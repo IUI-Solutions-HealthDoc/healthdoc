@@ -10,7 +10,7 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # Import all module models here so autogenerate sees them, e.g.:
-# from app.patients import models  # noqa: F401
+from app.patients import models  # noqa: F401
 from app.common.db import Base  # noqa: E402
 
 target_metadata = Base.metadata
