@@ -17,7 +17,7 @@ class RadiologyOrderItem(Base, UUIDPk, Timestamps, Blame):
     status = Column(String(30), nullable=False, server_default="placed")
 
 
-class RadiologyReport(Base, UUIDPk):
+class RadiologyReport(Base, UUIDPk, Timestamps):
     """
     Append-only, versioned - same pattern as lab_results, but narrative
     findings/impression text instead of structured result_data.

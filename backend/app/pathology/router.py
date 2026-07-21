@@ -6,12 +6,6 @@
 # @router.get("/ping")
 # async def ping() -> dict:
 #     return {"module": "pathology", "status": "stub"}
-"""
-pathology module router — issue #166: lab order receive API + sample collection.
-"""
-"""
-pathology module router — issue #166: lab order receive API + sample collection.
-"""
 import uuid
 from datetime import datetime, timezone
 
