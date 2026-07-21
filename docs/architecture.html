@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HealthDoc — System Architecture</title>
+<style>
+  :root{
+    --ink:#1c2733; --muted:#5b6b7b; --line:#d7dee6; --bg:#f7f9fb; --card:#ffffff;
+    --blue:#2563a8; --blue-bg:#e8f0f9; --orange:#c07b2d; --orange-bg:#fdf1e3;
+    --green:#2e7d4f; --green-bg:#e7f4ec; --red:#b1373f; --red-bg:#fbeaea;
+    --purple:#6b4fa0; --purple-bg:#f0ebf8; --teal:#0f766e; --teal-bg:#e2f3f1;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:15px/1.55 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ink);background:var(--bg)}
+  header.hero{background:linear-gradient(135deg,#16324f,#2563a8);color:#fff;padding:38px 28px 30px}
+  header.hero h1{margin:0 0 6px;font-size:26px}
+  header.hero p{margin:0;opacity:.85;max-width:920px}
+  nav.toc{position:sticky;top:0;z-index:50;background:#fff;border-bottom:1px solid var(--line);padding:8px 28px;display:flex;flex-wrap:wrap;gap:4px 14px;font-size:13px}
+  nav.toc a{color:var(--blue);text-decoration:none;padding:3px 6px;border-radius:6px}
+  nav.toc a:hover{background:var(--blue-bg)}
+  main{max-width:1180px;margin:0 auto;padding:26px 28px 80px}
+  section{margin-bottom:46px}
+  h2{font-size:21px;border-bottom:2px solid var(--line);padding-bottom:8px;margin:34px 0 14px}
+  h2 .no{color:var(--blue)}
+  h3{font-size:16px;margin:24px 0 8px}
+  p.lead{color:var(--muted);max-width:960px}
+  code,.mono{font-family:var(--mono);font-size:.92em;background:#eef2f6;border-radius:4px;padding:1px 5px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin:14px 0}
+  .grid{display:grid;gap:14px}
+  .g2{grid-template-columns:repeat(auto-fit,minmax(340px,1fr))}
+  .g3{grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+  table{border-collapse:collapse;width:100%;font-size:13.5px;background:#fff}
+  th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+  th{background:#eef2f6;font-weight:600}
+  tr:nth-child(even) td{background:#fafcfe}
+  .tag{display:inline-block;font-size:11px;font-weight:600;padding:1px 8px;border-radius:999px;margin:1px 2px;white-space:nowrap}
+  .t-blue{background:var(--blue-bg);color:var(--blue)} .t-orange{background:var(--orange-bg);color:var(--orange)}
+  .t-green{background:var(--green-bg);color:var(--green)} .t-red{background:var(--red-bg);color:var(--red)}
+  .t-purple{background:var(--purple-bg);color:var(--purple)} .t-teal{background:var(--teal-bg);color:var(--teal)}
+  /* flow steps */
+  .flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:0;margin:10px 0}
+  .step{background:#fff;border:1.5px solid var(--blue);border-radius:10px;padding:8px 12px;font-size:13px;max-width:230px;min-width:130px;position:relative;margin:6px 26px 6px 0}
+  .step b{display:block;font-size:12.5px;color:var(--blue)}
+  .step:after{content:"→";position:absolute;right:-21px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:16px}
+  .step:last-child:after{content:""}
+  .step.alt{border-color:var(--orange)} .step.alt b{color:var(--orange)}
+  .step.crit{border-color:var(--red)} .step.crit b{color:var(--red)}
+  .step.ok{border-color:var(--green)} .step.ok b{color:var(--green)}
+  .note{font-size:13px;color:var(--muted);background:var(--blue-bg);border-left:3px solid var(--blue);padding:8px 12px;border-radius:0 8px 8px 0;margin:10px 0}
+  .warn{background:var(--red-bg);border-left-color:var(--red)}
+  .good{background:var(--green-bg);border-left-color:var(--green)}
+  svg text{font-family:-apple-system,"Segoe UI",Roboto,sans-serif}
+  .legend{display:flex;flex-wrap:wrap;gap:10px;font-size:12.5px;color:var(--muted);margin:6px 0}
+  .legend span:before{content:"■ ";font-size:14px}
+  .lg-blue:before{color:var(--blue)} .lg-orange:before{color:var(--orange)} .lg-green:before{color:var(--green)}
+  .lg-purple:before{color:var(--purple)} .lg-teal:before{color:var(--teal)} .lg-red:before{color:var(--red)}
+  footer{color:var(--muted);font-size:12.5px;border-top:1px solid var(--line);padding:16px 28px}
+  @media print{nav.toc{position:static}.card{break-inside:avoid}}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <h1>HealthDoc — System Architecture</h1>
+  <p>Hospital Information Management System for India's public health network · ABDM V3-ready · DPDP-compliant ·
+  offline-resilient hybrid edge-cloud. This document is the connection map: how every container, module,
+  and workflow fits together. Companion docs: <code>database-schema.md</code> (tables/API fields),
+  <code>schema-conventions.md</code> (rules), ADR 0001/0002 (decisions).</p>
+</header>
+
+<nav class="toc">
+  <a href="#context">1 System context</a>
+  <a href="#infra">2 Infrastructure</a>
+  <a href="#request">3 Request lifecycle</a>
+  <a href="#modules">4 Module map</a>
+  <a href="#deps">5 Module dependencies</a>
+  <a href="#flows">6 Core workflows</a>
+  <a href="#data">7 Data platform &amp; sync</a>
+  <a href="#security">8 Security</a>
+  <a href="#frontend">9 Frontend</a>
+  <a href="#cicd">10 Environments &amp; CI/CD</a>
+</nav>
+
+<main>
+
+<!-- ============================================================ 1 -->
+<section id="context">
+<h2><span class="no">1.</span> System context</h2>
+<p class="lead">Three worlds talk to each other: the <b>facility edge</b> (a server inside each hospital running the
+full stack, so the hospital keeps working when the internet doesn't), the <b>cloud</b> (staging/production, the
+aggregation point facilities sync to), and <b>ABDM</b> (the national health network HealthDoc registers with as
+HIP + HIU).</p>
+
+<div class="card">
+<svg viewBox="0 0 1100 330" width="100%" role="img" aria-label="System context diagram: facility edge, cloud, and ABDM gateway">
+  <defs>
+    <marker id="arr" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9z" fill="#5b6b7b"/></marker>
+  </defs>
+  <!-- Facility -->
+  <rect x="20" y="30" width="380" height="270" rx="14" fill="#e8f0f9" stroke="#2563a8" stroke-width="1.5"/>
+  <text x="40" y="58" font-size="15" font-weight="700" fill="#16324f">Facility edge (each hospital)</text>
+  <rect x="40" y="75" width="160" height="52" rx="8" fill="#fff" stroke="#2563a8"/>
+  <text x="52" y="97" font-size="12.5" font-weight="600">Electron / browser</text>
+  <text x="52" y="114" font-size="11.5" fill="#5b6b7b">receptionist · doctor · nurse…</text>
+  <rect x="220" y="75" width="160" height="52" rx="8" fill="#fff" stroke="#2563a8"/>
+  <text x="232" y="97" font-size="12.5" font-weight="600">Queue displays</text>
+  <text x="232" y="114" font-size="11.5" fill="#5b6b7b">WebSocket, token calls</text>
+  <rect x="40" y="150" width="340" height="130" rx="8" fill="#fff" stroke="#2563a8"/>
+  <text x="52" y="172" font-size="12.5" font-weight="600">Facility server — Docker Compose stack</text>
+  <text x="52" y="192" font-size="11.5" fill="#5b6b7b">Nginx · FastAPI · Next.js · Keycloak · PostgreSQL</text>
+  <text x="52" y="209" font-size="11.5" fill="#5b6b7b">MongoDB · Redis · MinIO · Orthanc (PACS)</text>
+  <text x="52" y="235" font-size="11.5" fill="#b1373f" font-weight="600">Works fully offline — sync/outbox queues</text>
+  <text x="52" y="252" font-size="11.5" fill="#b1373f">changes until connectivity returns</text>
+  <!-- Cloud -->
+  <rect x="480" y="30" width="330" height="270" rx="14" fill="#e7f4ec" stroke="#2e7d4f" stroke-width="1.5"/>
+  <text x="500" y="58" font-size="15" font-weight="700" fill="#1d4d33">Cloud (staging / production)</text>
+  <rect x="500" y="80" width="290" height="60" rx="8" fill="#fff" stroke="#2e7d4f"/>
+  <text x="512" y="102" font-size="12.5" font-weight="600">Same stack, aggregated</text>
+  <text x="512" y="119" font-size="11.5" fill="#5b6b7b">multi-facility Postgres · MIS/reports · admin</text>
+  <rect x="500" y="155" width="290" height="60" rx="8" fill="#fff" stroke="#2e7d4f"/>
+  <text x="512" y="177" font-size="12.5" font-weight="600">Sync service (outbox module)</text>
+  <text x="512" y="194" font-size="11.5" fill="#5b6b7b">conflict rules by sensitivity tier — §7</text>
+  <rect x="500" y="230" width="290" height="50" rx="8" fill="#fff" stroke="#2e7d4f"/>
+  <text x="512" y="250" font-size="12.5" font-weight="600">CI/CD — GitHub Actions → staging</text>
+  <!-- ABDM -->
+  <rect x="890" y="70" width="190" height="190" rx="14" fill="#f0ebf8" stroke="#6b4fa0" stroke-width="1.5"/>
+  <text x="908" y="98" font-size="15" font-weight="700" fill="#463070">ABDM</text>
+  <text x="908" y="122" font-size="11.5" fill="#5b6b7b">Gateway V3 (sandbox)</text>
+  <text x="908" y="141" font-size="11.5" fill="#5b6b7b">ABHA verify · HIP · HIU</text>
+  <text x="908" y="160" font-size="11.5" fill="#5b6b7b">HFR / HPR registries</text>
+  <text x="908" y="179" font-size="11.5" fill="#5b6b7b">Consent manager</text>
+  <text x="908" y="205" font-size="11" fill="#b1373f">V3 endpoints only —</text>
+  <text x="908" y="220" font-size="11" fill="#b1373f">never v0.5 / v1.0</text>
+  <!-- arrows -->
+  <line x1="400" y1="165" x2="480" y2="165" stroke="#5b6b7b" stroke-width="1.6" marker-end="url(#arr)"/>
+  <line x1="480" y1="195" x2="400" y2="195" stroke="#5b6b7b" stroke-width="1.6" marker-end="url(#arr)"/>
+  <text x="405" y="155" font-size="11" fill="#5b6b7b">sync ↑↓ (TLS)</text>
+  <line x1="810" y1="165" x2="890" y2="165" stroke="#5b6b7b" stroke-width="1.6" marker-end="url(#arr)"/>
+  <text x="816" y="155" font-size="11" fill="#5b6b7b">HTTPS</text>
+</svg>
+</div>
+
+<div class="note"><b>Design principle:</b> the facility never depends on the cloud to treat a patient.
+Registration, queueing, consultations, lab, pharmacy, and billing all run locally; sync is asynchronous.
+That's why every primary key is a UUID and every row carries <code>updated_at</code> + a sensitivity tier.</div>
+</section>
+
+<!-- ============================================================ 2 -->
+<section id="infra">
+<h2><span class="no">2.</span> Infrastructure — containers and connections</h2>
+<p class="lead">One <code>docker compose</code> stack (<code>infra/docker-compose.yml</code>), identical in dev,
+staging, and each facility. Nginx is the single entry point; nothing else is exposed publicly.</p>
+
+<div class="card">
+<svg viewBox="0 0 1100 430" width="100%" role="img" aria-label="Container topology">
+  <defs><marker id="a2" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9z" fill="#5b6b7b"/></marker></defs>
+  <rect x="430" y="18" width="240" height="52" rx="10" fill="#fdf1e3" stroke="#c07b2d" stroke-width="1.5"/>
+  <text x="450" y="40" font-size="13.5" font-weight="700">Nginx :443 (TLS 1.3)</text>
+  <text x="450" y="58" font-size="11.5" fill="#5b6b7b">HSTS · CSP · rate limits · websockets</text>
+
+  <rect x="70" y="130" width="220" height="66" rx="10" fill="#e8f0f9" stroke="#2563a8" stroke-width="1.5"/>
+  <text x="88" y="154" font-size="13.5" font-weight="700">Next.js frontend :3000</text>
+  <text x="88" y="172" font-size="11.5" fill="#5b6b7b">app router · role UIs · Electron loads</text>
+  <text x="88" y="187" font-size="11.5" fill="#5b6b7b">same origin via nginx</text>
+
+  <rect x="430" y="130" width="240" height="66" rx="10" fill="#e8f0f9" stroke="#2563a8" stroke-width="1.5"/>
+  <text x="448" y="154" font-size="13.5" font-weight="700">FastAPI backend :8000</text>
+  <text x="448" y="172" font-size="11.5" fill="#5b6b7b">/api/v1 · envelope middleware · audit</text>
+  <text x="448" y="187" font-size="11.5" fill="#5b6b7b">26 module routers (§4)</text>
+
+  <rect x="810" y="130" width="220" height="66" rx="10" fill="#f0ebf8" stroke="#6b4fa0" stroke-width="1.5"/>
+  <text x="828" y="154" font-size="13.5" font-weight="700">Keycloak :8080 /auth</text>
+  <text x="828" y="172" font-size="11.5" fill="#5b6b7b">realm healthdoc · 11 roles · OIDC PKCE</text>
+  <text x="828" y="187" font-size="11.5" fill="#5b6b7b">JWKS for backend JWT verify</text>
+
+  <rect x="70" y="280" width="180" height="72" rx="10" fill="#e7f4ec" stroke="#2e7d4f" stroke-width="1.5"/>
+  <text x="88" y="304" font-size="13" font-weight="700">PostgreSQL 16</text>
+  <text x="88" y="322" font-size="11.5" fill="#5b6b7b">system of record</text>
+  <text x="88" y="337" font-size="11.5" fill="#5b6b7b">45+ tables · Alembic 0001–0020</text>
+
+  <rect x="270" y="280" width="170" height="72" rx="10" fill="#e7f4ec" stroke="#2e7d4f" stroke-width="1.5"/>
+  <text x="288" y="304" font-size="13" font-weight="700">MongoDB 7</text>
+  <text x="288" y="322" font-size="11.5" fill="#5b6b7b">clinical_notes · fhir_bundles</text>
+  <text x="288" y="337" font-size="11.5" fill="#5b6b7b">form_responses · abdm payloads</text>
+
+  <rect x="460" y="280" width="160" height="72" rx="10" fill="#e7f4ec" stroke="#2e7d4f" stroke-width="1.5"/>
+  <text x="478" y="304" font-size="13" font-weight="700">Redis 7</text>
+  <text x="478" y="322" font-size="11.5" fill="#5b6b7b">queue state · pub/sub</text>
+  <text x="478" y="337" font-size="11.5" fill="#5b6b7b">→ websocket fan-out</text>
+
+  <rect x="640" y="280" width="180" height="72" rx="10" fill="#e7f4ec" stroke="#2e7d4f" stroke-width="1.5"/>
+  <text x="658" y="304" font-size="13" font-weight="700">MinIO (S3)</text>
+  <text x="658" y="322" font-size="11.5" fill="#5b6b7b">hd-files · hd-reports (private)</text>
+  <text x="658" y="337" font-size="11.5" fill="#5b6b7b">presigned URLs only</text>
+
+  <rect x="840" y="280" width="190" height="72" rx="10" fill="#e7f4ec" stroke="#2e7d4f" stroke-width="1.5"/>
+  <text x="858" y="304" font-size="13" font-weight="700">Orthanc PACS</text>
+  <text x="858" y="322" font-size="11.5" fill="#5b6b7b">:8042 REST · :4242 DICOM</text>
+  <text x="858" y="337" font-size="11.5" fill="#5b6b7b">StudyInstanceUID ↔ radiology</text>
+
+  <line x1="500" y1="70" x2="220" y2="130" stroke="#5b6b7b" stroke-width="1.5" marker-end="url(#a2)"/>
+  <text x="300" y="96" font-size="11" fill="#5b6b7b">/ (UI)</text>
+  <line x1="550" y1="70" x2="550" y2="130" stroke="#5b6b7b" stroke-width="1.5" marker-end="url(#a2)"/>
+  <text x="558" y="100" font-size="11" fill="#5b6b7b">/api/ + /api/v1/ws/</text>
+  <line x1="620" y1="70" x2="880" y2="130" stroke="#5b6b7b" stroke-width="1.5" marker-end="url(#a2)"/>
+  <text x="750" y="96" font-size="11" fill="#5b6b7b">/auth/</text>
+
+  <line x1="480" y1="196" x2="180" y2="280" stroke="#5b6b7b" stroke-width="1.4" marker-end="url(#a2)"/>
+  <line x1="510" y1="196" x2="350" y2="280" stroke="#5b6b7b" stroke-width="1.4" marker-end="url(#a2)"/>
+  <line x1="545" y1="196" x2="540" y2="280" stroke="#5b6b7b" stroke-width="1.4" marker-end="url(#a2)"/>
+  <line x1="590" y1="196" x2="720" y2="280" stroke="#5b6b7b" stroke-width="1.4" marker-end="url(#a2)"/>
+  <line x1="640" y1="196" x2="920" y2="280" stroke="#5b6b7b" stroke-width="1.4" marker-end="url(#a2)"/>
+  <line x1="670" y1="163" x2="810" y2="163" stroke="#5b6b7b" stroke-width="1.4" marker-end="url(#a2)"/>
+  <text x="700" y="155" font-size="11" fill="#5b6b7b">JWKS fetch</text>
+</svg>
+</div>
+
+<table>
+<tr><th>Route (nginx)</th><th>Target</th><th>Notes</th></tr>
+<tr><td><code>/</code></td><td>frontend:3000</td><td>Next.js UI (+ HMR websocket in dev)</td></tr>
+<tr><td><code>/api/</code></td><td>backend:8000</td><td>rate-limited 30 r/s, burst 60</td></tr>
+<tr><td><code>/api/v1/ws/</code></td><td>backend:8000</td><td>WebSocket upgrade, 1 h read timeout (queue displays)</td></tr>
+<tr><td><code>/auth/</code></td><td>keycloak:8080</td><td>rate-limited 10 r/s; Keycloak runs with <code>--http-relative-path=/auth</code></td></tr>
+<tr><td><code>icd11</code> container (internal :80)</td><td>WHO ICD-API (self-hosted)</td><td>offline ICD-11 search at the edge; backend proxies it via <code>/api/v1/diagnoses/icd-search</code> — never exposed directly</td></tr>
+<tr><td>5432 / 27017 / 6379 / 9000-9001 / 8042 / 4242</td><td>datastores</td><td>bound to 127.0.0.1 only (dev convenience); never public</td></tr>
+</table>
+</section>
+
+<!-- ============================================================ 3 -->
+<section id="request">
+<h2><span class="no">3.</span> Request lifecycle — every API call goes through this</h2>
+<p class="lead">The same pipeline applies to all 26 modules. No module skips a stage; the audit write is in the
+<em>same DB transaction</em> as the mutation, so you cannot change data without a trace.</p>
+
+<div class="card">
+<div class="flow">
+  <div class="step"><b>1 · Client</b><code>lib/api.ts</code> adds Bearer JWT, JSON</div>
+  <div class="step"><b>2 · Nginx</b>TLS 1.3 · security headers · rate limit</div>
+  <div class="step"><b>3 · Envelope middleware</b>assigns <code>X-Request-ID</code></div>
+  <div class="step"><b>4 · Auth dep</b>JWT verified vs Keycloak JWKS → <code>CurrentUser</code></div>
+  <div class="step"><b>5 · Role gate</b><code>require_roles(…)</code> → 403 if wrong role</div>
+  <div class="step crit"><b>6 · Consent gate</b>clinical reads only — consent/ check, denials logged</div>
+  <div class="step"><b>7 · Service layer</b>module business logic; cross-module via service calls</div>
+  <div class="step crit"><b>8 · One transaction</b>mutation + <code>audit_logs</code> row commit together or roll back together</div>
+  <div class="step ok"><b>9 · Envelope out</b><code>{success,data,error,meta}</code></div>
+</div>
+<div class="note warn"><b>Failure rule:</b> if the audit insert fails, the business write rolls back too (B7-W1-04).
+If consent fails, return 403 <em>and</em> write the denial to <code>data_access_log</code>.</div>
+</div>
+
+<h3>Login flow (frontend ↔ Keycloak ↔ backend)</h3>
+<div class="card"><div class="flow">
+  <div class="step"><b>Login page</b>redirect to Keycloak (OIDC + PKCE S256)</div>
+  <div class="step"><b>Keycloak</b>credentials + roles; brute-force protected</div>
+  <div class="step"><b>Redirect back</b>code → tokens (15 min access, refresh)</div>
+  <div class="step"><b>lib/auth.ts</b>stores session, silent refresh, role-based route guard</div>
+  <div class="step ok"><b>Backend</b>maps JWT <code>sub</code> → <code>users.keycloak_sub</code> row</div>
+</div></div>
+</section>
+
+<!-- ============================================================ 4 -->
+<section id="modules">
+<h2><span class="no">4.</span> Module map — who owns what, who calls what</h2>
+<p class="lead">Each backend module is a folder in <code>backend/app/&lt;module&gt;/</code> (router · schemas ·
+models · service). Modules own their tables exclusively — other modules read via <b>service functions, never via
+another module's tables</b>. Owner key: B1 Tech Lead · B2 Priyanshu · B3 Aditya · B4 Suprita · B5 Khushi · B6 Riya · B7 Vani.</p>
+
+<table>
+<tr><th>Module</th><th>Owner</th><th>Purpose</th><th>Owns tables</th><th>Calls into</th><th>Frontend surface</th></tr>
+<tr><td><code>users</code>, <code>auth</code>, <code>common</code></td><td>B1</td><td>staff accounts + Keycloak sync; JWT deps; config/db/security/enums/mixins</td><td>facilities, users</td><td>Keycloak Admin API</td><td>admin/users</td></tr>
+<tr><td><code>patients</code></td><td>B2</td><td>identity core: UHID engine, search/dedup, merge, history aggregation</td><td>patients, patient_identifiers, patient_merge_log</td><td>consent, audit, files, encounters/orders (reads)</td><td>receptionist/patient-search</td></tr>
+<tr><td><code>emergency</code></td><td>B2</td><td>THID fast registration, supervisor-approved merge into UHID</td><td>— (writes patients w/ thid)</td><td>patients, audit</td><td>emergency</td></tr>
+<tr><td><code>registration</code></td><td>B2/B7</td><td>registration workflow: identity path, photo, visit + invoice creation</td><td>— (orchestrates)</td><td>patients, encounters(visits), billing, queue, files</td><td>receptionist/registration</td></tr>
+<tr><td><code>encounters</code>, <code>opd</code></td><td>B3</td><td>visits, encounters, diagnoses (ICD), consultation workflow</td><td>visits, encounters, diagnoses</td><td>patients, queue, orders, notifications</td><td>doctor/consultation, doctor/dashboard</td></tr>
+<tr><td><code>orders</code></td><td>B3</td><td>generic order header for lab/radiology/pharmacy/procedure/blood</td><td>orders</td><td>billing (charge lines), notifications</td><td>doctor/orders</td></tr>
+<tr><td><code>ipd</code>, <code>wards</code>, <code>ot</code></td><td>B3</td><td>admissions, beds, discharge; OT schedules (stub)</td><td>wards, beds, admissions, discharges, ot_*</td><td>billing (ipd_stay lines), nursing</td><td>ipd</td></tr>
+<tr><td><code>departments</code></td><td>B4</td><td>department/room master data</td><td>departments, rooms</td><td>—</td><td>admin/departments</td></tr>
+<tr><td><code>queue</code></td><td>B4</td><td>rosters, per-doctor daily queues, tokens, priority calling, live displays</td><td>rosters, queues, queue_tokens</td><td>Redis pub/sub, notifications</td><td>receptionist/queue, queue-display</td></tr>
+<tr><td><code>notifications</code></td><td>B4</td><td>event broadcast + durable history</td><td>notification_history</td><td>Redis pub/sub → WS</td><td>(in-app toasts, displays)</td></tr>
+<tr><td><code>pathology</code></td><td>B5</td><td>lab worklist: accession, samples, versioned results, verification</td><td>lab_order_items, lab_results</td><td>orders, billing (lab lines), files, notifications</td><td>lab</td></tr>
+<tr><td><code>radiology</code></td><td>B5</td><td>radiology worklist, Orthanc/PACS link, versioned reports</td><td>radiology_order_items, radiology_reports</td><td>orders, Orthanc REST, billing, files</td><td>radiology</td></tr>
+<tr><td><code>blood_bank</code></td><td>B5</td><td>donors + units (schema-first)</td><td>blood_donors, blood_units</td><td>patients, orders</td><td>(W3+)</td></tr>
+<tr><td><code>inventory</code></td><td>B6</td><td>item/batch master, FEFO, GRN, indents, dual-signoff adjustments, ledger</td><td>suppliers, inventory_items, stock_locations, inventory_batches, stock_ledger, grn*, indent*, adjustments</td><td>audit</td><td>inventory</td></tr>
+<tr><td><code>pharmacy</code></td><td>B6</td><td>prescription queue → FEFO dispense (versioned), substitutions</td><td>pharmacy_dispenses, pharmacy_dispense_items, facility_settings</td><td>orders/prescriptions (reads), inventory, billing (pharmacy lines)</td><td>pharmacy/prescription-queue, pharmacy/dispense</td></tr>
+<tr><td><code>billing</code></td><td>B7</td><td>invoice per visit, line accrual, payments, refunds, gapless numbering</td><td>invoices, invoice_items, payments, refunds, billing_counters</td><td>audit</td><td>billing, admin (config/MIS)</td></tr>
+<tr><td><code>consent</code></td><td>B7</td><td>consent purposes/records/withdrawals; access gating; break-glass</td><td>consent_purposes, consent_records, consent_withdrawals, data_access_log, consent_renewal_reminders</td><td>audit, notifications</td><td>consent</td></tr>
+<tr><td><code>audit</code>, <code>security_audit</code></td><td>B7</td><td>hash-chained audit log, middleware, integrity checks, viewer API</td><td>audit_logs, audit_log_archive, audit_integrity_checks</td><td>MinIO (archives)</td><td>audit-viewer</td></tr>
+<tr><td><code>files</code></td><td>B7</td><td>MinIO uploads, presigned URLs, access logging</td><td>files, file_access_log</td><td>MinIO</td><td>(embedded viewers)</td></tr>
+<tr><td><code>integrations/abdm</code></td><td>B2+B7</td><td>ABHA verify (identity), HIP/HIU data exchange, consent manager bridge, FHIR</td><td>— (Mongo: abdm_raw_payloads, fhir_bundles)</td><td>ABDM Gateway V3, patients, consent, files</td><td>admin/abdm-sync</td></tr>
+<tr><td><code>outbox</code></td><td>B1</td><td>edge→cloud sync queue, conflict resolution by sensitivity</td><td>(outbox tables, W4+)</td><td>all modules' change feeds</td><td>—</td></tr>
+<tr><td><code>reports</code>, <code>nursing</code>, <code>encounters</code>…</td><td>—</td><td>MIS dashboards, eMAR/vitals (W3+)</td><td>—</td><td>read-only cross-module service calls</td><td>reports, nurse/*</td></tr>
+</table>
+
+<div class="note good"><b>Per-facility module toggles:</b> lab, radiology, pharmacy, inventory, IPD, OT,
+blood bank, emergency, patient portal, ABDM, and refunds can each be switched off per hospital
+(<code>facility_modules</code>, admin-only, audited). Disabled ⇒ no worklist, no billing accrual, endpoints answer
+409 <code>module_disabled</code>, and the frontend hides the surface via <code>GET /facility/capabilities</code> —
+but clinical records still complete: orders flip to <code>external_referral</code>, prescriptions still print.
+Core modules (identity, registration, OPD, queue, billing, consent, audit) can never be disabled. Lab
+sub-departments (pathology/biochemistry/microbiology/hematology) and radiology modalities toggle via module config.</div>
+<div class="note"><b>Boundary rule:</b> importing another module's <em>models</em> is allowed only for FK typing;
+querying another module's tables directly in SQL is a PR-rejection offense. Cross-module data goes through that
+module's service functions, so schema changes stay local to their owner.</div>
+</section>
+<!-- ============================================================ 5 -->
+<section id="deps">
+<h2><span class="no">5.</span> Module dependency graph</h2>
+<p class="lead">Arrows mean "calls the service layer of". The identity core sits at the center; billing accrues
+from four departments; audit and consent are cross-cutting (everything writes to them).</p>
+
+<div class="card">
+<svg viewBox="0 0 1100 400" width="100%" role="img" aria-label="Module dependency graph">
+  <defs><marker id="a3" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9z" fill="#8895a3"/></marker></defs>
+  <!-- cross-cutting band -->
+  <rect x="20" y="330" width="1060" height="52" rx="10" fill="#fbeaea" stroke="#b1373f" stroke-width="1.4"/>
+  <text x="40" y="352" font-size="13" font-weight="700" fill="#b1373f">Cross-cutting: audit (every mutation, same transaction) · consent + data_access_log (every clinical read) · files (any binary) · notifications (any event)</text>
+  <text x="40" y="370" font-size="11.5" fill="#b1373f">No arrows drawn — assume every module points here.</text>
+
+  <!-- identity -->
+  <rect x="40" y="150" width="170" height="60" rx="10" fill="#e8f0f9" stroke="#2563a8" stroke-width="1.6"/>
+  <text x="58" y="175" font-size="13.5" font-weight="700">patients</text>
+  <text x="58" y="193" font-size="11.5" fill="#5b6b7b">UHID · search · merge</text>
+  <rect x="40" y="40" width="170" height="50" rx="10" fill="#e8f0f9" stroke="#2563a8"/>
+  <text x="58" y="62" font-size="12.5" font-weight="700">emergency (THID)</text>
+  <text x="58" y="79" font-size="11" fill="#5b6b7b">merges into patients</text>
+  <rect x="40" y="250" width="170" height="50" rx="10" fill="#e8f0f9" stroke="#2563a8"/>
+  <text x="58" y="272" font-size="12.5" font-weight="700">registration</text>
+  <text x="58" y="289" font-size="11" fill="#5b6b7b">orchestrator</text>
+
+  <!-- clinical spine -->
+  <rect x="290" y="150" width="170" height="60" rx="10" fill="#e2f3f1" stroke="#0f766e" stroke-width="1.6"/>
+  <text x="308" y="175" font-size="13.5" font-weight="700">encounters/opd</text>
+  <text x="308" y="193" font-size="11.5" fill="#5b6b7b">visits · diagnoses</text>
+  <rect x="290" y="40" width="170" height="50" rx="10" fill="#e2f3f1" stroke="#0f766e"/>
+  <text x="308" y="62" font-size="12.5" font-weight="700">queue</text>
+  <text x="308" y="79" font-size="11" fill="#5b6b7b">tokens · displays</text>
+  <rect x="290" y="250" width="170" height="50" rx="10" fill="#e2f3f1" stroke="#0f766e"/>
+  <text x="308" y="272" font-size="12.5" font-weight="700">ipd / wards / ot</text>
+  <text x="308" y="289" font-size="11" fill="#5b6b7b">admission · discharge</text>
+
+  <rect x="540" y="150" width="150" height="60" rx="10" fill="#e2f3f1" stroke="#0f766e" stroke-width="1.6"/>
+  <text x="558" y="175" font-size="13.5" font-weight="700">orders</text>
+  <text x="558" y="193" font-size="11.5" fill="#5b6b7b">generic header</text>
+
+  <!-- departments -->
+  <rect x="770" y="30" width="150" height="50" rx="10" fill="#eef2f6" stroke="#5b6b7b"/>
+  <text x="788" y="52" font-size="12.5" font-weight="700">pathology (lab)</text>
+  <text x="788" y="69" font-size="11" fill="#5b6b7b">versioned results</text>
+  <rect x="770" y="100" width="150" height="50" rx="10" fill="#eef2f6" stroke="#5b6b7b"/>
+  <text x="788" y="122" font-size="12.5" font-weight="700">radiology</text>
+  <text x="788" y="139" font-size="11" fill="#5b6b7b">Orthanc/PACS</text>
+  <rect x="770" y="170" width="150" height="50" rx="10" fill="#eef2f6" stroke="#5b6b7b"/>
+  <text x="788" y="192" font-size="12.5" font-weight="700">pharmacy</text>
+  <text x="788" y="209" font-size="11" fill="#5b6b7b">FEFO dispense</text>
+  <rect x="770" y="240" width="150" height="50" rx="10" fill="#eef2f6" stroke="#5b6b7b"/>
+  <text x="788" y="262" font-size="12.5" font-weight="700">inventory</text>
+  <text x="788" y="279" font-size="11" fill="#5b6b7b">stock ledger</text>
+
+  <!-- billing -->
+  <rect x="960" y="130" width="120" height="80" rx="10" fill="#fdf1e3" stroke="#c07b2d" stroke-width="1.8"/>
+  <text x="976" y="158" font-size="13.5" font-weight="700">billing</text>
+  <text x="976" y="176" font-size="11.5" fill="#5b6b7b">invoice / visit</text>
+  <text x="976" y="192" font-size="11.5" fill="#5b6b7b">payments · refunds</text>
+
+  <!-- arrows -->
+  <line x1="125" y1="90" x2="125" y2="150" stroke="#8895a3" stroke-width="1.5" marker-end="url(#a3)"/>
+  <line x1="125" y1="250" x2="125" y2="210" stroke="#8895a3" stroke-width="1.5" marker-end="url(#a3)"/>
+  <line x1="210" y1="275" x2="290" y2="275" stroke="#8895a3" stroke-width="1.5" marker-end="url(#a3)"/>
+  <line x1="210" y1="180" x2="290" y2="180" stroke="#8895a3" stroke-width="1.5" marker-end="url(#a3)"/>
+  <line x1="375" y1="150" x2="375" y2="90" stroke="#8895a3" stroke-width="1.5" marker-end="url(#a3)"/>
+  <line x1="375" y1="210" x2="375" y2="250" stroke="#8895a3" stroke-width="1.5" marker-end="url(#a3)"/>
+  <line x1="460" y1="180" x2="540" y2="180" stroke="#8895a3" stroke-width="1.5" marker-end="url(#a3)"/>
+  <line x1="690" y1="165" x2="770" y2="60" stroke="#8895a3" stroke-width="1.5" marker-end="url(#a3)"/>
+  <line x1="690" y1="172" x2="770" y2="125" stroke="#8895a3" stroke-width="1.5" marker-end="url(#a3)"/>
+  <line x1="690" y1="188" x2="770" y2="195" stroke="#8895a3" stroke-width="1.5" marker-end="url(#a3)"/>
+  <line x1="845" y1="220" x2="845" y2="240" stroke="#8895a3" stroke-width="1.5" marker-end="url(#a3)"/>
+  <line x1="920" y1="55" x2="985" y2="130" stroke="#c07b2d" stroke-width="1.5" marker-end="url(#a3)"/>
+  <line x1="920" y1="125" x2="975" y2="140" stroke="#c07b2d" stroke-width="1.5" marker-end="url(#a3)"/>
+  <line x1="920" y1="195" x2="960" y2="180" stroke="#c07b2d" stroke-width="1.5" marker-end="url(#a3)"/>
+  <line x1="460" y1="290" x2="965" y2="212" stroke="#c07b2d" stroke-width="1.5" marker-end="url(#a3)"/>
+  <text x="620" y="268" font-size="11" fill="#c07b2d">ipd_stay lines</text>
+  <line x1="210" y1="262" x2="962" y2="150" stroke="#c07b2d" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#a3)"/>
+  <text x="480" y="228" font-size="11" fill="#c07b2d">creates invoice + registration line</text>
+</svg>
+<div class="legend"><span class="lg-blue">identity (B2)</span><span class="lg-teal">clinical spine (B3/B4)</span><span>departments (B5/B6)</span><span class="lg-orange">billing (B7)</span><span class="lg-red">cross-cutting (B7)</span></div>
+</div>
+</section>
+
+<!-- ============================================================ 6 -->
+<section id="flows">
+<h2><span class="no">6.</span> Core workflows — module by module</h2>
+
+<h3>6.1 Registration (receptionist) — identity, photo, invoice, token</h3>
+<div class="card">
+<div class="flow">
+  <div class="step"><b>Search first</b><code>POST /patients/search</code> — blind-index Aadhaar or trigram name+DOB; ranked matches</div>
+  <div class="step"><b>Identity path</b>one of: ABDM (ABHA verify) · Aadhaar+mobile · demographics-only (flag <code>identity_unverified</code>)</div>
+  <div class="step"><b>Create patient</b>UHID engine (sequence + check digit); encrypt identifiers</div>
+  <div class="step"><b>Photo</b>mandatory capture → MinIO via files/; failure ⇒ <code>photo_pending</code>, never blocks</div>
+  <div class="step alt"><b>Invoice</b>billing creates visit invoice + <code>registration</code> line (or <code>waived</code> w/ scheme)</div>
+  <div class="step alt"><b>Payment</b>cash/UPI/card → gapless receipt</div>
+  <div class="step ok"><b>Visit + token</b>visit row; queue token in doctor's queue; display updates via WS</div>
+</div>
+<div class="note">Emergency path replaces steps 1–3 with THID issue (<code>TH-…</code>), treatment proceeds immediately;
+supervisor-approved merge into a UHID later writes <code>patient_merge_log</code> with before/after snapshots.</div>
+</div>
+
+<h3>6.2 OPD consultation (doctor)</h3>
+<div class="card"><div class="flow">
+  <div class="step"><b>Call next</b>queue sorts: emergency → doctor_recall → admin_override → senior/pregnant → follow-up → normal, then FIFO</div>
+  <div class="step"><b>Encounter</b>created under the visit; vitals pulled if nurse recorded</div>
+  <div class="step"><b>Diagnoses</b>ICD-11 search (local WHO container) — stem + post-coordination; ICD-10 fallback</div>
+  <div class="step"><b>Orders / Rx</b>generic <code>orders</code> header + items; prescription with per-drug items</div>
+  <div class="step alt"><b>Billing accrual</b>each chargeable item → <code>invoice_items</code> (consultation/lab/radiology/pharmacy)</div>
+  <div class="step ok"><b>Close</b>token → completed (or "waiting for investigation" if results pending); visit stays open</div>
+</div></div>
+
+<h3>6.3 Lab (pathology)</h3>
+<div class="card"><div class="flow">
+  <div class="step"><b>Worklist</b>orders with <code>order_type=lab</code> appear; accession no. assigned</div>
+  <div class="step"><b>Sample</b>collect + barcode; status <code>in_progress</code></div>
+  <div class="step"><b>Result v1</b><code>lab_results</code> insert (never update), <code>is_current=true</code></div>
+  <div class="step crit"><b>Correction?</b>new row v2, v1's <code>is_current</code> flips — full history preserved</div>
+  <div class="step ok"><b>Verify + notify</b>status <code>final</code>; doctor notified; reagent use → stock_ledger</div>
+</div></div>
+
+<h3>6.4 Radiology + PACS</h3>
+<div class="card"><div class="flow">
+  <div class="step"><b>Worklist</b><code>order_type=radiology</code>; modality + machine schedule</div>
+  <div class="step"><b>Acquire</b>machine pushes DICOM → Orthanc (:4242)</div>
+  <div class="step"><b>Link</b><code>pacs_study_uid</code> stored on the order item</div>
+  <div class="step"><b>Report v1..n</b>versioned findings + impression, same pattern as lab</div>
+  <div class="step ok"><b>View</b>frontend ReportViewer streams via backend-proxied Orthanc REST</div>
+</div></div>
+
+<h3>6.5 Pharmacy + inventory</h3>
+<div class="card"><div class="flow">
+  <div class="step"><b>Rx queue</b>prescriptions land in pharmacy queue</div>
+  <div class="step"><b>FEFO pick</b>batches by earliest expiry (<code>ix_inventory_batches_fefo</code>); expired never picked</div>
+  <div class="step alt"><b>Substitute?</b>flag + reason; may require doctor approval status</div>
+  <div class="step"><b>Dispense vN</b>new <code>pharmacy_dispenses</code> version per state change (received → … → dispensed)</div>
+  <div class="step"><b>Ledger</b>each dispense line → signed qty in <code>stock_ledger</code> (append-only)</div>
+  <div class="step alt"><b>Billing</b>pharmacy lines accrue to the visit invoice</div>
+  <div class="step ok"><b>Restock</b>GRN receipts, indents between locations, dual-signoff adjustments</div>
+</div></div>
+
+<h3>6.6 IPD — admission to discharge</h3>
+<div class="card"><div class="flow">
+  <div class="step"><b>Admit</b>admission row; bed <code>vacant → occupied</code></div>
+  <div class="step"><b>Ward care</b>nurse eMAR, vitals timeline (nursing module, Mongo notes)</div>
+  <div class="step alt"><b>Daily accrual</b><code>ipd_stay</code> invoice lines per day/procedure</div>
+  <div class="step crit"><b>Discharge check</b>invoice settlement per facility policy — never hard-blocks emergency/DAMA</div>
+  <div class="step ok"><b>Discharge</b>discharges row (type: discharged/dama/deceased/…); bed released; summary → Mongo</div>
+</div></div>
+
+<h3>6.7 Billing lifecycle (ADR 0002)</h3>
+<div class="card"><div class="flow">
+  <div class="step"><b>draft</b>created at registration with first line</div>
+  <div class="step"><b>lines accrue</b>departments append; totals recomputed</div>
+  <div class="step crit"><b>issued</b>immutability trigger freezes financial columns</div>
+  <div class="step"><b>partially_paid → paid</b>many payments allowed; gapless RCP numbers</div>
+  <div class="step alt"><b>waived</b>scheme adjustment covers 100%</div>
+  <div class="step alt"><b>refund</b>reversal row vs a payment (RFD number), approver required</div>
+  <div class="step crit"><b>cancelled</b>only correction path — cancel + new invoice</div>
+</div>
+<div class="note">Number allocation (<code>INV/RCP/RFD</code>) uses <code>billing_counters</code> with
+<code>SELECT … FOR UPDATE</code> inside the same transaction — gapless even on rollback.</div></div>
+
+<h3>6.8 Consent, break-glass, audit</h3>
+<div class="card"><div class="flow">
+  <div class="step"><b>Clinical read</b>e.g. <code>GET /patients/{id}/history</code></div>
+  <div class="step"><b>Role + scope</b>department scoping via users.department_id</div>
+  <div class="step crit"><b>Consent check</b>valid <code>consent_records</code> row for the purpose?</div>
+  <div class="step alt"><b>Break-glass</b>emergency role + flag bypasses gate — logged with <code>emergency_access=true</code>, triggers mandatory review</div>
+  <div class="step"><b>Log</b>every attempt (allow or deny) → <code>data_access_log</code></div>
+  <div class="step ok"><b>Serve</b>aggregated via other modules' service reads</div>
+</div>
+<div class="note warn">Audit chain: each <code>audit_logs</code> row stores <code>sha256(prev_hash + payload)</code>
+and an Ed25519 signature; a scheduled job re-walks partitions into <code>audit_integrity_checks</code> and alerts on
+the first mismatch. Old partitions archive to MinIO with file hashes.</div></div>
+
+<h3>6.9 ABDM integration (phased)</h3>
+<div class="card"><div class="flow">
+  <div class="step"><b>M1 · ABHA</b>verify ABHA number/QR at registration → verified demographics</div>
+  <div class="step"><b>M2 · HIP</b>publish care contexts; share records on consent-manager requests (FHIR bundles from Mongo)</div>
+  <div class="step"><b>M3 · HIU</b>request outside records with patient consent artefacts</div>
+  <div class="step alt"><b>Phase 2</b>NHCX / PM-JAY digital claims — external to hospital counter billing</div>
+</div>
+<div class="note">All Gateway traffic is V3, async callback-style; raw payloads land in Mongo
+(<code>abdm_raw_payloads</code>) for replay/debug; consent artefacts map into <code>consent_records</code>
+(channel <code>abdm_consent_manager</code>).</div></div>
+</section>
+
+<!-- ============================================================ 7 -->
+<section id="data">
+<h2><span class="no">7.</span> Data platform &amp; offline sync</h2>
+<div class="grid g2">
+  <div class="card"><h3 style="margin-top:0">Store roles</h3>
+    <table>
+      <tr><th>Store</th><th>Holds</th><th>Never holds</th></tr>
+      <tr><td>PostgreSQL</td><td>all relational truth: identity, visits, orders, results, stock, billing, audit, consent</td><td>binaries, DICOM</td></tr>
+      <tr><td>MongoDB</td><td>clinical_notes, fhir_bundles, form_responses, abdm_raw_payloads</td><td>money, audit, consent state</td></tr>
+      <tr><td>Redis</td><td>queue live state, pub/sub events, websocket fan-out</td><td>anything durable — DB is truth, Redis rebuilds</td></tr>
+      <tr><td>MinIO</td><td>photos, reports, ID proofs, audit archives (private buckets)</td><td>public objects; DB keeps only references</td></tr>
+      <tr><td>Orthanc</td><td>DICOM studies</td><td>—; linked by StudyInstanceUID</td></tr>
+    </table>
+  </div>
+  <div class="card"><h3 style="margin-top:0">Sync conflict tiers</h3>
+    <table>
+      <tr><th>Sensitivity</th><th>Examples</th><th>Conflict rule</th></tr>
+      <tr><td><span class="tag t-green">normal</span></td><td>master data edits, notes</td><td>last-writer-wins on <code>updated_at</code></td></tr>
+      <tr><td><span class="tag t-orange">important</span></td><td>clinical rows</td><td>merge where possible; else queue for human review</td></tr>
+      <tr><td><span class="tag t-red">critical</span></td><td>invoices, payments, refunds, receipts</td><td><b>never auto-resolved</b> — always human reconciliation</td></tr>
+    </table>
+    <p style="font-size:13px;color:var(--muted)">Enablers: UUID PKs (no collisions), accurate <code>updated_at</code>
+    (mixin-managed), append-only ledgers (naturally mergeable), outbox module queues local commits for upload.</p>
+  </div>
+</div>
+</section>
+
+<!-- ============================================================ 8 -->
+<section id="security">
+<h2><span class="no">8.</span> Security architecture (DPDP / ABDM / CERT-In)</h2>
+<div class="grid g3">
+  <div class="card"><h3 style="margin-top:0">Identity &amp; access</h3>
+    <p style="font-size:13.5px">Keycloak realm <code>healthdoc</code>; 12 roles (superadmin, receptionist, doctor, nurse, lab_tech,
+    radiology_tech, pharmacist, emergency, supervisor, admin, auditor, patient). Superadmin is cloud-only —
+    it owns facilities and appoints admins/DPOs but can never read clinical data. Staff accounts are created
+    via a maker-checker flow (<code>user_account_requests</code>): requester ≠ approver, approval atomically
+    creates the Keycloak account + profile row. OIDC + PKCE, 15-min access tokens,
+    silent refresh. Backend: JWKS-verified JWT → <code>require_roles</code> per endpoint; JWT <code>sub</code> ↔
+    <code>users.keycloak_sub</code>. No password columns anywhere.</p></div>
+  <div class="card"><h3 style="margin-top:0">Data protection</h3>
+    <p style="font-size:13.5px">Aadhaar: AES-256-GCM ciphertext + HMAC blind index, two separate keys — plaintext exists
+    nowhere (DB, logs, API). Files: private MinIO buckets, presigned URLs, per-access logging. TLS 1.3 only at the edge;
+    HSTS, CSP, frame-deny. Mobile is contact info, never identity.</p></div>
+  <div class="card"><h3 style="margin-top:0">DPDP Rules 2025 operations</h3>
+    <p style="font-size:13.5px">Compliance wave (migrations 0021–0026): DPO registry per facility, patient grievance
+    workflow with 90-day due dates and DPB escalation, breach-notification log tracking both clocks (CERT-In 6 h,
+    DPDP detailed report 72 h), consent-manager registry linked to consent records, guardian verification for minors,
+    and a Postgres audit row for every ABDM FHIR transmission.</p></div>
+  <div class="card"><h3 style="margin-top:0">Accountability</h3>
+    <p style="font-size:13.5px">Append-only, hash-chained, signed audit log written in the same transaction as every
+    mutation; integrity re-verification job; monthly partitions archived to MinIO with hashes. Clinical reads logged to
+    <code>data_access_log</code> including denials and break-glass. Financial rows immutable once issued.</p></div>
+</div>
+</section>
+
+<!-- ============================================================ 9 -->
+<section id="frontend">
+<h2><span class="no">9.</span> Frontend architecture</h2>
+<div class="card">
+<table>
+<tr><th>Layer</th><th>What it does</th></tr>
+<tr><td><code>app/&lt;role&gt;/…</code> routes</td><td>one folder per role surface: receptionist (registration, patient-search, queue), doctor (dashboard, consultation, orders, prescriptions), nurse (ward-dashboard, emar), lab, radiology, pharmacy (prescription-queue, dispense), billing, ipd, emergency, consent, reports, audit-viewer, admin (users, departments, abdm-sync), patient-portal, queue-display</td></tr>
+<tr><td><code>lib/auth.ts</code></td><td>Keycloak client (PKCE), session, role helpers; route guards redirect by role after login</td></tr>
+<tr><td><code>lib/api.ts</code></td><td>the only way to call the backend — unwraps the envelope, attaches JWT, throws <code>ApiError</code> with request_id</td></tr>
+<tr><td><code>components/</code></td><td>shared kit: DataTable, Modal, StatusChip, Toast (F2) · VitalsTimeline, BedGrid, eMARTable (F3) · BarcodeDisplay, ReportViewer, StatusStepper (F4) · StockLevelBadge, ExpiryChip, FEFOIndicator (F5) · MetricCard, ChartWrapper, ExportButton (F6)</td></tr>
+<tr><td>WebSocket</td><td><code>wss://…/api/v1/ws/queue/{department_id}</code> — queue-display pages subscribe; payload mirrors <code>notification_history.payload</code></td></tr>
+<tr><td>Electron</td><td>shell only (F1-W1-02): loads the same web app; weekly Windows/Linux test builds in CI; kiosk mode for queue displays</td></tr>
+</table>
+<div class="note good">UI displays business identifiers (UHID, token_display, INV/RCP numbers); URLs and API calls always use UUIDs. Enum values map to labels/colors client-side (e.g. <code>in_service</code> → "In Consultation").</div>
+</div>
+</section>
+
+<!-- ============================================================ 10 -->
+<section id="cicd">
+<h2><span class="no">10.</span> Environments, branches, CI/CD</h2>
+<div class="card">
+<div class="flow">
+  <div class="step"><b>feat/&lt;dev&gt;-&lt;module&gt;-&lt;desc&gt;</b>branch off staging; ≤400 lines/PR</div>
+  <div class="step"><b>PR → staging</b>CI: ruff + pytest (backend), lint + build (frontend); CODEOWNERS review; no self-merge</div>
+  <div class="step"><b>staging</b>auto-deploy; <code>alembic upgrade head</code>; week-gate checklists on milestones</div>
+  <div class="step ok"><b>main</b>production-ready only; PRs from staging with Tech Lead approval</div>
+</div>
+<table>
+<tr><th>Environment</th><th>Where</th><th>Notes</th></tr>
+<tr><td>dev</td><td>each laptop — <code>make setup</code></td><td>self-signed TLS, seeded Keycloak users (devpass), port overrides via .env</td></tr>
+<tr><td>staging</td><td>cloud VM</td><td>auto-deploy on merge; NTP-synced; real ABDM sandbox creds</td></tr>
+<tr><td>production</td><td>cloud + facility edges</td><td>real certs, hardened Keycloak, backups + audit archive jobs</td></tr>
+</table>
+<div class="note">Migration discipline: numbered chain 0001→0020 (0018 retired), one migration per PR, merged in
+chain order, empty-diff autogenerate check before merge — see <code>database-schema.md</code> §2.</div>
+</div>
+</section>
+
+</main>
+<footer>
+HealthDoc architecture · generated 2026-07-17 · sources: database-schema.md v3, schema-conventions.md,
+ADR 0001 (identity &amp; photo — in force), ADR 0002 (full departmental billing), infra/docker-compose.yml,
+.github issue plan (W1–W8). Binding order on conflicts: ADRs → database-schema.md → this document.
+</footer>
+</body>
+</html>
