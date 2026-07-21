@@ -8,17 +8,54 @@
   "ssoSessionIdleTimeout": 1800,
   "roles": {
     "realm": [
-      { "name": "receptionist", "description": "Registration, one-time payment, queue" },
-      { "name": "doctor", "description": "Consultation, orders, prescriptions" },
-      { "name": "nurse", "description": "Ward dashboard, eMAR, vitals" },
-      { "name": "lab_tech", "description": "Pathology worklist and results" },
-      { "name": "radiology_tech", "description": "Radiology worklist and PACS" },
-      { "name": "pharmacist", "description": "Prescription queue, dispense, inventory" },
-      { "name": "emergency", "description": "Emergency / THID fast registration" },
-      { "name": "supervisor", "description": "THID merge approval, overrides" },
-      { "name": "admin", "description": "Users, departments, registration-payment config, MIS" },
-      { "name": "auditor", "description": "Read-only audit viewer" },
-      { "name": "patient", "description": "Patient portal" }
+      {
+        "name": "superadmin",
+        "description": "Cloud-only platform owner: facilities, facility admins, DPO appointments, cross-facility MIS. No clinical data access."
+      },
+      {
+        "name": "receptionist",
+        "description": "Registration, one-time payment, queue"
+      },
+      {
+        "name": "doctor",
+        "description": "Consultation, orders, prescriptions"
+      },
+      {
+        "name": "nurse",
+        "description": "Ward dashboard, eMAR, vitals"
+      },
+      {
+        "name": "lab_tech",
+        "description": "Pathology worklist and results"
+      },
+      {
+        "name": "radiology_tech",
+        "description": "Radiology worklist and PACS"
+      },
+      {
+        "name": "pharmacist",
+        "description": "Prescription queue, dispense, inventory"
+      },
+      {
+        "name": "emergency",
+        "description": "Emergency / THID fast registration"
+      },
+      {
+        "name": "supervisor",
+        "description": "THID merge approval, overrides"
+      },
+      {
+        "name": "admin",
+        "description": "Users, departments, registration-payment config, MIS"
+      },
+      {
+        "name": "auditor",
+        "description": "Read-only audit viewer"
+      },
+      {
+        "name": "patient",
+        "description": "Patient portal"
+      }
     ]
   },
   "clients": [
@@ -29,9 +66,18 @@
       "standardFlowEnabled": true,
       "directAccessGrantsEnabled": false,
       "protocol": "openid-connect",
-      "redirectUris": ["https://localhost/*", "http://localhost:3000/*"],
-      "webOrigins": ["https://localhost", "http://localhost:3000"],
-      "attributes": { "pkce.code.challenge.method": "S256", "post.logout.redirect.uris": "+" }
+      "redirectUris": [
+        "https://localhost/*",
+        "http://localhost:3000/*"
+      ],
+      "webOrigins": [
+        "https://localhost",
+        "http://localhost:3000"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "+"
+      }
     },
     {
       "clientId": "healthdoc-backend",
@@ -48,8 +94,16 @@
       "firstName": "Dev",
       "lastName": "Receptionist",
       "email": "dev.receptionist@healthdoc.local",
-      "credentials": [{ "type": "password", "value": "devpass", "temporary": false }],
-      "realmRoles": ["receptionist"]
+      "credentials": [
+        {
+          "type": "password",
+          "value": "devpass",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "receptionist"
+      ]
     },
     {
       "username": "dev.doctor",
@@ -57,8 +111,16 @@
       "firstName": "Dev",
       "lastName": "Doctor",
       "email": "dev.doctor@healthdoc.local",
-      "credentials": [{ "type": "password", "value": "devpass", "temporary": false }],
-      "realmRoles": ["doctor"]
+      "credentials": [
+        {
+          "type": "password",
+          "value": "devpass",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "doctor"
+      ]
     },
     {
       "username": "dev.admin",
@@ -66,8 +128,17 @@
       "firstName": "Dev",
       "lastName": "Admin",
       "email": "dev.admin@healthdoc.local",
-      "credentials": [{ "type": "password", "value": "devpass", "temporary": false }],
-      "realmRoles": ["admin", "supervisor"]
+      "credentials": [
+        {
+          "type": "password",
+          "value": "devpass",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "admin",
+        "supervisor"
+      ]
     }
   ]
 }

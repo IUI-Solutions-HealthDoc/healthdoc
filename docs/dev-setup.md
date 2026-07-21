@@ -60,7 +60,7 @@ audit writes in the same transaction as the mutation.
 
 **"port is already in use" / "address already in use"** — something on your
 machine already listens on that port (common: local Postgres on 5432, another
-dev server on 3000/8000). `make setup` now detects this and names the process.
+dev server on 3000/8000). `make setup` detects this and names the process.
 Two fixes:
 
 1. Stop the local service, e.g. `brew services stop postgresql@16`, or

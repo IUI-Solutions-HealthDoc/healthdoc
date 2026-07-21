@@ -1,52 +1,5 @@
-# HealthDoc module ownership — replace dev-xx with real GitHub usernames
+# HealthDoc code ownership — Tech Lead accounts review everything.
+# (Module-level dev ownership is tracked via issues/labels; PR approval
+# authority is centralized to the two lead accounts below.)
 
-/backend/app/auth/                      @Ajay85720
-/backend/app/common/                    @Ajay85720
-/backend/app/integrations/              @Ajay85720
-/backend/migrations/                    @Ajay85720
-/backend/app/outbox/                    @Ajay85720
-/backend/app/patients/                  @priyanshuiuis
-/backend/app/emergency/                 @priyanshuiuis
-/backend/app/registration/              @priyanshuiuis
-/backend/app/opd/                       @aditya953791
-/backend/app/encounters/                @aditya953791
-/backend/app/ipd/                       @aditya953791
-/backend/app/orders/                    @aditya953791
-/backend/app/ot/                        @aditya953791
-/backend/app/queue/                     @Suprita-iui
-/backend/app/departments/               @Suprita-iui
-/backend/app/notifications/             @Suprita-iui
-/backend/app/wards/                     @Suprita-iui
-/backend/app/nursing/                   @Suprita-iui
-/backend/app/pathology/                 @Khushi-2004-bot
-/backend/app/radiology/                 @Khushi-2004-bot
-/backend/app/blood_bank/                @Khushi-2004-bot
-/backend/app/pharmacy/                  @riyaraj-iui
-/backend/app/inventory/                 @riyaraj-iui
-/backend/app/billing/                   @vaani-choudhary
-/backend/app/consent/                   @vaani-choudhary
-/backend/app/audit/                     @vaani-choudhary
-/backend/app/files/                     @vaani-choudhary
-/backend/app/reports/                   @vaani-choudhary
-/backend/app/security_audit/            @vaani-choudhary
-/frontend/app/receptionist/             @kunalsharmagithb
-/frontend/app/queue-display/            @kunalsharmagithb
-/frontend/app/emergency/                @kunalsharmagithb
-/frontend/app/patient-portal/           @kunalsharmagithb
-/frontend/app/login/                    @kunalsharmagithb
-/frontend/lib/                          @kunalsharmagithb
-/frontend/electron/                     @kunalsharmagithb
-/frontend/app/doctor/                   @AmanSaxena08
-/frontend/app/nurse/                    @ankitsinghnaam
-/frontend/app/ipd/                      @ankitsinghnaam
-/frontend/app/lab/                      @ishikaiui
-/frontend/app/radiology/                @ishikaiui
-/frontend/app/pharmacy/                 @vanshikaaggarwal9
-/frontend/app/inventory/                @vanshikaaggarwal9
-/frontend/app/billing/                  @adi1407
-/frontend/app/admin/                    @adi1407
-/frontend/app/reports/                  @adi1407
-/frontend/app/audit-viewer/             @adi1407
-/frontend/app/consent/                  @adi1407
-/infra/                                 @Ajay85720
-/frontend/components/                   @kunalsharmagithb @ishikaiui  # cross-team review
+* @solutionsiui @kandol007
