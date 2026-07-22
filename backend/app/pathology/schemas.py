@@ -45,3 +45,30 @@ class LabOrderItemListOut(BaseModel):
     page: int
     page_size: int
     total: int
+
+class LabResultCreate(BaseModel):
+    """Body for POST /pathology/order-items/{item_id}/results (technician entry)."""
+    result_data: dict
+    remarks: str | None = None
+
+
+class LabResultVerify(BaseModel):
+    """Body for PUT /pathology/order-items/{item_id}/results/verify (pathologist approval)."""
+    result_data: dict | None = None
+    remarks: str | None = None
+
+
+class LabResultOut(BaseModel):
+    id: uuid.UUID
+    lab_order_item_id: uuid.UUID
+    version: int
+    is_current: bool
+    result_data: dict
+    remarks: str | None
+    status: str
+    created_by: uuid.UUID
+    created_at: datetime
+    tat_minutes: int | None = None
+
+    class Config:
+        from_attributes = True
