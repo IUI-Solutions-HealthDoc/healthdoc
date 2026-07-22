@@ -51,7 +51,6 @@ The milestone closes only when every item is checked. Unchecked items
 become `carry-over` issues in the next milestone.
 
 
-
 ## Local development
 
 ```bash
