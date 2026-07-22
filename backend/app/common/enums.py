@@ -446,3 +446,7 @@ class ModuleCode(CheckedEnum):
 class FulfilmentMode(CheckedEnum):
     INTERNAL = "internal"
     EXTERNAL_REFERRAL = "external_referral"
+
+class MergeSourceType(CheckedEnum):
+    THID = "thid"
+    DUPLICATE_UHID = "duplicate_uhid"
