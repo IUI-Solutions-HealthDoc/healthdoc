@@ -6,6 +6,12 @@ Usage in any module router:
     @router.get("/", dependencies=[Depends(require_roles("receptionist", "admin"))])
     async def list_things(user: CurrentUser): ...
 """
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.common.db import get_db
+from app.users.models import User
+
 import time
 from typing import Annotated
 
@@ -71,3 +77,19 @@ def require_roles(*allowed: str):
         return user
 
     return _check
+
+async def get_current_db_user(
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """Resolves the JWT subject to the app-side users row. Promoted here per
+    B2-W1-02 review — this lookup was previously duplicated inline in
+    patients/router.py and again in common/modules.py:47."""
+    result = await db.execute(select(User).where(User.keycloak_sub == current_user.sub))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "No user profile found for this account")
+    return user
+
+
+CurrentDbUser = Annotated[User, Depends(get_current_db_user)]

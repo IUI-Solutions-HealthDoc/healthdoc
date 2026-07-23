@@ -8,11 +8,6 @@ from app.common.security import (
     aadhaar_blind_indexes_all_versions,
     active_key_versions,
 )
-import pytest
-
-from app.common.security import aadhaar_blind_index
-
-
 def test_blind_index_is_deterministic():
     a = aadhaar_blind_index("999999990019")
     b = aadhaar_blind_index("999999990019")
