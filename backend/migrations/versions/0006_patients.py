@@ -20,7 +20,7 @@ def upgrade() -> None:
     sa.Column('uhid', sa.String(length=30), nullable=True),
     sa.Column('thid', sa.String(length=25), nullable=True),
     sa.Column('full_name', sa.Text(), nullable=False),
-    sa.Column('sex', sa.String(length=30), nullable=False),
+    sa.Column('sex', sa.String(length=50), nullable=False),
     sa.Column('dob', sa.Date(), nullable=True),
     sa.Column('age_years', sa.SmallInteger(), nullable=True),
     sa.Column('guardian_name', sa.Text(), nullable=True),

@@ -1,21 +1,23 @@
+"""Patient models — see docs/database-schema.md §3 (0006) and docs/schema-conventions.md."""
 import uuid
 from datetime import date, datetime
 
 from sqlalchemy import (
     Boolean, CheckConstraint, Date, DateTime, ForeignKey,
-    LargeBinary, SmallInteger, String, Text, UniqueConstraint, func, text,
+    LargeBinary, SmallInteger, String, Text, UniqueConstraint, func,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.common.db import Base
+from app.common.models import UUIDPk, Timestamps, Blame
 from app.common.enums import (
     Sex, IdentityPath, IdentityStatus, PatientStatus,
     IdentifierType, MergeStatus, MergeSourceType,
 )
 
 
-class Patient(Base):
+class Patient(Base, UUIDPk, Timestamps, Blame):
     __tablename__ = "patients"
     __table_args__ = (
         CheckConstraint("dob IS NOT NULL OR age_years IS NOT NULL", name="dob_or_age"),
@@ -26,12 +28,10 @@ class Patient(Base):
         CheckConstraint(PatientStatus.sql_check("status"), name="status"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("uuid_generate_v4()"))
-
-    uhid: Mapped[str | None] = mapped_column(String(30), nullable=True)  # unique enforced by partial index, not here
+    uhid: Mapped[str | None] = mapped_column(String(30), nullable=True)  # unique via partial index
     thid: Mapped[str | None] = mapped_column(String(25), unique=True, nullable=True)
     full_name: Mapped[str] = mapped_column(Text, nullable=False)
-    sex: Mapped[str] = mapped_column(String(30), nullable=False)
+    sex: Mapped[str] = mapped_column(String(50), nullable=False)
     dob: Mapped[date | None] = mapped_column(Date, nullable=True)
     age_years: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
     guardian_name: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -57,20 +57,14 @@ class Patient(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     deleted_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
 
-    created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    updated_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
-
-class PatientIdentifier(Base):
+class PatientIdentifier(Base, UUIDPk, Timestamps):
     __tablename__ = "patient_identifiers"
     __table_args__ = (
-        UniqueConstraint("patient_id", "identifier_type", name="uq_patient_identifier_type"),
-        CheckConstraint(IdentifierType.sql_check("identifier_type"), name="ck_patient_identifiers_identifier_type"),
+        UniqueConstraint("patient_id", "identifier_type", name="patient_identifier_type"),
+        CheckConstraint(IdentifierType.sql_check("identifier_type"), name="identifier_type"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("uuid_generate_v4()"))
     patient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("patients.id"), nullable=False, index=True)
     identifier_type: Mapped[str] = mapped_column(String(50), nullable=False)
     identifier_value_encrypted: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
@@ -80,18 +74,14 @@ class PatientIdentifier(Base):
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     captured_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
-
-class PatientMergeLog(Base):
+class PatientMergeLog(Base, UUIDPk, Timestamps):
     __tablename__ = "patient_merge_log"
     __table_args__ = (
-        CheckConstraint(MergeSourceType.sql_check("source_type"), name="ck_patient_merge_log_source_type"),
-        CheckConstraint(MergeStatus.sql_check("status"), name="ck_patient_merge_log_status"),
+        CheckConstraint(MergeSourceType.sql_check("source_type"), name="source_type"),
+        CheckConstraint(MergeStatus.sql_check("status"), name="status"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("uuid_generate_v4()"))
     source_type: Mapped[str] = mapped_column(String(50), nullable=False)
     source_patient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("patients.id"), nullable=False, index=True)
     target_patient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("patients.id"), nullable=False, index=True)
@@ -107,6 +97,3 @@ class PatientMergeLog(Base):
 
     before_snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)
     after_snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
