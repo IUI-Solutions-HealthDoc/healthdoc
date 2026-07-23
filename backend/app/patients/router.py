@@ -6,7 +6,7 @@ from app.auth.deps import CurrentDbUser, require_roles
 from app.common.db import get_db
 from app.patients.models import Patient
 from app.patients.schemas import PatientCreate, PatientOut
-from app.patients.service import generate_uhid
+from app.patients.service import generate_uhid, build_aadhaar_identifier
 from app.users.models import Facility
 
 router = APIRouter(prefix="/patients", tags=["patients"])
@@ -34,9 +34,13 @@ async def register_patient(
 
     uhid = await generate_uhid(db, state_code=facility.state_code, facility_code=facility.code)
 
-    # NOTE: identity_path is hardcoded to demographics_only, and no rows are
-    # written to patient_identifiers or photo_file_id here. ABDM/Aadhaar/THID
-    # identity paths are out of scope for this ticket — tracked as B2-W2-01.
+    if payload.aadhaar_number:
+        identity_path = "aadhaar_mobile"
+        identity_status = "identity_unverified"
+    else:
+        identity_path = "demographics_only"
+        identity_status = "identity_unverified"
+
     patient = Patient(
         uhid=uhid,
         full_name=payload.full_name,
@@ -46,11 +50,20 @@ async def register_patient(
         mobile=payload.mobile,
         abha_number=payload.abha_number,
         facility_id=payload.facility_id,
-        identity_path="demographics_only",
-        identity_status="verified",
+        identity_path=identity_path,
+        identity_status=identity_status,
         created_by=current_db_user.id,
     )
     db.add(patient)
     await db.flush()
+
+    if payload.aadhaar_number:
+        db.add(build_aadhaar_identifier(
+            patient_id=patient.id,
+            aadhaar_number=payload.aadhaar_number,
+            captured_by=current_db_user.id,
+        ))
+        await db.flush()
+
     await db.refresh(patient)
     return patient
