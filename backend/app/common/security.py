@@ -19,11 +19,18 @@ Key rotation (schema v3.5, patient_identifiers.key_version):
 import hashlib
 import hmac
 import json
+import base64
+import hashlib
+import hmac
+import json
+import os
 
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from app.common.config import get_settings
 
 CURRENT_KEY_VERSION = 1  # code-level default; overridden by settings.aadhaar_hmac_current_key_version
-
+_AES_KEY_LEN = 32       # AES-256
+_NONCE_LEN = 12         # GCM standard nonce size   
 
 def _load_hmac_keys() -> dict[int, str]:
     """Returns {key_version: key} for Aadhaar blind-index HMAC keys.
@@ -83,9 +90,51 @@ def aadhaar_blind_indexes_all_versions(aadhaar: str) -> dict[int, str]:
     return {v: aadhaar_blind_index(aadhaar, key_version=v) for v in active_key_versions()}
 
 
-def encrypt_pii(value: str) -> bytes:  # pragma: no cover — not in B2-W1-03 scope
-    raise NotImplementedError
+def _load_aes_keys() -> dict[int, bytes]:
+    settings = get_settings()
+
+    if settings.aadhaar_encryption_keys_json:
+        try:
+            raw = json.loads(settings.aadhaar_encryption_keys_json)
+        except json.JSONDecodeError as exc:
+            raise ValueError("aadhaar_encryption_keys_json is not valid JSON") from exc
+        keys = {int(v): base64.b64decode(k) for v, k in raw.items()}
+        if not keys:
+            raise ValueError("aadhaar_encryption_keys_json is set but empty")
+        return keys
+
+    derived = hashlib.sha256(settings.aadhaar_encryption_key.encode("utf-8")).digest()
+    return {1: derived}
+
+def encrypt_pii(value: str, key_version: int | None = None) -> bytes:
+    """Encrypts a PII value (e.g. Aadhaar number) with AES-256-GCM.
+    Blob layout: 1-byte key_version || 12-byte nonce || ciphertext+tag."""
+    version = key_version if key_version is not None else current_key_version()
+    keys = _load_aes_keys()
+
+    if version not in keys:
+        raise ValueError(f"No AES key configured for key_version={version}")
+    if version > 255:
+        raise ValueError("key_version must fit in a single byte (0-255)")
+
+    aesgcm = AESGCM(keys[version])
+    nonce = os.urandom(_NONCE_LEN)
+    ciphertext = aesgcm.encrypt(nonce, value.encode("utf-8"), associated_data=None)
+    return bytes([version]) + nonce + ciphertext
 
 
-def decrypt_pii(blob: bytes) -> str:  # pragma: no cover — not in B2-W1-03 scope
-    raise NotImplementedError
+def decrypt_pii(blob: bytes) -> str:
+    if len(blob) < 1 + _NONCE_LEN + 16:
+        raise ValueError("decrypt_pii: blob too short to be a valid ciphertext")
+
+    version = blob[0]
+    nonce = blob[1:1 + _NONCE_LEN]
+    ciphertext = blob[1 + _NONCE_LEN:]
+
+    keys = _load_aes_keys()
+    if version not in keys:
+        raise ValueError(f"No AES key configured for key_version={version}")
+
+    aesgcm = AESGCM(keys[version])
+    plaintext = aesgcm.decrypt(nonce, ciphertext, associated_data=None)
+    return plaintext.decode("utf-8")
