@@ -1,7 +1,7 @@
-"""B2-W1-02: UHID generation — Luhn check digit, sequence, lock key."""
+"""B2-W1-02: UHID generation — Luhn check digit, Postgres sequence naming."""
 import pytest
 
-from app.patients.service import compute_check_digit, _advisory_lock_key
+from app.patients.service import compute_check_digit, _sequence_name
 
 
 def test_check_digit_is_single_digit():
@@ -21,18 +21,22 @@ def test_check_digit_rejects_non_numeric():
         compute_check_digit("00004x")
 
 
-def test_advisory_lock_key_deterministic():
-    a = _advisory_lock_key("IN-RJ-JPR001-2026-")
-    b = _advisory_lock_key("IN-RJ-JPR001-2026-")
-    assert a == b
+def test_sequence_name_format():
+    assert _sequence_name("JPR001", 2026) == "seq_uhid_jpr001_2026"
 
 
-def test_advisory_lock_key_differs_per_facility():
-    a = _advisory_lock_key("IN-RJ-JPR001-2026-")
-    b = _advisory_lock_key("IN-RJ-JPR002-2026-")
+def test_sequence_name_differs_per_facility():
+    a = _sequence_name("JPR001", 2026)
+    b = _sequence_name("JPR002", 2026)
     assert a != b
 
 
-def test_advisory_lock_key_within_postgres_int_range():
-    key = _advisory_lock_key("IN-RJ-JPR001-2026-")
-    assert 0 <= key < 2**31
+def test_sequence_name_differs_per_year():
+    a = _sequence_name("JPR001", 2026)
+    b = _sequence_name("JPR001", 2027)
+    assert a != b
+
+
+def test_sequence_name_rejects_invalid_facility_code():
+    with pytest.raises(ValueError):
+        _sequence_name("JPR001; DROP TABLE patients;--", 2026)
