@@ -45,10 +45,10 @@ def upgrade() -> None:
     )
     op.create_index("ix_users_department_id", "users", ["department_id"])
 
-    # op.create_foreign_key(
-    #     "fk_audit_logs_department_id", "audit_logs", "departments",
-    #     ["department_id"], ["id"],
-    # )
+    op.create_foreign_key(
+        "fk_audit_logs_department_id", "audit_logs", "departments",
+        ["department_id"], ["id"],
+    )
 
 def downgrade() -> None:
     op.drop_constraint("fk_audit_logs_department_id", "audit_logs", type_="foreignkey")
