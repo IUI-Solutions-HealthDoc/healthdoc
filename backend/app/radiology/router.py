@@ -20,12 +20,14 @@ from sqlalchemy import select, func
 
 from app.common.db import get_db
 from app.auth.deps import get_current_user, require_roles
-from app.radiology.models import RadiologyOrderItem, RadiologyReport
+from app.radiology.fhir import build_diagnostic_report_bundle
 from app.radiology.schemas import (
     RadiologyOrderItemCreate, RadiologyOrderItemOut, ScheduleRequest,
     RadiologyOrderItemListOut, RadiologyReportCreate, RadiologyReportSignOff,
     RadiologyReportOut,
 )
+from app.radiology.models import RadiologyOrderItem, RadiologyReport
+
 
 router = APIRouter(prefix="/radiology", tags=["radiology"])
 
@@ -186,8 +188,43 @@ async def sign_off_radiology_report(
     report_out.tat_minutes = int(tat_delta.total_seconds() // 60)
     return report_out
 
+@router.get("/order-items/{item_id}/fhir-bundle")
+async def get_fhir_bundle(
+    item_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """
+    #204: builds a FHIR R4 Bundle (DiagnosticReport + Observation) from the
+    current finalized report. Returns 409 if no report has been signed off yet.
+    """
+    item = await db.get(RadiologyOrderItem, item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Radiology order item not found")
+
+    current_report = (await db.execute(
+        select(RadiologyReport)
+        .where(RadiologyReport.radiology_order_item_id == item_id, RadiologyReport.is_current.is_(True))
+    )).scalar_one_or_none()
+
+    if current_report is None:
+        raise HTTPException(status_code=409, detail="No report exists for this item yet")
+
+    from app.orders.models import Order
+
+    order = await db.get(Order, item.order_id)
+    if order is None:
+        raise HTTPException(status_code=404, detail="Underlying order not found")
+
+    bundle = build_diagnostic_report_bundle(
+        order_item=item,
+        report=current_report,
+        patient_id=order.patient_id,
+    )
+    return bundle
 
 async def _generate_accession_number(db: AsyncSession, prefix: str) -> str:
+
     today = datetime.now(timezone.utc).strftime("%Y%m%d")
     count_today = (await db.execute(
         select(func.count()).select_from(RadiologyOrderItem)
