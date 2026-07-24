@@ -14,12 +14,12 @@ import re
 from datetime import datetime, timezone
 
 import uuid
-
-from sqlalchemy import text
+from sqlalchemy import text, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.common.security import encrypt_pii, aadhaar_blind_index, current_key_version
-from app.patients.models import PatientIdentifier
+from app.common.security import encrypt_pii, aadhaar_blind_index, aadhaar_blind_indexes_all_versions, current_key_version
+from app.patients.models import Patient, PatientIdentifier
+
 
 _FACILITY_CODE_RE = re.compile(r"^[A-Za-z0-9_]{1,20}$")
 
@@ -91,3 +91,90 @@ def build_aadhaar_identifier(
         key_version=version,
         captured_by=captured_by,
     )
+
+NAME_TRGM_THRESHOLD = 0.3  # tunable threshold, not specified in the schema docs — revisit if match quality looks off
+
+def mask_mobile(mobile: str | None) -> str | None:
+    if not mobile:
+        return None
+    if len(mobile) <= 4:
+        return "*" * len(mobile)
+    return "*" * (len(mobile) - 4) + mobile[-4:]
+
+
+async def search_patients(
+    db: AsyncSession,
+    *,
+    full_name: str | None = None,
+    dob=None,
+    mobile: str | None = None,
+    uhid: str | None = None,
+    aadhaar_number: str | None = None,
+    abha_number: str | None = None,
+    facility_id=None,
+    page: int = 1,
+    page_size: int = 20,
+):
+    """Returns (page_of_(patient, score, matched_on), total_count).
+    Exact-match paths (aadhaar/abha/uhid/mobile) run first; fuzzy name+dob fills in.
+    A patient found via multiple paths keeps its highest-scoring match."""
+    matches: dict = {}
+    base_filter = [Patient.deleted_at.is_(None)]
+    if facility_id:
+        base_filter.append(Patient.facility_id == facility_id)
+
+    if aadhaar_number:
+        blind_indexes = list(aadhaar_blind_indexes_all_versions(aadhaar_number).values())
+        stmt = (
+            select(Patient)
+            .join(PatientIdentifier, PatientIdentifier.patient_id == Patient.id)
+            .where(
+                PatientIdentifier.identifier_type == "aadhaar",
+                PatientIdentifier.identifier_blind_index.in_(blind_indexes),
+                *base_filter,
+            )
+        )
+        for patient in (await db.execute(stmt)).scalars().all():
+            matches[patient.id] = (patient, 1.0, "aadhaar")
+
+    if abha_number:
+        stmt = select(Patient).where(Patient.abha_number == abha_number, *base_filter)
+        for patient in (await db.execute(stmt)).scalars().all():
+            existing = matches.get(patient.id)
+            if not existing or existing[1] < 1.0:
+                matches[patient.id] = (patient, 1.0, "abha")
+
+    if uhid:
+        stmt = select(Patient).where(Patient.uhid == uhid, *base_filter)
+        for patient in (await db.execute(stmt)).scalars().all():
+            existing = matches.get(patient.id)
+            if not existing or existing[1] < 1.0:
+                matches[patient.id] = (patient, 1.0, "uhid")
+
+    if mobile:
+        stmt = select(Patient).where(Patient.mobile == mobile, *base_filter)
+        for patient in (await db.execute(stmt)).scalars().all():
+            existing = matches.get(patient.id)
+            if not existing or existing[1] < 1.0:
+                matches[patient.id] = (patient, 1.0, "mobile")
+
+    if full_name:
+        similarity = func.similarity(Patient.full_name, full_name)
+        stmt = (
+            select(Patient, similarity.label("score"))
+            .where(similarity > NAME_TRGM_THRESHOLD, *base_filter)
+            .order_by(similarity.desc())
+            .limit(50)
+        )
+        for patient, score in (await db.execute(stmt)).all():
+            boosted = float(score)
+            if dob and patient.dob == dob:
+                boosted = min(1.0, boosted + 0.3)
+            existing = matches.get(patient.id)
+            if not existing or existing[1] < boosted:
+                matches[patient.id] = (patient, boosted, "name_dob")
+
+    ranked = sorted(matches.values(), key=lambda m: m[1], reverse=True)
+    total = len(ranked)
+    start = (page - 1) * page_size
+    return ranked[start:start + page_size], total

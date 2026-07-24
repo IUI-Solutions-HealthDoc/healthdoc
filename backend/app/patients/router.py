@@ -5,8 +5,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.deps import CurrentDbUser, require_roles
 from app.common.db import get_db
 from app.patients.models import Patient
-from app.patients.schemas import PatientCreate, PatientOut
-from app.patients.service import generate_uhid, build_aadhaar_identifier
+from app.patients.schemas import (
+    PatientCreate, PatientOut,
+    PatientSearchRequest, PatientSearchResponse, PatientSearchResult,)
+from app.patients.service import generate_uhid, build_aadhaar_identifier, search_patients, mask_mobile
 from app.users.models import Facility
 
 router = APIRouter(prefix="/patients", tags=["patients"])
@@ -67,3 +69,39 @@ async def register_patient(
 
     await db.refresh(patient)
     return patient
+
+@router.post(
+    "/search",
+    response_model=PatientSearchResponse,
+    dependencies=[Depends(require_roles("receptionist", "admin"))],
+)
+async def search_patients_endpoint(
+    payload: PatientSearchRequest,
+    db: AsyncSession = Depends(get_db),
+) -> PatientSearchResponse:
+    results, total = await search_patients(
+        db,
+        full_name=payload.full_name,
+        dob=payload.dob,
+        mobile=payload.mobile,
+        uhid=payload.uhid,
+        aadhaar_number=payload.aadhaar_number,
+        abha_number=payload.abha_number,
+        facility_id=payload.facility_id,
+        page=payload.page,
+        page_size=payload.page_size,
+    )
+    items = [
+        PatientSearchResult(
+            id=patient.id,
+            uhid=patient.uhid,
+            full_name=patient.full_name,
+            sex=patient.sex,
+            age_years=patient.age_years,
+            mobile_masked=mask_mobile(patient.mobile),
+            match_score=round(score, 3),
+            matched_on=matched_on,
+        )
+        for patient, score, matched_on in results
+    ]
+    return PatientSearchResponse(items=items, page=payload.page, page_size=payload.page_size, total=total)

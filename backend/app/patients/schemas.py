@@ -4,8 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, model_validator
-
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 class PatientCreate(BaseModel):
     full_name: str
@@ -41,3 +40,39 @@ class PatientOut(BaseModel):
     photo_file_id: uuid.UUID | None
     facility_id: uuid.UUID
     created_at: datetime
+
+
+class PatientSearchRequest(BaseModel):
+    full_name: str | None = None
+    dob: date | None = None
+    mobile: str | None = None
+    uhid: str | None = None
+    aadhaar_number: str | None = None
+    abha_number: str | None = None
+    facility_id: uuid.UUID | None = None
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=20, ge=1, le=100)
+
+    @model_validator(mode="after")
+    def _at_least_one_criterion(self) -> "PatientSearchRequest":
+        if not any([self.full_name, self.mobile, self.uhid, self.aadhaar_number, self.abha_number]):
+            raise ValueError("At least one search criterion is required")
+        return self
+
+
+class PatientSearchResult(BaseModel):
+    id: uuid.UUID
+    uhid: str | None
+    full_name: str
+    sex: str
+    age_years: int | None
+    mobile_masked: str | None
+    match_score: float
+    matched_on: str  # "aadhaar" | "abha" | "uhid" | "mobile" | "name_dob"
+
+
+class PatientSearchResponse(BaseModel):
+    items: list[PatientSearchResult]
+    page: int
+    page_size: int
+    total: int
