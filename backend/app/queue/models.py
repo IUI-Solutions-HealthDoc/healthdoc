@@ -20,11 +20,13 @@ class Queue(Base):
     display_label: Mapped[str] = mapped_column(String(50), nullable=True)
     now_serving_token_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("queue_tokens.id"), nullable=True)
     service_date: Mapped[date] = mapped_column(Date(), nullable=False)
-    is_open: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    is_open: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
-    tokens: Mapped[list["QueueToken"]] = relationship(back_populates="queue")
+    tokens: Mapped[list["QueueToken"]] = relationship(back_populates="queue", foreign_keys="QueueToken.queue_id")
+    now_serving_token: Mapped["QueueToken"] = relationship("QueueToken", foreign_keys=[now_serving_token_id])
+
 
 
 class QueueToken(Base):
@@ -38,11 +40,11 @@ class QueueToken(Base):
     visit_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("visits.id"), nullable=True)
     sequence: Mapped[int] = mapped_column(Integer, nullable=False)
     token_display: Mapped[str] = mapped_column(String(20), nullable=False)
-    status: Mapped[str] = mapped_column(String(30), default=QueueTokenStatus.WAITING.value, nullable=False)
-    priority: Mapped[str] = mapped_column(String(30), default=QueuePriority.NORMAL.value, nullable=False)
+    status: Mapped[str] = mapped_column(String(50), nullable=False, server_default="waiting")
+    priority: Mapped[str] = mapped_column(String(50), nullable=False, server_default="normal")
     called_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
-    queue: Mapped["Queue"] = relationship(back_populates="tokens")
+    queue: Mapped["Queue"] = relationship(back_populates="tokens", foreign_keys=[queue_id])

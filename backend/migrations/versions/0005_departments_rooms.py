@@ -20,9 +20,11 @@ def upgrade() -> None:
         sa.Column("facility_id", UUID(as_uuid=True),
                   sa.ForeignKey("facilities.id"), nullable=False),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
     )
+
+    op.create_index("ix_departments_facility_id", "departments", ["facility_id"])
 
     op.create_table(
         "rooms",
@@ -32,12 +34,26 @@ def upgrade() -> None:
                   sa.ForeignKey("departments.id"), nullable=False),
         sa.Column("room_number", sa.String(30), nullable=False),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.UniqueConstraint("department_id", "room_number", name="uq_room_per_department"),
     )
 
+    op.add_column(
+        "users",
+        sa.Column("department_id", UUID(as_uuid=True), sa.ForeignKey("departments.id"), nullable=True),
+    )
+    op.create_index("ix_users_department_id", "users", ["department_id"])
+
+    # op.create_foreign_key(
+    #     "fk_audit_logs_department_id", "audit_logs", "departments",
+    #     ["department_id"], ["id"],
+    # )
 
 def downgrade() -> None:
+    op.drop_constraint("fk_audit_logs_department_id", "audit_logs", type_="foreignkey")
+    op.drop_index("ix_users_department_id", table_name="users")
+    op.drop_column("users", "department_id")
     op.drop_table("rooms")
+    op.drop_index("ix_departments_facility_id", table_name="departments")
     op.drop_table("departments")

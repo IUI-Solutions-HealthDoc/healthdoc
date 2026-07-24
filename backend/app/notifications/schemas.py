@@ -1,20 +1,21 @@
 import uuid
 from datetime import datetime
+from typing import Any, Dict
 from pydantic import BaseModel, ConfigDict
 
 
 class NotificationHistoryCreate(BaseModel):
-    user_id: uuid.UUID
-    channel: str
-    payload: dict
+    event_type: str
+    payload: Dict[str, Any]
+    department_id: uuid.UUID | None = None
 
 
 class NotificationHistoryOut(BaseModel):
     id: uuid.UUID
-    user_id: uuid.UUID
-    channel: str
-    payload: dict
-    status: str
-    sent_at: datetime
+    event_type: str
+    payload: Dict[str, Any]
+    department_id: uuid.UUID | None
+    created_at: datetime
+    updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
