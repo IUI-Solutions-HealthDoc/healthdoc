@@ -1,9 +1,11 @@
 """Alembic environment — B1-W1-04. Uses sync psycopg driver derived from DATABASE_URL."""
 import os
 from logging.config import fileConfig
-
 from alembic import context
 from sqlalchemy import create_engine, pool
+from dotenv import load_dotenv
+
+load_dotenv()
 
 config = context.config
 if config.config_file_name is not None:

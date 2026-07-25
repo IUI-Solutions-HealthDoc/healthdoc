@@ -1,19 +1,18 @@
-from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, Index, String, Text
+from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 
-from app.common.database import Base
+from sqlalchemy.orm import relationship
+from app.common.db import Base
 from app.common.enums import OrderPriority, OrderStatus, OrderType
-from app.common.mixins import Blame, Timestamps, UUIDPk
+from app.common.models import Blame, Timestamps, UUIDPk
 
 
 class Order(Base, UUIDPk, Timestamps, Blame):
     """schema.md §3, 0008 — the single order header for every department.
-
     Lab/radiology add their OWN detail rows later (migrations 0010/0011)
     that point back at this table via order_id. Don't put lab-specific
     or radiology-specific columns here.
     """
-
     __tablename__ = "orders"
 
     order_number = Column(String(30), unique=True, nullable=False)
@@ -41,7 +40,6 @@ class Order(Base, UUIDPk, Timestamps, Blame):
 class Prescription(Base, UUIDPk, Timestamps, Blame):
     """schema.md §3, 0008 — header only. Drugs live in PrescriptionItem
     below (one row per drug), never as one big text blob here."""
-
     __tablename__ = "prescriptions"
 
     encounter_id = Column(
@@ -52,6 +50,10 @@ class Prescription(Base, UUIDPk, Timestamps, Blame):
     )
     notes = Column(Text, nullable=True)
 
+    items = relationship(
+        "PrescriptionItem", back_populates="prescription", cascade="all, delete-orphan"
+    )
+
     __table_args__ = (
         Index("ix_prescriptions_encounter_id", "encounter_id"),
         Index("ix_prescriptions_patient_id", "patient_id"),
@@ -60,23 +62,22 @@ class Prescription(Base, UUIDPk, Timestamps, Blame):
 
 class PrescriptionItem(Base, UUIDPk, Timestamps):
     """One row per drug on a prescription.
-
     medicine_item_id has no FK constraint yet — inventory_items doesn't
     exist until migration 0012. The FK gets added later in that
     migration with op.create_foreign_key(), same pattern as
     patients.photo_file_id waiting on migration 0019.
     """
-
     __tablename__ = "prescription_items"
 
     prescription_id = Column(
         UUID(as_uuid=True), ForeignKey("prescriptions.id", ondelete="CASCADE"), nullable=False
     )
+    prescription = relationship("Prescription", back_populates="items")
     medicine_item_id = Column(UUID(as_uuid=True), nullable=True)  # FK added in migration 0012
     medicine_name = Column(Text, nullable=False)
     dosage = Column(String(50), nullable=True)
     frequency = Column(String(50), nullable=True)
-    duration_days = Column(UUID(as_uuid=True), nullable=True)  # placeholder, fix below
+    duration_days = Column(Integer, nullable=True)
     route = Column(String(30), nullable=True)
     instructions = Column(Text, nullable=True)
     status = Column(String(50), nullable=False, server_default="prescribed")

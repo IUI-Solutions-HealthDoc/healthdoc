@@ -65,3 +65,12 @@ for name in MODULES:
         app.include_router(module.router, prefix=settings.api_prefix)
     except ModuleNotFoundError:
         log.warning("module app.%s has no router.py yet — skipped", name)
+
+from app.patients.models import Patient  # noqa: F401 — must import before mapper configure
+from app.encounters.diagnosis_routers import router as diagnosis_router
+from app.orders.prescription_routers import router as prescriptions_router
+from app.encounters.vitals_router import router as vitals_router
+
+app.include_router(diagnosis_router, prefix=settings.api_prefix)
+app.include_router(prescriptions_router, prefix=settings.api_prefix)
+app.include_router(vitals_router, prefix=settings.api_prefix)
