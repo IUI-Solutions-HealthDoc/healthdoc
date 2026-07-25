@@ -70,7 +70,11 @@ from app.patients.models import Patient  # noqa: F401 — must import before map
 from app.encounters.diagnosis_routers import router as diagnosis_router
 from app.orders.prescription_routers import router as prescriptions_router
 from app.encounters.vitals_router import router as vitals_router
+from app.orders.results_router import router as results_router
+from app.encounters.close_router import router as close_encounter_router
 
 app.include_router(diagnosis_router, prefix=settings.api_prefix)
 app.include_router(prescriptions_router, prefix=settings.api_prefix)
 app.include_router(vitals_router, prefix=settings.api_prefix)
+app.include_router(results_router, prefix=settings.api_prefix)
+app.include_router(close_encounter_router, prefix=settings.api_prefix)

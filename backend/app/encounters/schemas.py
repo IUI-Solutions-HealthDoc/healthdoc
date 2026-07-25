@@ -37,3 +37,7 @@ class EncounterOut(BaseModel):
     updated_at: Optional[datetime]
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ClosedEncounterOut(EncounterOut):
+    fhir_bundle_id: Optional[str] = None

@@ -1,9 +1,9 @@
-from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, Index, Integer, String, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, Index, Integer, String, Text, Boolean
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 
 from sqlalchemy.orm import relationship
 from app.common.db import Base
-from app.common.enums import OrderPriority, OrderStatus, OrderType
+from app.common.enums import OrderPriority, OrderStatus, OrderType, ResultStatus
 from app.common.models import Blame, Timestamps, UUIDPk
 
 
@@ -84,4 +84,28 @@ class PrescriptionItem(Base, UUIDPk, Timestamps):
 
     __table_args__ = (
         Index("ix_prescription_items_prescription_id", "prescription_id"),
+    )
+
+class Result(Base, UUIDPk, Timestamps, Blame):
+    """schema.md — B3-W4-01. One row per order's result. Tracks the raw
+    result separately from the doctor's review/sign-off, since those
+    happen at different times by different people."""
+    __tablename__ = "results"
+
+    order_id = Column(
+        UUID(as_uuid=True), ForeignKey("orders.id", ondelete="RESTRICT"), nullable=False
+    )
+    result_status = Column(String(50), nullable=False, server_default="pending")
+    result_text = Column(Text, nullable=True)
+    result_data = Column(JSONB, nullable=True)
+    performed_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    performed_at = Column(DateTime(timezone=True), nullable=True)
+    reviewed_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    review_notes = Column(Text, nullable=True)
+    is_signed_off = Column(Boolean, nullable=False, server_default="false")
+
+    __table_args__ = (
+        CheckConstraint(ResultStatus.sql_check("result_status"), name="ck_results_result_status"),
+        Index("ix_results_order_id", "order_id"),
     )
