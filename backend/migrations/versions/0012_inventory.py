@@ -1,22 +1,7 @@
-"""0012 - inventory (B6-W1-01)
-
-Tables: suppliers, inventory_items, stock_locations, inventory_batches,
-stock_ledger. Also adds the deferred FK prescription_items.medicine_item_id
--> inventory_items.id.
-
-Built against HealthDoc Master Database Schema v3.4.1, section 3.
-Enum-backed columns use varchar(50) per the v3.4.1 blanket-rule override
-(was varchar(30) in v2.2 - widened because tight widths truncate silently
-as the vocabulary grows).
-
-Revision ID: 0012
-Revises: 0011
-Create Date: 2026-07-22
-"""
 from alembic import op
 
 revision = "0012"
-down_revision = "0011"  # confirm this matches the actual head in your synced repo
+down_revision = "0011"  # confirm thi
 branch_labels = None
 depends_on = None
 

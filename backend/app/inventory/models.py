@@ -1,14 +1,4 @@
-"""
-backend/app/inventory/models.py
-
-SQLAlchemy models for migration 0012 (inventory).
-Adjust the import path for `Base` / mixins to match your actual
-backend/app/common/db.py and backend/app/common/models.py conventions -
-these assume a common UUIDPk + Timestamps mixin pattern, per the schema
-doc's own notation ("every table implicitly starts with id UUID PK... and
-ends with created_at/updated_at").
-"""
-import uuid
+﻿import uuid
 from sqlalchemy import (
     Column, String, Text, Boolean, Numeric, ForeignKey, DateTime, CheckConstraint
 )
@@ -114,3 +104,5 @@ class StockLedger(Base):
     performed_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     reason = Column(Text)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+

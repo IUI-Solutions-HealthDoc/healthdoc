@@ -1,15 +1,3 @@
-"""0013 - pharmacy (B6-W1-01)
-
-Tables: pharmacy_dispenses, pharmacy_dispense_items, grn, grn_items,
-indents, indent_items, adjustments, facility_settings.
-
-audit_logs is NOT created here - owned by B7/Vani (migration 0003).
-Mutations on these tables write through the shared audit middleware.
-
-Revision ID: 0013
-Revises: 0012
-Create Date: 2026-07-22
-"""
 from alembic import op
 
 revision = "0013"

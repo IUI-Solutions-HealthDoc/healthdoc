@@ -1,9 +1,3 @@
-"""
-backend/app/pharmacy/models.py
-
-SQLAlchemy models for migration 0013 (pharmacy).
-Adjust import paths to match your actual codebase conventions.
-"""
 from sqlalchemy import (
     Column, String, Text, Boolean, Numeric, Integer, ForeignKey, DateTime, CheckConstraint
 )
