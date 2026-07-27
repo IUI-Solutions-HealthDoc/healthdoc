@@ -1,5 +1,5 @@
 """
-Request/response shapes for the lab API (#166).
+Request/response shapes for the lab API (#166, #184, #218).
 JSON field names = column names, snake_case, no renaming layer (Master Schema §4.2).
 """
 import uuid
@@ -24,6 +24,8 @@ class LabOrderItemOut(BaseModel):
     test_code: str | None
     test_name: str
     sample_type: str
+    barcode: str | None = None
+    collected_at: datetime | None = None
     department_id: uuid.UUID | None
     status: str
     estimated_minutes: int | None
@@ -46,6 +48,7 @@ class LabOrderItemListOut(BaseModel):
     page_size: int
     total: int
 
+
 class LabResultCreate(BaseModel):
     """Body for POST /pathology/order-items/{item_id}/results (technician entry)."""
     result_data: dict
@@ -58,6 +61,13 @@ class LabResultVerify(BaseModel):
     remarks: str | None = None
 
 
+class LabResultAmend(BaseModel):
+    """Body for PUT /pathology/order-items/{item_id}/results/amend (#218)."""
+    result_data: dict | None = None
+    remarks: str | None = None
+    amendment_reason: str = Field(..., min_length=1)
+
+
 class LabResultOut(BaseModel):
     id: uuid.UUID
     lab_order_item_id: uuid.UUID
@@ -65,6 +75,7 @@ class LabResultOut(BaseModel):
     is_current: bool
     result_data: dict
     remarks: str | None
+    amendment_reason: str | None = None
     status: str
     created_by: uuid.UUID
     created_at: datetime
@@ -72,3 +83,8 @@ class LabResultOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class LabResultHistoryOut(BaseModel):
+    """Response for GET /pathology/order-items/{item_id}/results/history (#218)."""
+    items: list[LabResultOut]

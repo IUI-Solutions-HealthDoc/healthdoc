@@ -1,11 +1,3 @@
-# """pathology module router — endpoints land here; see this module's GitHub issues."""
-# from fastapi import APIRouter
-
-# router = APIRouter(prefix="/pathology", tags=["pathology"])
-
-# @router.get("/ping")
-# async def ping() -> dict:
-#     return {"module": "pathology", "status": "stub"}
 """
 pathology module router — issue #166 (order receive + sample collection),
 #184 (result entry + dual-verify), #185 (critical value SSE alert),
@@ -16,6 +8,17 @@ pagination follow Master Schema §4 - this router returns plain Pydantic
 models; the envelope middleware wraps them.
 
 NOTE: project uses async SQLAlchemy (AsyncSession) - every DB call is awaited.
+
+STILL OPEN (flagged, not silently fixed — see TODOs inline):
+- _write_audit_log is a stub (pass). Audit logging is owned by a teammate's
+  module (app/audit/models.py + migration 0003). Swap the stub once that
+  lands — do not implement it here.
+- CRITICAL_THRESHOLDS only has a placeholder hemoglobin range. Needs real
+  values from the pathologist/lab director before this ships.
+- _resolve_ordering_doctor_id / _publish_critical_alert import
+  app.notifications.models.NotificationHistory and app.encounters.models.Encounter.
+  Confirm these modules exist and match the field names used below before
+  relying on #185 end-to-end.
 """
 import asyncio
 import json
@@ -33,6 +36,7 @@ from app.pathology.models import LabOrderItem, LabResult
 from app.pathology.schemas import (
     LabOrderItemCreate, LabOrderItemOut, SampleCollectionRequest, LabOrderItemListOut,
     LabResultCreate, LabResultVerify, LabResultOut,
+    LabResultAmend, LabResultHistoryOut,
 )
 
 router = APIRouter(prefix="/pathology", tags=["pathology"])
@@ -42,6 +46,8 @@ router = APIRouter(prefix="/pathology", tags=["pathology"])
 async def ping() -> dict:
     return {"module": "pathology", "status": "stub"}
 
+
+# --- #166: order receive + sample collection ---
 
 @router.post(
     "/order-items",
@@ -99,6 +105,9 @@ async def collect_sample(
     """
     Records barcode + collection timestamp for a placed lab item.
     Rejects duplicate barcodes (edge case flagged in the original draft).
+
+    NOTE: requires LabOrderItem.barcode / LabOrderItem.collected_at columns
+    (added in migration 00XX_lab_barcode_collected_at.py — see that file).
     """
     item = await db.get(LabOrderItem, item_id)
     if item is None:
@@ -109,13 +118,14 @@ async def collect_sample(
 
     duplicate = (await db.execute(
         select(func.count()).select_from(LabOrderItem)
-        .where(LabOrderItem.accession_number == payload.barcode)
+        .where(LabOrderItem.barcode == payload.barcode)
     )).scalar()
     if duplicate:
         raise HTTPException(status_code=409, detail="Duplicate barcode")
 
     item.status = "in_progress"
-    _collected_at = payload.collected_at or datetime.now(timezone.utc)
+    item.barcode = payload.barcode
+    item.collected_at = payload.collected_at or datetime.now(timezone.utc)
 
     await _write_audit_log(db, table_name="lab_order_items", row_id=item.id,
                             action="update", actor_id=current_user.id)
@@ -167,8 +177,8 @@ async def _generate_accession_number(db: AsyncSession, prefix: str) -> str:
 
 async def _write_audit_log(db: AsyncSession, *, table_name: str, row_id: uuid.UUID,
                             action: str, actor_id: uuid.UUID) -> None:
-    """Confirm the real shared audit_logs write path in your project (migration 0003)
-    and swap this stub for the actual import/call your teammates already built."""
+    """TODO (teammate's module): swap this stub once app/audit/models.py +
+    migration 0003 land. Do not implement here — confirmed not your task."""
     pass
 
 
@@ -282,11 +292,83 @@ async def verify_result(
     await db.flush()
     await db.refresh(new_result)
 
-    # #186: TAT - calculated on the fly, not stored
-    tat_delta = new_result.created_at - item.created_at
+    # #186: TAT - calculated on the fly, not stored.
+    # Baseline is collected_at when available (falls back to created_at until
+    # every item has gone through the fixed sample-collection flow).
+    tat_delta = new_result.created_at - (item.collected_at or item.created_at)
     result_out = LabResultOut.model_validate(new_result)
     result_out.tat_minutes = int(tat_delta.total_seconds() // 60)
     return result_out
+
+
+# --- #218: report amendment (version rows, locked originals, history API) ---
+
+@router.put(
+    "/order-items/{item_id}/results/amend",
+    response_model=LabResultOut,
+)
+async def amend_result(
+    item_id: uuid.UUID,
+    payload: LabResultAmend,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_roles("pathologist")),
+):
+    """
+    Amends an already-final result. The original version row is never
+    mutated (locked) - a new version is appended with status='corrected'
+    and a required amendment_reason.
+    """
+    current = (await db.execute(
+        select(LabResult)
+        .where(LabResult.lab_order_item_id == item_id, LabResult.is_current.is_(True))
+    )).scalar_one_or_none()
+
+    if current is None:
+        raise HTTPException(status_code=404, detail="No result found for this item")
+    if current.status != "final":
+        raise HTTPException(status_code=409, detail="Only a finalized result can be amended")
+
+    current.is_current = False
+    await db.flush()
+
+    amended = LabResult(
+        lab_order_item_id=item_id,
+        version=current.version + 1,
+        is_current=True,
+        result_data=payload.result_data if payload.result_data is not None else current.result_data,
+        remarks=payload.remarks if payload.remarks is not None else current.remarks,
+        status="corrected",
+        amendment_reason=payload.amendment_reason,
+        created_by=current_user.id,
+    )
+    db.add(amended)
+
+    await _write_audit_log(db, table_name="lab_results", row_id=amended.id,
+                            action="create", actor_id=current_user.id)
+    await db.flush()
+    await db.refresh(amended)
+    return amended
+
+
+@router.get(
+    "/order-items/{item_id}/results/history",
+    response_model=LabResultHistoryOut,
+)
+async def get_result_history(
+    item_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Full version history for a lab result, oldest first. Includes locked originals."""
+    result = await db.execute(
+        select(LabResult)
+        .where(LabResult.lab_order_item_id == item_id)
+        .order_by(LabResult.version.asc())
+    )
+    rows = result.scalars().all()
+    if not rows:
+        raise HTTPException(status_code=404, detail="No results found for this item")
+    return LabResultHistoryOut(items=rows)
 
 
 # --- #185: critical value flag -> notify ordering doctor via SSE ---
@@ -304,7 +386,7 @@ _critical_alert_subscribers: dict[uuid.UUID, list[asyncio.Queue]] = {}
 
 async def _resolve_ordering_doctor_id(db: AsyncSession, item: LabOrderItem) -> uuid.UUID | None:
     from app.orders.models import Order
-    from app.encounters.models import Encounter  # confirmed module: app/encounters/
+    from app.encounters.models import Encounter  # confirm module/fields before relying on this
 
     order = await db.get(Order, item.order_id)
     if order is None:
@@ -322,7 +404,7 @@ async def _publish_critical_alert(db: AsyncSession, item: LabOrderItem,
         return  # can't notify if the doctor can't be resolved - log/alert ops separately
 
     # Durable, audited record - IDs only, no clinical values or patient identity
-    from app.notifications.models import NotificationHistory  # confirmed module: app/notifications/
+    from app.notifications.models import NotificationHistory  # confirm module/fields before relying on this
     notification = NotificationHistory(
         event_type="lab_critical_result",
         payload={

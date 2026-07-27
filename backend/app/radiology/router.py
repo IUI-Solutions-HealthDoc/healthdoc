@@ -7,6 +7,7 @@
 # @router.get("/ping")
 # async def ping() -> dict:
 #     return {"module": "radiology", "status": "stub"}
+
 """
 radiology module router — issue #203: order receive + scheduling;
 radiologist draft + sign-off.
