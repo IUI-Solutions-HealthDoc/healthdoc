@@ -178,3 +178,106 @@ async def search_patients(
     total = len(ranked)
     start = (page - 1) * page_size
     return ranked[start:start + page_size], total
+
+def _patient_snapshot(patient: "Patient") -> dict:
+    """Minimal before/after snapshot for patient_merge_log — captures only the
+    fields the merge action itself can change, not full PHI."""
+    return {
+        "id": str(patient.id),
+        "uhid": patient.uhid,
+        "thid": patient.thid,
+        "status": patient.status,
+        "merged_into_patient_id": str(patient.merged_into_patient_id) if patient.merged_into_patient_id else None,
+    }
+
+
+async def request_merge(
+    db: AsyncSession,
+    *,
+    source_patient_id: uuid.UUID,
+    target_patient_id: uuid.UUID,
+    source_type: str,
+    reason: str | None,
+    requested_by: uuid.UUID,
+) -> "PatientMergeLog":
+    from app.patients.models import PatientMergeLog
+
+    if source_patient_id == target_patient_id:
+        raise ValueError("source_patient_id and target_patient_id must differ")
+
+    source = await db.get(Patient, source_patient_id)
+    target = await db.get(Patient, target_patient_id)
+    if not source or not target:
+        raise ValueError("source or target patient not found")
+
+    merge_log = PatientMergeLog(
+        source_type=source_type,
+        source_patient_id=source_patient_id,
+        target_patient_id=target_patient_id,
+        requested_by=requested_by,
+        status="pending",
+        reason=reason,
+        before_snapshot={"source": _patient_snapshot(source), "target": _patient_snapshot(target)},
+    )
+    db.add(merge_log)
+    await db.flush()
+    await db.refresh(merge_log)
+    return merge_log
+
+
+async def approve_merge(
+    db: AsyncSession,
+    *,
+    merge_log_id: uuid.UUID,
+    approved_by: uuid.UUID,
+) -> "PatientMergeLog":
+    from app.patients.models import PatientMergeLog
+    from datetime import datetime, timezone
+
+    merge_log = await db.get(PatientMergeLog, merge_log_id)
+    if not merge_log:
+        raise ValueError("merge request not found")
+    if merge_log.status != "pending":
+        raise ValueError(f"merge request is not pending (status={merge_log.status})")
+    if merge_log.requested_by == approved_by:
+        raise ValueError("self_approval_not_allowed")  # maker-checker, matches /user-requests convention
+
+    source = await db.get(Patient, merge_log.source_patient_id)
+    target = await db.get(Patient, merge_log.target_patient_id)
+
+    source.status = "merged"
+    source.merged_into_patient_id = target.id
+    await db.flush()
+
+    merge_log.status = "approved"
+    merge_log.approved_by = approved_by
+    merge_log.approved_at = datetime.now(timezone.utc)
+    merge_log.after_snapshot = {"source": _patient_snapshot(source), "target": _patient_snapshot(target)}
+    await db.flush()
+    await db.refresh(merge_log)
+    return merge_log
+
+
+async def reject_merge(
+    db: AsyncSession,
+    *,
+    merge_log_id: uuid.UUID,
+    rejected_by: uuid.UUID,
+    reason: str | None,
+) -> "PatientMergeLog":
+    from app.patients.models import PatientMergeLog
+
+    merge_log = await db.get(PatientMergeLog, merge_log_id)
+    if not merge_log:
+        raise ValueError("merge request not found")
+    if merge_log.status != "pending":
+        raise ValueError(f"merge request is not pending (status={merge_log.status})")
+    if merge_log.requested_by == rejected_by:
+        raise ValueError("self_approval_not_allowed")
+
+    merge_log.status = "rejected"
+    merge_log.approved_by = rejected_by
+    merge_log.reason = reason or merge_log.reason
+    await db.flush()
+    await db.refresh(merge_log)
+    return merge_log
