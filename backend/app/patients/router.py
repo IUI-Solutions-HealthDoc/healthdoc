@@ -1,4 +1,5 @@
 """patients module router — B2-W1-02: registration endpoint."""
+import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -105,3 +106,70 @@ async def search_patients_endpoint(
         for patient, score, matched_on in results
     ]
     return PatientSearchResponse(items=items, page=payload.page, page_size=payload.page_size, total=total)
+
+from app.patients.schemas import MergeRequestCreate, MergeActionRequest, MergeLogOut
+from app.patients.service import request_merge, approve_merge, reject_merge
+
+
+@router.post(
+    "/merge",
+    status_code=201,
+    response_model=MergeLogOut,
+    dependencies=[Depends(require_roles("admin", "supervisor"))],
+)
+async def request_patient_merge(
+    payload: MergeRequestCreate,
+    current_db_user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+) -> MergeLogOut:
+    try:
+        merge_log = await request_merge(
+            db,
+            source_patient_id=payload.source_patient_id,
+            target_patient_id=payload.target_patient_id,
+            source_type=payload.source_type,
+            reason=payload.reason,
+            requested_by=current_db_user.id,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return merge_log
+
+
+@router.post(
+    "/merge/{merge_id}/approve",
+    response_model=MergeLogOut,
+    dependencies=[Depends(require_roles("admin", "supervisor"))],
+)
+async def approve_patient_merge(
+    merge_id: uuid.UUID,
+    current_db_user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+) -> MergeLogOut:
+    try:
+        merge_log = await approve_merge(db, merge_log_id=merge_id, approved_by=current_db_user.id)
+    except ValueError as e:
+        if str(e) == "self_approval_not_allowed":
+            raise HTTPException(409, {"code": "self_approval_not_allowed"})
+        raise HTTPException(400, str(e))
+    return merge_log
+
+
+@router.post(
+    "/merge/{merge_id}/reject",
+    response_model=MergeLogOut,
+    dependencies=[Depends(require_roles("admin", "supervisor"))],
+)
+async def reject_patient_merge(
+    merge_id: uuid.UUID,
+    payload: MergeActionRequest,
+    current_db_user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+) -> MergeLogOut:
+    try:
+        merge_log = await reject_merge(db, merge_log_id=merge_id, rejected_by=current_db_user.id, reason=payload.reason)
+    except ValueError as e:
+        if str(e) == "self_approval_not_allowed":
+            raise HTTPException(409, {"code": "self_approval_not_allowed"})
+        raise HTTPException(400, str(e))
+    return merge_log

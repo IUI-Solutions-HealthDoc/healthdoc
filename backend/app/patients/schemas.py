@@ -76,3 +76,28 @@ class PatientSearchResponse(BaseModel):
     page: int
     page_size: int
     total: int
+
+class MergeRequestCreate(BaseModel):
+    source_patient_id: uuid.UUID
+    target_patient_id: uuid.UUID
+    source_type: str  # "thid" | "duplicate_uhid" (MergeSourceType enum)
+    reason: str | None = None
+
+
+class MergeActionRequest(BaseModel):
+    reason: str | None = None  # required for reject, optional for approve
+
+
+class MergeLogOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    source_type: str
+    source_patient_id: uuid.UUID
+    target_patient_id: uuid.UUID
+    requested_by: uuid.UUID
+    requested_at: datetime
+    approved_by: uuid.UUID | None
+    approved_at: datetime | None
+    status: str
+    reason: str | None
