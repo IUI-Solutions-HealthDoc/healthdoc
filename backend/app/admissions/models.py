@@ -1,82 +1,90 @@
-from sqlalchemy import Boolean, CheckConstraint, Column, Date, DateTime, ForeignKey, Index, String, Text, UniqueConstraint
+import uuid
+from datetime import date, datetime
+from sqlalchemy import ForeignKey, String, Text, CheckConstraint, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import Mapped, mapped_column
 
 from app.common.db import Base
-from app.common.enums import AdmissionStatus, BedStatus, DischargeType
-from app.common.models import Blame, Timestamps, UUIDPk
+from app.common.models import UUIDPk, Timestamps, Blame
+from app.common.enums import AdmissionStatus, DischargeType, BedStatus
 
 
 class Ward(Base, UUIDPk, Timestamps):
     __tablename__ = "wards"
-
-    name = Column(Text, nullable=False)
-    department_id = Column(
-        UUID(as_uuid=True), ForeignKey("departments.id", ondelete="RESTRICT"), nullable=True
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    department_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("departments.id"), nullable=True
     )
-    facility_id = Column(
-        UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False
+    facility_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("facilities.id"), nullable=False
     )
-    is_active = Column(Boolean, nullable=False, server_default="true")
-
-    __table_args__ = (
-        Index("ix_wards_department_id", "department_id"),
-        Index("ix_wards_facility_id", "facility_id"),
-    )
+    is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
 
 
 class Bed(Base, UUIDPk, Timestamps):
     __tablename__ = "beds"
-
-    ward_id = Column(UUID(as_uuid=True), ForeignKey("wards.id", ondelete="RESTRICT"), nullable=False)
-    bed_number = Column(String(20), nullable=False)
-    status = Column(String(50), nullable=False, server_default=BedStatus.VACANT.value)
-
     __table_args__ = (
         UniqueConstraint("ward_id", "bed_number", name="uq_beds_ward_id_bed_number"),
         CheckConstraint(BedStatus.sql_check("status"), name="ck_beds_status"),
     )
+    ward_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("wards.id"), nullable=False, index=True
+    )
+    bed_number: Mapped[str] = mapped_column(String(20), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), default="vacant", nullable=False)
 
 
 class Admission(Base, UUIDPk, Timestamps, Blame):
-    """schema.md §3, 0015 — real FKs to ward/bed, never varchar names."""
-
     __tablename__ = "admissions"
-
-    visit_id = Column(UUID(as_uuid=True), ForeignKey("visits.id", ondelete="RESTRICT"), nullable=False)
-    patient_id = Column(UUID(as_uuid=True), ForeignKey("patients.id", ondelete="RESTRICT"), nullable=False)
-    ward_id = Column(UUID(as_uuid=True), ForeignKey("wards.id", ondelete="RESTRICT"), nullable=False)
-    bed_id = Column(UUID(as_uuid=True), ForeignKey("beds.id", ondelete="RESTRICT"), nullable=False)
-    admitted_at = Column(DateTime(timezone=True), nullable=False)
-    reason = Column(Text, nullable=True)
-    status = Column(String(50), nullable=False, server_default=AdmissionStatus.ADMITTED.value)
-
     __table_args__ = (
         CheckConstraint(AdmissionStatus.sql_check("status"), name="ck_admissions_status"),
-        Index("ix_admissions_visit_id", "visit_id"),
-        Index("ix_admissions_patient_id", "patient_id"),
-        Index("ix_admissions_ward_id", "ward_id"),
-        Index("ix_admissions_bed_id", "bed_id"),
     )
+    visit_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("visits.id"), nullable=False, index=True
+    )
+    patient_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("patients.id"), nullable=False, index=True
+    )
+    ward_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("wards.id"), nullable=False, index=True
+    )
+    bed_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("beds.id"), nullable=False, index=True
+    )
+    admitted_at: Mapped[datetime] = mapped_column(nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(30), default="admitted", nullable=False)
 
 
 class Discharge(Base, UUIDPk, Timestamps, Blame):
-    """discharge is never hard-blocked by unpaid invoice for
-    emergency/DAMA cases — architecture.md §20.2 / ADR 0002.
-    Long-form discharge_summary text goes to Mongo clinical_notes
-    eventually; kept as a plain text column here for MVP simplicity."""
-
     __tablename__ = "discharges"
-
-    admission_id = Column(
-        UUID(as_uuid=True), ForeignKey("admissions.id", ondelete="RESTRICT"), unique=True, nullable=False
-    )
-    discharged_at = Column(DateTime(timezone=True), nullable=False)
-    discharge_type = Column(String(50), nullable=False)
-    discharge_summary = Column(Text, nullable=True)
-    follow_up_date = Column(Date, nullable=True)
-
     __table_args__ = (
-        CheckConstraint(DischargeType.sql_check("discharge_type"), name="ck_discharges_discharge_type"),
-        # admission_id is already unique, so no separate index needed
-        # per the §3 blanket FK-index rule.
+        CheckConstraint(DischargeType.sql_check("discharge_type"), name="ck_discharges_type"),
+    )
+    admission_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("admissions.id"), unique=True, nullable=False
+    )
+    discharged_at: Mapped[datetime] = mapped_column(nullable=False)
+    discharge_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    discharge_summary: Mapped[str | None] = mapped_column(Text)
+    follow_up_date: Mapped[date | None] = mapped_column(nullable=True)
+
+
+class PatientMovementLog(Base, UUIDPk, Timestamps):
+    __tablename__ = "patient_movement_log"
+    admission_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("admissions.id"), nullable=False, index=True
+    )
+    from_ward_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("wards.id"))
+    from_bed_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("beds.id"))
+    to_ward_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("wards.id"), nullable=False
+    )
+    to_bed_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("beds.id"), nullable=False
+    )
+    moved_at: Mapped[datetime] = mapped_column(nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text)
+    moved_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
     )

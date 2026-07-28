@@ -117,32 +117,34 @@ class Diagnosis(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
-class Vitals(Base):
+from app.common.models import UUIDPk, Timestamps, Blame
+
+class Vitals(Base, UUIDPk, Timestamps, Blame):
     __tablename__ = "vitals"
-
-    id = Column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        server_default=func.uuid_generate_v4(),
-    )
-    encounter_id = Column(UUID(as_uuid=True), ForeignKey("encounters.id"), nullable=False)
-    bp_systolic = Column(Integer, nullable=True)
-    bp_diastolic = Column(Integer, nullable=True)
-    pulse = Column(Integer, nullable=True)
-    temperature = Column(Numeric(4, 1), nullable=True)
-    spo2 = Column(Integer, nullable=True)
-    respiratory_rate = Column(Integer, nullable=True)
-    weight = Column(Numeric(5, 2), nullable=True)
-    height = Column(Numeric(5, 2), nullable=True)
-    recorded_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    recorded_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-
     __table_args__ = (
         CheckConstraint(
-            "spo2 IS NULL OR (spo2 >= 0 AND spo2 <= 100)",
-            name="ck_vitals_spo2_range",
+            "encounter_id IS NOT NULL OR admission_id IS NOT NULL",
+            name="ck_vitals_encounter_or_admission",
         ),
     )
+
+    encounter_id = Column(UUID(as_uuid=True), ForeignKey("encounters.id"), nullable=True)
+    admission_id = Column(UUID(as_uuid=True), ForeignKey("admissions.id"), nullable=True)
+    patient_id = Column(UUID(as_uuid=True), ForeignKey("patients.id"), nullable=False, index=True)
+
+    measured_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    height_cm = Column(Numeric(5, 1), nullable=True)
+    weight_kg = Column(Numeric(5, 2), nullable=True)
+    bmi = Column(Numeric(4, 1), nullable=True)          # app-computed, never client-writable
+    waist_cm = Column(Numeric(5, 1), nullable=True)
+    hip_cm = Column(Numeric(5, 1), nullable=True)
+    whr = Column(Numeric(3, 2), nullable=True)           # app-computed, never client-writable
+
+    temp_c = Column(Numeric(3, 1), nullable=True)
+    pulse_bpm = Column(Integer, nullable=True)
+    resp_rate = Column(Integer, nullable=True)
+    bp_systolic = Column(Integer, nullable=True)
+    bp_diastolic = Column(Integer, nullable=True)
+    spo2_pct = Column(Integer, nullable=True)
+    pain_score = Column(Integer, nullable=True)
