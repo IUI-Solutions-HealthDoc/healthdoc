@@ -87,4 +87,33 @@ class LabResultOut(BaseModel):
 
 class LabResultHistoryOut(BaseModel):
     """Response for GET /pathology/order-items/{item_id}/results/history (#218)."""
-    items: list[LabResultOut]
+    items: list[LabResultOut] 
+
+class TATByTestOut(BaseModel):
+    test_name: str
+    sample_count: int
+    avg_tat_minutes: float | None
+    median_tat_minutes: float | None
+
+
+class StatusCountOut(BaseModel):
+    status: str
+    count: int
+
+
+class PanicFrequencyOut(BaseModel):
+    test_name: str
+    critical_count: int
+    total_count: int
+    panic_rate_pct: float
+
+
+class LabMISSummaryOut(BaseModel):
+    """Response for GET /pathology/mis/summary (#231)."""
+    date_from: datetime
+    date_to: datetime
+    tat_by_test: list[TATByTestOut]
+    order_counts_by_status: list[StatusCountOut]
+    total_orders: int
+    total_results: int
+    panic_frequency: list[PanicFrequencyOut]
