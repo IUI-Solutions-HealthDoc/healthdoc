@@ -71,7 +71,7 @@ async def transfer_patient(db: AsyncSession, admission_id: uuid.UUID, data, auth
         from_bed_id=old_bed_id,
         to_ward_id=data.to_ward_id,
         to_bed_id=data.to_bed_id,
-        moved_at=datetime.now(timezone.utc),
+        moved_at=datetime.now(timezone.utc).replace(tzinfo=None),
         reason=data.reason,
         moved_by=user.id,
     )
@@ -102,7 +102,7 @@ async def discharge_patient(db: AsyncSession, admission_id: uuid.UUID, data, aut
 
     discharge = Discharge(
         admission_id=admission.id,
-        discharged_at=datetime.now(timezone.utc),
+        discharged_at=datetime.now(timezone.utc).replace(tzinfo=None),
         discharge_type=data.discharge_type,
         discharge_summary=data.discharge_summary,
         follow_up_date=data.follow_up_date,

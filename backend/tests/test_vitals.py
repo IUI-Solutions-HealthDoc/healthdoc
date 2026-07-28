@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone
 import pytest
 from httpx import AsyncClient
 
@@ -32,6 +33,7 @@ async def seeded_encounter_and_admission(db_session, fake_facility):
         age_years=30,
         identity_path="demographics_only",
         facility_id=fake_facility.id,
+        created_by=doctor.id,
     )
     db_session.add(patient)
     await db_session.flush()
@@ -42,7 +44,7 @@ async def seeded_encounter_and_admission(db_session, fake_facility):
         facility_id=fake_facility.id,
         visit_type="opd",
         status="registered",
-        visit_date="2026-07-28T09:00:00+00:00",
+        visit_date=datetime(2026, 7, 28, 9, 0, 0, tzinfo=timezone.utc),
         created_by=doctor.id,
     )
     db_session.add(visit)
@@ -69,7 +71,7 @@ async def seeded_encounter_and_admission(db_session, fake_facility):
         patient_id=patient.id,
         ward_id=ward.id,
         bed_id=bed.id,
-        admitted_at="2026-07-28T09:00:00+00:00",
+        admitted_at=datetime(2026, 7, 28, 9, 0, 0),
         status="admitted",
         created_by=doctor.id,
     )
@@ -91,9 +93,9 @@ async def test_create_vitals_with_encounter_succeeds(authed_client: AsyncClient,
         "bp_diastolic": 80,
         "spo2_pct": 98,
     }
-    response = await authed_client.post(f"/encounters/{encounter.id}/vitals", json=payload)
+    response = await authed_client.post(f"/api/v1/encounters/{encounter.id}/vitals", json=payload)
     assert response.status_code == 201
-    body = response.json()
+    body = response.json()["data"]
     assert body["encounter_id"] == str(encounter.id)
     assert body["patient_id"] == str(patient.id)
     assert body["pulse_bpm"] == 80
@@ -108,9 +110,9 @@ async def test_create_vitals_computes_bmi(authed_client: AsyncClient, seeded_enc
         "height_cm": "170",
         "weight_kg": "70",
     }
-    response = await authed_client.post(f"/encounters/{encounter.id}/vitals", json=payload)
+    response = await authed_client.post(f"/api/v1/encounters/{encounter.id}/vitals", json=payload)
     assert response.status_code == 201
-    body = response.json()
+    body = response.json()["data"]
     # bmi = 70 / (1.70^2) ~= 24.2 -- app-computed, must not be client-suppliable
     assert body["bmi"] is not None
     assert 24.0 <= float(body["bmi"]) <= 24.3
@@ -126,9 +128,9 @@ async def test_client_supplied_bmi_is_ignored(authed_client: AsyncClient, seeded
         "patient_id": str(patient.id),
         "bmi": "999.9",  # attacker-supplied, should be ignored entirely
     }
-    response = await authed_client.post(f"/encounters/{encounter.id}/vitals", json=payload)
+    response = await authed_client.post(f"/api/v1/encounters/{encounter.id}/vitals", json=payload)
     assert response.status_code == 201
-    body = response.json()
+    body = response.json()["data"]
     assert body["bmi"] != 999.9
 
 
@@ -137,10 +139,10 @@ async def test_list_vitals_for_encounter(authed_client: AsyncClient, seeded_enco
     encounter = seeded_encounter_and_admission["encounter"]
 
     payload = {"patient_id": str(patient.id), "pulse_bpm": 72}
-    await authed_client.post(f"/encounters/{encounter.id}/vitals", json=payload)
+    await authed_client.post(f"/api/v1/encounters/{encounter.id}/vitals", json=payload)
 
-    response = await authed_client.get(f"/encounters/{encounter.id}/vitals")
+    response = await authed_client.get(f"/api/v1/encounters/{encounter.id}/vitals")
     assert response.status_code == 200
-    items = response.json()
+    items = response.json()["data"]
     assert len(items) >= 1
     assert items[0]["encounter_id"] == str(encounter.id)

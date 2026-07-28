@@ -1,9 +1,11 @@
 import uuid
 import re
+import asyncio
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from sqlalchemy.pool import NullPool
 
 from app.main import app
 from app.common.db import Base, get_db
@@ -13,7 +15,7 @@ from app.users.models import User, Facility
 
 TEST_DATABASE_URL = re.sub(r"/([^/]+)$", "/healthdoc_test", get_settings().database_url)
 
-engine = create_async_engine(TEST_DATABASE_URL, pool_pre_ping=True)
+engine = create_async_engine(TEST_DATABASE_URL, poolclass=NullPool)
 TestSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
