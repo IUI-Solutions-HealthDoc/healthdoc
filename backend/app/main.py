@@ -14,7 +14,7 @@ from app.common.redis import get_redis
 log = logging.getLogger("healthdoc")
 
 MODULES = [
-    "audit", "billing", "blood_bank", "consent", "departments", "emergency",
+    "admissions", "audit", "billing", "blood_bank", "consent", "departments", "emergency",
     "encounters", "files", "inventory", "ipd", "notifications", "nursing",
     "opd", "orders", "ot", "outbox", "pathology", "patients", "pharmacy",
     "queue", "radiology", "registration", "reports", "security_audit",
@@ -78,3 +78,4 @@ app.include_router(prescriptions_router, prefix=settings.api_prefix)
 app.include_router(vitals_router, prefix=settings.api_prefix)
 app.include_router(results_router, prefix=settings.api_prefix)
 app.include_router(close_encounter_router, prefix=settings.api_prefix)
+from app.departments.models import Department  # noqa: F401
