@@ -20,10 +20,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-ChargeCategory = Literal[
-    "registration", "consultation", "lab", "radiology",
-    "pharmacy", "procedure", "ipd_stay", "blood", "other",
-]
+from app.common.enums import ChargeCategory  # single source of truth — don't re-list values here
 
 
 # ---------------------------------------------------------------------
@@ -60,6 +57,14 @@ class InvoicePreviewResponse(BaseModel):
     """Response for GET /billing/invoices/{visit_id}/preview — read-only, no DB writes."""
 
     visit_id: uuid.UUID
+    patient_id: uuid.UUID | None = Field(
+        None,
+        description=(
+            "Resolved even when invoice_id is null (looked up via the visit), "
+            "since consuming code (the data_access_log decorator, B7-W2-02) "
+            "needs a patient_id to log against regardless of invoice state."
+        ),
+    )
     invoice_id: uuid.UUID | None = Field(
         None, description="Null if no invoice exists yet for this visit."
     )

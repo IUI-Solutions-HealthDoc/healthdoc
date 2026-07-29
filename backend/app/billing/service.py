@@ -1,49 +1,30 @@
 """
 Invoice builder service (B7-W2-01 — issue #168).
 
-WHAT THIS DOES
----------------
-Given a visit, find chargeable clinical work that has completed but
-has no matching invoice_items row yet, price it, and either:
-  - report it back without writing anything (preview), or
-  - append it to the visit's draft invoice as new invoice_items rows
-    (build).
+REVISED after seeing app/common/: this stack is fully async
+(AsyncSession / asyncpg via db.py), so every DB-touching function here
+is async and every db.execute(...) is awaited.
 
-Also ships a PM-JAY eligibility STUB (see docstring on
-check_pmjay_eligibility below).
+app/common/db.get_db() already commits once, automatically, after the
+route handler returns — so this module never calls db.commit() itself.
+It calls db.flush() before building the response so that
+trg_invoices_freeze / trg_invoice_items_freeze errors (if the guard
+below somehow missed a race) surface as a real exception now, not as a
+silent no-op discovered later, and db.refresh() to read back
+server-computed values within the same still-open transaction.
 
-WHY invoice_items IS THE DEDUPE KEY, NOT A "billed" FLAG ON THE SOURCE
-ROW
-------------------------------------------------------------------
-lab_order_items / radiology_order_items / pharmacy_dispense_items
-don't have a "billed" boolean, and I'm not adding one to their tables
-in this module. invoice_items.reference_type + reference_id already
-exists for exactly this purpose (schema doc §3 0014: "reference_id —
-source row"), so "already billed" is answered by
-    NOT EXISTS (SELECT 1 FROM invoice_items
-                WHERE reference_type = <table> AND reference_id = <row.id>)
-This also makes the builder idempotent — calling /build twice in a row
-is a no-op the second time, which matters because departments append
-work continuously and this endpoint will be polled/retried.
+Status/category values come from app/common/enums.py (ResultStatus,
+DispenseStatus, ChargeCategory) instead of inline strings, per that
+file's own "never inline strings" rule.
 
-WHAT'S DELIBERATELY NOT HANDLED YET (flagged, not silently skipped)
-------------------------------------------------------------------
-- ipd_stay (per-day bed charges) and procedure (OT) charges: both need
-  a rate basis (ward/bed-class tariff, OT package pricing) that
-  doesn't exist in the schema yet. Left out rather than guessed.
-- blood: same reasoning (blood_units has no price column).
-These three charge_category values still exist on invoice_items for
-when someone (possibly me, in a follow-up ticket) adds their
-aggregators; this file only wires lab/radiology/pharmacy.
-
-Cross-module tables (visits, encounters, orders, lab_*, radiology_*,
-pharmacy_*, inventory_batches) are read here via lightweight
-sqlalchemy.sql.table() projections rather than importing other
-modules' ORM models, to avoid a hard import dependency between
-app/billing and app/{lab,radiology,pharmacy,visits}. If those modules
-already export their ORM models for cross-module use by the time this
-merges, swap these for real model imports — same queries, less
-duplication.
+AUDIT LOGGING — intentionally NOT wired in this file. app/audit isn't
+implemented yet and nothing on the team has merged anything for it, so
+there's no real function, confirmed signature, or confirmed table
+shape to call into. Left as a single TODO comment at the call site in
+build_invoice() — pick it up once app/audit exists and its owner
+confirms the interface. Not adding a fallback/stub import here on
+purpose: that's speculative code for an unmerged module in someone
+else's folder, not this ticket's job.
 """
 
 from __future__ import annotations
@@ -52,7 +33,8 @@ import uuid
 from decimal import ROUND_HALF_UP, Decimal
 
 import sqlalchemy as sa
-from sqlalchemy.orm import Session
+from fastapi import HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.billing.models import Invoice, InvoiceItem
 from app.billing.pricing import (
@@ -66,7 +48,7 @@ from app.billing.schemas import (
     InvoicePreviewResponse,
     PMJAYEligibilityResponse,
 )
-from app.common.exceptions import ConflictError, NotFoundError
+from app.common.enums import ChargeCategory, DispenseStatus, ResultStatus
 
 TWO_PLACES = Decimal("0.01")
 
@@ -76,8 +58,11 @@ def _money(value: Decimal) -> Decimal:
 
 
 # ---------------------------------------------------------------------
-# Minimal read-only projections of cross-module tables. Column lists
-# are intentionally narrow — only what this file needs.
+# Minimal read-only projections of cross-module tables. Deliberately
+# not importing other modules' ORM models — avoids a hard import
+# dependency between app/billing and app/{lab,radiology,pharmacy}.
+# Swap for real model imports if/when those modules export them for
+# cross-module use.
 # ---------------------------------------------------------------------
 
 encounters_t = sa.table("encounters", sa.column("id"), sa.column("visit_id"))
@@ -118,28 +103,53 @@ prescription_items_t = sa.table(
 inventory_batches_t = sa.table(
     "inventory_batches", sa.column("id"), sa.column("issue_rate_mrp"),
 )
+users_t = sa.table("users", sa.column("id"), sa.column("keycloak_sub"))
 
-# "final" also covers a corrected result — a corrected report still
-# means the work is complete and billable; the correction itself
-# doesn't un-bill the earlier line (that's a refund/dispute concern,
-# out of scope here).
-_LAB_BILLABLE_STATUSES = ("final", "corrected")
-_RADIOLOGY_BILLABLE_STATUSES = ("final", "corrected")
-_PHARMACY_BILLABLE_STATUSES = ("dispensed", "partially_dispensed")
+# A corrected result still means the work is complete/billable — the
+# correction itself doesn't un-bill the earlier line (that's a
+# refund/dispute concern, out of scope here).
+_LAB_BILLABLE_STATUSES = (ResultStatus.FINAL.value, ResultStatus.CORRECTED.value)
+_RADIOLOGY_BILLABLE_STATUSES = (ResultStatus.FINAL.value, ResultStatus.CORRECTED.value)
+_PHARMACY_BILLABLE_STATUSES = (DispenseStatus.DISPENSED.value, DispenseStatus.PARTIALLY_DISPENSED.value)
 
 
-def _already_billed_reference_ids(db: Session, invoice_id: uuid.UUID, reference_type: str) -> set[uuid.UUID]:
-    rows = db.execute(
+async def resolve_actor_user_id(db: AsyncSession, *, keycloak_sub: str, fallback_id: uuid.UUID | None) -> uuid.UUID:
+    """
+    Blame.created_by/updated_by and audit_logs.user_id are FKs to
+    users.id — the app-side UUID, NOT the Keycloak subject. I don't
+    have app/auth/deps.py to confirm whether CurrentUser already
+    carries the resolved users.id (fallback_id here) or only .sub.
+    If it already carries .id, pass it as fallback_id and this
+    short-circuits with zero extra queries. If not, this resolves it
+    via keycloak_sub. Router calls this so service functions can stay
+    agnostic to CurrentUser's exact shape.
+    """
+    if fallback_id is not None:
+        return fallback_id
+    result = await db.execute(sa.select(users_t.c.id).where(users_t.c.keycloak_sub == keycloak_sub))
+    user_id = result.scalar_one_or_none()
+    if user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="No users row matches this token's subject.",
+        )
+    return user_id
+
+
+async def _already_billed_reference_ids(
+    db: AsyncSession, invoice_id: uuid.UUID, reference_type: str
+) -> set[uuid.UUID]:
+    result = await db.execute(
         sa.select(InvoiceItem.reference_id).where(
             InvoiceItem.invoice_id == invoice_id,
             InvoiceItem.reference_type == reference_type,
         )
-    ).scalars().all()
-    return set(rows)
+    )
+    return set(result.scalars().all())
 
 
-def _aggregate_lab_charges(db: Session, visit_id: uuid.UUID, invoice_id: uuid.UUID) -> list[ChargeLine]:
-    billed = _already_billed_reference_ids(db, invoice_id, "lab_order_items")
+async def _aggregate_lab_charges(db: AsyncSession, visit_id: uuid.UUID, invoice_id: uuid.UUID) -> list[ChargeLine]:
+    billed = await _already_billed_reference_ids(db, invoice_id, "lab_order_items")
 
     stmt = (
         sa.select(lab_order_items_t.c.id, lab_order_items_t.c.test_code, lab_order_items_t.c.test_name)
@@ -160,15 +170,16 @@ def _aggregate_lab_charges(db: Session, visit_id: uuid.UUID, invoice_id: uuid.UU
         )
     )
 
+    result = await db.execute(stmt)
     lines: list[ChargeLine] = []
-    for row in db.execute(stmt):
+    for row in result:
         if row.id in billed:
             continue
         price = price_lab_test(row.test_code)
         unit_price = price.unit_price if price.unit_price is not None else Decimal("0")
         lines.append(
             ChargeLine(
-                charge_category="lab",
+                charge_category=ChargeCategory.LAB,
                 reference_type="lab_order_items",
                 reference_id=row.id,
                 description=row.test_name,
@@ -182,8 +193,8 @@ def _aggregate_lab_charges(db: Session, visit_id: uuid.UUID, invoice_id: uuid.UU
     return lines
 
 
-def _aggregate_radiology_charges(db: Session, visit_id: uuid.UUID, invoice_id: uuid.UUID) -> list[ChargeLine]:
-    billed = _already_billed_reference_ids(db, invoice_id, "radiology_order_items")
+async def _aggregate_radiology_charges(db: AsyncSession, visit_id: uuid.UUID, invoice_id: uuid.UUID) -> list[ChargeLine]:
+    billed = await _already_billed_reference_ids(db, invoice_id, "radiology_order_items")
 
     stmt = (
         sa.select(
@@ -208,15 +219,16 @@ def _aggregate_radiology_charges(db: Session, visit_id: uuid.UUID, invoice_id: u
         )
     )
 
+    result = await db.execute(stmt)
     lines: list[ChargeLine] = []
-    for row in db.execute(stmt):
+    for row in result:
         if row.id in billed:
             continue
         price = price_radiology_modality(row.modality)
         unit_price = price.unit_price if price.unit_price is not None else Decimal("0")
         lines.append(
             ChargeLine(
-                charge_category="radiology",
+                charge_category=ChargeCategory.RADIOLOGY,
                 reference_type="radiology_order_items",
                 reference_id=row.id,
                 description=row.scan_type,
@@ -230,8 +242,8 @@ def _aggregate_radiology_charges(db: Session, visit_id: uuid.UUID, invoice_id: u
     return lines
 
 
-def _aggregate_pharmacy_charges(db: Session, visit_id: uuid.UUID, invoice_id: uuid.UUID) -> list[ChargeLine]:
-    billed = _already_billed_reference_ids(db, invoice_id, "pharmacy_dispense_items")
+async def _aggregate_pharmacy_charges(db: AsyncSession, visit_id: uuid.UUID, invoice_id: uuid.UUID) -> list[ChargeLine]:
+    billed = await _already_billed_reference_ids(db, invoice_id, "pharmacy_dispense_items")
 
     stmt = (
         sa.select(
@@ -254,8 +266,9 @@ def _aggregate_pharmacy_charges(db: Session, visit_id: uuid.UUID, invoice_id: uu
         )
     )
 
+    result = await db.execute(stmt)
     lines: list[ChargeLine] = []
-    for row in db.execute(stmt):
+    for row in result:
         if row.id in billed:
             continue
         price = price_pharmacy_batch(row.issue_rate_mrp)
@@ -263,7 +276,7 @@ def _aggregate_pharmacy_charges(db: Session, visit_id: uuid.UUID, invoice_id: uu
         unit_price = price.unit_price if price.unit_price is not None else Decimal("0")
         lines.append(
             ChargeLine(
-                charge_category="pharmacy",
+                charge_category=ChargeCategory.PHARMACY,
                 reference_type="pharmacy_dispense_items",
                 reference_id=row.id,
                 description=row.medicine_name,
@@ -277,33 +290,37 @@ def _aggregate_pharmacy_charges(db: Session, visit_id: uuid.UUID, invoice_id: uu
     return lines
 
 
-def aggregate_unbilled_charges(db: Session, visit_id: uuid.UUID, invoice_id: uuid.UUID) -> list[ChargeLine]:
-    return (
-        _aggregate_lab_charges(db, visit_id, invoice_id)
-        + _aggregate_radiology_charges(db, visit_id, invoice_id)
-        + _aggregate_pharmacy_charges(db, visit_id, invoice_id)
-    )
+async def aggregate_unbilled_charges(db: AsyncSession, visit_id: uuid.UUID, invoice_id: uuid.UUID) -> list[ChargeLine]:
+    # ipd_stay / procedure / blood deliberately not aggregated — no
+    # rate basis (bed-class tariff, OT package price, blood unit
+    # price) exists anywhere in the schema yet. Left out rather than
+    # guessed; flagged again here since this is the one function that
+    # decides "everything chargeable for this visit."
+    lab = await _aggregate_lab_charges(db, visit_id, invoice_id)
+    radiology = await _aggregate_radiology_charges(db, visit_id, invoice_id)
+    pharmacy = await _aggregate_pharmacy_charges(db, visit_id, invoice_id)
+    return lab + radiology + pharmacy
 
 
-def _get_invoice_for_visit(db: Session, visit_id: uuid.UUID) -> Invoice:
-    invoice = db.execute(
-        sa.select(Invoice).where(Invoice.visit_id == visit_id)
-    ).scalar_one_or_none()
+async def _get_invoice_for_visit(db: AsyncSession, visit_id: uuid.UUID) -> Invoice:
+    result = await db.execute(sa.select(Invoice).where(Invoice.visit_id == visit_id))
+    invoice = result.scalar_one_or_none()
     if invoice is None:
-        # Invoices are created at registration (per schema doc §3 0014),
-        # not by this endpoint. A missing invoice means registration
-        # didn't run, or PID mismatch — surfacing that is more useful
-        # than silently creating one here with no registration line.
-        raise NotFoundError(f"No invoice found for visit_id={visit_id}. "
-                             "Invoices are created at registration.")
+        # Invoices are created at registration (schema doc §3 0014), not
+        # by this endpoint. A missing invoice means registration didn't
+        # run — surfacing that beats silently creating one with no
+        # registration line.
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No invoice found for visit_id={visit_id}. Invoices are created at registration.",
+        )
     return invoice
 
 
-def preview_invoice(db: Session, visit_id: uuid.UUID) -> InvoicePreviewResponse:
+async def preview_invoice(db: AsyncSession, visit_id: uuid.UUID) -> InvoicePreviewResponse:
     """Read-only. Never writes to invoice_items or invoices."""
-    invoice = db.execute(
-        sa.select(Invoice).where(Invoice.visit_id == visit_id)
-    ).scalar_one_or_none()
+    result = await db.execute(sa.select(Invoice).where(Invoice.visit_id == visit_id))
+    invoice = result.scalar_one_or_none()
 
     if invoice is None:
         new_lines: list[ChargeLine] = []
@@ -312,10 +329,11 @@ def preview_invoice(db: Session, visit_id: uuid.UUID) -> InvoicePreviewResponse:
         invoice_id = None
         invoice_status = None
     else:
-        new_lines = aggregate_unbilled_charges(db, visit_id, invoice.id)
-        already_billed = db.execute(
+        new_lines = await aggregate_unbilled_charges(db, visit_id, invoice.id)
+        count_result = await db.execute(
             sa.select(sa.func.count()).select_from(InvoiceItem).where(InvoiceItem.invoice_id == invoice.id)
-        ).scalar_one()
+        )
+        already_billed = count_result.scalar_one()
         existing_gross = Decimal(invoice.gross_amount)
         invoice_id = invoice.id
         invoice_status = invoice.status
@@ -335,41 +353,33 @@ def preview_invoice(db: Session, visit_id: uuid.UUID) -> InvoicePreviewResponse:
     )
 
 
-def build_invoice(
-    db: Session,
+async def build_invoice(
+    db: AsyncSession,
     visit_id: uuid.UUID,
     actor_user_id: uuid.UUID,
     dry_run: bool = False,
 ) -> InvoiceBuildResponse:
     """
     Append unbilled, priced charge lines to the visit's draft invoice
-    and recompute totals.
-
-    Guards:
-    - Invoice must already exist for the visit (see _get_invoice_for_visit).
-    - Invoice must be in 'draft' status. Once it leaves draft,
-      trg_invoices_freeze / trg_invoice_items_freeze block exactly this
-      kind of write at the DB layer — checking here first just turns a
-      raw trigger exception into a clean 409 for the API caller.
-    - Unpriced lines (pricing.py returned no tariff) are never written.
-      They're reported in the response as lines_skipped_unpriced so
-      billing staff can chase down a tariff instead of getting a
-      silently wrong total.
+    and recompute totals. No db.commit() here — see module docstring;
+    app/common/db.get_db() commits once after the route handler returns.
     """
-    invoice = _get_invoice_for_visit(db, visit_id)
+    invoice = await _get_invoice_for_visit(db, visit_id)
 
     if invoice.status != "draft":
-        raise ConflictError(
-            f"Invoice {invoice.invoice_number} is '{invoice.status}', not 'draft' — "
-            "new charges can no longer be appended. Corrections require a new invoice."
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Invoice {invoice.invoice_number} is '{invoice.status}', not 'draft' — "
+                "new charges can no longer be appended. Corrections require a new invoice."
+            ),
         )
 
-    charge_lines = aggregate_unbilled_charges(db, visit_id, invoice.id)
+    charge_lines = await aggregate_unbilled_charges(db, visit_id, invoice.id)
     priced_lines = [line for line in charge_lines if line.priced]
     skipped = len(charge_lines) - len(priced_lines)
 
     if dry_run or not priced_lines:
-        added_total = _money(sum((line.amount for line in priced_lines), Decimal("0")))
         return InvoiceBuildResponse(
             visit_id=visit_id,
             invoice_id=invoice.id,
@@ -398,38 +408,30 @@ def build_invoice(
     added_total = sum((line.amount for line in priced_lines), Decimal("0"))
     invoice.gross_amount = _money(Decimal(invoice.gross_amount) + added_total)
     # net = gross - discount - scheme_adjustment. Discount/scheme
-    # adjustment aren't touched by the builder — that's a separate
-    # discount/scheme workflow — so this only re-derives net_amount
-    # from the (now larger) gross_amount.
+    # adjustment aren't touched by the builder (separate workflow) —
+    # this only re-derives net_amount from the now-larger gross_amount.
     invoice.net_amount = _money(
         invoice.gross_amount - Decimal(invoice.discount_amount) - Decimal(invoice.scheme_adjustment)
     )
     invoice.updated_by = actor_user_id
 
-    db.flush()  # surface trigger/constraint errors before commit
+    # Flush now, inside this still-open transaction, so
+    # trg_invoices_freeze / trg_invoice_items_freeze raise here — as a
+    # real exception the caller sees — rather than only at the implicit
+    # commit in get_db() after this function has already returned 200.
+    await db.flush()
 
-    # NOTE: confirm exact log_audit_event(...) signature with the audit
-    # module owner — this call assumes kwargs matching audit_logs
-    # columns per schema doc §3 0003.
-    from app.audit.service import log_audit_event  # local import avoids a hard top-level dependency cycle
-    log_audit_event(
-        db,
-        user_id=actor_user_id,
-        action="invoice_charges_appended",
-        resource_type="invoices",
-        resource_id=invoice.id,
-        patient_id=invoice.patient_id,
-        visit_id=invoice.visit_id,
-        new_value={
-            "lines_added": len(priced_lines),
-            "lines_skipped_unpriced": skipped,
-            "gross_amount": str(invoice.gross_amount),
-            "net_amount": str(invoice.net_amount),
-        },
-    )
+    # TODO(billing): call into app.audit once it exists and its owner
+    # confirms the function name/signature. Not implemented here —
+    # app/audit isn't built yet on any branch, so there's nothing real
+    # to call. When it lands, this is a CRITICAL-sensitivity mutation
+    # (invoice gross/net change + new invoice_items rows) and should be
+    # logged with enough detail to answer "which charges were billed"
+    # (reference_ids / charge_categories / new invoice_item ids), not
+    # just a lines-added count — worth keeping in mind for whoever
+    # designs that call, not something to solve from billing's side.
 
-    db.commit()
-    db.refresh(invoice)
+    await db.refresh(invoice)
 
     return InvoiceBuildResponse(
         visit_id=visit_id,
@@ -444,37 +446,21 @@ def build_invoice(
 
 
 # ---------------------------------------------------------------------
-# PM-JAY eligibility — STUB
+# PM-JAY eligibility — STUB. No DB access, no async needed.
 # ---------------------------------------------------------------------
 
-# Config-driven placeholder, matching the schema doc's rule that
-# "government scheme coverage must be configurable (lookup table), not
-# hardcoded" (HMIS context doc, billing section). This dict is that
-# lookup's stand-in until a real `scheme_eligibility_rules`-style table
-# and the ABDM/PM-JAY beneficiary API integration exist — that
-# integration is a certification-track item and explicitly not mine to
-# build (owned by seniors/managers per project scope).
 _PMJAY_STUB_CONFIG = {
     "enabled": True,
     "default_status": "not_determined",
 }
 
 
-def check_pmjay_eligibility(
-    db: Session, patient_id: uuid.UUID, visit_id: uuid.UUID
-) -> PMJAYEligibilityResponse:
-    """
-    STUB — does not call ABDM/PM-JAY. Always returns 'not_determined'
-    (unless the feature is toggled off, then 'not_eligible' with a
-    reason) so the invoice UI can show a "verify PM-JAY manually" nudge
-    at billing time without pretending to have real eligibility data.
-
-    Do not wire this into automatic scheme_adjustment calculation on
-    invoices — that requires a verified eligibility result, which this
-    function cannot produce. It exists so the invoice-preview screen
-    has a place to surface a prompt; the actual eligibility decision
-    stays a manual front-desk/ABDM step until that integration lands.
-    """
+def check_pmjay_eligibility(patient_id: uuid.UUID, visit_id: uuid.UUID) -> PMJAYEligibilityResponse:
+    """STUB — does not call ABDM/PM-JAY. Always 'not_determined' unless
+    disabled, routed through a config dict (not hardcoded) so a real
+    eligibility table can replace it later without changing the
+    response shape. Do not wire this into automatic scheme_adjustment
+    on invoices — see schemas.py docstring on PMJAYEligibilityResponse."""
     if not _PMJAY_STUB_CONFIG["enabled"]:
         return PMJAYEligibilityResponse(
             patient_id=patient_id,
@@ -488,8 +474,8 @@ def check_pmjay_eligibility(
         visit_id=visit_id,
         eligibility_status=_PMJAY_STUB_CONFIG["default_status"],
         reason=(
-            "PM-JAY eligibility is not yet verified automatically — "
-            "this is a stub pending ABDM/PM-JAY beneficiary API integration. "
-            "Front desk should verify the beneficiary card/ABHA manually."
+            "PM-JAY eligibility is not yet verified automatically — this is "
+            "a stub pending ABDM/PM-JAY beneficiary API integration. Front "
+            "desk should verify the beneficiary card/ABHA manually."
         ),
     )
