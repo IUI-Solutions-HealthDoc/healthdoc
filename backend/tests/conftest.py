@@ -4,6 +4,7 @@ import asyncio
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
+from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy.pool import NullPool
 
@@ -65,6 +66,13 @@ async def fake_user_row(db_session, fake_facility):
     await db_session.flush()
     await db_session.refresh(user)
     return user
+
+
+@pytest.fixture
+def client():
+    """Plain sync TestClient for simple unauthenticated endpoints
+    (health check, module stubs) that don't need a DB session override."""
+    return TestClient(app)
 
 
 @pytest.fixture
