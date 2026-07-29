@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     icd11_base_url: str = "http://icd11:80"
     icd11_release: str = "2025-01"
     icd11_linearization: str = "mms"
+    audit_signing_key_b64: str = ""  # base64 32-byte Ed25519 seed; empty = dev-only ephemeral key
+    audit_signer_key_id: str = "dev-key-v1"
 
 
 @lru_cache

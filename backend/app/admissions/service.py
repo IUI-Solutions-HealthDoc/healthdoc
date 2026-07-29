@@ -6,6 +6,7 @@ from fastapi import HTTPException, status
 
 from app.admissions.models import Admission, Discharge, Bed, PatientMovementLog
 from app.users.models import User
+from app.audit import service as audit_service
 
 
 async def _resolve_user(db: AsyncSession, keycloak_sub: str) -> User:
@@ -44,9 +45,22 @@ async def admit_patient(db: AsyncSession, data, auth_user) -> Admission:
     await db.flush()
     await db.refresh(admission)
 
-    # TODO(audit): write audit_logs row here. Blocked — app/audit has no
-    # service.py, and audit_logs requires Ed25519 signature + signer_key_id
-    # (schema doc §3-0003), which needs B7's signing infra. Raised with team.
+    await audit_service.write_audit_log(
+        db,
+        facility_id=user.facility_id,
+        user_id=user.id,
+        role=",".join(auth_user.roles) if auth_user.roles else None,
+        action="admission.create",
+        resource_type="admission",
+        resource_id=admission.id,
+        patient_id=admission.patient_id,
+        visit_id=admission.visit_id,
+        new_value={
+            "ward_id": str(admission.ward_id),
+            "bed_id": str(admission.bed_id),
+            "status": admission.status,
+        },
+    )
 
     return admission
 
@@ -85,7 +99,19 @@ async def transfer_patient(db: AsyncSession, admission_id: uuid.UUID, data, auth
     await db.flush()
     await db.refresh(movement)
 
-    # TODO(audit): same blocker as above.
+    await audit_service.write_audit_log(
+        db,
+        facility_id=user.facility_id,
+        user_id=user.id,
+        role=",".join(auth_user.roles) if auth_user.roles else None,
+        action="admission.transfer",
+        resource_type="admission",
+        resource_id=admission.id,
+        patient_id=admission.patient_id,
+        visit_id=admission.visit_id,
+        old_value={"ward_id": str(old_ward_id), "bed_id": str(old_bed_id)},
+        new_value={"ward_id": str(data.to_ward_id), "bed_id": str(data.to_bed_id)},
+    )
 
     return movement
 
@@ -119,7 +145,21 @@ async def discharge_patient(db: AsyncSession, admission_id: uuid.UUID, data, aut
     await db.flush()
     await db.refresh(discharge)
 
-    # TODO(audit): same blocker as above.
+    await audit_service.write_audit_log(
+        db,
+        facility_id=user.facility_id,
+        user_id=user.id,
+        role=",".join(auth_user.roles) if auth_user.roles else None,
+        action="admission.discharge",
+        resource_type="admission",
+        resource_id=admission.id,
+        patient_id=admission.patient_id,
+        visit_id=admission.visit_id,
+        new_value={
+            "discharge_type": discharge.discharge_type,
+            "discharged_at": discharge.discharged_at.isoformat(),
+        },
+    )
     # TODO(fhir/notifications): app/fhir and app/notifications don't exist
     # yet either — confirm with B4/B7 before wiring these in.
 
