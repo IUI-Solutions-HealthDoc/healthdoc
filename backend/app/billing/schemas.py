@@ -1,12 +1,14 @@
 """
 Pydantic schemas for the invoice-builder slice of the billing module
-(B7-W2-01 — issue #168).
+(B7-W2-01 — issue #168), plus the payment/refund slice (B7-W3-01 —
+issue #188).
 
 These sit alongside whatever CRUD schemas already exist in
 app/billing/schemas.py for Invoice / InvoiceItem / Payment / Refund
-(InvoiceCreate, InvoiceOut, etc.). Only the schemas needed for this
-ticket — preview, build, PM-JAY eligibility stub — are defined here;
-merge into the existing schemas.py rather than replacing it.
+(InvoiceCreate, InvoiceOut, etc.). Only the schemas needed for these
+tickets — preview, build, PM-JAY eligibility stub, payments, refunds —
+are defined here; merge into the existing schemas.py rather than
+replacing it.
 
 Field names intentionally mirror the DB columns (snake_case) per the
 API contract in the schema doc (§4.2: "JSON keys = DB column names").
@@ -20,7 +22,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from app.common.enums import ChargeCategory  # single source of truth — don't re-list values here
+from app.common.enums import ChargeCategory, PaymentMode, PaymentStatus  # single source of truth — don't re-list values here
 
 
 # ---------------------------------------------------------------------
@@ -128,3 +130,71 @@ class PMJAYEligibilityResponse(BaseModel):
             "front desk is prompted to collect scheme documents."
         ),
     )
+
+
+# ---------------------------------------------------------------------
+# Payments — B7-W3-01 (#188).
+#
+# Payment receipts are immutable after save (schema doc §22.3 / §35.4.4;
+# see migrations/00xx_payment_refund_immutability.py). There is
+# deliberately no PaymentUpdate / PATCH schema anywhere in this module —
+# corrections are always a new Refund row, never an edit. See
+# service.record_payment for the balance/overpayment checks and the
+# invoice status transition (issued -> partially_paid -> paid).
+# ---------------------------------------------------------------------
+
+class PaymentCreate(BaseModel):
+    """Body for POST /billing/invoices/{invoice_id}/payments."""
+
+    amount: Decimal = Field(..., gt=0, description="Must not exceed the invoice's remaining balance.")
+    mode: PaymentMode
+    currency: str = Field("INR", min_length=3, max_length=3)
+    collected_at: str | None = Field(
+        None,
+        description=(
+            "ISO-8601 UTC timestamp of when cash/UPI/card was actually "
+            "collected, if different from 'now' (e.g. backdating a "
+            "receptionist's end-of-shift batch entry). Defaults to now() "
+            "if omitted."
+        ),
+    )
+
+
+class PaymentOut(BaseModel):
+    """Response shape per schema doc §4.4 — /billing/invoices/{id}/payments."""
+
+    id: uuid.UUID
+    receipt_number: str
+    invoice_id: uuid.UUID
+    amount: Decimal
+    currency: str
+    mode: PaymentMode
+    status: PaymentStatus
+    collected_at: str
+
+
+# ---------------------------------------------------------------------
+# Refunds — B7-W3-01 (#188). Reversal ledger, not an edit path.
+#
+# Gated by the "billing_refunds" toggleable module (schema doc §3 0027 /
+# ModuleCode.BILLING_REFUNDS) — unlike invoices/payments, which are core
+# billing and can never be disabled. See router.py.
+# ---------------------------------------------------------------------
+
+class RefundCreate(BaseModel):
+    """Body for POST /billing/payments/{payment_id}/refunds."""
+
+    amount: Decimal = Field(..., gt=0, description="Must not exceed the payment's un-refunded balance.")
+    reason: str = Field(..., min_length=1)
+
+
+class RefundOut(BaseModel):
+    """Response shape per schema doc §4.4 — /billing/payments/{id}/refunds."""
+
+    id: uuid.UUID
+    refund_number: str
+    payment_id: uuid.UUID
+    amount: Decimal
+    reason: str
+    approved_by: uuid.UUID
+    refunded_at: str

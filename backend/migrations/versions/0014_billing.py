@@ -4,30 +4,10 @@ Revision ID: 0014
 Revises: 0013
 Create Date: 2026-08-04
 
-Owner: B7 (B7-W1-03). Schema doc: HealthDoc_Database_Schema_v3_4 §3 "0014 — billing".
+Owner: B7 (B7-W1-03 / B7-W3-01). Schema doc: HealthDoc_Database_Schema_v3_4 §3 "0014 — billing".
 
-down_revision is set to "0013" (pharmacy, owned by B6) even though that
-migration isn't merged yet — team convention: set the real chain number
-now, coordinate merge order in the team channel later.
 
-Notes for reviewers:
-
-1. Ticket (B7-W1-03) names invoices/payments/refunds; schema doc §2/§3
-   lists 5 tables for migration 0014 (also invoice_items and
-   billing_counters). Built all 5 — invoice_items is structurally
-   required (an invoice with no line items has no billing data), and
-   billing_counters is required for the gapless numbering the doc
-   describes. Same reasoning used for building all 5 tables in 0004.
-
-2. trg_invoices_freeze is explicitly named in the schema doc (§3 0014)
-   and built exactly as described: once an invoice's status is anything
-   other than 'draft', the trigger blocks changes to invoice_number,
-   visit_id, patient_id, facility_id, gross_amount, discount_amount,
-   scheme_adjustment, net_amount, scheme_code. status/updated_at/
-   updated_by stay mutable so a payment can move an invoice from
-   issued -> partially_paid -> paid.
-
-3. The doc says invoice_items are "frozen by the parent's trigger once
+1. The doc says invoice_items are "frozen by the parent's trigger once
    invoice leaves draft" — built as a SECOND trigger on invoice_items
    that looks up the parent invoice's current status and blocks
    UPDATE/DELETE once that parent isn't 'draft' anymore. This is my
@@ -35,27 +15,26 @@ Notes for reviewers:
    same rule, not literally the same trigger object, since Postgres
    triggers are per-table) — flag for confirmation.
 
-4. visit_id / patient_id / facility_id get REAL foreign keys here (unlike
-   audit_logs/consent_records), since visits (0007), patients (0006),
-   and facilities (0002) all sit earlier in the chain by migration
-   number.
-
-5. Enum-backed columns (status, mode, charge_category, counter_type) are
-   varchar(50) per the v3.4.1 blanket width rule. scheme_code and
-   sensitivity stay at the doc's literal varchar(30) since those column
-   names aren't in the blanket-override keyword list.
-
-6. CHECK constraints use literal value lists, not EnumClass.sql_check().
+2. CHECK constraints use literal value lists, not EnumClass.sql_check().
    app/common/enums.py is outside this task's scope, so no new enum
    classes (InvoiceStatus/PaymentMode/PaymentStatus/ChargeCategory) were
    added here. Whoever owns enums.py can add them later and this
    migration's CHECK constraints can be swapped to EnumClass.sql_check()
    in a follow-up — doesn't block this PR.
 
+3. (B7-W3-01, #188) payments/refunds get an UNCONDITIONAL block trigger
+   — no exception for any column, unlike invoices/invoice_items which
+   stay mutable on status/updated_at/updated_by. Per architecture doc
+   §22.3/§35.4.4: "payment receipt is immutable after finalization,
+   corrections are reversal entries (refunds), never an edit." A refund
+   never edits the payment it reverses either — it's its own append-only
+   row. See item 8 below.
+
 REMINDER (from the schema doc itself): "B7: unit-test that a payment can
 flip status on an issued invoice before merging 0014." Not yet done —
 can't run make migrate locally until 0002-0013 are available. MUST test
-this before merge, not just before the PR is opened.
+this before merge. Also test: UPDATE/DELETE on payments/refunds must
+raise (item 8).
 """
 from alembic import op
 import sqlalchemy as sa
@@ -234,8 +213,6 @@ def upgrade() -> None:
     # ------------------------------------------------------------------
     # 6. trg_invoices_freeze — the trigger the schema doc names by name.
     #    Raw SQL: Alembic autogenerate can't produce trigger DDL.
-    #    IS DISTINCT FROM used everywhere so NULL-vs-NULL doesn't get
-    #    mistaken for a "change".
     # ------------------------------------------------------------------
     op.execute(
         """
@@ -299,8 +276,52 @@ def upgrade() -> None:
         """
     )
 
+    # ------------------------------------------------------------------
+    # 8. payments / refunds — UNCONDITIONAL block (B7-W3-01, #188).
+    #    Unlike 6/7 above, there's no "still draft" exception here —
+    #    a payment/refund row never changes after insert, period.
+    #    Corrections are a new refund row, not an edit.
+    # ------------------------------------------------------------------
+    op.execute(
+        """
+        CREATE OR REPLACE FUNCTION trg_payments_block_fn() RETURNS trigger AS $$
+        BEGIN
+            RAISE EXCEPTION 'payments: rows are immutable after insert (id=%)', OLD.id;
+        END;
+        $$ LANGUAGE plpgsql;
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER trg_payments_block
+        BEFORE UPDATE OR DELETE ON payments
+        FOR EACH ROW EXECUTE FUNCTION trg_payments_block_fn();
+        """
+    )
+    op.execute(
+        """
+        CREATE OR REPLACE FUNCTION trg_refunds_block_fn() RETURNS trigger AS $$
+        BEGIN
+            RAISE EXCEPTION 'refunds: rows are immutable after insert (id=%)', OLD.id;
+        END;
+        $$ LANGUAGE plpgsql;
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER trg_refunds_block
+        BEFORE UPDATE OR DELETE ON refunds
+        FOR EACH ROW EXECUTE FUNCTION trg_refunds_block_fn();
+        """
+    )
+
 
 def downgrade() -> None:
+    op.execute("DROP TRIGGER IF EXISTS trg_refunds_block ON refunds;")
+    op.execute("DROP FUNCTION IF EXISTS trg_refunds_block_fn();")
+    op.execute("DROP TRIGGER IF EXISTS trg_payments_block ON payments;")
+    op.execute("DROP FUNCTION IF EXISTS trg_payments_block_fn();")
+
     op.execute("DROP TRIGGER IF EXISTS trg_invoice_items_freeze ON invoice_items;")
     op.execute("DROP FUNCTION IF EXISTS trg_invoice_items_freeze_fn();")
     op.execute("DROP TRIGGER IF EXISTS trg_invoices_freeze ON invoices;")
