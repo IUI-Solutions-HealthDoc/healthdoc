@@ -1,10 +1,22 @@
-from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, Index, Integer, String, Text, Boolean
+from sqlalchemy import CheckConstraint, Column, Date, DateTime, ForeignKey, Index, Integer, String, Text, Boolean
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 
 from sqlalchemy.orm import relationship
 from app.common.db import Base
 from app.common.enums import OrderPriority, OrderStatus, OrderType, ResultStatus
 from app.common.models import Blame, Timestamps, UUIDPk
+
+
+
+
+class OrderNumberCounter(Base):
+    """Matches migrations/versions/0019_order_number_counters.py exactly.
+    No UUIDPk/Timestamps mixins -- this table's PK is counter_date, and
+    it has no created_at/updated_at columns in the real migration."""
+    __tablename__ = "order_number_counters"
+
+    counter_date = Column(Date, primary_key=True)
+    seq = Column(Integer, nullable=False, server_default="0")
 
 
 class Order(Base, UUIDPk, Timestamps, Blame):
