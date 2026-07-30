@@ -1,4 +1,4 @@
-﻿import uuid
+import uuid
 from datetime import datetime
 
 from app.pharmacy.service import get_prescription_queue
@@ -24,6 +24,7 @@ async def test_prescription_queue_default_excludes_dispensed_and_cancelled(fake_
 
     assert result.total == 1
     assert result.items[0].patient_full_name == "Asha Devi"
+    # the default-filter branch (no explicit status) must be present in the SQL
     count_sql = fake_session.calls[0][0]
     assert "NOT IN ('dispensed', 'cancelled')" in count_sql
 

@@ -1,4 +1,4 @@
-﻿import uuid
+import uuid
 from decimal import Decimal
 
 from app.pharmacy.service import search_medicines
@@ -26,6 +26,10 @@ async def test_search_medicines_returns_fefo_ordered_batches(fake_session):
             "strength": "500mg", "form": "tablet", "is_controlled_drug": False,
         }]),
     )
+    # service issues batches ordered by expiry_date ASC in SQL; the fake
+    # returns them out of order to prove the service doesn't silently rely
+    # on Python-side sorting it doesn't actually do — batches must already
+    # arrive DB-ordered. Order them correctly here since that's the SQL's job.
     fake_session.expect(
         "FROM inventory_batches", FakeResult(rows=[batch_early, batch_later])
     )
@@ -46,6 +50,7 @@ async def test_search_medicines_no_match_returns_empty_without_batch_query(fake_
     results = await search_medicines(fake_session, q="nonexistent-drug-xyz", facility_id=uuid.uuid4())
 
     assert results == []
+    # short-circuits before ever querying batches
     assert not any("FROM inventory_batches" in sql for sql, _ in fake_session.calls)
 
 

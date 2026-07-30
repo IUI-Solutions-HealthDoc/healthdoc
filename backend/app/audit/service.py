@@ -1,4 +1,4 @@
-"""
+﻿"""
 Audit write-helper — the MANUAL/bulk-operation path.
 
 Repo path: backend/app/audit/service.py

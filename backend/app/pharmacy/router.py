@@ -9,11 +9,18 @@ from app.common.db import get_db
 from app.common.modules import require_module
 from app.pharmacy.schemas import (
     DispenseCreate,
+    DispenseItemOut,
     DispenseOut,
     MedicineSearchResponse,
     PrescriptionQueueResponse,
+    SubstitutionApprovalRequest,
 )
-from app.pharmacy.service import create_dispense, get_prescription_queue, search_medicines
+from app.pharmacy.service import (
+    approve_substitution,
+    create_dispense,
+    get_prescription_queue,
+    search_medicines,
+)
 
 router = APIRouter(prefix="/pharmacy", tags=["pharmacy"])
 
@@ -77,5 +84,25 @@ async def create_dispense_endpoint(
         db,
         payload,
         current_user_id=current_user.id,
+        facility_id=current_user.facility_id,
+    )
+
+
+@router.post(
+    "/dispenses/items/{item_id}/approve",
+    response_model=DispenseItemOut,
+    dependencies=[Depends(require_module("pharmacy"))],
+)
+async def approve_substitution_endpoint(
+    item_id: UUID,
+    payload: SubstitutionApprovalRequest,
+    current_user: Annotated[CurrentUser, Depends(require_roles("doctor"))],
+    db: DbSession,
+) -> DispenseItemOut:
+    return await approve_substitution(
+        db,
+        payload,
+        item_row_id=item_id,
+        approving_user_id=current_user.id,
         facility_id=current_user.facility_id,
     )

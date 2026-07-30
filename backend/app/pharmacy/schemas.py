@@ -1,9 +1,18 @@
-﻿from datetime import datetime
+"""Pharmacy module schemas — B6-W2-01.
+
+Response fields are returned as plain dicts/models and wrapped by
+EnvelopeMiddleware per the API contract (docs/database-schema.md §4).
+Field names are snake_case column names — no camelCase renaming layer.
+"""
+from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+# ---------------------------------------------------------------------------
+# Prescription queue (GET /pharmacy/queue)
+# ---------------------------------------------------------------------------
 
 class PrescriptionQueueItem(BaseModel):
     prescription_id: UUID
@@ -15,7 +24,7 @@ class PrescriptionQueueItem(BaseModel):
     encounter_id: UUID
     prescribed_at: datetime
     item_count: int
-    dispense_status: str | None = None  
+    dispense_status: str | None = None  # None = never dispensed against yet
 
 
 class PrescriptionQueueResponse(BaseModel):
@@ -24,6 +33,10 @@ class PrescriptionQueueResponse(BaseModel):
     page_size: int
     total: int
 
+
+# ---------------------------------------------------------------------------
+# Medicine search (GET /pharmacy/medicines/search)
+# ---------------------------------------------------------------------------
 
 class BatchAvailability(BaseModel):
     batch_id: UUID
@@ -52,27 +65,65 @@ class MedicineSearchResponse(BaseModel):
     items: list[MedicineSearchResult]
 
 
+# ---------------------------------------------------------------------------
+# Dispense create (POST /pharmacy/dispenses)
+# ---------------------------------------------------------------------------
+
 class DispenseItemCreate(BaseModel):
     prescription_item_id: UUID
-    batch_id: UUID
-    quantity_dispensed: Decimal = Field(gt=0)
-    is_substitute: bool = False
+    quantity_dispensed: Decimal = Field(gt=0, description="Requested quantity")
+    batch_id: UUID | None = Field(
+        default=None,
+        description="Manual batch pin (W2 behavior). Omit to auto-select via FEFO "
+        "(W3), splitting across batches if needed.",
+    )
+    substitute_item_id: UUID | None = Field(
+        default=None,
+        description="A different inventory_items.id than what was prescribed. "
+        "Requires doctor approval (see POST .../approve) before stock is touched.",
+    )
     substitute_reason: str | None = None
 
 
 class DispenseCreate(BaseModel):
     prescription_id: UUID
     items: list[DispenseItemCreate] = Field(min_length=1)
+    allow_partial: bool = Field(
+        default=False,
+        description="If true and available stock < requested for an item, dispense "
+        "whatever is available instead of rejecting the whole request.",
+    )
+
+
+class BatchAllocation(BaseModel):
+    """One (batch, quantity) slice of a possibly FEFO-split item fulfillment."""
+    batch_id: UUID
+    batch_number: str
+    quantity_from_batch: Decimal
+    expiry_date: str
 
 
 class DispenseItemOut(BaseModel):
-    id: UUID
+    item_row_ids: list[UUID] = Field(
+        description="pharmacy_dispense_items.id for each batch used to fulfill this "
+        "item — more than one if FEFO split across batches. Empty if this is a "
+        "pending substitution (no batch chosen yet)."
+    )
     prescription_item_id: UUID
-    batch_id: UUID
     quantity_prescribed: Decimal | None = None
-    quantity_dispensed: Decimal | None = None
+    quantity_dispensed: Decimal
     is_substitute: bool
+    substitute_item_id: UUID | None = None
     substitute_reason: str | None = None
+    is_partial: bool = Field(description="quantity_dispensed < quantity_prescribed")
+    approval_status: str = Field(
+        default="not_required",
+        description="not_required | pending | approved | rejected — only substituted "
+        "items are ever anything other than not_required",
+    )
+    batches: list[BatchAllocation] = Field(
+        default_factory=list, description="Which batch(es) fulfilled this item, FEFO order"
+    )
 
 
 class DispenseOut(BaseModel):
@@ -85,3 +136,14 @@ class DispenseOut(BaseModel):
     is_current: bool
     created_at: datetime
     items: list[DispenseItemOut]
+
+
+# ---------------------------------------------------------------------------
+# Substitution approval (POST /pharmacy/dispenses/{id}/items/{item_id}/approve)
+# ---------------------------------------------------------------------------
+
+class SubstitutionApprovalRequest(BaseModel):
+    approved: bool
+    rejection_reason: str | None = Field(
+        default=None, description="Required if approved=false"
+    )

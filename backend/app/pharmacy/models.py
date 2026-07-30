@@ -51,6 +51,15 @@ class PharmacyDispense(Base, UUIDPk, Timestamps):
             DispenseStatus.sql_check("status"),
             name="status",
         ),
+        # NOTE: migration 0013 created this as a bare `UNIQUE (prescription_id,
+        # version)` inside CREATE TABLE — Postgres auto-names that
+        # `pharmacy_dispenses_prescription_id_version_key`, which does NOT
+        # match schema-conventions.md §3's `uq_<table>_<cols>` rule (also
+        # doesn't match this model's explicit name below). `make revision
+        # m=check` will show a rename diff until either the DB constraint or
+        # this name is reconciled — flagging rather than silently patching
+        # someone else's merged migration (see schema-conventions.md §12:
+        # "Never edit a merged migration — write a new one").
         UniqueConstraint(
             "prescription_id", "version",
         ),
@@ -62,6 +71,10 @@ class PharmacyDispense(Base, UUIDPk, Timestamps):
         ),
         Index("ix_pharmacy_dispenses_visit_id", "visit_id"),
         Index("ix_pharmacy_dispenses_dispensed_by", "dispensed_by"),
+        # uq_pharmacy_dispenses_current (partial unique on prescription_id
+        # WHERE is_current) is a partial index — created in the migration
+        # via raw SQL, not representable here; do not redeclare it as a
+        # plain UniqueConstraint or autogenerate will emit a duplicate.
     )
 
 
@@ -96,6 +109,17 @@ class PharmacyDispenseItem(Base, UUIDPk, Timestamps):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=True
     )
     expiry_override_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # --- added in migration 0014 (B6-W3-01) --------------------------------
+    approval_status: Mapped[str] = mapped_column(nullable=False, default="not_required")
+    substitute_item_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("inventory_items.id", ondelete="RESTRICT"), nullable=True
+    )
+    approved_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=True
+    )
+    approved_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    rejection_reason: Mapped[str | None] = mapped_column(nullable=True)
 
     dispense: Mapped["PharmacyDispense"] = relationship(back_populates="items")
 
