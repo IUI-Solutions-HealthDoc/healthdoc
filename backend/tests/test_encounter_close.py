@@ -116,6 +116,16 @@ async def test_close_encounter_without_prescription_succeeds(
     # Only the OPD note Composition -- no prescriptions on this encounter.
     assert len(doc["resources"]) == 1
 
+    from sqlalchemy import select
+    from app.audit.models import AuditLog
+    audit_stmt = select(AuditLog).where(
+        AuditLog.resource_id == seed["encounter"].id, AuditLog.action == "encounter.close"
+    )
+    audit_result = await db_session.execute(audit_stmt)
+    audit_entry = audit_result.scalar_one()
+    assert audit_entry.facility_id == seed["visit"].facility_id
+    assert audit_entry.patient_id == seed["patient"].id
+
 
 async def test_close_encounter_with_prescription_builds_medication_requests(
     authed_client: AsyncClient, seeded_encounter, fake_mongo, db_session

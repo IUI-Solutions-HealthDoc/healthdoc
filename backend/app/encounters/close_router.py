@@ -17,6 +17,7 @@ from app.opd.models import Encounter, Visit
 from app.orders.models import Prescription
 from app.encounters.schemas import ClosedEncounterOut
 from app.integrations.abdm.fhir.builders import build_opd_note_composition, build_medication_request
+from app.audit import service as audit_service
 
 router = APIRouter(prefix="/encounters", tags=["encounters"])
 
@@ -81,6 +82,23 @@ async def close_encounter(encounter_id: uuid.UUID, db: AsyncSession = Depends(ge
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     insert_result = await mongo["fhir_bundles"].insert_one(bundle_doc)
+
+    await audit_service.write_audit_log(
+        db,
+        facility_id=visit.facility_id,
+        user_id=encounter.created_by,
+        role=None,
+        action="encounter.close",
+        resource_type="encounter",
+        resource_id=encounter.id,
+        patient_id=visit.patient_id,
+        visit_id=visit.id,
+        new_value={
+            "ended_at": encounter.ended_at.isoformat(),
+            "fhir_bundle_id": str(insert_result.inserted_id),
+            "resource_count": len(resources),
+        },
+    )
 
     out = ClosedEncounterOut.model_validate(encounter)
     out.fhir_bundle_id = str(insert_result.inserted_id)
