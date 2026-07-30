@@ -1,15 +1,4 @@
-﻿"""STUB - minimal audit_logs placeholder (TEMPORARY)
-
-DELETE THIS FILE before opening your real PR for #167, once the real 0003
-(audit, B7/Vani) migration lands. This only creates enough of audit_logs
-to let pharmacy mutations write a real row locally instead of using the
-no-op shim in service.py.
-
-Revision ID: 0003
-Revises: 0002
-Create Date: 2026-07-25
-"""
-from alembic import op
+﻿from alembic import op
 
 revision = "0003_stub_TEMP"
 down_revision = "0002"

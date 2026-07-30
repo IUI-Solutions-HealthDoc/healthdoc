@@ -1,16 +1,4 @@
-﻿"""STUB - departments/visits/prescriptions placeholder (TEMPORARY)
-
-DELETE THIS FILE before opening your real PR for #167.
-Bridges the migration chain (0002 -> 0011 -> 0012) so pharmacy/inventory
-work can be developed and tested locally while the real migrations
-0005 (departments, B4), 0007 (visits, B3), 0008 (orders/prescriptions, B3)
-are still in review upstream.
-
-Revision ID: 0011
-Revises: 0002
-Create Date: 2026-07-25
-"""
-from alembic import op
+﻿from alembic import op
 
 revision = "0011"
 down_revision = "0003_stub_TEMP"

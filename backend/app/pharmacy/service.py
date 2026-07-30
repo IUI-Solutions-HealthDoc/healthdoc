@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.audit.service import write_audit_log  
+from app.audit.service import write_audit_log
 from app.common.enums import DispenseStatus, NotificationStatus
 from app.pharmacy.schemas import (
     BatchAllocation,

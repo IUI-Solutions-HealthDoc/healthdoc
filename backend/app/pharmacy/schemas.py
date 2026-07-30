@@ -1,9 +1,3 @@
-"""Pharmacy module schemas — B6-W2-01.
-
-Response fields are returned as plain dicts/models and wrapped by
-EnvelopeMiddleware per the API contract (docs/database-schema.md §4).
-Field names are snake_case column names — no camelCase renaming layer.
-"""
 from datetime import datetime
 from decimal import Decimal
 from uuid import UUID

@@ -273,15 +273,15 @@ async def test_substitution_creates_pending_row_without_touching_stock(fake_sess
     assert item.quantity_dispensed == Decimal("0")
     assert item.batches == []
 
-    # nothing debited — approval hasn't happened yet
+   
     assert fake_session.db["stock_ledger"] == []
 
-    # notified both doctor and patient
+   
     assert len(fake_session.db["notifications"]) == 2
     recipients = {n["recipient_user_id"] for n in fake_session.db["notifications"]}
     assert recipients == {str(doctor_id), str(patient_id)}
 
-    # still audited — creating the pending row is itself a mutation
+   
     assert len(audit_log.calls) == 1
 
 
@@ -317,9 +317,7 @@ async def test_substitution_mixed_with_normal_item_status_reflects_pending(fake_
     assert len(result.items) == 2
 
 
-# ---------------------------------------------------------------------------
-# Versioning — unchanged from W2, re-verified against the new response shape
-# ---------------------------------------------------------------------------
+
 
 async def test_second_dispense_supersedes_first_as_new_version(fake_session, audit_log):
     prescription_id, patient_id = uuid.uuid4(), uuid.uuid4()

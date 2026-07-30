@@ -1,23 +1,3 @@
-"""0014 - pharmacy substitution approval (B6-W3-01)
-
-Adds the item-level approval gate that substitution needs and that 0013
-doesn't have (0013 only has a dispense-level status, not per-item).
-
-Also relaxes two 0013 constraints on pharmacy_dispense_items, both
-required so a "pending substitution" row can exist before a batch has
-been chosen and before any quantity has actually been dispensed:
-  - batch_id: NOT NULL -> nullable (unknown until FEFO-allocated at
-    approval time)
-  - quantity_dispensed: already nullable in 0013, unchanged here, listed
-    for completeness
-
-Per schema-conventions.md: never edit a merged migration. This is a new
-migration on top of 0013, not a modification of it.
-
-Revision ID: 0014
-Revises: 0013
-Create Date: 2026-07-27
-"""
 from alembic import op
 
 revision = "0014"
