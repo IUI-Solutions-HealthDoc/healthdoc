@@ -51,15 +51,7 @@ class PharmacyDispense(Base, UUIDPk, Timestamps):
             DispenseStatus.sql_check("status"),
             name="status",
         ),
-        # NOTE: migration 0013 created this as a bare `UNIQUE (prescription_id,
-        # version)` inside CREATE TABLE — Postgres auto-names that
-        # `pharmacy_dispenses_prescription_id_version_key`, which does NOT
-        # match schema-conventions.md §3's `uq_<table>_<cols>` rule (also
-        # doesn't match this model's explicit name below). `make revision
-        # m=check` will show a rename diff until either the DB constraint or
-        # this name is reconciled — flagging rather than silently patching
-        # someone else's merged migration (see schema-conventions.md §12:
-        # "Never edit a merged migration — write a new one").
+       
         UniqueConstraint(
             "prescription_id", "version",
         ),
@@ -71,10 +63,7 @@ class PharmacyDispense(Base, UUIDPk, Timestamps):
         ),
         Index("ix_pharmacy_dispenses_visit_id", "visit_id"),
         Index("ix_pharmacy_dispenses_dispensed_by", "dispensed_by"),
-        # uq_pharmacy_dispenses_current (partial unique on prescription_id
-        # WHERE is_current) is a partial index — created in the migration
-        # via raw SQL, not representable here; do not redeclare it as a
-        # plain UniqueConstraint or autogenerate will emit a duplicate.
+        
     )
 
 

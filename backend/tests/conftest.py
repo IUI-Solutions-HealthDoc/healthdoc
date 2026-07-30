@@ -1,4 +1,4 @@
-﻿﻿import uuid
+?import uuid
 from datetime import date
 from itertools import count
 
@@ -75,7 +75,7 @@ def _compile_inet_sqlite(type_, compiler, **kw):
 @compiles(ARRAY, "sqlite")
 def _compile_array_sqlite(type_, compiler, **kw):
     """`Base.metadata.create_all` here materialises EVERY model in the app, not
-    just the queue module's — so a Postgres-only type anywhere in the project
+    just the queue module's � so a Postgres-only type anywhere in the project
     breaks these tests. `consent_records.scope` (ARRAY(Text), migration 0004)
     did exactly that the moment 0004 merged.
 
@@ -87,7 +87,7 @@ def _compile_array_sqlite(type_, compiler, **kw):
  
 @pytest_asyncio.fixture
 async def db():
-    """A fresh, empty, in-memory database — created and destroyed once per
+    """A fresh, empty, in-memory database � created and destroyed once per
     test. Has no connection to your real Postgres DB."""
 
     _ensure_stub_tables_exist()
