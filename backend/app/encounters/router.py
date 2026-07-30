@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.common.db import get_db
 from app.opd.models import Encounter
 from app.encounters.schemas import EncounterCreate, EncounterUpdate, EncounterOut
+from app.audit import service as audit_service
 
 router = APIRouter(prefix="/encounters", tags=["encounters"])
 
@@ -24,6 +25,21 @@ async def create_encounter(payload: EncounterCreate, db: AsyncSession = Depends(
     db.add(encounter)
     await db.flush()
     await db.refresh(encounter)
+
+    facility_id = await audit_service.facility_id_for_encounter(db, encounter.id)
+    if facility_id:
+        await audit_service.write_audit_log(
+            db,
+            facility_id=facility_id,
+            user_id=encounter.created_by,
+            role=None,
+            action="encounter.create",
+            resource_type="encounter",
+            resource_id=encounter.id,
+            visit_id=encounter.visit_id,
+            new_value={"encounter_type": encounter.encounter_type, "chief_complaint": encounter.chief_complaint},
+        )
+
     return encounter
 
 
@@ -47,11 +63,27 @@ async def update_encounter(
     if not encounter:
         raise HTTPException(status_code=404, detail="Encounter not found")
 
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    changed_fields = payload.model_dump(exclude_unset=True)
+    for field, value in changed_fields.items():
         setattr(encounter, field, value)
 
     await db.flush()
     await db.refresh(encounter)
+
+    facility_id = await audit_service.facility_id_for_encounter(db, encounter.id)
+    if facility_id:
+        await audit_service.write_audit_log(
+            db,
+            facility_id=facility_id,
+            user_id=encounter.created_by,
+            role=None,
+            action="encounter.update",
+            resource_type="encounter",
+            resource_id=encounter.id,
+            visit_id=encounter.visit_id,
+            new_value=changed_fields,
+        )
+
     return encounter
 
 

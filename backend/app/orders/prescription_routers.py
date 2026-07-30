@@ -7,6 +7,7 @@ from sqlalchemy.orm import selectinload
 from app.common.db import get_db
 from app.orders.models import Prescription, PrescriptionItem
 from app.orders.prescription_schemas import PrescriptionCreate, PrescriptionOut
+from app.audit import service as audit_service
 
 router = APIRouter(prefix="/prescriptions", tags=["prescriptions"])
 
@@ -53,7 +54,23 @@ async def create_prescription(payload: PrescriptionCreate, db: AsyncSession = De
         .where(Prescription.id == prescription.id)
         .options(selectinload(Prescription.items))
     )
-    return result.scalar_one()
+    created = result.scalar_one()
+
+    facility_id = await audit_service.facility_id_for_encounter(db, created.encounter_id)
+    if facility_id:
+        await audit_service.write_audit_log(
+            db,
+            facility_id=facility_id,
+            user_id=created.created_by,
+            role=None,
+            action="prescription.create",
+            resource_type="prescription",
+            resource_id=created.id,
+            patient_id=created.patient_id,
+            new_value={"item_count": len(created.items)},
+        )
+
+    return created
 
 
 @router.get("/{prescription_id}", response_model=PrescriptionOut)

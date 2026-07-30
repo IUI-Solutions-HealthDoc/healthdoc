@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.common.db import get_db
 from app.opd.models import Diagnosis, IcdCode
 from app.encounters.diagnosis_schemas import DiagnosisCreate, DiagnosisOut, IcdSearchResult
+from app.audit import service as audit_service
 
 router = APIRouter(prefix="/diagnoses", tags=["diagnoses"])
 
@@ -16,6 +17,24 @@ async def create_diagnosis(payload: DiagnosisCreate, db: AsyncSession = Depends(
     db.add(diagnosis)
     await db.flush()
     await db.refresh(diagnosis)
+
+    facility_id = await audit_service.facility_id_for_encounter(db, diagnosis.encounter_id)
+    if facility_id:
+        await audit_service.write_audit_log(
+            db,
+            facility_id=facility_id,
+            user_id=diagnosis.created_by,
+            role=None,
+            action="diagnosis.create",
+            resource_type="diagnosis",
+            resource_id=diagnosis.id,
+            new_value={
+                "icd_code": diagnosis.icd_code,
+                "icd_version": diagnosis.icd_version,
+                "is_primary": diagnosis.is_primary,
+            },
+        )
+
     return diagnosis
 
 

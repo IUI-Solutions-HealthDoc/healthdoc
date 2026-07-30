@@ -42,6 +42,18 @@ async def _get_prev_hash(db: AsyncSession) -> str:
     return last_hash or ("0" * 64)
 
 
+async def facility_id_for_encounter(db: AsyncSession, encounter_id: uuid.UUID):
+    """Encounter -> Visit -> facility_id. Shared by routers (encounters,
+    orders, prescriptions, diagnoses) that have no authenticated user to
+    pull facility_id from directly."""
+    from app.opd.models import Encounter, Visit
+    stmt = select(Visit.facility_id).join(Encounter, Encounter.visit_id == Visit.id).where(
+        Encounter.id == encounter_id
+    )
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
+
+
 async def write_audit_log(
     db: AsyncSession,
     *,

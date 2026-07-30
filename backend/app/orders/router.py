@@ -9,6 +9,7 @@ from app.common.enums import OrderStatus
 from app.orders.models import Order
 from app.orders.schemas import OrderCreate, OrderOut, OrderStatusUpdate
 from app.orders.order_number import generate_order_number
+from app.audit import service as audit_service
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 
@@ -36,6 +37,21 @@ async def create_order(payload: OrderCreate, db: AsyncSession = Depends(get_db))
     db.add(order)
     await db.flush()
     await db.refresh(order)
+
+    facility_id = await audit_service.facility_id_for_encounter(db, order.encounter_id)
+    if facility_id:
+        await audit_service.write_audit_log(
+            db,
+            facility_id=facility_id,
+            user_id=order.created_by,
+            role=None,
+            action="order.create",
+            resource_type="order",
+            resource_id=order.id,
+            patient_id=order.patient_id,
+            new_value={"order_type": order.order_type, "order_number": order.order_number, "status": order.status},
+        )
+
     return order
 
 
@@ -82,7 +98,24 @@ async def update_order_status(
             detail=f"Cannot transition order from '{order.status}' to '{new_status}'",
         )
 
+    old_status = order.status
     order.status = new_status
     await db.flush()
     await db.refresh(order)
+
+    facility_id = await audit_service.facility_id_for_encounter(db, order.encounter_id)
+    if facility_id:
+        await audit_service.write_audit_log(
+            db,
+            facility_id=facility_id,
+            user_id=order.created_by,
+            role=None,
+            action="order.status_update",
+            resource_type="order",
+            resource_id=order.id,
+            patient_id=order.patient_id,
+            old_value={"status": old_status},
+            new_value={"status": order.status},
+        )
+
     return order
