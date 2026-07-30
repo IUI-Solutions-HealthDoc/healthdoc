@@ -1,6 +1,7 @@
 import uuid
-from datetime import date
+from datetime import date, datetime
 from pydantic import BaseModel, ConfigDict
+from app.common.enums import QueuePriority
 
 
 class QueueCreate(BaseModel):
@@ -38,5 +39,35 @@ class QueueTokenOut(BaseModel):
     token_display: str
     status: str
     priority: str
+    created_at: datetime
+    called_at: datetime | None = None
+    completed_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
+
+class QueueTokenGenerateRequest(BaseModel):
+    """visit_id is required — complete_by_visit_id() needs it to trigger
+    automatic call-next."""
+    queue_id: uuid.UUID
+    visit_id: uuid.UUID
+    priority: str = QueuePriority.NORMAL.value
+
+
+class TokenPriorityElevate(BaseModel):
+    priority: str
+
+class QueueTokenListItemOut(QueueTokenOut):
+    doctor_name: str
+    room_number: str | None
+    model_config = ConfigDict(from_attributes=True)
+ 
+ 
+class QueueTokenListOut(BaseModel):
+    waiting_count: int
+    now_serving: str | None
+    items: list[QueueTokenListItemOut]
+ 
+ 
+class CompleteAdvanceOut(BaseModel):
+    completed_token: QueueTokenOut
+    next_token: QueueTokenOut | None
