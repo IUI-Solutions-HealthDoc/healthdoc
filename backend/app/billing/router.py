@@ -27,21 +27,25 @@ unlike everything else in this router.
 """
 
 import uuid
+from datetime import date
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import CurrentUser, require_roles
 from app.billing import service
 from app.billing.schemas import (
+    DailyRevenueResponse,
     InvoiceBuildRequest,
     InvoiceBuildResponse,
     InvoicePreviewResponse,
     PaymentCreate,
     PaymentOut,
+    PendingInvoicesResponse,
     PMJAYEligibilityResponse,
     RefundCreate,
     RefundOut,
+    SchemeBreakdownResponse,
 )
 from app.common.db import get_db
 from app.common.modules import require_module
@@ -66,6 +70,11 @@ _BILLING_ROLES = ("receptionist", "supervisor", "admin")
 # verbatim in the docs I have — flag for review; if refunds should stay
 # receptionist-accessible, just use _BILLING_ROLES here instead.
 _REFUND_APPROVAL_ROLES = ("supervisor", "admin")
+
+# MIS is a financial-overview surface, not day-to-day counter work — no
+# receptionist. auditor included since these are exactly the kind of
+# aggregate financial figures an auditor role should be able to pull.
+_MIS_ROLES = ("supervisor", "admin", "auditor")
 
 
 @router.get("/ping")
@@ -185,3 +194,54 @@ async def record_payment_refund(
         fallback_id=getattr(user, "id", None),
     )
     return await service.create_refund(db, payment_id=payment_id, body=body, actor_user_id=actor_user_id)
+
+
+# ---------------------------------------------------------------------
+# Billing MIS — B7-W3-02 (#189). Read-only. Always scoped to the
+# caller's own facility (resolved server-side from the JWT, never a
+# query param) — a facility's supervisor/auditor shouldn't be able to
+# pull another facility's revenue by just changing a UUID in the URL.
+# ---------------------------------------------------------------------
+
+
+@router.get(
+    "/mis/daily-revenue",
+    response_model=DailyRevenueResponse,
+    summary="Net revenue (payments minus refunds) per day for the caller's facility",
+)
+async def get_daily_revenue(
+    date_from: date = Query(default_factory=date.today),
+    date_to: date = Query(default_factory=date.today),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_roles(*_MIS_ROLES)),
+) -> DailyRevenueResponse:
+    facility_id = await service.facility_id_for_user(db, keycloak_sub=user.sub)
+    return await service.get_daily_revenue(db, facility_id=facility_id, date_from=date_from, date_to=date_to)
+
+
+@router.get(
+    "/mis/pending-invoices",
+    response_model=PendingInvoicesResponse,
+    summary="Invoices with an outstanding balance for the caller's facility",
+)
+async def get_pending_invoices(
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_roles(*_MIS_ROLES)),
+) -> PendingInvoicesResponse:
+    facility_id = await service.facility_id_for_user(db, keycloak_sub=user.sub)
+    return await service.get_pending_invoices(db, facility_id=facility_id)
+
+
+@router.get(
+    "/mis/scheme-breakdown",
+    response_model=SchemeBreakdownResponse,
+    summary="Billed/collected amounts grouped by scheme_code for invoices created in the given period",
+)
+async def get_scheme_breakdown(
+    date_from: date = Query(default_factory=date.today),
+    date_to: date = Query(default_factory=date.today),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_roles(*_MIS_ROLES)),
+) -> SchemeBreakdownResponse:
+    facility_id = await service.facility_id_for_user(db, keycloak_sub=user.sub)
+    return await service.get_scheme_breakdown(db, facility_id=facility_id, date_from=date_from, date_to=date_to)

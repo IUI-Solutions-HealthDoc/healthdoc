@@ -53,13 +53,19 @@ from app.billing.pricing import (
 )
 from app.billing.schemas import (
     ChargeLine,
+    DailyRevenuePoint,
+    DailyRevenueResponse,
     InvoiceBuildResponse,
     InvoicePreviewResponse,
     PaymentCreate,
     PaymentOut,
+    PendingInvoiceLine,
+    PendingInvoicesResponse,
     PMJAYEligibilityResponse,
     RefundCreate,
     RefundOut,
+    SchemeBreakdownLine,
+    SchemeBreakdownResponse,
 )
 from app.common.enums import ChargeCategory, DispenseStatus, PaymentStatus, ResultStatus
 
@@ -637,7 +643,7 @@ async def record_payment(
     see module docstring; app/common/db.get_db() commits once after the
     route handler returns.
     """
-    result = await db.execute(sa.select(Invoice).where(Invoice.id == invoice_id))
+    result = await db.execute(sa.select(Invoice).where(Invoice.id == invoice_id).with_for_update())
     invoice = result.scalar_one_or_none()
     if invoice is None:
         raise HTTPException(
@@ -737,7 +743,7 @@ async def create_refund(
     status from the new balance. No db.commit() here — see module
     docstring.
     """
-    result = await db.execute(sa.select(Payment).where(Payment.id == payment_id))
+    result = await db.execute(sa.select(Payment).where(Payment.id == payment_id).with_for_update())
     payment = result.scalar_one_or_none()
     if payment is None:
         raise HTTPException(
@@ -820,4 +826,198 @@ async def create_refund(
         reason=refund.reason,
         approved_by=refund.approved_by,
         refunded_at=refund.refunded_at.isoformat(),
+    )
+
+
+# =======================================================================
+# Billing MIS — B7-W3-02 (#189). Read-only. Computed live from
+# invoices/payments/refunds, not kpi_snapshots (that's B1's daily-job
+# table — separate concern). Every function here is facility-scoped;
+# router resolves the caller's own facility_id, never a client-supplied one.
+# =======================================================================
+
+
+async def facility_id_for_user(db: AsyncSession, keycloak_sub: str) -> uuid.UUID:
+    result = await db.execute(sa.select(users_t.c.facility_id).where(users_t.c.keycloak_sub == keycloak_sub))
+    facility_id = result.scalar_one_or_none()
+    if facility_id is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "No users row matches this token's subject.")
+    return facility_id
+
+
+async def get_daily_revenue(
+    db: AsyncSession, facility_id: uuid.UUID, date_from: date, date_to: date
+) -> DailyRevenueResponse:
+    """Net revenue = cash collected minus cash refunded, per calendar day
+    (each side counted on the day it happened, not the original payment's day)."""
+    if date_from > date_to:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "date_from must be <= date_to.")
+
+    paid_rows = await db.execute(
+        sa.select(
+            sa.cast(Payment.collected_at, sa.Date).label("day"),
+            sa.func.count().label("cnt"),
+            sa.func.sum(Payment.amount).label("total"),
+        )
+        .select_from(Payment)
+        .join(Invoice, Invoice.id == Payment.invoice_id)
+        .where(
+            Invoice.facility_id == facility_id,
+            Payment.status == PaymentStatus.SUCCESS.value,
+            sa.cast(Payment.collected_at, sa.Date).between(date_from, date_to),
+        )
+        .group_by(sa.cast(Payment.collected_at, sa.Date))
+    )
+    paid_by_day = {row.day: (row.cnt, Decimal(row.total)) for row in paid_rows}
+
+    refund_rows = await db.execute(
+        sa.select(
+            sa.cast(Refund.refunded_at, sa.Date).label("day"),
+            sa.func.sum(Refund.amount).label("total"),
+        )
+        .select_from(Refund)
+        .join(Payment, Payment.id == Refund.payment_id)
+        .join(Invoice, Invoice.id == Payment.invoice_id)
+        .where(
+            Invoice.facility_id == facility_id,
+            sa.cast(Refund.refunded_at, sa.Date).between(date_from, date_to),
+        )
+        .group_by(sa.cast(Refund.refunded_at, sa.Date))
+    )
+    refunded_by_day = {row.day: Decimal(row.total) for row in refund_rows}
+
+    points: list[DailyRevenuePoint] = []
+    total_net = Decimal("0")
+    day = date_from
+    while day <= date_to:
+        cnt, gross = paid_by_day.get(day, (0, Decimal("0")))
+        refunded = refunded_by_day.get(day, Decimal("0"))
+        net = _money(gross - refunded)
+        total_net += net
+        points.append(
+            DailyRevenuePoint(
+                day=day, payment_count=cnt, gross_collected=_money(gross),
+                refunded=_money(refunded), net_revenue=net,
+            )
+        )
+        day = date.fromordinal(day.toordinal() + 1)
+
+    return DailyRevenueResponse(
+        facility_id=facility_id, date_from=date_from, date_to=date_to,
+        points=points, total_net_revenue=_money(total_net),
+    )
+
+
+async def get_pending_invoices(db: AsyncSession, facility_id: uuid.UUID) -> PendingInvoicesResponse:
+    """Invoices with status in (issued, partially_paid) i.e. balance_due > 0."""
+    result = await db.execute(
+        sa.select(Invoice).where(
+            Invoice.facility_id == facility_id,
+            Invoice.status.in_(_PAYABLE_INVOICE_STATUSES),
+        ).order_by(Invoice.created_at.asc())
+    )
+    invoices = result.scalars().all()
+
+    today = date.today()
+    items: list[PendingInvoiceLine] = []
+    total_balance = Decimal("0")
+    for invoice in invoices:
+        total_paid, total_refunded = await _payment_totals_for_invoice(db, invoice.id)
+        paid_amount = _money(total_paid - total_refunded)
+        balance_due = _money(Decimal(invoice.net_amount) - paid_amount)
+        if balance_due <= Decimal("0"):  # fully paid, status just hasn't caught up somehow — skip
+            continue
+        total_balance += balance_due
+        items.append(
+            PendingInvoiceLine(
+                invoice_id=invoice.id,
+                invoice_number=invoice.invoice_number,
+                visit_id=invoice.visit_id,
+                patient_id=invoice.patient_id,
+                status=invoice.status,
+                net_amount=_money(Decimal(invoice.net_amount)),
+                paid_amount=paid_amount,
+                balance_due=balance_due,
+                created_at=invoice.created_at.isoformat(),
+                days_pending=(today - invoice.created_at.date()).days,
+            )
+        )
+
+    return PendingInvoicesResponse(
+        facility_id=facility_id,
+        as_of=datetime.now(timezone.utc).isoformat(),
+        count=len(items),
+        total_balance_due=_money(total_balance),
+        items=items,
+    )
+
+
+async def get_scheme_breakdown(
+    db: AsyncSession, facility_id: uuid.UUID, date_from: date, date_to: date
+) -> SchemeBreakdownResponse:
+    """Groups invoices created in [date_from, date_to] by scheme_code
+    (NULL -> 'self_pay'). collected_total nets out refunds, same as
+    get_daily_revenue."""
+    if date_from > date_to:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "date_from must be <= date_to.")
+
+    scheme_col = sa.func.coalesce(Invoice.scheme_code, "self_pay").label("scheme_code")
+    result = await db.execute(
+        sa.select(
+            scheme_col,
+            sa.func.count().label("cnt"),
+            sa.func.sum(Invoice.net_amount).label("net_billed"),
+            sa.func.sum(Invoice.scheme_adjustment).label("scheme_adjustment"),
+        )
+        .where(
+            Invoice.facility_id == facility_id,
+            sa.cast(Invoice.created_at, sa.Date).between(date_from, date_to),
+        )
+        .group_by(scheme_col)
+    )
+    rows = result.all()
+
+    lines: list[SchemeBreakdownLine] = []
+    grand_total = Decimal("0")
+    for row in rows:
+        scheme_filter = None if row.scheme_code == "self_pay" else row.scheme_code
+
+        collected_result = await db.execute(
+            sa.select(sa.func.coalesce(sa.func.sum(Payment.amount), 0))
+            .select_from(Payment)
+            .join(Invoice, Invoice.id == Payment.invoice_id)
+            .where(
+                Invoice.facility_id == facility_id,
+                Invoice.scheme_code == scheme_filter,
+                sa.cast(Invoice.created_at, sa.Date).between(date_from, date_to),
+                Payment.status == PaymentStatus.SUCCESS.value,
+            )
+        )
+        refunded_result = await db.execute(
+            sa.select(sa.func.coalesce(sa.func.sum(Refund.amount), 0))
+            .select_from(Refund)
+            .join(Payment, Payment.id == Refund.payment_id)
+            .join(Invoice, Invoice.id == Payment.invoice_id)
+            .where(
+                Invoice.facility_id == facility_id,
+                Invoice.scheme_code == scheme_filter,
+                sa.cast(Invoice.created_at, sa.Date).between(date_from, date_to),
+            )
+        )
+        collected = _money(Decimal(collected_result.scalar_one()) - Decimal(refunded_result.scalar_one()))
+        net_billed = _money(Decimal(row.net_billed))
+        grand_total += net_billed
+        lines.append(
+            SchemeBreakdownLine(
+                scheme_code=row.scheme_code,
+                invoice_count=row.cnt,
+                net_billed=net_billed,
+                scheme_adjustment_total=_money(Decimal(row.scheme_adjustment)),
+                collected_total=collected,
+            )
+        )
+
+    return SchemeBreakdownResponse(
+        facility_id=facility_id, date_from=date_from, date_to=date_to,
+        lines=lines, grand_total_net_billed=_money(grand_total),
     )
