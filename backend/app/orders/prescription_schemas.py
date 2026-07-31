@@ -39,5 +39,6 @@ class PrescriptionOut(BaseModel):
     patient_id: uuid.UUID
     notes: Optional[str]
     items: list[PrescriptionItemOut]
+    cds_flags: list[dict] = []
 
     model_config = ConfigDict(from_attributes=True)

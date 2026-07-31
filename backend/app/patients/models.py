@@ -37,3 +37,13 @@ class Patient(Base, UUIDPk, Timestamps, Blame):
     facility_id = Column(UUID(as_uuid=True), ForeignKey("facilities.id"), nullable=False)
     deleted_at = Column(DateTime(timezone=True), nullable=True)
     deleted_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+
+
+class PatientAllergy(Base, UUIDPk, Timestamps, Blame):
+    """B3-W6-01 (#229). Matches migrations/versions/0024_patient_allergies.py."""
+    __tablename__ = "patient_allergies"
+
+    patient_id = Column(UUID(as_uuid=True), ForeignKey("patients.id"), nullable=False)
+    allergen = Column(Text, nullable=False)
+    reaction = Column(Text, nullable=True)
+    severity = Column(String(30), nullable=True)

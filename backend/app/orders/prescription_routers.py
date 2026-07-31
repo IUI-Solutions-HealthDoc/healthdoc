@@ -7,6 +7,7 @@ from sqlalchemy.orm import selectinload
 from app.common.db import get_db
 from app.orders.models import Prescription, PrescriptionItem
 from app.orders.prescription_schemas import PrescriptionCreate, PrescriptionOut
+from app.orders import cds_service
 from app.audit import service as audit_service
 
 router = APIRouter(prefix="/prescriptions", tags=["prescriptions"])
@@ -56,6 +57,11 @@ async def create_prescription(payload: PrescriptionCreate, db: AsyncSession = De
     )
     created = result.scalar_one()
 
+    medicine_names = [item.medicine_name for item in created.items]
+    interaction_flags = cds_service.check_interactions(medicine_names)
+    allergy_flags = await cds_service.check_allergies(db, created.patient_id, medicine_names)
+    cds_flags = interaction_flags + allergy_flags
+
     facility_id = await audit_service.facility_id_for_encounter(db, created.encounter_id)
     if facility_id:
         await audit_service.write_audit_log(
@@ -67,10 +73,12 @@ async def create_prescription(payload: PrescriptionCreate, db: AsyncSession = De
             resource_type="prescription",
             resource_id=created.id,
             patient_id=created.patient_id,
-            new_value={"item_count": len(created.items)},
+            new_value={"item_count": len(created.items), "cds_flags_raised": len(cds_flags)},
         )
 
-    return created
+    out = PrescriptionOut.model_validate(created)
+    out.cds_flags = cds_flags
+    return out
 
 
 @router.get("/{prescription_id}", response_model=PrescriptionOut)
