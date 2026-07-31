@@ -273,15 +273,11 @@ async def test_substitution_creates_pending_row_without_touching_stock(fake_sess
     assert item.quantity_dispensed == Decimal("0")
     assert item.batches == []
 
-   
     assert fake_session.db["stock_ledger"] == []
 
-   
-    assert len(fake_session.db["notifications"]) == 2
-    recipients = {n["recipient_user_id"] for n in fake_session.db["notifications"]}
-    assert recipients == {str(doctor_id), str(patient_id)}
+    assert len(fake_session.db["notifications"]) == 1
+    assert fake_session.db["notifications"][0]["recipient_user_id"] == str(doctor_id)
 
-   
     assert len(audit_log.calls) == 1
 
 

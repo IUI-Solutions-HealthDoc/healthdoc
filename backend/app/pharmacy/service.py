@@ -264,34 +264,27 @@ async def _write_notification(
     except Exception:  
         pass
 
-
 async def _notify_substitution_stakeholders(
     db: AsyncSession, *, prescription_id: UUID, title: str, body: str, reference_id: str,
 ) -> None:
     
     row = (
-        await db.execute(
-            text("""
-                SELECT e.provider_id AS doctor_id, p.patient_id
-                FROM prescriptions p
-                JOIN encounters e ON e.id = p.encounter_id
-                WHERE p.id = :id
-            """),
-            {"id": str(prescription_id)},
-        )
-    ).mappings().first()
+    await db.execute(
+        text("""
+            SELECT e.provider_id AS doctor_id
+            FROM prescriptions p
+            JOIN encounters e ON e.id = p.encounter_id
+            WHERE p.id = :id
+        """),
+        {"id": str(prescription_id)},
+    )
+).mappings().first()
     if row is None:
         return
 
     if row.get("doctor_id"):
         await _write_notification(
             db, recipient_user_id=row["doctor_id"], notification_type="pharmacy_substitution",
-            title=title, body=body, reference_type="pharmacy_dispense_items",
-            reference_id=reference_id,
-        )
-    if row.get("patient_id"):
-        await _write_notification(
-            db, recipient_user_id=row["patient_id"], notification_type="pharmacy_substitution",
             title=title, body=body, reference_type="pharmacy_dispense_items",
             reference_id=reference_id,
         )
