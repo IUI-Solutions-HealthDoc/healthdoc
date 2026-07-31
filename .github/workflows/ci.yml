@@ -14,6 +14,14 @@ jobs:
       - run: pip install -r requirements.txt || echo "requirements.txt not yet created"
       - run: pip install ruff pytest && ruff check . || true
       - run: pytest -q || echo "no tests yet"
+      - name: Spec drift check (docs vs enums)
+        run: python scripts/spec_check.py ..
+      - name: PR convention check (blockers fail the build)
+        run: |
+          git fetch --no-tags --depth=50 origin staging || true
+          python scripts/pr_check.py
+      - name: Migration chain integrity
+        run: python scripts/check_migration_integrity.py || true
   frontend:
     runs-on: ubuntu-latest
     defaults: { run: { working-directory: frontend } }
@@ -23,4 +31,7 @@ jobs:
         with: { node-version: "20" }
       - run: npm ci || npm install || echo "package.json not yet created"
       - run: npm run lint --if-present
+      - name: Frontend convention check
+        run: node scripts/fe_check.mjs --all
+      - run: npm run test --if-present
       - run: npm run build --if-present

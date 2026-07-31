@@ -427,20 +427,30 @@ class DischargeNotificationTarget(CheckedEnum):
 
 
 class ModuleCode(CheckedEnum):
-    """Per-facility toggleable modules (facility_modules). Core modules
-    (patients, registration, opd, queue, billing, consent, audit, files,
-    users, notifications) are NOT listed — they can never be disabled."""
-    LAB = "lab"
-    RADIOLOGY = "radiology"
+    """The ONLY per-facility toggleable modules (facility_modules).
+
+    Exactly five. Everything else — patients, registration, opd/encounters, queue,
+    departments, billing, consent, audit, files, users, notifications, inventory,
+    ipd, emergency, patient_portal, abdm, refunds — is CORE and can never be
+    disabled (see common/modules.CORE_MODULES).
+
+    Inventory is deliberately core *because* pharmacy is optional: consumables,
+    reagents and ward stock exist even with no dispensary.
+    """
     PHARMACY = "pharmacy"
-    INVENTORY = "inventory"
-    IPD = "ipd"
+    LAB = "lab"                 # pathology
+    RADIOLOGY = "radiology"
     OT = "ot"
     BLOOD_BANK = "blood_bank"
+
+
+class ProcedureSetting(CheckedEnum):
+    """Where a procedure happened — decoupled from the OT module so minor
+    procedures are recordable and billable at a facility with no theatre."""
+    OPD_MINOR = "opd_minor"
+    BEDSIDE = "bedside"
     EMERGENCY = "emergency"
-    PATIENT_PORTAL = "patient_portal"
-    ABDM = "abdm"
-    BILLING_REFUNDS = "billing_refunds"
+    OT = "ot"
 
 
 class FulfilmentMode(CheckedEnum):
