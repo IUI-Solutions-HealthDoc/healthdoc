@@ -57,11 +57,10 @@ This only WRITES the log row. It does not:
     to (e.g. an order_id that isn't itself a patient_id). Callers must
     supply the right path-param name via patient_id_param.
 
-AUTH — same caveat as app/billing/router.py: I don't have
-app/auth/deps.py to confirm CurrentUser's exact shape. Matched to how
-app/common/modules.py actually uses it (`user: CurrentUser` with no
-explicit Depends(), implying CurrentUser is already an Annotated
-Depends() type) rather than guessing a different pattern.
+AUTH — confirmed against app/auth/deps.py: CurrentUser =
+Annotated[AuthUser, Depends(get_current_user)]. AuthUser has sub,
+username, roles — no `id` field, so _resolve_user_id() always takes the
+keycloak_sub lookup path.
 """
 
 from __future__ import annotations
@@ -202,7 +201,8 @@ def _extract_role(user: CurrentUser) -> str | None:
 
 
 async def _resolve_user_id(db: AsyncSession, user: CurrentUser) -> uuid.UUID | None:
-    """users.id (app UUID), not the Keycloak sub — see module docstring."""
+    """users.id (app UUID), not the Keycloak sub. AuthUser has no `id`
+    field today, so this always falls through to the keycloak_sub lookup."""
     existing = getattr(user, "id", None)
     if existing is not None:
         return existing

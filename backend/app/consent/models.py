@@ -96,6 +96,9 @@ class ConsentRecord(UUIDPk, Blame, Timestamps, Base):
     __table_args__ = (
         Index("ix_consent_records_patient_id", "patient_id"),
         Index("ix_consent_records_purpose_id", "purpose_id"),
+        Index("ix_consent_records_granted_by_user_id", "granted_by_user_id"),
+        Index("ix_consent_records_created_by", "created_by"),
+        Index("ix_consent_records_updated_by", "updated_by"),
         CheckConstraint(
             "granted_by_type IN ('patient', 'guardian', 'nominee')",
             name="ck_consent_records_granted_by_type",
@@ -146,6 +149,7 @@ class ConsentWithdrawal(UUIDPk, Base):
 
     __table_args__ = (
         Index("ix_consent_withdrawals_consent_id", "consent_id"),
+        Index("ix_consent_withdrawals_withdrawn_by_user_id", "withdrawn_by_user_id"),
         CheckConstraint(
             "withdrawn_by_type IN ('patient', 'guardian', 'nominee', 'system_expiry')",
             name="ck_consent_withdrawals_withdrawn_by_type",
@@ -199,6 +203,7 @@ class DataAccessLog(UUIDPk, Base):
     __table_args__ = (
         Index("ix_data_access_log_user_id", "user_id", "accessed_at"),
         Index("ix_data_access_log_patient_id", "patient_id", "accessed_at"),
+        Index("ix_data_access_log_consent_id", "consent_id"),
         CheckConstraint(
             "access_channel IN ('ui', 'api', 'abdm_hiu', 'export')",
             name="ck_data_access_log_access_channel",
@@ -211,6 +216,69 @@ class DataAccessLog(UUIDPk, Base):
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"<DataAccessLog id={self.id} user={self.user_id} resource={self.resource_type}:{self.resource_id}>"
+
+
+class BreakGlassGrant(UUIDPk, Timestamps, Base):
+    """
+    Emergency ("break-glass") access grant — added to the schema doc in
+    v3.9, under migration 0004 (this module's own migration). Was missing
+    from this file/migration entirely; added per the v3.13 schema pass.
+
+    A grant is active iff `now() < expires_at AND revoked_at IS NULL`
+    (app/service-layer check — no DB constraint can express "now()" at
+    read time). Clinical reads consult this table when consent is absent;
+    every read under an active grant still writes a DataAccessLog row
+    with emergency_access=True (see app/consent/access_log.py).
+
+    expires_at is NOT server-computed here — the service sets it to
+    granted_at + <facility-configurable window, default 2h> at insert
+    time, since the window is a facility setting, not a fixed interval.
+
+    Unreviewed expired grants (reviewed_at IS NULL and expires_at is in
+    the past) are the DPO/compliance queue's worklist — that queue reads
+    this table directly; no separate table backs it.
+    """
+
+    __tablename__ = "break_glass_grants"
+
+    patient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)  # FK added in 0006
+    granted_to_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="RESTRICT", name="fk_break_glass_grants_granted_to_user_id"),
+        nullable=False,
+    )
+    justification: Mapped[str] = mapped_column(Text, nullable=False)  # >= 20 chars, enforced at service layer
+    granted_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(nullable=False)  # granted_at + facility-configurable window
+
+    revoked_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    revoked_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="RESTRICT", name="fk_break_glass_grants_revoked_by"),
+        nullable=True,
+    )
+
+    reviewed_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    reviewed_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="RESTRICT", name="fk_break_glass_grants_reviewed_by"),
+        nullable=True,
+    )
+    review_outcome: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        Index("ix_break_glass_grants_patient_id", "patient_id", "expires_at"),
+        Index("ix_break_glass_grants_granted_to_user_id", "granted_to_user_id", "expires_at"),
+        Index("ix_break_glass_grants_revoked_by", "revoked_by"),
+        Index("ix_break_glass_grants_reviewed_by", "reviewed_by"),
+        CheckConstraint(
+            "char_length(justification) >= 20",
+            name="ck_break_glass_grants_justification_length",
+        ),
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<BreakGlassGrant id={self.id} patient={self.patient_id} expires_at={self.expires_at}>"
 
 
 class ConsentRenewalReminder(UUIDPk, Base):
