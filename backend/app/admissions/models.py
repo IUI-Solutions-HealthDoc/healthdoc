@@ -31,7 +31,7 @@ class Bed(Base, UUIDPk, Timestamps):
         UUID(as_uuid=True), ForeignKey("wards.id"), nullable=False, index=True
     )
     bed_number: Mapped[str] = mapped_column(String(20), nullable=False)
-    status: Mapped[str] = mapped_column(String(30), default="vacant", nullable=False)
+    status: Mapped[str] = mapped_column(String(50), default="vacant", nullable=False)
 
 
 class Admission(Base, UUIDPk, Timestamps, Blame):
@@ -53,7 +53,7 @@ class Admission(Base, UUIDPk, Timestamps, Blame):
     )
     admitted_at: Mapped[datetime] = mapped_column(nullable=False)
     reason: Mapped[str | None] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(String(30), default="admitted", nullable=False)
+    status: Mapped[str] = mapped_column(String(50), default="admitted", nullable=False)
 
 
 class Discharge(Base, UUIDPk, Timestamps, Blame):
@@ -65,7 +65,7 @@ class Discharge(Base, UUIDPk, Timestamps, Blame):
         UUID(as_uuid=True), ForeignKey("admissions.id"), unique=True, nullable=False
     )
     discharged_at: Mapped[datetime] = mapped_column(nullable=False)
-    discharge_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    discharge_type: Mapped[str] = mapped_column(String(50), nullable=False)
     discharge_summary: Mapped[str | None] = mapped_column(Text)
     follow_up_date: Mapped[date | None] = mapped_column(nullable=True)
 

@@ -23,8 +23,8 @@ class Visit(Base):
     patient_id = Column(UUID(as_uuid=True), ForeignKey("patients.id"), nullable=False)
     facility_id = Column(UUID(as_uuid=True), ForeignKey("facilities.id"), nullable=False)
     department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id"), nullable=True)
-    visit_type = Column(String(30), nullable=False)
-    status = Column(String(30), nullable=False, server_default="registered")
+    visit_type = Column(String(50), nullable=False)
+    status = Column(String(50), nullable=False, server_default="registered")
     visit_date = Column(DateTime(timezone=True), nullable=False)
 
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
@@ -56,7 +56,7 @@ class Encounter(Base):
     )
     visit_id = Column(UUID(as_uuid=True), ForeignKey("visits.id"), nullable=False)
     provider_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    encounter_type = Column(String(30), nullable=True)
+    encounter_type = Column(String(50), nullable=True)
     chief_complaint = Column(Text, nullable=True)
     started_at = Column(DateTime(timezone=True), nullable=True)
     ended_at = Column(DateTime(timezone=True), nullable=True)
@@ -108,7 +108,7 @@ class Diagnosis(Base):
     icd_uri = Column(Text, nullable=True)
     post_coordinated_code = Column(Text, nullable=True)
     diagnosis_text = Column(Text, nullable=False)
-    diagnosis_type = Column(String(30), nullable=False)
+    diagnosis_type = Column(String(50), nullable=False)
     is_primary = Column(Boolean, nullable=False, server_default="false")
 
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
