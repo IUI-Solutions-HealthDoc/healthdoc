@@ -16,6 +16,9 @@ class OrderStatus(BaseEnum):
     PLACED = "placed"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
+    VERIFICATION_PENDING = "verification_pending"
+    RELEASED = "released"
+    REJECTED = "rejected"
     CANCELLED = "cancelled"
 
 
@@ -24,6 +27,19 @@ class ResultStatus(BaseEnum):
     PRELIMINARY = "preliminary"
     FINAL = "final"
     CORRECTED = "corrected"
+
+
+class RadiologyItemStatus(BaseEnum):
+    """Separate from OrderStatus — radiology's lifecycle genuinely differs (per the Radiology doc)."""
+    PLACED = "placed"
+    SCHEDULED = "scheduled"
+    SCANNED = "scanned"
+    REPORTING = "reporting"
+    VERIFICATION_PENDING = "verification_pending"
+    RELEASED = "released"
+    RESCHEDULED = "rescheduled"
+    CANCELLED = "cancelled"
+    REJECTED = "rejected"
 
 
 class Sex(BaseEnum):

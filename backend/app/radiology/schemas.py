@@ -23,6 +23,7 @@ class RadiologyOrderItemOut(BaseModel):
     machine_id: str | None
     pacs_study_uid: str | None
     scheduled_at: datetime | None
+    scan_completed_at: datetime | None = None
     status: str
     created_at: datetime
 
@@ -34,6 +35,11 @@ class ScheduleRequest(BaseModel):
     """Body for PUT /radiology/order-items/{item_id}/schedule"""
     scheduled_at: datetime
     machine_id: str
+
+
+class ScanCompletionRequest(BaseModel):
+    """Body for PUT /radiology/order-items/{item_id}/scan-complete"""
+    completed_at: datetime | None = None
 
 
 class RadiologyOrderItemListOut(BaseModel):

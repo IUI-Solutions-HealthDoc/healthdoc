@@ -1,5 +1,5 @@
 """
-radiology module router - issue #203: order receive + scheduling;
+radiology module router — issue #203: order receive + scheduling;
 radiologist draft + sign-off.
 """
 import uuid
@@ -39,7 +39,7 @@ async def create_radiology_order_item(
     try:
         from app.orders.models import Order
     except ImportError:
-        Order = None
+        Order = None  # BLOCKED: app.orders has no models.py yet (confirmed 2026-08-01)
 
     if Order is not None:
         order = await db.get(Order, order_id)
@@ -72,6 +72,10 @@ async def mark_scan_complete(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(require_roles("radiology_tech")),
 ):
+    """
+    Records when the scan was actually performed (images acquired).
+    This becomes the TAT baseline — mirrors LabOrderItem.collected_at.
+    """
     item = await db.get(RadiologyOrderItem, item_id)
     if item is None:
         raise HTTPException(status_code=404, detail="Radiology order item not found")
@@ -190,6 +194,10 @@ async def get_fhir_bundle(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    """
+    #204: builds a FHIR R4 Bundle (DiagnosticReport + Observation) from the
+    current finalized report. Returns 409 if no report has been signed off yet.
+    """
     item = await db.get(RadiologyOrderItem, item_id)
     if item is None:
         raise HTTPException(status_code=404, detail="Radiology order item not found")
@@ -205,7 +213,7 @@ async def get_fhir_bundle(
     try:
         from app.orders.models import Order
     except ImportError:
-        Order = None
+        Order = None  # BLOCKED: app.orders has no models.py yet (confirmed 2026-08-01)
 
     patient_id = None
     if Order is not None:

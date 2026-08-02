@@ -4,11 +4,17 @@ from app.common.mixins import UUIDPk, Timestamps, Blame
 from app.common.db import Base
 
 
-class LabOrderItem(Base, UUIDPk, Timestamps, Blame):
+class LabOrderItem(Base, UUIDPk, Timestamps):
     __tablename__ = "lab_order_items"
 
-    order_id = Column(UUID(as_uuid=True), ForeignKey("orders.id", ondelete="RESTRICT"),
-                       nullable=False, index=True)  # order.order_type = 'lab'
+    # NOTE: not using the Blame mixin here — it hardcodes ForeignKey("users.id"),
+    # and app.users has no models.py/table yet (confirmed 2026-07-30). Using
+    # plain UUID columns instead, matching the FK-free migration. Switch back
+    # to the Blame mixin once app.users exists.
+    created_by = Column(UUID(as_uuid=True), nullable=False)
+    updated_by = Column(UUID(as_uuid=True), nullable=True)
+
+    order_id = Column(UUID(as_uuid=True), nullable=False, index=True)  # order.order_type = 'lab'; no FK yet — app.orders has no models.py
     accession_number = Column(String(30), unique=True, nullable=False)
     test_code = Column(String(30), nullable=True)
     test_name = Column(Text, nullable=False)
@@ -20,8 +26,10 @@ class LabOrderItem(Base, UUIDPk, Timestamps, Blame):
     barcode = Column(String(50), unique=True, nullable=True)
     collected_at = Column(DateTime(timezone=True), nullable=True)
 
-    department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id", ondelete="RESTRICT"),
-                            nullable=True, index=True)
+    # NOTE: FK to departments.id intentionally omitted — app.departments has no
+    # models.py yet (confirmed 2026-07-30).
+    department_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+
     status = Column(
         String(30),
         nullable=False,
@@ -49,7 +57,9 @@ class LabResult(Base, UUIDPk, Timestamps):
     amendment_reason = Column(Text, nullable=True)
 
     status = Column(String(30), nullable=False)
-    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    # NOTE: FK to users.id intentionally omitted — same reason as LabOrderItem
+    # above; app.users has no models.py yet (confirmed 2026-07-30).
+    created_by = Column(UUID(as_uuid=True), nullable=False)
 
     # UNIQUE(lab_order_item_id, version) + partial unique index WHERE is_current
     # Declared in Alembic migration (0010_lab.py), not here because

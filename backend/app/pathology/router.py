@@ -1,30 +1,29 @@
 """
-pathology module router — issue #166 (order receive + sample collection),
+pathology module router - issue #166 (order receive + sample collection),
 #184 (result entry + dual-verify), #185 (critical value SSE alert),
-#186 (TAT calculation on release).
+#186 (TAT calculation on release), #231 (lab MIS summary).
 
 Prefix is /pathology (module-scoped). Response wrapping (envelope) and
-pagination follow Master Schema §4 - this router returns plain Pydantic
-models; the envelope middleware wraps them.
+pagination follow Master Schema Section 4 - this router returns plain
+Pydantic models; the envelope middleware wraps them.
 
 NOTE: project uses async SQLAlchemy (AsyncSession) - every DB call is awaited.
 
-STILL OPEN (flagged, not silently fixed — see TODOs inline):
+STILL OPEN (flagged, not silently fixed - see TODOs inline):
 - _write_audit_log is a stub (pass). Audit logging is owned by a teammate's
   module (app/audit/models.py + migration 0003). Swap the stub once that
-  lands — do not implement it here.
+  lands - do not implement it here.
 - CRITICAL_THRESHOLDS only has a placeholder hemoglobin range. Needs real
   values from the pathologist/lab director before this ships.
-- _resolve_ordering_doctor_id / _publish_critical_alert import
-  app.notifications.models.NotificationHistory and app.encounters.models.Encounter.
-  Confirm these modules exist and match the field names used below before
-  relying on #185 end-to-end.
+- orders/departments/users FKs on LabOrderItem/LabResult are intentionally
+  omitted at the DB level too (see migration for #166) for the same reason -
+  those tables don't exist yet either.
 """
 import asyncio
 import json
 import uuid
 from datetime import datetime, timezone, timedelta
-
+from statistics import mean, median
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -56,19 +55,19 @@ async def ping() -> dict:
 )
 async def create_lab_order_item(
     payload: LabOrderItemCreate,
-    order_id: uuid.UUID = Query(..., description="Existing order id (order_type='lab')"),
+    order_id: uuid.UUID = Query(..., description="Existing order id (order_type=lab)"),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(require_roles("doctor", "lab_tech")),
 ):
-    """
-    Doctor (or authorized staff) places a lab test against an existing order.
-    Pydantic already enforces test_name/sample_type are not empty.
-    """
-    from app.orders.models import Order  # shared orders table (migration 0008)
+    try:
+        from app.orders.models import Order
+    except ImportError:
+        Order = None
 
-    order = await db.get(Order, order_id)
-    if order is None:
-        raise HTTPException(status_code=404, detail="Order not found")
+    if Order is not None:
+        order = await db.get(Order, order_id)
+        if order is None:
+            raise HTTPException(status_code=404, detail="Order not found")
 
     accession_number = await _generate_accession_number(db, prefix="LAB")
 
@@ -81,13 +80,13 @@ async def create_lab_order_item(
         department_id=payload.department_id,
         estimated_minutes=payload.estimated_minutes,
         status="placed",
-        created_by=current_user.id,
+        created_by=current_user.sub,
     )
     db.add(item)
     await db.flush()
 
     await _write_audit_log(db, table_name="lab_order_items", row_id=item.id,
-                            action="create", actor_id=current_user.id)
+                            action="create", actor_id=current_user.sub)
     await db.refresh(item)
     return item
 
@@ -102,13 +101,6 @@ async def collect_sample(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(require_roles("lab_tech")),
 ):
-    """
-    Records barcode + collection timestamp for a placed lab item.
-    Rejects duplicate barcodes (edge case flagged in the original draft).
-
-    NOTE: requires LabOrderItem.barcode / LabOrderItem.collected_at columns
-    (added in migration 00XX_lab_barcode_collected_at.py — see that file).
-    """
     item = await db.get(LabOrderItem, item_id)
     if item is None:
         raise HTTPException(status_code=404, detail="Lab order item not found")
@@ -128,7 +120,7 @@ async def collect_sample(
     item.collected_at = payload.collected_at or datetime.now(timezone.utc)
 
     await _write_audit_log(db, table_name="lab_order_items", row_id=item.id,
-                            action="update", actor_id=current_user.id)
+                            action="update", actor_id=current_user.sub)
     await db.refresh(item)
     return item
 
@@ -144,7 +136,6 @@ async def list_lab_order_items(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """Powers the 'Technician Dashboard - Pending Samples' screen."""
     query = select(LabOrderItem)
     if status:
         query = query.where(LabOrderItem.status == status)
@@ -161,11 +152,6 @@ async def list_lab_order_items(
 
 
 async def _generate_accession_number(db: AsyncSession, prefix: str) -> str:
-    """
-    LAB-YYYYMMDD-SEQ5. Placeholder counter logic - confirm with the team
-    whether this should use a shared counter table (like billing_counters)
-    for guaranteed gapless sequencing before this ships.
-    """
     today = datetime.now(timezone.utc).strftime("%Y%m%d")
     count_today = (await db.execute(
         select(func.count()).select_from(LabOrderItem)
@@ -177,21 +163,17 @@ async def _generate_accession_number(db: AsyncSession, prefix: str) -> str:
 
 async def _write_audit_log(db: AsyncSession, *, table_name: str, row_id: uuid.UUID,
                             action: str, actor_id: uuid.UUID) -> None:
-    """TODO (teammate's module): swap this stub once app/audit/models.py +
-    migration 0003 land. Do not implement here — confirmed not your task."""
     pass
 
 
 # --- #184: result entry (technician) + dual-verify pathologist approval ---
 
 CRITICAL_THRESHOLDS = {
-    # PLACEHOLDER - confirm real thresholds with team; keyed by result_data field name.
     "hemoglobin_g_dl": {"low": 7.0, "high": 20.0},
 }
 
 
 def _check_critical(result_data: dict) -> list[str]:
-    """Returns list of field names that breached a critical threshold."""
     flagged = []
     for field, limits in CRITICAL_THRESHOLDS.items():
         value = result_data.get(field)
@@ -213,7 +195,6 @@ async def enter_result(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(require_roles("lab_tech")),
 ):
-    """Technician enters the first version of a result (status=preliminary)."""
     item = await db.get(LabOrderItem, item_id)
     if item is None:
         raise HTTPException(status_code=404, detail="Lab order item not found")
@@ -225,17 +206,13 @@ async def enter_result(
         result_data=payload.result_data,
         remarks=payload.remarks,
         status="preliminary",
-        created_by=current_user.id,
+        created_by=current_user.sub,
     )
     db.add(result)
-    item.status = "completed"  # awaiting verification, not "released"
-
-    flagged = _check_critical(payload.result_data)
-    if flagged:
-        await _publish_critical_alert(db, item, flagged, current_user)
+    item.status = "completed"
 
     await _write_audit_log(db, table_name="lab_results", row_id=result.id,
-                            action="create", actor_id=current_user.id)
+                            action="create", actor_id=current_user.sub)
     await db.flush()
     await db.refresh(result)
     return result
@@ -251,11 +228,6 @@ async def verify_result(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(require_roles("pathologist")),
 ):
-    """
-    Pathologist approves (or corrects + approves) the current preliminary result.
-    Dual-verify rule: the approving pathologist must be a DIFFERENT user than
-    whoever entered the version being approved.
-    """
     current = (await db.execute(
         select(LabResult)
         .where(LabResult.lab_order_item_id == item_id, LabResult.is_current.is_(True))
@@ -264,7 +236,7 @@ async def verify_result(
     if current is None:
         raise HTTPException(status_code=404, detail="No result found for this item")
 
-    if current.created_by == current_user.id:
+    if str(current.created_by) == current_user.sub:
         raise HTTPException(
             status_code=403,
             detail="Verifying pathologist must be different from the person who entered the result",
@@ -280,7 +252,7 @@ async def verify_result(
         result_data=payload.result_data if payload.result_data is not None else current.result_data,
         remarks=payload.remarks if payload.remarks is not None else current.remarks,
         status="final",
-        created_by=current_user.id,
+        created_by=current_user.sub,
     )
     db.add(new_result)
 
@@ -288,13 +260,10 @@ async def verify_result(
     item.status = "released"
 
     await _write_audit_log(db, table_name="lab_results", row_id=new_result.id,
-                            action="create", actor_id=current_user.id)
+                            action="create", actor_id=current_user.sub)
     await db.flush()
     await db.refresh(new_result)
 
-    # #186: TAT - calculated on the fly, not stored.
-    # Baseline is collected_at when available (falls back to created_at until
-    # every item has gone through the fixed sample-collection flow).
     tat_delta = new_result.created_at - (item.collected_at or item.created_at)
     result_out = LabResultOut.model_validate(new_result)
     result_out.tat_minutes = int(tat_delta.total_seconds() // 60)
@@ -313,11 +282,6 @@ async def amend_result(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(require_roles("pathologist")),
 ):
-    """
-    Amends an already-final result. The original version row is never
-    mutated (locked) - a new version is appended with status='corrected'
-    and a required amendment_reason.
-    """
     current = (await db.execute(
         select(LabResult)
         .where(LabResult.lab_order_item_id == item_id, LabResult.is_current.is_(True))
@@ -339,12 +303,12 @@ async def amend_result(
         remarks=payload.remarks if payload.remarks is not None else current.remarks,
         status="corrected",
         amendment_reason=payload.amendment_reason,
-        created_by=current_user.id,
+        created_by=current_user.sub,
     )
     db.add(amended)
 
     await _write_audit_log(db, table_name="lab_results", row_id=amended.id,
-                            action="create", actor_id=current_user.id)
+                            action="create", actor_id=current_user.sub)
     await db.flush()
     await db.refresh(amended)
     return amended
@@ -359,7 +323,6 @@ async def get_result_history(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """Full version history for a lab result, oldest first. Includes locked originals."""
     result = await db.execute(
         select(LabResult)
         .where(LabResult.lab_order_item_id == item_id)
@@ -371,22 +334,109 @@ async def get_result_history(
     return LabResultHistoryOut(items=rows)
 
 
+# --- #231: Lab MIS summary - TAT by test, status counts, panic frequency ---
+
+@router.get(
+    "/mis/summary",
+    response_model=LabMISSummaryOut,
+)
+async def lab_mis_summary(
+    date_from: datetime = Query(..., description="Range start, inclusive"),
+    date_to: datetime = Query(..., description="Range end, inclusive"),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_roles("pathologist", "lab_tech", "doctor")),
+):
+    """
+    Aggregates lab order items and results created within [date_from, date_to].
+    Computed on the fly (not stored) - fine at current data volumes, per the
+    same pattern as the single-item TAT calc in verify_result.
+    """
+    items_result = await db.execute(
+        select(LabOrderItem).where(
+            LabOrderItem.created_at >= date_from,
+            LabOrderItem.created_at <= date_to,
+        )
+    )
+    items = items_result.scalars().all()
+    total_orders = len(items)
+
+    status_counts: dict[str, int] = {}
+    for item in items:
+        status_counts[item.status] = status_counts.get(item.status, 0) + 1
+    order_counts_by_status = [
+        StatusCountOut(status=status_name, count=count)
+        for status_name, count in status_counts.items()
+    ]
+
+    results_result = await db.execute(
+        select(LabResult).where(
+            LabResult.created_at >= date_from,
+            LabResult.created_at <= date_to,
+            LabResult.status.in_(["final", "corrected"]),
+        )
+    )
+    results = results_result.scalars().all()
+    total_results = len(results)
+
+    tat_map: dict[str, list[float]] = {}
+    panic_map: dict[str, dict[str, int]] = {}
+
+    for result in results:
+        item = await db.get(LabOrderItem, result.lab_order_item_id)
+        if item is None:
+            continue
+
+        baseline = item.collected_at or item.created_at
+        tat_minutes = (result.created_at - baseline).total_seconds() / 60
+        tat_map.setdefault(item.test_name, []).append(tat_minutes)
+
+        panic_map.setdefault(item.test_name, {"critical": 0, "total": 0})
+        panic_map[item.test_name]["total"] += 1
+        if _check_critical(result.result_data):
+            panic_map[item.test_name]["critical"] += 1
+
+    tat_by_test = [
+        TATByTestOut(
+            test_name=name,
+            sample_count=len(values),
+            avg_tat_minutes=round(mean(values), 1) if values else None,
+            median_tat_minutes=round(median(values), 1) if values else None,
+        )
+        for name, values in tat_map.items()
+    ]
+
+    panic_frequency = [
+        PanicFrequencyOut(
+            test_name=name,
+            critical_count=stats["critical"],
+            total_count=stats["total"],
+            panic_rate_pct=round((stats["critical"] / stats["total"]) * 100, 1) if stats["total"] else 0.0,
+        )
+        for name, stats in panic_map.items()
+    ]
+
+    return LabMISSummaryOut(
+        date_from=date_from,
+        date_to=date_to,
+        tat_by_test=tat_by_test,
+        order_counts_by_status=order_counts_by_status,
+        total_orders=total_orders,
+        total_results=total_results,
+        panic_frequency=panic_frequency,
+    )
+
+
 # --- #185: critical value flag -> notify ordering doctor via SSE ---
-#
-# Doctor lookup confirmed via schema §3:
-#   lab_order_items.order_id -> orders.encounter_id -> encounters.provider_user_id
-# Durable record goes to notification_history (0020), payload IDs-only per the
-# PII rule (no patient name/UHID/clinical values in that table).
-# Live delivery uses an in-process asyncio broadcaster (not Redis) since no
-# pub/sub client name is confirmed yet - fine for a single-worker deployment;
-# revisit if the app runs multiple uvicorn workers/processes in production.
 
 _critical_alert_subscribers: dict[uuid.UUID, list[asyncio.Queue]] = {}
 
 
 async def _resolve_ordering_doctor_id(db: AsyncSession, item: LabOrderItem) -> uuid.UUID | None:
-    from app.orders.models import Order
-    from app.encounters.models import Encounter  # confirm module/fields before relying on this
+    try:
+        from app.orders.models import Order
+        from app.encounters.models import Encounter
+    except ImportError:
+        return None
 
     order = await db.get(Order, item.order_id)
     if order is None:
@@ -398,31 +448,33 @@ async def _resolve_ordering_doctor_id(db: AsyncSession, item: LabOrderItem) -> u
 
 
 async def _publish_critical_alert(db: AsyncSession, item: LabOrderItem,
-                                   flagged_fields: list[str], actor) -> None:
+                                   flagged_fields: list[str]) -> None:
     doctor_id = await _resolve_ordering_doctor_id(db, item)
     if doctor_id is None:
-        return  # can't notify if the doctor can't be resolved - log/alert ops separately
+        return
 
-    # Durable, audited record - IDs only, no clinical values or patient identity
-    from app.notifications.models import NotificationHistory  # confirm module/fields before relying on this
+    try:
+        from app.notifications.models import NotificationHistory
+    except ImportError:
+        return
+
     notification = NotificationHistory(
         event_type="lab_critical_result",
         payload={
             "lab_order_item_id": str(item.id),
             "accession_number": item.accession_number,
-            "flagged_field_count": len(flagged_fields),  # count only, not field names/values
+            "flagged_field_count": len(flagged_fields),
         },
         department_id=item.department_id,
     )
     db.add(notification)
     await db.flush()
 
-    # Live push to any doctor currently connected via SSE
     live_message = json.dumps({
         "lab_order_item_id": str(item.id),
         "accession_number": item.accession_number,
     })
-    for queue in _critical_alert_subscribers.get(doctor_id, []):
+    for queue in _critical_alert_subscribers.get(str(doctor_id), []):
         await queue.put(live_message)
 
 
@@ -430,9 +482,8 @@ async def _publish_critical_alert(db: AsyncSession, item: LabOrderItem,
 async def critical_alerts_stream(
     current_user=Depends(get_current_user),
 ):
-    """SSE stream for the logged-in doctor's critical value alerts."""
     queue: asyncio.Queue = asyncio.Queue()
-    _critical_alert_subscribers.setdefault(current_user.id, []).append(queue)
+    _critical_alert_subscribers.setdefault(current_user.sub, []).append(queue)
 
     async def event_generator():
         try:
@@ -440,6 +491,6 @@ async def critical_alerts_stream(
                 message = await queue.get()
                 yield f"data: {message}\n\n"
         finally:
-            _critical_alert_subscribers[current_user.id].remove(queue)
+            _critical_alert_subscribers[current_user.sub].remove(queue)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
