@@ -55,6 +55,15 @@ if [[ ! -f infra/nginx/certs/dev.crt ]]; then
   ./infra/nginx/generate-dev-certs.sh
 fi
 
+# Optional services run behind Compose profiles (schema §Module toggle behavior):
+#   radiology -> orthanc (PACS, large image)   icd11 -> WHO ICD-API (several GB)
+# Enable per facility:  COMPOSE_PROFILES=radiology,icd11 make setup
+# Without them the app still works: radiology is simply off, and ICD search
+# degrades to the local icd_codes catalog (never errors).
+export COMPOSE_PROFILES="${COMPOSE_PROFILES:-}"
+if [[ -n "$COMPOSE_PROFILES" ]]; then
+  echo "Enabling optional profiles: $COMPOSE_PROFILES"
+fi
 docker compose -f infra/docker-compose.yml --env-file .env up -d --build
 
 HTTPS="${HTTPS_PORT:-443}"
