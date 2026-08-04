@@ -36,9 +36,12 @@ module.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import uuid
 from datetime import date, datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
+from zoneinfo import ZoneInfo
 
 import sqlalchemy as sa
 from fastapi import HTTPException, status
@@ -122,13 +125,36 @@ prescription_items_t = sa.table(
 inventory_batches_t = sa.table(
     "inventory_batches", sa.column("id"), sa.column("issue_rate_mrp"),
 )
-users_t = sa.table("users", sa.column("id"), sa.column("keycloak_sub"))
+users_t = sa.table("users", sa.column("id"), sa.column("keycloak_sub"), sa.column("facility_id"))
+
+# idempotency_keys (0002, owned by B1) — shared infra table, read/write only,
+# no schema change made here. §4A.1: every POST that creates something needs
+# an Idempotency-Key; enforced for payments/refunds in router.py.
+idempotency_keys_t = sa.table(
+    "idempotency_keys",
+    sa.column("key"), sa.column("endpoint"), sa.column("request_hash"),
+    sa.column("response_status"), sa.column("response_body"), sa.column("user_id"),
+)
 
 # facilities.code (varchar(20), e.g. "JPR001") — schema doc §3 0002.
 # Needed to format receipt_number / refund_number
 # (RCP-<FACILITY>-<YYYYMMDD>-<SEQ5> / RFD-...). Same cross-module
 # read-only-projection approach as the tables above.
-facilities_t = sa.table("facilities", sa.column("id"), sa.column("code"))
+facilities_t = sa.table("facilities", sa.column("id"), sa.column("code"), sa.column("timezone"))
+
+
+async def _facility_business_date(db: AsyncSession, facility_id: uuid.UUID) -> date:
+    """(now() AT TIME ZONE facilities.timezone)::date — per schema doc's blanket
+    rule. NEVER use date.today() / now()::date for a business date: that's UTC,
+    and IST is UTC+5:30, so anything before 05:30 IST lands on yesterday."""
+    result = await db.execute(
+        sa.select(sa.cast(sa.func.timezone(facilities_t.c.timezone, sa.func.now()), sa.Date))
+        .where(facilities_t.c.id == facility_id)
+    )
+    business_date = result.scalar_one_or_none()
+    if business_date is None:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"facility_id={facility_id} not found.")
+    return business_date
 
 # billing_counters — gapless allocator (schema doc §3 0014). Real model
 # is app.billing.models.BillingCounter; using a bare table projection
@@ -566,13 +592,14 @@ async def _allocate_billing_number(
     isn't in this module — invoices are created at registration, per
     _get_invoice_for_visit's docstring).
     """
-    today = date.today()
-
-    facility_code_row = await db.execute(
-        sa.select(facilities_t.c.code).where(facilities_t.c.id == facility_id)
+    facility_row = await db.execute(
+        sa.select(
+            facilities_t.c.code,
+            sa.cast(sa.func.timezone(facilities_t.c.timezone, sa.func.now()), sa.Date).label("business_date"),
+        ).where(facilities_t.c.id == facility_id)
     )
-    facility_code = facility_code_row.scalar_one_or_none()
-    if facility_code is None:
+    row = facility_row.first()
+    if row is None:
         # Should be unreachable (facility_id is a NOT NULL FK on
         # invoices), but a billing_counters row keyed to a nonexistent
         # facility would be a bad enough data-integrity problem that
@@ -581,6 +608,7 @@ async def _allocate_billing_number(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"facility_id={facility_id} has no matching facilities row.",
         )
+    facility_code, today = row.code, row.business_date
 
     upsert = (
         pg_insert(billing_counters_t)
@@ -602,7 +630,9 @@ async def _allocate_billing_number(
     return f"{prefix}-{facility_code}-{today:%Y%m%d}-{sequence:05d}"
 
 
-async def _payment_totals_for_invoice(db: AsyncSession, invoice_id: uuid.UUID) -> tuple[Decimal, Decimal]:
+async def _facility_timezone(db: AsyncSession, facility_id: uuid.UUID) -> str:
+    result = await db.execute(sa.select(facilities_t.c.timezone).where(facilities_t.c.id == facility_id))
+    return result.scalar_one()
     """(total successful payments, total refunds against those payments) for one invoice."""
     paid_result = await db.execute(
         sa.select(sa.func.coalesce(sa.func.sum(Payment.amount), 0)).where(
@@ -813,7 +843,7 @@ async def create_refund(
 
     # TODO(billing): call into app.audit once it exists — same note as
     # record_payment(); refunds are the more sensitive of the two
-    # (billing_refunds module gate, approved_by field) so this matters
+    # (core/always-on per v3.13, approved_by field) so this matters
     # at least as much when app/audit lands.
 
     await db.refresh(refund)
@@ -845,17 +875,63 @@ async def facility_id_for_user(db: AsyncSession, keycloak_sub: str) -> uuid.UUID
     return facility_id
 
 
+def _request_hash(request_body: dict) -> str:
+    canonical = json.dumps(request_body, sort_keys=True, default=str)
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+async def check_idempotency(
+    db: AsyncSession, key: str, endpoint: str, request_body: dict, user_id: uuid.UUID
+) -> dict | None:
+    """None = unseen, proceed normally. Returns the cached response body to
+    replay if this exact key+endpoint+body was already handled. Raises 409
+    idempotency_key_reuse if the same key was used with a different body."""
+    result = await db.execute(
+        sa.select(idempotency_keys_t.c.request_hash, idempotency_keys_t.c.response_body)
+        .where(idempotency_keys_t.c.key == key, idempotency_keys_t.c.endpoint == endpoint)
+    )
+    row = result.first()
+    if row is None:
+        return None
+    if row.request_hash != _request_hash(request_body):
+        raise HTTPException(status.HTTP_409_CONFLICT, detail={"code": "idempotency_key_reuse"})
+    return row.response_body
+
+
+async def store_idempotency(
+    db: AsyncSession, key: str, endpoint: str, request_body: dict, user_id: uuid.UUID,
+    response_body: dict, response_status: int = 201,
+) -> None:
+    await db.execute(
+        pg_insert(idempotency_keys_t)
+        .values(
+            key=key, endpoint=endpoint, request_hash=_request_hash(request_body),
+            response_status=response_status, response_body=response_body, user_id=user_id,
+        )
+        .on_conflict_do_nothing(index_elements=["key", "endpoint"])
+    )
+
+
 async def get_daily_revenue(
-    db: AsyncSession, facility_id: uuid.UUID, date_from: date, date_to: date
+    db: AsyncSession, facility_id: uuid.UUID, date_from: date | None, date_to: date | None
 ) -> DailyRevenueResponse:
-    """Net revenue = cash collected minus cash refunded, per calendar day
-    (each side counted on the day it happened, not the original payment's day)."""
+    """Net revenue = cash collected minus cash refunded, per facility business
+    day (each side counted on the day it happened, not the original payment's
+    day). Bucketed via facilities.timezone, not UTC — see _facility_business_date."""
+    business_today = await _facility_business_date(db, facility_id)
+    date_from = date_from or business_today
+    date_to = date_to or business_today
     if date_from > date_to:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "date_from must be <= date_to.")
 
+    tz_row = await db.execute(sa.select(facilities_t.c.timezone).where(facilities_t.c.id == facility_id))
+    tz = tz_row.scalar_one()
+    paid_day = sa.cast(sa.func.timezone(tz, Payment.collected_at), sa.Date)
+    refund_day = sa.cast(sa.func.timezone(tz, Refund.refunded_at), sa.Date)
+
     paid_rows = await db.execute(
         sa.select(
-            sa.cast(Payment.collected_at, sa.Date).label("day"),
+            paid_day.label("day"),
             sa.func.count().label("cnt"),
             sa.func.sum(Payment.amount).label("total"),
         )
@@ -864,15 +940,15 @@ async def get_daily_revenue(
         .where(
             Invoice.facility_id == facility_id,
             Payment.status == PaymentStatus.SUCCESS.value,
-            sa.cast(Payment.collected_at, sa.Date).between(date_from, date_to),
+            paid_day.between(date_from, date_to),
         )
-        .group_by(sa.cast(Payment.collected_at, sa.Date))
+        .group_by(paid_day)
     )
     paid_by_day = {row.day: (row.cnt, Decimal(row.total)) for row in paid_rows}
 
     refund_rows = await db.execute(
         sa.select(
-            sa.cast(Refund.refunded_at, sa.Date).label("day"),
+            refund_day.label("day"),
             sa.func.sum(Refund.amount).label("total"),
         )
         .select_from(Refund)
@@ -880,9 +956,9 @@ async def get_daily_revenue(
         .join(Invoice, Invoice.id == Payment.invoice_id)
         .where(
             Invoice.facility_id == facility_id,
-            sa.cast(Refund.refunded_at, sa.Date).between(date_from, date_to),
+            refund_day.between(date_from, date_to),
         )
-        .group_by(sa.cast(Refund.refunded_at, sa.Date))
+        .group_by(refund_day)
     )
     refunded_by_day = {row.day: Decimal(row.total) for row in refund_rows}
 
@@ -918,7 +994,8 @@ async def get_pending_invoices(db: AsyncSession, facility_id: uuid.UUID) -> Pend
     )
     invoices = result.scalars().all()
 
-    today = date.today()
+    business_today = await _facility_business_date(db, facility_id)
+    tz = ZoneInfo(await _facility_timezone(db, facility_id))
     items: list[PendingInvoiceLine] = []
     total_balance = Decimal("0")
     for invoice in invoices:
@@ -939,7 +1016,7 @@ async def get_pending_invoices(db: AsyncSession, facility_id: uuid.UUID) -> Pend
                 paid_amount=paid_amount,
                 balance_due=balance_due,
                 created_at=invoice.created_at.isoformat(),
-                days_pending=(today - invoice.created_at.date()).days,
+                days_pending=(business_today - invoice.created_at.astimezone(tz).date()).days,
             )
         )
 
@@ -953,13 +1030,19 @@ async def get_pending_invoices(db: AsyncSession, facility_id: uuid.UUID) -> Pend
 
 
 async def get_scheme_breakdown(
-    db: AsyncSession, facility_id: uuid.UUID, date_from: date, date_to: date
+    db: AsyncSession, facility_id: uuid.UUID, date_from: date | None, date_to: date | None
 ) -> SchemeBreakdownResponse:
-    """Groups invoices created in [date_from, date_to] by scheme_code
-    (NULL -> 'self_pay'). collected_total nets out refunds, same as
-    get_daily_revenue."""
+    """Groups invoices created in [date_from, date_to] (facility-local dates)
+    by scheme_code (NULL -> 'self_pay'). collected_total nets out refunds,
+    same as get_daily_revenue."""
+    business_today = await _facility_business_date(db, facility_id)
+    date_from = date_from or business_today
+    date_to = date_to or business_today
     if date_from > date_to:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "date_from must be <= date_to.")
+
+    tz = await _facility_timezone(db, facility_id)
+    invoice_day = sa.cast(sa.func.timezone(tz, Invoice.created_at), sa.Date)
 
     scheme_col = sa.func.coalesce(Invoice.scheme_code, "self_pay").label("scheme_code")
     result = await db.execute(
@@ -971,7 +1054,7 @@ async def get_scheme_breakdown(
         )
         .where(
             Invoice.facility_id == facility_id,
-            sa.cast(Invoice.created_at, sa.Date).between(date_from, date_to),
+            invoice_day.between(date_from, date_to),
         )
         .group_by(scheme_col)
     )
@@ -989,7 +1072,7 @@ async def get_scheme_breakdown(
             .where(
                 Invoice.facility_id == facility_id,
                 Invoice.scheme_code == scheme_filter,
-                sa.cast(Invoice.created_at, sa.Date).between(date_from, date_to),
+                invoice_day.between(date_from, date_to),
                 Payment.status == PaymentStatus.SUCCESS.value,
             )
         )
@@ -1001,7 +1084,7 @@ async def get_scheme_breakdown(
             .where(
                 Invoice.facility_id == facility_id,
                 Invoice.scheme_code == scheme_filter,
-                sa.cast(Invoice.created_at, sa.Date).between(date_from, date_to),
+                invoice_day.between(date_from, date_to),
             )
         )
         collected = _money(Decimal(collected_result.scalar_one()) - Decimal(refunded_result.scalar_one()))
