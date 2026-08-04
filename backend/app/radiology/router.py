@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
 from app.common.db import get_db
-from app.auth.deps import get_current_user, require_roles
+from app.auth.deps import get_current_user, require_roles, get_current_db_user, CurrentDbUser
 from app.radiology.fhir import build_diagnostic_report_bundle
 from app.radiology.schemas import (
     RadiologyOrderItemCreate, RadiologyOrderItemOut, ScheduleRequest,
@@ -35,6 +35,7 @@ async def create_radiology_order_item(
     order_id: uuid.UUID = Query(...),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(require_roles("doctor", "radiology_tech")),
+    current_db_user: CurrentDbUser = Depends(get_current_db_user),
 ):
     try:
         from app.orders.models import Order
@@ -55,12 +56,12 @@ async def create_radiology_order_item(
         scan_type=payload.scan_type,
         machine_id=payload.machine_id,
         status="placed",
-        created_by=current_user.id,
+        created_by=current_db_user.id,
     )
     db.add(item)
     await db.flush()
     await _write_audit_log(db, table_name="radiology_order_items", row_id=item.id,
-                            action="create", actor_id=current_user.id)
+                            action="create", actor_id=current_db_user.id)
     await db.refresh(item)
     return item
 
@@ -71,6 +72,7 @@ async def mark_scan_complete(
     payload: ScanCompletionRequest,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(require_roles("radiology_tech")),
+    current_db_user: CurrentDbUser = Depends(get_current_db_user),
 ):
     item = await db.get(RadiologyOrderItem, item_id)
     if item is None:
@@ -82,7 +84,7 @@ async def mark_scan_complete(
     item.status = "scanned"
 
     await _write_audit_log(db, table_name="radiology_order_items", row_id=item.id,
-                            action="update", actor_id=current_user.id)
+                            action="update", actor_id=current_db_user.id)
     await db.refresh(item)
     return item
 
@@ -114,6 +116,7 @@ async def draft_radiology_report(
     payload: RadiologyReportCreate,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(require_roles("radiologist")),
+    current_db_user: CurrentDbUser = Depends(get_current_db_user),
 ):
     item = await db.get(RadiologyOrderItem, item_id)
     if item is None:
@@ -129,13 +132,13 @@ async def draft_radiology_report(
         findings=payload.findings,
         impression=payload.impression,
         status="preliminary",
-        created_by=current_user.id,
+        created_by=current_db_user.id,
     )
     db.add(report)
     item.status = "reporting"
 
     await _write_audit_log(db, table_name="radiology_reports", row_id=report.id,
-                            action="create", actor_id=current_user.id)
+                            action="create", actor_id=current_db_user.id)
     await db.flush()
     await db.refresh(report)
     return report
@@ -147,6 +150,7 @@ async def sign_off_radiology_report(
     payload: RadiologyReportSignOff,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(require_roles("radiologist")),
+    current_db_user: CurrentDbUser = Depends(get_current_db_user),
 ):
     current = (await db.execute(
         select(RadiologyReport)
@@ -166,7 +170,7 @@ async def sign_off_radiology_report(
         findings=payload.findings if payload.findings is not None else current.findings,
         impression=payload.impression if payload.impression is not None else current.impression,
         status="final",
-        created_by=current_user.id,
+        created_by=current_db_user.id,
     )
     db.add(new_report)
 
@@ -174,7 +178,7 @@ async def sign_off_radiology_report(
     item.status = "released"
 
     await _write_audit_log(db, table_name="radiology_reports", row_id=new_report.id,
-                            action="create", actor_id=current_user.id)
+                            action="create", actor_id=current_db_user.id)
     await db.flush()
     await db.refresh(new_report)
 

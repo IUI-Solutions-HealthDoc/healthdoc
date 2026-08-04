@@ -30,7 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
 from app.common.db import get_db
-from app.auth.deps import get_current_user, require_roles
+from app.auth.deps import get_current_user, require_roles, get_current_db_user, CurrentDbUser
 from app.pathology.models import LabOrderItem, LabResult
 from app.pathology.schemas import (
     LabOrderItemCreate, LabOrderItemOut, SampleCollectionRequest, LabOrderItemListOut,
@@ -58,6 +58,7 @@ async def create_lab_order_item(
     order_id: uuid.UUID = Query(..., description="Existing order id (order_type=lab)"),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(require_roles("doctor", "lab_tech")),
+    current_db_user: CurrentDbUser = Depends(get_current_db_user),
 ):
     try:
         from app.orders.models import Order
@@ -80,13 +81,13 @@ async def create_lab_order_item(
         department_id=payload.department_id,
         estimated_minutes=payload.estimated_minutes,
         status="placed",
-        created_by=current_user.sub,
+        created_by=current_db_user.id,
     )
     db.add(item)
     await db.flush()
 
     await _write_audit_log(db, table_name="lab_order_items", row_id=item.id,
-                            action="create", actor_id=current_user.sub)
+                            action="create", actor_id=current_db_user.id)
     await db.refresh(item)
     return item
 
@@ -100,6 +101,7 @@ async def collect_sample(
     payload: SampleCollectionRequest,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(require_roles("lab_tech")),
+    current_db_user: CurrentDbUser = Depends(get_current_db_user),
 ):
     item = await db.get(LabOrderItem, item_id)
     if item is None:
@@ -120,7 +122,7 @@ async def collect_sample(
     item.collected_at = payload.collected_at or datetime.now(timezone.utc)
 
     await _write_audit_log(db, table_name="lab_order_items", row_id=item.id,
-                            action="update", actor_id=current_user.sub)
+                            action="update", actor_id=current_db_user.id)
     await db.refresh(item)
     return item
 
@@ -194,6 +196,7 @@ async def enter_result(
     payload: LabResultCreate,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(require_roles("lab_tech")),
+    current_db_user: CurrentDbUser = Depends(get_current_db_user),
 ):
     item = await db.get(LabOrderItem, item_id)
     if item is None:
@@ -206,13 +209,19 @@ async def enter_result(
         result_data=payload.result_data,
         remarks=payload.remarks,
         status="preliminary",
-        created_by=current_user.sub,
+        created_by=current_db_user.id,
     )
     db.add(result)
     item.status = "completed"
 
+    # #185: wire the critical-value check + doctor notification back in -
+    # this call was missing entirely in this version, so alerts never fired.
+    flagged = _check_critical(payload.result_data)
+    if flagged:
+        await _publish_critical_alert(db, item, flagged)
+
     await _write_audit_log(db, table_name="lab_results", row_id=result.id,
-                            action="create", actor_id=current_user.sub)
+                            action="create", actor_id=current_db_user.id)
     await db.flush()
     await db.refresh(result)
     return result
@@ -227,6 +236,7 @@ async def verify_result(
     payload: LabResultVerify,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(require_roles("pathologist")),
+    current_db_user: CurrentDbUser = Depends(get_current_db_user),
 ):
     current = (await db.execute(
         select(LabResult)
@@ -236,7 +246,7 @@ async def verify_result(
     if current is None:
         raise HTTPException(status_code=404, detail="No result found for this item")
 
-    if str(current.created_by) == current_user.sub:
+    if str(current.created_by) == str(current_db_user.id):
         raise HTTPException(
             status_code=403,
             detail="Verifying pathologist must be different from the person who entered the result",
@@ -252,7 +262,7 @@ async def verify_result(
         result_data=payload.result_data if payload.result_data is not None else current.result_data,
         remarks=payload.remarks if payload.remarks is not None else current.remarks,
         status="final",
-        created_by=current_user.sub,
+        created_by=current_db_user.id,
     )
     db.add(new_result)
 
@@ -260,7 +270,7 @@ async def verify_result(
     item.status = "released"
 
     await _write_audit_log(db, table_name="lab_results", row_id=new_result.id,
-                            action="create", actor_id=current_user.sub)
+                            action="create", actor_id=current_db_user.id)
     await db.flush()
     await db.refresh(new_result)
 
@@ -281,6 +291,7 @@ async def amend_result(
     payload: LabResultAmend,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(require_roles("pathologist")),
+    current_db_user: CurrentDbUser = Depends(get_current_db_user),
 ):
     current = (await db.execute(
         select(LabResult)
@@ -303,12 +314,12 @@ async def amend_result(
         remarks=payload.remarks if payload.remarks is not None else current.remarks,
         status="corrected",
         amendment_reason=payload.amendment_reason,
-        created_by=current_user.sub,
+        created_by=current_db_user.id,
     )
     db.add(amended)
 
     await _write_audit_log(db, table_name="lab_results", row_id=amended.id,
-                            action="create", actor_id=current_user.sub)
+                            action="create", actor_id=current_db_user.id)
     await db.flush()
     await db.refresh(amended)
     return amended
@@ -428,7 +439,7 @@ async def lab_mis_summary(
 
 # --- #185: critical value flag -> notify ordering doctor via SSE ---
 
-_critical_alert_subscribers: dict[uuid.UUID, list[asyncio.Queue]] = {}
+_critical_alert_subscribers: dict[str, list[asyncio.Queue]] = {}
 
 
 async def _resolve_ordering_doctor_id(db: AsyncSession, item: LabOrderItem) -> uuid.UUID | None:
@@ -481,9 +492,14 @@ async def _publish_critical_alert(db: AsyncSession, item: LabOrderItem,
 @router.get("/critical-alerts/stream")
 async def critical_alerts_stream(
     current_user=Depends(get_current_user),
+    current_db_user: CurrentDbUser = Depends(get_current_db_user),
 ):
+    # NOTE: key must be str(users.id) to match _publish_critical_alert's
+    # str(doctor_id) lookup - doctor_id there comes from
+    # encounter.provider_user_id, which is a users.id, not a Keycloak sub.
+    subscriber_key = str(current_db_user.id)
     queue: asyncio.Queue = asyncio.Queue()
-    _critical_alert_subscribers.setdefault(current_user.sub, []).append(queue)
+    _critical_alert_subscribers.setdefault(subscriber_key, []).append(queue)
 
     async def event_generator():
         try:
@@ -491,6 +507,6 @@ async def critical_alerts_stream(
                 message = await queue.get()
                 yield f"data: {message}\n\n"
         finally:
-            _critical_alert_subscribers[current_user.sub].remove(queue)
+            _critical_alert_subscribers[subscriber_key].remove(queue)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
