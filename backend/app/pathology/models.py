@@ -1,18 +1,11 @@
 from sqlalchemy import Column, String, Text, Integer, Boolean, DateTime, ForeignKey, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from app.common.mixins import UUIDPk, Timestamps, Blame
+from app.common.models import UUIDPk, Timestamps, Blame
 from app.common.db import Base
 
 
-class LabOrderItem(Base, UUIDPk, Timestamps):
+class LabOrderItem(Base, UUIDPk, Timestamps, Blame):
     __tablename__ = "lab_order_items"
-
-    # NOTE: not using the Blame mixin here — it hardcodes ForeignKey("users.id"),
-    # and app.users has no models.py/table yet (confirmed 2026-07-30). Using
-    # plain UUID columns instead, matching the FK-free migration. Switch back
-    # to the Blame mixin once app.users exists.
-    created_by = Column(UUID(as_uuid=True), nullable=False)
-    updated_by = Column(UUID(as_uuid=True), nullable=True)
 
     order_id = Column(UUID(as_uuid=True), nullable=False, index=True)  # order.order_type = 'lab'; no FK yet — app.orders has no models.py
     accession_number = Column(String(30), unique=True, nullable=False)
@@ -57,9 +50,14 @@ class LabResult(Base, UUIDPk, Timestamps):
     amendment_reason = Column(Text, nullable=True)
 
     status = Column(String(30), nullable=False)
-    # NOTE: FK to users.id intentionally omitted — same reason as LabOrderItem
-    # above; app.users has no models.py yet (confirmed 2026-07-30).
-    created_by = Column(UUID(as_uuid=True), nullable=False)
+
+    # NOTE: not using the Blame mixin here on purpose. Blame declares BOTH
+    # created_by and updated_by, but lab_results (migration 0010_lab.py) is
+    # append-only/versioned — rows are never updated in place, so there is
+    # no updated_by column in the DB. Declaring it via Blame would create a
+    # model attribute with no matching column. created_by alone gets the
+    # real FK by hand instead, now that app.users exists on staging.
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
 
     # UNIQUE(lab_order_item_id, version) + partial unique index WHERE is_current
     # Declared in Alembic migration (0010_lab.py), not here because

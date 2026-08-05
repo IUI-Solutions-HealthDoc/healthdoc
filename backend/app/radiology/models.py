@@ -1,18 +1,11 @@
 from sqlalchemy import Column, String, Text, Integer, Boolean, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
-from app.common.mixins import UUIDPk, Timestamps
+from app.common.models import UUIDPk, Timestamps, Blame
 from app.common.db import Base
 
 
-class RadiologyOrderItem(Base, UUIDPk, Timestamps):
+class RadiologyOrderItem(Base, UUIDPk, Timestamps, Blame):
     __tablename__ = "radiology_order_items"
-
-    # NOTE: not using the Blame mixin here — it hardcodes ForeignKey("users.id"),
-    # and app.users has no models.py/table yet (confirmed 2026-07-30). Using
-    # plain UUID columns instead. Switch back to the Blame mixin once
-    # app.users exists.
-    created_by = Column(UUID(as_uuid=True), nullable=False)
-    updated_by = Column(UUID(as_uuid=True), nullable=True)
 
     # NOTE: FK to orders.id intentionally omitted — app.orders has no
     # models.py yet (confirmed 2026-07-30).
@@ -43,6 +36,8 @@ class RadiologyReport(Base, UUIDPk, Timestamps):
     impression = Column(Text, nullable=False)
     status = Column(String(30), nullable=False)     # ResultStatus enum
 
-    # NOTE: FK to users.id intentionally omitted — app.users has no
-    # models.py yet (confirmed 2026-07-30).
-    created_by = Column(UUID(as_uuid=True), nullable=False)
+    # NOTE: not using Blame here — same reason as LabResult in pathology:
+    # radiology_reports (migration 0011_radiology.py) only has created_by,
+    # no updated_by column, since these rows are append-only/versioned and
+    # never updated in place.
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)

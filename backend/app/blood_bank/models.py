@@ -1,21 +1,14 @@
 from sqlalchemy import Column, String, Text, Integer, Numeric, Date, DateTime, Boolean, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
-from app.common.mixins import UUIDPk, Timestamps
+from app.common.models import UUIDPk, Timestamps, Blame
 from app.common.db import Base
 
 
-class BloodDonor(Base, UUIDPk, Timestamps):
+class BloodDonor(Base, UUIDPk, Timestamps, Blame):
     __tablename__ = "blood_donors"
 
-    # NOTE: not using the Blame mixin here — it hardcodes ForeignKey("users.id"),
-    # and app.users has no models.py/table yet (confirmed 2026-07-30). Using
-    # plain UUID columns instead. Switch back to the Blame mixin once
-    # app.users exists.
-    created_by = Column(UUID(as_uuid=True), nullable=False)
-    updated_by = Column(UUID(as_uuid=True), nullable=True)
-
     # NOTE: FK to patients.id intentionally omitted — app.patients has no
-    # models.py yet (confirmed 2026-07-31).
+    # models.py yet (confirmed 2026-07-31). Revisit as a separate FK pass.
     patient_id = Column(UUID(as_uuid=True), nullable=True, index=True)
     full_name = Column(Text, nullable=False)
     sex = Column(String(30), nullable=True)
