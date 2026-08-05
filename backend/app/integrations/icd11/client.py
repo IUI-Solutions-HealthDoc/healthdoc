@@ -97,6 +97,7 @@ class ICD11Client:
                 "icd_uri": e.get("id"),  # Foundation URI — permanent
                 "is_postcoordinable": bool(e.get("postcoordinationAvailability")),
                 "version": "icd11",
+                "score": e.get("score"),
             }
             for e in entities
             if e.get("theCode")

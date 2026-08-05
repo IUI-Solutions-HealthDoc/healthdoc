@@ -451,6 +451,10 @@ class ModuleCode(CheckedEnum):
     RADIOLOGY = "radiology"
     OT = "ot"
     BLOOD_BANK = "blood_bank"
+    EMERGENCY = "emergency"
+    PATIENT_PORTAL = "patient_portal"
+    ABDM = "abdm"
+    BILLING_REFUNDS = "billing_refunds"
 
 
 class ProcedureSetting(CheckedEnum):

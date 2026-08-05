@@ -3,6 +3,7 @@ import importlib
 import logging
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from app.common.config import get_settings
@@ -29,6 +30,21 @@ app = FastAPI(
     openapi_url=f"{settings.api_prefix}/openapi.json",
 )
 app.add_middleware(EnvelopeMiddleware)
+
+# B1-W4-02: CORS locked to the Electron/desktop origin only (no wildcard).
+# Extra origins (e.g. https://localhost for browser dev) come from settings.
+_ALLOWED_ORIGINS = [
+    "app://healthdoc",
+    "https://localhost",
+    "http://localhost:3000",
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+)
 
 
 @app.get(f"{settings.api_prefix}/health")
@@ -65,3 +81,16 @@ for name in MODULES:
         app.include_router(module.router, prefix=settings.api_prefix)
     except ModuleNotFoundError:
         log.warning("module app.%s has no router.py yet — skipped", name)
+
+
+# B1-owned routers that don't live at app/<name>/router.py — included explicitly.
+_B1_ROUTERS = [
+    "app.security_audit.breakglass",
+    "app.integrations.abdm.identity.router",
+]
+for path in _B1_ROUTERS:
+    try:
+        mod = importlib.import_module(path)
+        app.include_router(mod.router, prefix=settings.api_prefix)
+    except ModuleNotFoundError as exc:
+        log.warning("B1 router %s not importable: %s", path, exc)
