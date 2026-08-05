@@ -56,7 +56,10 @@ def test_rotation_produces_different_hash_per_version(monkeypatch):
     get_settings.cache_clear()
     monkeypatch.setenv(
         "AADHAAR_HMAC_KEYS_JSON",
-        json.dumps({"1": "old-key-value", "2": "new-key-value"}),
+        json.dumps({
+            "1": "old-key-value-with-enough-entropy-to-pass-validation-0000",
+            "2": "new-key-value-with-enough-entropy-to-pass-validation-1111",
+        }),
     )
     aadhaar = "999999990019"
     v1 = aadhaar_blind_index(aadhaar, key_version=1)
@@ -71,7 +74,10 @@ def test_lookup_across_all_versions_includes_both(monkeypatch):
     get_settings.cache_clear()
     monkeypatch.setenv(
         "AADHAAR_HMAC_KEYS_JSON",
-        json.dumps({"1": "old-key-value", "2": "new-key-value"}),
+        json.dumps({
+            "1": "old-key-value-with-enough-entropy-to-pass-validation-0000",
+            "2": "new-key-value-with-enough-entropy-to-pass-validation-1111",
+        }),
     )
     aadhaar = "999999990019"
     all_versions = aadhaar_blind_indexes_all_versions(aadhaar)
@@ -114,3 +120,26 @@ def test_decrypt_rejects_unknown_key_version():
     tampered = bytes([250]) + blob[1:]
     with pytest.raises(ValueError):
         decrypt_pii(tampered)
+
+
+def test_aad_round_trip_with_matching_associated_data():
+    plaintext = "999999990019"
+    aad = b"patient-a:aadhaar"
+    blob = encrypt_pii(plaintext, associated_data=aad)
+    assert decrypt_pii(blob, associated_data=aad) == plaintext
+
+
+def test_aad_rejects_blob_moved_to_a_different_row():
+    """The exact attack the PR review named: a ciphertext blob copied from
+    patient A's row into patient B's must not decrypt cleanly."""
+    plaintext = "999999990019"
+    blob = encrypt_pii(plaintext, associated_data=b"patient-a:aadhaar")
+    with pytest.raises(Exception):
+        decrypt_pii(blob, associated_data=b"patient-b:aadhaar")
+
+
+def test_aad_rejects_missing_associated_data_when_one_was_used():
+    plaintext = "999999990019"
+    blob = encrypt_pii(plaintext, associated_data=b"patient-a:aadhaar")
+    with pytest.raises(Exception):
+        decrypt_pii(blob)  # no associated_data passed at all

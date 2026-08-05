@@ -10,22 +10,22 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.common.db import Base
-from app.common.models import UUIDPk, Timestamps, Blame
+from app.common.models import UUIDPk, Timestamps, Blame, Versioned
 from app.common.enums import (
     Sex, IdentityPath, IdentityStatus, PatientStatus,
     IdentifierType, MergeStatus, MergeSourceType,
 )
 
 
-class Patient(Base, UUIDPk, Timestamps, Blame):
+class Patient(Base, UUIDPk, Timestamps, Blame, Versioned):
     __tablename__ = "patients"
     __table_args__ = (
-        CheckConstraint("dob IS NOT NULL OR age_years IS NOT NULL", name="dob_or_age"),
-        CheckConstraint("uhid IS NOT NULL OR thid IS NOT NULL", name="has_identifier"),
-        CheckConstraint(Sex.sql_check("sex"), name="sex"),
-        CheckConstraint(IdentityPath.sql_check("identity_path"), name="identity_path"),
-        CheckConstraint(IdentityStatus.sql_check("identity_status"), name="identity_status"),
-        CheckConstraint(PatientStatus.sql_check("status"), name="status"),
+        CheckConstraint("dob IS NOT NULL OR age_years IS NOT NULL", name="ck_patients_dob_or_age"),
+        CheckConstraint("uhid IS NOT NULL OR thid IS NOT NULL", name="ck_patients_has_identifier"),
+        CheckConstraint(Sex.sql_check("sex"), name="ck_patients_sex"),
+        CheckConstraint(IdentityPath.sql_check("identity_path"), name="ck_patients_identity_path"),
+        CheckConstraint(IdentityStatus.sql_check("identity_status"), name="ck_patients_identity_status"),
+        CheckConstraint(PatientStatus.sql_check("status"), name="ck_patients_status"),
     )
 
     uhid: Mapped[str | None] = mapped_column(String(30), nullable=True)  # unique via partial index
@@ -61,8 +61,10 @@ class Patient(Base, UUIDPk, Timestamps, Blame):
 class PatientIdentifier(Base, UUIDPk, Timestamps):
     __tablename__ = "patient_identifiers"
     __table_args__ = (
+        # Unique constraint left as-is per team decision — only check
+        # constraints were in scope for the ck_<table>_<column> rename.
         UniqueConstraint("patient_id", "identifier_type", name="patient_identifier_type"),
-        CheckConstraint(IdentifierType.sql_check("identifier_type"), name="identifier_type"),
+        CheckConstraint(IdentifierType.sql_check("identifier_type"), name="ck_patient_identifiers_identifier_type"),
     )
 
     patient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("patients.id"), nullable=False, index=True)
@@ -78,8 +80,8 @@ class PatientIdentifier(Base, UUIDPk, Timestamps):
 class PatientMergeLog(Base, UUIDPk, Timestamps):
     __tablename__ = "patient_merge_log"
     __table_args__ = (
-        CheckConstraint(MergeSourceType.sql_check("source_type"), name="source_type"),
-        CheckConstraint(MergeStatus.sql_check("status"), name="status"),
+        CheckConstraint(MergeSourceType.sql_check("source_type"), name="ck_patient_merge_log_source_type"),
+        CheckConstraint(MergeStatus.sql_check("status"), name="ck_patient_merge_log_status"),
     )
 
     source_type: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -93,6 +95,10 @@ class PatientMergeLog(Base, UUIDPk, Timestamps):
 
     status: Mapped[str] = mapped_column(String(50), nullable=False)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Should-fix (PR review): reject_merge previously overwrote this same
+    # `reason` column with why the merge was refused, destroying why it was
+    # requested in the first place. Both matter for audit — kept separate.
+    decision_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     unmerge_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     before_snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)

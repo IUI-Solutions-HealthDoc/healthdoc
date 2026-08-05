@@ -33,3 +33,14 @@ class Blame:
     updated_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=True
     )
+
+
+@declarative_mixin
+class Versioned:
+    """Optimistic concurrency (schema §4A.2). row_version starts at 1 and is
+    bumped by the service on every update, in the same transaction as the
+    update itself. GET returns it as an ETag; PATCH/PUT must send If-Match —
+    a mismatch means someone else updated the row first, and the request is
+    rejected with 409 stale_write instead of silently overwriting their
+    change. Add to any table that is mutated after creation."""
+    row_version: Mapped[int] = mapped_column(nullable=False, server_default="1")

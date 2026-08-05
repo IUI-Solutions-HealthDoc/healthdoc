@@ -1,46 +1,21 @@
-"""B2-W4-01: patient merge tool — pure-logic tests (no DB required).
-Full request_merge()/approve_merge()/reject_merge() flows need a real DB
-session (db.get/flush) — pending the same async-DB fixture decision noted
-in test_patient_search.py.
-"""
-import uuid
-
-from app.patients.service import _patient_snapshot
-
-
-class _FakePatient:
-    def __init__(self, id, uhid=None, thid=None, status="active", merged_into_patient_id=None):
-        self.id = id
-        self.uhid = uhid
-        self.thid = thid
-        self.status = status
-        self.merged_into_patient_id = merged_into_patient_id
+"""Blocker 5 (PR review, patients module): a half-merge is more dangerous
+than no merge — this test turns a silently-missing repoint into a red
+build. It needs no database connection; it inspects SQLAlchemy metadata
+directly, so it works even without the async-Postgres fixture (see
+conftest.py discussion in review)."""
+import app.main  # noqa: F401  ensures every model module is imported and
+                  # registered on Base.metadata before we inspect it
+from app.patients.service import REPOINTED_ON_MERGE, AUDIT_TABLES_EXEMPT_FROM_REPOINTING, _tables_with_fk_to_patients
 
 
-def test_patient_snapshot_captures_expected_fields():
-    pid = uuid.uuid4()
-    patient = _FakePatient(id=pid, uhid="IN-RJ-JPR001-2026-000001-8", status="active")
-    snapshot = _patient_snapshot(patient)
-    assert snapshot["id"] == str(pid)
-    assert snapshot["uhid"] == "IN-RJ-JPR001-2026-000001-8"
-    assert snapshot["status"] == "active"
-    assert snapshot["merged_into_patient_id"] is None
-
-
-def test_patient_snapshot_handles_merged_patient():
-    pid = uuid.uuid4()
-    target_id = uuid.uuid4()
-    patient = _FakePatient(id=pid, thid="TH-JPR001-260714-0007", status="merged", merged_into_patient_id=target_id)
-    snapshot = _patient_snapshot(patient)
-    assert snapshot["status"] == "merged"
-    assert snapshot["merged_into_patient_id"] == str(target_id)
-    assert snapshot["thid"] == "TH-JPR001-260714-0007"
-
-
-def test_patient_snapshot_only_includes_documented_fields():
-    # Guards against accidentally leaking full_name/dob/mobile/etc into
-    # patient_merge_log's JSONB snapshot — it should only ever capture the
-    # identity/merge-state fields the merge action itself changes.
-    patient = _FakePatient(id=uuid.uuid4())
-    snapshot = _patient_snapshot(patient)
-    assert set(snapshot.keys()) == {"id", "uhid", "thid", "status", "merged_into_patient_id"}
+def test_repointing_covers_every_patient_fk():
+    referencing_tables = _tables_with_fk_to_patients()
+    missing = referencing_tables - REPOINTED_ON_MERGE - AUDIT_TABLES_EXEMPT_FROM_REPOINTING
+    assert not missing, (
+        f"{sorted(missing)} have a foreign key to patients.id but are not in "
+        f"REPOINTED_ON_MERGE (backend/app/patients/service.py). Either add "
+        f"repointing logic for them in approve_merge and add them to that set, "
+        f"or confirm approve_merge still raises NotImplementedError while they "
+        f"remain unhandled — this test existing and failing is the point, not "
+        f"a bug to silence."
+    )

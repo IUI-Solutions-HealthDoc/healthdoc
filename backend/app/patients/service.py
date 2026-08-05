@@ -17,7 +17,7 @@ import uuid
 from sqlalchemy import text, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.common.security import encrypt_pii, aadhaar_blind_index, aadhaar_blind_indexes_all_versions, current_key_version
+from app.common.security import encrypt_pii, aadhaar_blind_index, aadhaar_blind_indexes_all_versions, current_hmac_key_version, current_aes_key_version
 from app.patients.models import Patient, PatientIdentifier
 
 
@@ -82,13 +82,19 @@ def build_aadhaar_identifier(
 ) -> PatientIdentifier:
     """Builds (does not add/commit) the patient_identifiers row for Aadhaar.
     Caller adds it to the same session/transaction as the patient insert."""
-    version = current_key_version()
+    # HMAC and AES keys rotate independently (PR review blocker 7) — the
+    # stored key_version column tracks the HMAC version specifically, since
+    # that's what duplicate-check lookups depend on. AES decryption doesn't
+    # need this column at all: it reads its own version byte from the
+    # ciphertext blob (see security.py decrypt_pii).
+    hmac_version = current_hmac_key_version()
+    aes_version = current_aes_key_version()
     return PatientIdentifier(
         patient_id=patient_id,
         identifier_type="aadhaar",
-        identifier_value_encrypted=encrypt_pii(aadhaar_number, key_version=version),
-        identifier_blind_index=aadhaar_blind_index(aadhaar_number, key_version=version),
-        key_version=version,
+        identifier_value_encrypted=encrypt_pii(aadhaar_number, key_version=aes_version),
+        identifier_blind_index=aadhaar_blind_index(aadhaar_number, key_version=hmac_version),
+        key_version=hmac_version,
         captured_by=captured_by,
     )
 
@@ -105,13 +111,13 @@ def mask_mobile(mobile: str | None) -> str | None:
 async def search_patients(
     db: AsyncSession,
     *,
+    facility_id: uuid.UUID,
     full_name: str | None = None,
     dob=None,
     mobile: str | None = None,
     uhid: str | None = None,
     aadhaar_number: str | None = None,
     abha_number: str | None = None,
-    facility_id=None,
     page: int = 1,
     page_size: int = 20,
 ):
@@ -119,9 +125,10 @@ async def search_patients(
     Exact-match paths (aadhaar/abha/uhid/mobile) run first; fuzzy name+dob fills in.
     A patient found via multiple paths keeps its highest-scoring match."""
     matches: dict = {}
-    base_filter = [Patient.deleted_at.is_(None)]
-    if facility_id:
-        base_filter.append(Patient.facility_id == facility_id)
+    # facility_id is required (PR review blocker 4) — cross-facility search
+    # is a separate, consent-gated operation, never a default. Unconditional
+    # so a future caller can't accidentally reopen the leak by omitting it.
+    base_filter = [Patient.deleted_at.is_(None), Patient.facility_id == facility_id]
 
     if aadhaar_number:
         blind_indexes = list(aadhaar_blind_indexes_all_versions(aadhaar_number).values())
@@ -179,6 +186,31 @@ async def search_patients(
     start = (page - 1) * page_size
     return ranked[start:start + page_size], total
 
+async def find_duplicate_by_aadhaar(
+    db: AsyncSession, *, aadhaar_number: str, facility_id: uuid.UUID,
+) -> Patient | None:
+    """Blocker 8: exact duplicate-check before registration. Checked across
+    every active key version (aadhaar_blind_indexes_all_versions), same
+    reasoning as search_patients's aadhaar path — a patient registered
+    under an old key must still be found before a background re-index job
+    catches up. Scoped to facility_id for the same reason search is
+    (blocker 4): this is not a cross-facility lookup."""
+    blind_indexes = list(aadhaar_blind_indexes_all_versions(aadhaar_number).values())
+    stmt = (
+        select(Patient)
+        .join(PatientIdentifier, PatientIdentifier.patient_id == Patient.id)
+        .where(
+            PatientIdentifier.identifier_type == "aadhaar",
+            PatientIdentifier.identifier_blind_index.in_(blind_indexes),
+            Patient.facility_id == facility_id,
+            Patient.deleted_at.is_(None),
+            Patient.status != "merged",
+        )
+        .limit(1)
+    )
+    return (await db.execute(stmt)).scalars().first()
+
+
 def _patient_snapshot(patient: "Patient") -> dict:
     """Minimal before/after snapshot for patient_merge_log — captures only the
     fields the merge action itself can change, not full PHI."""
@@ -225,6 +257,25 @@ async def request_merge(
     return merge_log
 
 
+# Tables that approve_merge actually repoints today. §3 0006 "Merge
+# repointing" names the full list (visits, encounters, orders,
+# prescriptions, lab_order_items, radiology_order_items, admissions,
+# invoices, patient_identifiers, files, vitals, consent_records) — most of
+# those tables don't exist yet (0007/0008/... land later). This set is
+# checked against live FK metadata by
+# test_patient_merge.py::test_repointing_covers_every_patient_fk, which
+# fails the build the day a new FK to patients.id appears without a
+# matching entry here. Do not add a table name here without also adding
+# the repointing code for it below.
+REPOINTED_ON_MERGE: frozenset[str] = frozenset({"patient_identifiers"})
+
+# patient_merge_log itself has FKs to patients.id (source_patient_id,
+# target_patient_id) — these must NEVER be repointed. It's the audit trail
+# of the merge; rewriting its own references after the fact would let a
+# merge erase evidence of which patient was actually merged into which.
+AUDIT_TABLES_EXEMPT_FROM_REPOINTING: frozenset[str] = frozenset({"patient_merge_log"})
+
+
 async def approve_merge(
     db: AsyncSession,
     *,
@@ -234,7 +285,14 @@ async def approve_merge(
     from app.patients.models import PatientMergeLog
     from datetime import datetime, timezone
 
-    merge_log = await db.get(PatientMergeLog, merge_log_id)
+    # Blocker 6: lock the merge log row for the duration of this decision.
+    # Without this, two supervisors approving the same request concurrently
+    # both read status == "pending" and both proceed.
+    merge_log = (
+        await db.execute(
+            select(PatientMergeLog).where(PatientMergeLog.id == merge_log_id).with_for_update()
+        )
+    ).scalar_one_or_none()
     if not merge_log:
         raise ValueError("merge request not found")
     if merge_log.status != "pending":
@@ -244,6 +302,32 @@ async def approve_merge(
 
     source = await db.get(Patient, merge_log.source_patient_id)
     target = await db.get(Patient, merge_log.target_patient_id)
+
+    # Blocker 6: reject merging into a patient that is itself already a
+    # merge tombstone. Without this, A->B then B->C leaves A pointing at a
+    # dead row; single-hop resolution never reaches C.
+    if target.status != "active":
+        raise ValueError(
+            f"target patient is not active (status={target.status}) — cannot merge into a "
+            f"non-active patient; resolve the target's own merge chain first"
+        )
+
+    # Blocker 5: refuse to approve until every table with a real FK to
+    # patients.id is covered by REPOINTED_ON_MERGE. A half-merge (source
+    # tombstoned but child rows still pointing at it) is more dangerous
+    # than no merge — /patients/{id}/history would silently return a
+    # partial record. request_merge/reject_merge are unaffected and keep
+    # shipping; only the destructive step is gated.
+    missing = (
+        _tables_with_fk_to_patients() - REPOINTED_ON_MERGE - AUDIT_TABLES_EXEMPT_FROM_REPOINTING
+    )
+    if missing:
+        raise NotImplementedError(
+            f"merge_repointing_not_implemented: {sorted(missing)} reference patients.id "
+            f"but are not yet repointed by approve_merge"
+        )
+
+    await _repoint_identifiers(db, source=source, target=target)
 
     source.status = "merged"
     source.merged_into_patient_id = target.id
@@ -256,6 +340,66 @@ async def approve_merge(
     await db.flush()
     await db.refresh(merge_log)
     return merge_log
+
+
+async def _repoint_identifiers(db: AsyncSession, *, source: Patient, target: Patient) -> None:
+    """Moves source's patient_identifiers rows onto target (§3 0006 merge
+    repointing rule). UNIQUE (patient_id, identifier_type) means a source
+    row can't just be moved if target already has one of that type:
+
+    - target has none of that type yet -> repoint (UPDATE patient_id)
+    - target already has one, same blind index -> genuine duplicate
+      (confirmed same underlying identifier); drop source's redundant row
+    - target already has one, different blind index -> conflicting
+      identity evidence. Refused rather than guessed at: silently picking
+      one is exactly the kind of mistake this rule exists to prevent.
+      Known limitation: blind-index comparison only works cleanly when
+      both rows were hashed under the same HMAC key version — a rotation
+      between the two registrations could make the same real identifier
+      compare as different.
+    """
+    source_rows = (
+        await db.execute(select(PatientIdentifier).where(PatientIdentifier.patient_id == source.id))
+    ).scalars().all()
+    if not source_rows:
+        return
+
+    target_rows = (
+        await db.execute(select(PatientIdentifier).where(PatientIdentifier.patient_id == target.id))
+    ).scalars().all()
+    target_by_type = {row.identifier_type: row for row in target_rows}
+
+    for row in source_rows:
+        existing = target_by_type.get(row.identifier_type)
+        if existing is None:
+            row.patient_id = target.id
+        elif existing.identifier_blind_index == row.identifier_blind_index:
+            await db.delete(row)
+        else:
+            raise ValueError(
+                f"identifier_conflict: source and target both have a "
+                f"{row.identifier_type!r} identifier that do not match — "
+                f"cannot auto-repoint, needs manual resolution before this "
+                f"merge can be approved"
+            )
+    await db.flush()
+
+
+def _tables_with_fk_to_patients() -> set[str]:
+    """Every table currently registered on Base.metadata that has a
+    ForeignKey column pointing at patients.id. Shared by approve_merge's
+    guard and by the test that keeps it honest."""
+    from app.common.db import Base
+
+    tables = set()
+    for table in Base.metadata.tables.values():
+        if table.name == "patients":
+            continue
+        for column in table.columns:
+            for fk in column.foreign_keys:
+                if fk.target_fullname == "patients.id":
+                    tables.add(table.name)
+    return tables
 
 
 async def reject_merge(
@@ -275,9 +419,11 @@ async def reject_merge(
     if merge_log.requested_by == rejected_by:
         raise ValueError("self_approval_not_allowed")
 
+    # Should-fix: don't overwrite the original request reason, and don't
+    # set approved_by on a rejection — a populated approved_by on a
+    # rejected request is misleading (implies someone approved it).
     merge_log.status = "rejected"
-    merge_log.approved_by = rejected_by
-    merge_log.reason = reason or merge_log.reason
+    merge_log.decision_reason = reason
     await db.flush()
     await db.refresh(merge_log)
     return merge_log

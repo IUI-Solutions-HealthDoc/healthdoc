@@ -9,7 +9,7 @@ from app.patients.models import Patient
 from app.patients.schemas import (
     PatientCreate, PatientOut,
     PatientSearchRequest, PatientSearchResponse, PatientSearchResult,)
-from app.patients.service import generate_uhid, build_aadhaar_identifier, search_patients, mask_mobile
+from app.patients.service import generate_uhid, build_aadhaar_identifier, search_patients, mask_mobile, find_duplicate_by_aadhaar
 from app.users.models import Facility
 
 router = APIRouter(prefix="/patients", tags=["patients"])
@@ -31,9 +31,30 @@ async def register_patient(
     current_db_user: CurrentDbUser,
     db: AsyncSession = Depends(get_db),
 ) -> Patient:
-    facility = await db.get(Facility, payload.facility_id)
+    facility = await db.get(Facility, current_db_user.facility_id)
     if not facility:
         raise HTTPException(404, "Facility not found")
+
+    # Blocker 8: check the blind index before creating anything. Without
+    # this, register_patient silently creates a duplicate for every Aadhaar
+    # already on file, and someone has to notice and run the merge tool
+    # after the fact. The check runs across every active key version (same
+    # as search_patients) so a patient registered under a rotated-out key
+    # is still found.
+    if payload.aadhaar_number:
+        duplicate = await find_duplicate_by_aadhaar(
+            db, aadhaar_number=payload.aadhaar_number, facility_id=current_db_user.facility_id,
+        )
+        if duplicate is not None:
+            raise HTTPException(
+                409,
+                {
+                    "code": "duplicate_aadhaar",
+                    "message": "A patient with this Aadhaar number is already registered at this facility.",
+                    "candidate_patient_id": str(duplicate.id),
+                    "candidate_uhid": duplicate.uhid,
+                },
+            )
 
     uhid = await generate_uhid(db, state_code=facility.state_code, facility_code=facility.code)
 
@@ -52,7 +73,7 @@ async def register_patient(
         age_years=payload.age_years,
         mobile=payload.mobile,
         abha_number=payload.abha_number,
-        facility_id=payload.facility_id,
+        facility_id=current_db_user.facility_id,
         identity_path=identity_path,
         identity_status=identity_status,
         created_by=current_db_user.id,
@@ -78,6 +99,7 @@ async def register_patient(
 )
 async def search_patients_endpoint(
     payload: PatientSearchRequest,
+    current_db_user: CurrentDbUser,
     db: AsyncSession = Depends(get_db),
 ) -> PatientSearchResponse:
     results, total = await search_patients(
@@ -88,7 +110,7 @@ async def search_patients_endpoint(
         uhid=payload.uhid,
         aadhaar_number=payload.aadhaar_number,
         abha_number=payload.abha_number,
-        facility_id=payload.facility_id,
+        facility_id=current_db_user.facility_id,
         page=payload.page,
         page_size=payload.page_size,
     )
@@ -139,7 +161,10 @@ async def request_patient_merge(
 @router.post(
     "/merge/{merge_id}/approve",
     response_model=MergeLogOut,
-    dependencies=[Depends(require_roles("admin", "supervisor"))],
+    # v3.13 schema: admin is explicitly barred from approving merges — only
+    # supervisor has merge-approval authority (identity power is deliberately
+    # separated from facility-config power).
+    dependencies=[Depends(require_roles("supervisor"))],
 )
 async def approve_patient_merge(
     merge_id: uuid.UUID,
@@ -158,7 +183,8 @@ async def approve_patient_merge(
 @router.post(
     "/merge/{merge_id}/reject",
     response_model=MergeLogOut,
-    dependencies=[Depends(require_roles("admin", "supervisor"))],
+    # same restriction as approve — reject is also a merge-approval decision
+    dependencies=[Depends(require_roles("supervisor"))],
 )
 async def reject_patient_merge(
     merge_id: uuid.UUID,
