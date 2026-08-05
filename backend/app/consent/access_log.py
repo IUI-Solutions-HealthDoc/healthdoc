@@ -73,9 +73,18 @@ import sqlalchemy as sa
 from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+# _select_acting_role is underscore-prefixed (private) in its home module
+# — importing it across module boundaries is a smell worth raising with
+# the audit module owner (consider exporting it as a public helper, e.g.
+# app.audit.deps.select_acting_role, since two modules now depend on the
+# same "which role was this done under" logic and it needs one answer).
+# Doing so here per review: single-role selection must match audit_logs'
+# _select_acting_role() exactly, not diverge with a second implementation.
+from app.audit.deps import _select_acting_role
 from app.auth.deps import CurrentUser
 from app.common.db import SessionLocal
 from app.common.enums import AccessChannel
+from app.consent.access_log_fallback import serialise_row_for_fallback, write_fallback_row
 from app.consent.models import DataAccessLog
 
 logger = logging.getLogger(__name__)
@@ -127,14 +136,37 @@ def log_patient_data_access(
         resource_id = (
             _extract_uuid(request, resource_id_param) if resource_id_param else patient_id
         )
+        role = _select_acting_role(user.roles)
 
         if patient_id is None:
             # Wiring mistake (decorated route doesn't actually have this
-            # path/query param), not a runtime condition — fail loud in
-            # logs rather than silently skip logging patient access.
+            # path/query param), not a runtime condition — but per
+            # review, this must still be RECORDED, not just logged and
+            # dropped: a clinical read happened and normal logging
+            # couldn't place it. Goes straight to the durable fallback
+            # rather than attempting a DB insert with no patient_id.
+            row = serialise_row_for_fallback(
+                user_id=None,
+                role=role,
+                resource_type=resource_type,
+                resource_id=resource_id,
+                patient_id=None,
+                purpose_code=purpose_code,
+                access_channel=access_channel,
+                emergency_access=emergency_access,
+                consent_required=consent_required,
+                consent_verified=None,
+            )
+            write_fallback_row(
+                row,
+                failure_reason=(
+                    f"missing_path_param:{patient_id_param} on {request.method} {request.url.path}"
+                ),
+            )
             logger.error(
                 "log_patient_data_access: no param '%s' found on %s %s — "
-                "access NOT logged. Check the dependency wiring on this route.",
+                "wrote to fallback instead of data_access_log. Check the "
+                "dependency wiring on this route.",
                 patient_id_param, request.method, request.url.path,
             )
             return
@@ -143,9 +175,23 @@ def log_patient_data_access(
             async with SessionLocal() as log_session:
                 user_id = await _resolve_user_id(log_session, user)
                 if user_id is None:
+                    row = serialise_row_for_fallback(
+                        user_id=None,
+                        role=role,
+                        resource_type=resource_type,
+                        resource_id=resource_id,
+                        patient_id=patient_id,
+                        purpose_code=purpose_code,
+                        access_channel=access_channel,
+                        emergency_access=emergency_access,
+                        consent_required=consent_required,
+                        consent_verified=None,
+                    )
+                    write_fallback_row(row, failure_reason="unresolved_user_id")
                     logger.error(
                         "log_patient_data_access: could not resolve a users.id "
-                        "for this request (%s %s) — access NOT logged.",
+                        "for this request (%s %s) — wrote to fallback instead "
+                        "of data_access_log.",
                         request.method, request.url.path,
                     )
                     return
@@ -153,7 +199,7 @@ def log_patient_data_access(
                 log_session.add(
                     DataAccessLog(
                         user_id=user_id,
-                        role=_extract_role(user),
+                        role=role,
                         resource_type=resource_type,
                         resource_id=resource_id,
                         patient_id=patient_id,
@@ -165,13 +211,29 @@ def log_patient_data_access(
                     )
                 )
                 await log_session.commit()
-        except Exception:
+        except Exception as exc:
             # Logging must never be the reason a clinical read fails.
-            # Losing one access-log row is bad; blocking patient care
-            # because the logger had a bad day is worse. Log loudly,
-            # let the request continue.
-            logger.exception(
-                "Failed to write data_access_log row for %s %s (patient=%s, purpose=%s)",
+            # Losing the row silently is what changed here though: the
+            # DB write failed, so this falls back to a durable local
+            # write instead of just logger.exception() — see
+            # access_log_fallback.py's module docstring for why a local
+            # file survives failure modes a Postgres outbox wouldn't.
+            row = serialise_row_for_fallback(
+                user_id=None,  # not resolved on this path — DB was unreachable
+                role=role,
+                resource_type=resource_type,
+                resource_id=resource_id,
+                patient_id=patient_id,
+                purpose_code=purpose_code,
+                access_channel=access_channel,
+                emergency_access=emergency_access,
+                consent_required=consent_required,
+                consent_verified=None,
+            )
+            write_fallback_row(row, failure_reason=f"db_write_failed:{exc!r}")
+            logger.warning(
+                "data_access_log DB write failed for %s %s (patient=%s, purpose=%s) — "
+                "wrote to durable fallback instead. See fallback file for recovery.",
                 request.method, request.url.path, patient_id, purpose_code,
             )
 
@@ -186,18 +248,6 @@ def _extract_uuid(request: Request, param_name: str) -> uuid.UUID | None:
         return uuid.UUID(str(raw))
     except (ValueError, TypeError):
         return None
-
-
-def _extract_role(user: CurrentUser) -> str | None:
-    """DataAccessLog.role is free text (Text, nullable). CurrentUser's
-    exact attribute for Keycloak realm roles isn't confirmed — tries the
-    plausible ones rather than assuming a single name."""
-    roles = getattr(user, "roles", None) or getattr(user, "role", None)
-    if not roles:
-        return None
-    if isinstance(roles, (list, tuple, set)):
-        return ",".join(sorted(roles))
-    return str(roles)
 
 
 async def _resolve_user_id(db: AsyncSession, user: CurrentUser) -> uuid.UUID | None:

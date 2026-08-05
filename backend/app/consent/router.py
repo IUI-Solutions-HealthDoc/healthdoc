@@ -18,7 +18,7 @@ import uuid
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.deps import CurrentUser, require_roles
+from app.auth.deps import AuthUser, require_roles
 from app.consent import service
 from app.consent.access_log import log_patient_data_access
 from app.consent.schemas import ConsentRecordOut
@@ -60,7 +60,7 @@ async def ping() -> dict:
 async def list_patient_consent_records(
     patient_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: CurrentUser = Depends(require_roles(*_CONSENT_VIEW_ROLES)),
+    _user: AuthUser = Depends(require_roles(*_CONSENT_VIEW_ROLES)),
 ) -> list[ConsentRecordOut]:
     records = await service.list_consent_records_for_patient(db, patient_id)
     return [ConsentRecordOut.model_validate(r) for r in records]

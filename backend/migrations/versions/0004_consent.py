@@ -3,15 +3,8 @@ break_glass_grants, data_access_log, consent_renewal_reminders
 
 Revision ID: 0004
 Revises: 0003
-Create Date: 2026-07-22
-Updated: 2026-08-01 — reconciled against schema doc v3.13 per Tech Lead
-review. See "Changes from the original v3.4 baseline" below.
 
-Owner: B7 (B7-W1-02). Schema doc: HealthDoc Master Database Schema v3.13
-§3 "0004 — consent".
-
-Notes for reviewers (flag these interpretations in the PR, per repo convention
-of calling out ambiguous doc text rather than silently guessing):
+Notes for reviewers:
 
 1. Enum/status columns are varchar(50), not the varchar(30) shown inline in
    the schema doc's §3 table listing — same override migration 0003 already
@@ -47,31 +40,6 @@ of calling out ambiguous doc text rather than silently guessing):
    say explicitly which layer owns it, but a bypassable justification gate
    on emergency PHI access is worth the redundancy. Flag for confirmation.
 
-Changes from the original v3.4 baseline (this revision, post Tech-Lead review):
-
-  a. Added break_glass_grants — introduced to the schema doc in v3.9, filed
-     under this same migration/owner, but not present in the original build.
-     Was a genuine gap, not a reinterpretation.
-
-  b. consent_records immutability (frozen except status/status_changed_at)
-     is now a DB trigger (trg_consent_records_freeze) instead of app-layer
-     only, following the trg_invoices_freeze precedent from migration 0014
-     (frozen-column-list on an otherwise-mutable row). Tech Lead's call —
-     the doc itself still doesn't mandate a trigger here explicitly.
-
-  c. consent_withdrawals -> consent_records status flip to 'revoked' is now
-     a DB trigger (trg_consent_withdrawals_flip_status) instead of an
-     app-layer "same transaction" convention, for the same reason as (b):
-     the invariant should hold no matter which code path inserts the row.
-
-  d. Added the three FK indexes the blanket indexing rule requires but the
-     original migration missed: consent_records.granted_by_user_id,
-     consent_withdrawals.withdrawn_by_user_id, data_access_log.consent_id.
-     These target tables (users, consent_records) already exist at 0004 —
-     unlike patient_id/visit_id, these are not deferred FKs, so the rule
-     applies immediately rather than waiting for a later migration.
-
-  ConsentStatus.EXPIRED already existed in enums.py — no enum change needed.
 """
 from alembic import op
 import sqlalchemy as sa
@@ -275,12 +243,40 @@ def upgrade() -> None:
     # vice versa). trg_consent_records_freeze (above) explicitly allows
     # status/status_changed_at to change, so this UPDATE is not blocked
     # by that trigger.
+    # v3.13 fix (Tech Lead review, re-applied here after this migration
+    # was regenerated -- do not simplify back to unconditional 'revoked'):
+    # a system_expiry withdrawal must flip status to 'expired', not
+    # 'revoked' -- those are different DPDP facts (the patient withdrew
+    # it vs. it lapsed on its own), and an unconditional 'revoked' makes
+    # ConsentStatus.EXPIRED unreachable from any code path. Also guards
+    # against rewriting a consent that's already in a terminal state
+    # (revoked/denied/expired) -- a withdrawal against a settled consent
+    # is a duplicate insert or an upstream logic error and must fail
+    # loudly rather than silently overwrite status_changed_at.
     op.execute(
         """
         CREATE OR REPLACE FUNCTION trg_consent_withdrawals_flip_status() RETURNS trigger AS $$
+        DECLARE
+            current_status text;
+            new_status text;
         BEGIN
+            SELECT status INTO current_status FROM consent_records WHERE id = NEW.consent_id;
+
+            IF current_status IS NULL THEN
+                RAISE EXCEPTION 'consent_withdrawals: no consent_records row %', NEW.consent_id;
+            END IF;
+
+            IF current_status IN ('revoked', 'denied', 'expired') THEN
+                RAISE EXCEPTION
+                    'consent_records % is already in terminal status % -- cannot withdraw again',
+                    NEW.consent_id, current_status;
+            END IF;
+
+            new_status := CASE WHEN NEW.withdrawn_by_type = 'system_expiry'
+                                THEN 'expired' ELSE 'revoked' END;
+
             UPDATE consent_records
-            SET status = 'revoked',
+            SET status = new_status,
                 status_changed_at = NEW.withdrawn_at
             WHERE id = NEW.consent_id;
             RETURN NEW;
@@ -397,12 +393,15 @@ def upgrade() -> None:
     op.execute("CREATE INDEX ix_data_access_log_user_id ON data_access_log (user_id, accessed_at);")
     op.execute("CREATE INDEX ix_data_access_log_patient_id ON data_access_log (patient_id, accessed_at);")
     op.execute("CREATE INDEX ix_data_access_log_consent_id ON data_access_log (consent_id);")
+
     # Index strategy addendum (§3-end): BRIN on accessed_at inside
     # audit/access-log partitions — same reasoning as audit_logs in 0003.
+    
     op.execute("CREATE INDEX ix_data_access_log_accessed_at_brin ON data_access_log USING BRIN (accessed_at);")
 
     # Monthly partitions: current month + 5 ahead, same rolling-forward
     # TODO as audit_logs — needs a scheduled job to keep creating partitions.
+
     op.execute(
         """
         DO $$
@@ -421,10 +420,22 @@ def upgrade() -> None:
                     'CREATE TABLE %I PARTITION OF data_access_log FOR VALUES FROM (%L) TO (%L);',
                     part_name, part_start, part_end
                 );
-            END LOOP;
+            END LOOP; 
         END $$;
         """
     )
+
+    # DEFAULT partition -- the never-fail safety net. Six months of
+    # monthly partitions eventually run out; without this, a row outside
+    # that range fails the INSERT with "no partition found" rather than
+    # landing somewhere. That matters more here than for audit_logs:
+    # access_log.py writes on its own session inside try/except Exception,
+    # so a range-exhaustion failure would otherwise be silently swallowed
+    # -- the read succeeds, the log row never lands anywhere, and nobody
+    # notices until an audit asks for records that don't exist. Rows
+    # landing in DEFAULT are a monitoring signal (follow-up, not this
+    # migration), not a failure.
+    op.execute("CREATE TABLE data_access_log_default PARTITION OF data_access_log DEFAULT;")
 
     # Append-only enforcement: block UPDATE and DELETE, same as audit_logs.
     op.execute(
@@ -445,7 +456,7 @@ def upgrade() -> None:
     )
 
     # ------------------------------------------------------------------
-    # 5. consent_renewal_reminders — plain table, ordinary Alembic ops.
+    # consent_renewal_reminders — plain table, ordinary Alembic ops.
     # ------------------------------------------------------------------
     op.create_table(
         "consent_renewal_reminders",
@@ -459,7 +470,7 @@ def upgrade() -> None:
         ),
         sa.Column("remind_at", sa.TIMESTAMP(timezone=True), nullable=False),
         sa.Column("sent_at", sa.TIMESTAMP(timezone=True), nullable=True),
-        sa.Column("notification_channel", sa.String(30), nullable=True),
+        sa.Column("notification_channel", sa.String(50), nullable=True),  # blanket enum-width rule -> 50
         sa.Column("created_at", sa.TIMESTAMP(timezone=True), nullable=False, server_default=sa.text("now()")),
     )
     op.create_index("ix_consent_renewal_reminders_consent_id", "consent_renewal_reminders", ["consent_id"])
@@ -473,6 +484,8 @@ def downgrade() -> None:
 
     op.execute("DROP TRIGGER IF EXISTS trg_data_access_log_block_update ON data_access_log;")
     op.execute("DROP FUNCTION IF EXISTS trg_data_access_log_block_update();")
+    # data_access_log_default and the monthly partitions all drop via
+    # CASCADE off the partitioned parent -- no separate DROP needed.
     op.execute("DROP TABLE IF EXISTS data_access_log CASCADE;")
 
     op.drop_index("ix_break_glass_grants_reviewed_by", table_name="break_glass_grants")

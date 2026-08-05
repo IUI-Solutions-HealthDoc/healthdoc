@@ -22,6 +22,7 @@ from datetime import datetime
 from sqlalchemy import (
     ARRAY,
     CheckConstraint,
+    DateTime,
     ForeignKey,
     Index,
     String,
@@ -83,15 +84,15 @@ class ConsentRecord(UUIDPk, Blame, Timestamps, Base):
         UUID(as_uuid=True), nullable=True
     )  # FK added in 0019
 
-    granted_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
-    expires_at: Mapped[datetime | None] = mapped_column(nullable=True)  # NULLABLE per issue spec
+    granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)  # NULLABLE per issue spec
     scope: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
     channel: Mapped[str] = mapped_column(String(50), nullable=False)  # ConsentChannel enum
     consent_artefact_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     consent_artefact_signature: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     status: Mapped[str] = mapped_column(String(50), nullable=False, server_default="granted")  # ConsentStatus enum
-    status_changed_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
+    status_changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (
         Index("ix_consent_records_patient_id", "patient_id"),
@@ -140,12 +141,12 @@ class ConsentWithdrawal(UUIDPk, Base):
         ForeignKey("users.id", ondelete="RESTRICT", name="fk_consent_withdrawals_withdrawn_by_user_id"),
         nullable=True,
     )
-    withdrawn_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
+    withdrawn_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     cascaded_actions: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    cascade_deadline: Mapped[datetime | None] = mapped_column(nullable=True)
-    cascade_completed_at: Mapped[datetime | None] = mapped_column(nullable=True)
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
+    cascade_deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cascade_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (
         Index("ix_consent_withdrawals_consent_id", "consent_id"),
@@ -176,7 +177,7 @@ class DataAccessLog(UUIDPk, Base):
     __tablename__ = "data_access_log"
 
     accessed_at: Mapped[datetime] = mapped_column(
-        primary_key=True, server_default=func.now(), nullable=False
+        DateTime(timezone=True), primary_key=True, server_default=func.now(), nullable=False
     )
 
     consent_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -248,17 +249,17 @@ class BreakGlassGrant(UUIDPk, Timestamps, Base):
         nullable=False,
     )
     justification: Mapped[str] = mapped_column(Text, nullable=False)  # >= 20 chars, enforced at service layer
-    granted_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
-    expires_at: Mapped[datetime] = mapped_column(nullable=False)  # granted_at + facility-configurable window
+    granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)  # granted_at + facility-configurable window
 
-    revoked_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="RESTRICT", name="fk_break_glass_grants_revoked_by"),
         nullable=True,
     )
 
-    reviewed_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     reviewed_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="RESTRICT", name="fk_break_glass_grants_reviewed_by"),
@@ -291,10 +292,10 @@ class ConsentRenewalReminder(UUIDPk, Base):
         ForeignKey("consent_records.id", ondelete="RESTRICT", name="fk_consent_renewal_reminders_consent_id"),
         nullable=False,
     )
-    remind_at: Mapped[datetime] = mapped_column(nullable=False)
-    sent_at: Mapped[datetime | None] = mapped_column(nullable=True)
-    notification_channel: Mapped[str | None] = mapped_column(String(30), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
+    remind_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    notification_channel: Mapped[str | None] = mapped_column(String(50), nullable=True)  # blanket enum-width rule -> 50
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (
         Index("ix_consent_renewal_reminders_consent_id", "consent_id"),
