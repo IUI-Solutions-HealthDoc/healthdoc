@@ -1,4 +1,6 @@
+import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects.postgresql import UUID
 
 revision = "0013"
 down_revision = "0012"
@@ -7,184 +9,301 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # ---------------------------------------------------------------
-    # pharmacy_dispenses (version + is_current pattern, no previous_version_id)
-    # ---------------------------------------------------------------
-    op.execute("""
-        CREATE TABLE pharmacy_dispenses (
-            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-            prescription_id UUID NOT NULL REFERENCES prescriptions(id),
-            visit_id UUID NULL REFERENCES visits(id),
-            status VARCHAR(50) NOT NULL
-                CONSTRAINT ck_pharmacy_dispenses_status
-                CHECK (status IN ('received','in_progress','partially_dispensed','dispensed','out_of_stock','substitute_suggested','doctor_approval_required','returned','cancelled')),
-            dispensed_by UUID NOT NULL REFERENCES users(id),
-            version INT NOT NULL,
-            is_current BOOLEAN NOT NULL,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            UNIQUE (prescription_id, version)
-        )
-    """)
+    op.create_table(
+        "pharmacy_dispenses",
+        sa.Column("id", UUID(as_uuid=True), primary_key=True,
+                  server_default=sa.text("uuid_generate_v4()")),
+        sa.Column("prescription_id", UUID(as_uuid=True),
+                  sa.ForeignKey("prescriptions.id", ondelete="RESTRICT"), nullable=False),
+        sa.Column("visit_id", UUID(as_uuid=True),
+                  sa.ForeignKey("visits.id", ondelete="RESTRICT"), nullable=True),
+        sa.Column("status", sa.String(50), nullable=False),
+        sa.Column("dispensed_by", UUID(as_uuid=True),
+                  sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False),
+        sa.Column("version", sa.Integer(), nullable=False),
+        sa.Column("is_current", sa.Boolean(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.func.now()),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.func.now()),
+        sa.CheckConstraint(
+            "status IN ('received','in_progress','partially_dispensed','dispensed',"
+            "'out_of_stock','substitute_suggested','doctor_approval_required',"
+            "'returned','cancelled')",
+            name="ck_pharmacy_dispenses_status",
+        ),
+        sa.UniqueConstraint("prescription_id", "version",
+                             name="uq_pharmacy_dispenses_prescription_id_version"),
+    )
     op.execute("""
         CREATE UNIQUE INDEX uq_pharmacy_dispenses_current
         ON pharmacy_dispenses (prescription_id)
         WHERE is_current
     """)
-    op.execute("CREATE INDEX ix_pharmacy_dispenses_visit_id ON pharmacy_dispenses (visit_id)")
-    op.execute("CREATE INDEX ix_pharmacy_dispenses_dispensed_by ON pharmacy_dispenses (dispensed_by)")
+    op.create_index("ix_pharmacy_dispenses_visit_id", "pharmacy_dispenses", ["visit_id"])
+    op.create_index("ix_pharmacy_dispenses_dispensed_by", "pharmacy_dispenses", ["dispensed_by"])
 
-    # ---------------------------------------------------------------
-    # pharmacy_dispense_items
-    # ---------------------------------------------------------------
-    op.execute("""
-        CREATE TABLE pharmacy_dispense_items (
-            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-            dispense_id UUID NOT NULL REFERENCES pharmacy_dispenses(id) ON DELETE CASCADE,
-            prescription_item_id UUID NOT NULL REFERENCES prescription_items(id),
-            batch_id UUID NOT NULL REFERENCES inventory_batches(id),
-            quantity_prescribed NUMERIC(12,2),
-            quantity_dispensed NUMERIC(12,2),
-            is_substitute BOOLEAN NOT NULL DEFAULT FALSE,
-            substitute_reason TEXT,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        )
-    """)
-    op.execute("CREATE INDEX ix_pharmacy_dispense_items_dispense_id ON pharmacy_dispense_items (dispense_id)")
-    op.execute("CREATE INDEX ix_pharmacy_dispense_items_prescription_item_id ON pharmacy_dispense_items (prescription_item_id)")
-    op.execute("CREATE INDEX ix_pharmacy_dispense_items_batch_id ON pharmacy_dispense_items (batch_id)")
+    op.create_table(
+        "pharmacy_dispense_items",
+        sa.Column("id", UUID(as_uuid=True), primary_key=True,
+                  server_default=sa.text("uuid_generate_v4()")),
+        sa.Column("dispense_id", UUID(as_uuid=True),
+                  sa.ForeignKey("pharmacy_dispenses.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("prescription_item_id", UUID(as_uuid=True),
+                  sa.ForeignKey("prescription_items.id", ondelete="RESTRICT"), nullable=False),
+        sa.Column("batch_id", UUID(as_uuid=True),
+                  sa.ForeignKey("inventory_batches.id", ondelete="RESTRICT"), nullable=True),
+        sa.Column("quantity_prescribed", sa.Numeric(12, 2)),
+        sa.Column("quantity_dispensed", sa.Numeric(12, 2)),
+        sa.Column("is_substitute", sa.Boolean(), nullable=False, server_default=sa.false()),
+        sa.Column("substitute_reason", sa.Text()),
+        sa.Column("approval_status", sa.String(50), nullable=False, server_default="not_required"),
+        sa.Column("substitute_item_id", UUID(as_uuid=True),
+                  sa.ForeignKey("inventory_items.id", ondelete="RESTRICT"), nullable=True),
+        sa.Column("approved_by", UUID(as_uuid=True),
+                  sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=True),
+        sa.Column("approved_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("rejection_reason", sa.Text()),
+        sa.Column("expiry_override_by", UUID(as_uuid=True),
+                  sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=True),
+        sa.Column("expiry_override_reason", sa.Text()),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.func.now()),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.func.now()),
+        sa.CheckConstraint(
+            "approval_status IN ('not_required', 'pending', 'approved', 'rejected')",
+            name="ck_pharmacy_dispense_items_approval_status",
+        ),
+        sa.CheckConstraint(
+            "quantity_dispensed IS NULL OR quantity_dispensed >= 0",
+            name="ck_pharmacy_dispense_items_quantity_dispensed_nonneg",
+        ),
+        sa.CheckConstraint(
+            "quantity_dispensed IS NULL OR quantity_prescribed IS NULL "
+            "OR quantity_dispensed <= quantity_prescribed",
+            name="ck_pharmacy_dispense_items_dispensed_not_over_prescribed",
+        ),
+        sa.CheckConstraint(
+            "NOT is_substitute OR substitute_reason IS NOT NULL",
+            name="ck_pharmacy_dispense_items_substitute_reason_required",
+        ),
+    )
+    op.create_index("ix_pharmacy_dispense_items_dispense_id", "pharmacy_dispense_items",
+                    ["dispense_id"])
+    op.create_index("ix_pharmacy_dispense_items_prescription_item_id", "pharmacy_dispense_items",
+                    ["prescription_item_id"])
+    op.create_index("ix_pharmacy_dispense_items_batch_id", "pharmacy_dispense_items",
+                    ["batch_id"])
+    op.create_index("ix_pharmacy_dispense_items_substitute_item_id", "pharmacy_dispense_items",
+                    ["substitute_item_id"])
 
-    # ---------------------------------------------------------------
-    # grn [Blame]
-    # ---------------------------------------------------------------
     op.execute("""
-        CREATE TABLE grn (
-            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-            supplier_id UUID NOT NULL REFERENCES suppliers(id),
-            invoice_number VARCHAR(50),
-            received_date DATE NOT NULL,
-            status VARCHAR(50) NOT NULL
-                CONSTRAINT ck_grn_status
-                CHECK (status IN ('draft','received','verified','cancelled')),
-            created_by UUID NOT NULL REFERENCES users(id),
-            updated_by UUID NULL REFERENCES users(id),
-            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        )
-    """)
-    op.execute("CREATE INDEX ix_grn_supplier_id ON grn (supplier_id)")
-    op.execute("CREATE INDEX ix_grn_created_by ON grn (created_by)")
-    op.execute("CREATE INDEX ix_grn_updated_by ON grn (updated_by)")
+        CREATE OR REPLACE FUNCTION reject_expired_batch_dispense()
+        RETURNS TRIGGER AS $$
+        DECLARE
+            batch_expiry DATE;
+        BEGIN
+            IF NEW.batch_id IS NULL THEN
+                RETURN NEW;
+            END IF;
 
-    # ---------------------------------------------------------------
-    # grn_items
-    # ---------------------------------------------------------------
-    op.execute("""
-        CREATE TABLE grn_items (
-            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-            grn_id UUID NOT NULL REFERENCES grn(id) ON DELETE CASCADE,
-            item_id UUID NOT NULL REFERENCES inventory_items(id),
-            batch_number VARCHAR(50),
-            expiry_date DATE,
-            quantity NUMERIC(12,2) NOT NULL CHECK (quantity > 0),
-            unit_price NUMERIC(12,2),
-            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        )
-    """)
-    op.execute("CREATE INDEX ix_grn_items_grn_id ON grn_items (grn_id)")
-    op.execute("CREATE INDEX ix_grn_items_item_id ON grn_items (item_id)")
+            SELECT expiry_date INTO batch_expiry
+            FROM inventory_batches WHERE id = NEW.batch_id;
 
-    # ---------------------------------------------------------------
-    # indents [Blame]
-    # ---------------------------------------------------------------
-    op.execute("""
-        CREATE TABLE indents (
-            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-            department_id UUID NOT NULL REFERENCES departments(id),
-            status VARCHAR(50) NOT NULL
-                CONSTRAINT ck_indents_status
-                CHECK (status IN ('requested','approved','rejected','issued')),
-            approved_by UUID NULL REFERENCES users(id),
-            created_by UUID NOT NULL REFERENCES users(id),
-            updated_by UUID NULL REFERENCES users(id),
-            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        )
-    """)
-    op.execute("CREATE INDEX ix_indents_department_id ON indents (department_id)")
-    op.execute("CREATE INDEX ix_indents_approved_by ON indents (approved_by)")
-    op.execute("CREATE INDEX ix_indents_created_by ON indents (created_by)")
-    op.execute("CREATE INDEX ix_indents_updated_by ON indents (updated_by)")
+            IF batch_expiry < CURRENT_DATE THEN
+                IF NEW.expiry_override_by IS NULL OR NEW.expiry_override_reason IS NULL THEN
+                    RAISE EXCEPTION
+                        'batch % expired % — dispensing requires expiry_override_by '
+                        'and expiry_override_reason to be set',
+                        NEW.batch_id, batch_expiry;
+                END IF;
+            END IF;
 
-    # ---------------------------------------------------------------
-    # indent_items
-    # ---------------------------------------------------------------
-    op.execute("""
-        CREATE TABLE indent_items (
-            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-            indent_id UUID NOT NULL REFERENCES indents(id) ON DELETE CASCADE,
-            item_id UUID NOT NULL REFERENCES inventory_items(id),
-            quantity_requested NUMERIC(12,2) NOT NULL CHECK (quantity_requested > 0),
-            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        )
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql
     """)
-    op.execute("CREATE INDEX ix_indent_items_indent_id ON indent_items (indent_id)")
-    op.execute("CREATE INDEX ix_indent_items_item_id ON indent_items (item_id)")
+    op.execute("""
+        CREATE TRIGGER trg_pharmacy_dispense_items_reject_expired
+        BEFORE INSERT OR UPDATE ON pharmacy_dispense_items
+        FOR EACH ROW EXECUTE FUNCTION reject_expired_batch_dispense()
+    """)
 
-    # ---------------------------------------------------------------
-    # adjustments [Blame] - dual sign-off
-    # ---------------------------------------------------------------
-    op.execute("""
-        CREATE TABLE adjustments (
-            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-            item_id UUID NOT NULL REFERENCES inventory_items(id),
-            batch_id UUID NOT NULL REFERENCES inventory_batches(id),
-            quantity_change NUMERIC(12,2) NOT NULL CHECK (quantity_change <> 0),
-            reason TEXT NOT NULL,
-            first_approver_id UUID NOT NULL REFERENCES users(id),
-            second_approver_id UUID NULL REFERENCES users(id),
-            status VARCHAR(50) NOT NULL
-                CONSTRAINT ck_adjustments_status
-                CHECK (status IN ('pending','approved','rejected')),
-            created_by UUID NOT NULL REFERENCES users(id),
-            updated_by UUID NULL REFERENCES users(id),
-            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            CONSTRAINT ck_adjustments_distinct_approvers CHECK (first_approver_id <> second_approver_id)
-        )
-    """)
-    op.execute("CREATE INDEX ix_adjustments_item_id ON adjustments (item_id)")
-    op.execute("CREATE INDEX ix_adjustments_batch_id ON adjustments (batch_id)")
-    op.execute("CREATE INDEX ix_adjustments_first_approver_id ON adjustments (first_approver_id)")
-    op.execute("CREATE INDEX ix_adjustments_second_approver_id ON adjustments (second_approver_id)")
-    op.execute("CREATE INDEX ix_adjustments_created_by ON adjustments (created_by)")
-    op.execute("CREATE INDEX ix_adjustments_updated_by ON adjustments (updated_by)")
+    op.create_table(
+        "grn",
+        sa.Column("id", UUID(as_uuid=True), primary_key=True,
+                  server_default=sa.text("uuid_generate_v4()")),
+        sa.Column("facility_id", UUID(as_uuid=True),
+                  sa.ForeignKey("facilities.id"), nullable=False),
+        sa.Column("supplier_id", UUID(as_uuid=True),
+                  sa.ForeignKey("suppliers.id"), nullable=False),
+        sa.Column("invoice_number", sa.String(50)),
+        sa.Column("received_date", sa.Date(), nullable=False),
+        sa.Column("status", sa.String(50), nullable=False),
+        sa.Column("created_by", UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("updated_by", UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.func.now()),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.func.now()),
+        sa.CheckConstraint(
+            "status IN ('draft','received','verified','cancelled')",
+            name="ck_grn_status",
+        ),
+    )
+    op.create_index("ix_grn_facility_id", "grn", ["facility_id"])
+    op.create_index("ix_grn_supplier_id", "grn", ["supplier_id"])
+    op.create_index("ix_grn_created_by", "grn", ["created_by"])
+    op.create_index("ix_grn_updated_by", "grn", ["updated_by"])
 
-    # ---------------------------------------------------------------
-    # facility_settings
-    # ---------------------------------------------------------------
-    op.execute("""
-        CREATE TABLE facility_settings (
-            facility_id UUID PRIMARY KEY REFERENCES facilities(id),
-            stock_deduction_policy VARCHAR(50)
-                CONSTRAINT ck_facility_settings_stock_deduction_policy
-                CHECK (stock_deduction_policy IN ('on_acceptance','on_dispense')),
-            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        )
-    """)
+    op.create_table(
+        "grn_items",
+        sa.Column("id", UUID(as_uuid=True), primary_key=True,
+                  server_default=sa.text("uuid_generate_v4()")),
+        sa.Column("grn_id", UUID(as_uuid=True),
+                  sa.ForeignKey("grn.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("item_id", UUID(as_uuid=True),
+                  sa.ForeignKey("inventory_items.id"), nullable=False),
+        sa.Column("batch_number", sa.String(50)),
+        sa.Column("expiry_date", sa.Date()),
+        sa.Column("quantity", sa.Numeric(12, 2), nullable=False),
+        sa.Column("unit_price", sa.Numeric(12, 2)),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.func.now()),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.func.now()),
+        sa.CheckConstraint("quantity > 0", name="ck_grn_items_quantity_positive"),
+    )
+    op.create_index("ix_grn_items_grn_id", "grn_items", ["grn_id"])
+    op.create_index("ix_grn_items_item_id", "grn_items", ["item_id"])
+
+    op.create_table(
+        "indents",
+        sa.Column("id", UUID(as_uuid=True), primary_key=True,
+                  server_default=sa.text("uuid_generate_v4()")),
+        sa.Column("facility_id", UUID(as_uuid=True),
+                  sa.ForeignKey("facilities.id"), nullable=False),
+        sa.Column("department_id", UUID(as_uuid=True),
+                  sa.ForeignKey("departments.id"), nullable=False),
+        sa.Column("status", sa.String(50), nullable=False),
+        sa.Column("approved_by", UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column("created_by", UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("updated_by", UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.func.now()),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.func.now()),
+        sa.CheckConstraint(
+            "status IN ('requested','approved','rejected','issued')",
+            name="ck_indents_status",
+        ),
+    )
+    op.create_index("ix_indents_facility_id", "indents", ["facility_id"])
+    op.create_index("ix_indents_department_id", "indents", ["department_id"])
+    op.create_index("ix_indents_approved_by", "indents", ["approved_by"])
+    op.create_index("ix_indents_created_by", "indents", ["created_by"])
+    op.create_index("ix_indents_updated_by", "indents", ["updated_by"])
+
+    op.create_table(
+        "indent_items",
+        sa.Column("id", UUID(as_uuid=True), primary_key=True,
+                  server_default=sa.text("uuid_generate_v4()")),
+        sa.Column("indent_id", UUID(as_uuid=True),
+                  sa.ForeignKey("indents.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("item_id", UUID(as_uuid=True),
+                  sa.ForeignKey("inventory_items.id"), nullable=False),
+        sa.Column("quantity_requested", sa.Numeric(12, 2), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.func.now()),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.func.now()),
+        sa.CheckConstraint("quantity_requested > 0", name="ck_indent_items_quantity_requested_positive"),
+    )
+    op.create_index("ix_indent_items_indent_id", "indent_items", ["indent_id"])
+    op.create_index("ix_indent_items_item_id", "indent_items", ["item_id"])
+
+    op.create_table(
+        "adjustments",
+        sa.Column("id", UUID(as_uuid=True), primary_key=True,
+                  server_default=sa.text("uuid_generate_v4()")),
+        sa.Column("facility_id", UUID(as_uuid=True),
+                  sa.ForeignKey("facilities.id"), nullable=False),
+        sa.Column("item_id", UUID(as_uuid=True),
+                  sa.ForeignKey("inventory_items.id"), nullable=False),
+        sa.Column("batch_id", UUID(as_uuid=True),
+                  sa.ForeignKey("inventory_batches.id"), nullable=False),
+        sa.Column("quantity_change", sa.Numeric(12, 2), nullable=False),
+        sa.Column("reason", sa.Text(), nullable=False),
+        sa.Column("first_approver_id", UUID(as_uuid=True),
+                  sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("second_approver_id", UUID(as_uuid=True),
+                  sa.ForeignKey("users.id"), nullable=True),
+        sa.Column("status", sa.String(50), nullable=False),
+        sa.Column("created_by", UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("updated_by", UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.func.now()),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.func.now()),
+        sa.CheckConstraint("quantity_change <> 0", name="ck_adjustments_quantity_change_nonzero"),
+        sa.CheckConstraint(
+            "status IN ('pending','approved','rejected')",
+            name="ck_adjustments_status",
+        ),
+        sa.CheckConstraint(
+            "first_approver_id <> second_approver_id",
+            name="ck_adjustments_distinct_approvers",
+        ),
+        sa.CheckConstraint(
+            "status <> 'approved' OR second_approver_id IS NOT NULL",
+            name="ck_adjustments_second_approver_required_when_approved",
+        ),
+        sa.CheckConstraint(
+            "created_by <> first_approver_id",
+            name="ck_adjustments_creator_not_first_approver",
+        ),
+        sa.CheckConstraint(
+            "second_approver_id IS NULL OR created_by <> second_approver_id",
+            name="ck_adjustments_creator_not_second_approver",
+        ),
+    )
+    op.create_index("ix_adjustments_facility_id", "adjustments", ["facility_id"])
+    op.create_index("ix_adjustments_item_id", "adjustments", ["item_id"])
+    op.create_index("ix_adjustments_batch_id", "adjustments", ["batch_id"])
+    op.create_index("ix_adjustments_first_approver_id", "adjustments", ["first_approver_id"])
+    op.create_index("ix_adjustments_second_approver_id", "adjustments", ["second_approver_id"])
+    op.create_index("ix_adjustments_created_by", "adjustments", ["created_by"])
+    op.create_index("ix_adjustments_updated_by", "adjustments", ["updated_by"])
+
+    op.create_table(
+        "facility_settings",
+        sa.Column("facility_id", UUID(as_uuid=True),
+                  sa.ForeignKey("facilities.id"), primary_key=True),
+        sa.Column("stock_deduction_policy", sa.String(50)),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.func.now()),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.func.now()),
+        sa.CheckConstraint(
+            "stock_deduction_policy IN ('on_acceptance','on_dispense')",
+            name="ck_facility_settings_stock_deduction_policy",
+        ),
+    )
 
 
 def downgrade() -> None:
-    op.execute("DROP TABLE IF EXISTS facility_settings")
-    op.execute("DROP TABLE IF EXISTS adjustments")
-    op.execute("DROP TABLE IF EXISTS indent_items")
-    op.execute("DROP TABLE IF EXISTS indents")
-    op.execute("DROP TABLE IF EXISTS grn_items")
-    op.execute("DROP TABLE IF EXISTS grn")
-    op.execute("DROP TABLE IF EXISTS pharmacy_dispense_items")
+    op.drop_table("facility_settings")
+    op.drop_table("adjustments")
+    op.drop_table("indent_items")
+    op.drop_table("indents")
+    op.drop_table("grn_items")
+    op.drop_table("grn")
+
+    op.execute("DROP TRIGGER IF EXISTS trg_pharmacy_dispense_items_reject_expired "
+               "ON pharmacy_dispense_items")
+    op.execute("DROP FUNCTION IF EXISTS reject_expired_batch_dispense()")
+    op.drop_table("pharmacy_dispense_items")
+
     op.execute("DROP INDEX IF EXISTS uq_pharmacy_dispenses_current")
-    op.execute("DROP TABLE IF EXISTS pharmacy_dispenses")
+    op.drop_table("pharmacy_dispenses")

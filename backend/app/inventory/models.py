@@ -1,108 +1,157 @@
-﻿import uuid
+import uuid
+from datetime import date, datetime
+from decimal import Decimal
+
 from sqlalchemy import (
-    Column, String, Text, Boolean, Numeric, ForeignKey, DateTime, CheckConstraint
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
 )
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.sql import func
+from sqlalchemy.orm import Mapped, mapped_column
 
-from app.common.db import Base  # adjust to actual import path
+from app.common.db import Base
+from app.common.models import Timestamps, UUIDPk
 
 
-class Supplier(Base):
+class Supplier(Base, UUIDPk, Timestamps):
     __tablename__ = "suppliers"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.uuid_generate_v4())
-    name = Column(Text, nullable=False)
-    contact_info = Column(Text)
-    is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    facility_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    contact_info: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    __table_args__ = (
+        Index("ix_suppliers_facility_id", "facility_id"),
+    )
 
 
-class InventoryItem(Base):
+class InventoryItem(Base, UUIDPk, Timestamps):
     __tablename__ = "inventory_items"
+
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    generic_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    strength: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    form: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    item_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    is_controlled_drug: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    manufacturer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    owning_department_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("departments.id"), nullable=True
+    )
+    reorder_level: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0"))
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
     __table_args__ = (
         CheckConstraint(
-            "form IN ('tablet','capsule','injection','syrup','ointment','fluid','reagent','consumable','film','implant','blood_component')",
-            name="ck_inventory_items_form",
+            "form IN ('tablet','capsule','injection','syrup','ointment','fluid',"
+            "'reagent','consumable','film','implant','blood_component')",
+            name="form",
         ),
         CheckConstraint(
-            "item_type IN ('medicine','reagent','consumable','film','implant','blood_component')",
-            name="ck_inventory_items_item_type",
+            "item_type IN ('medicine','reagent','consumable','film','implant',"
+            "'blood_component')",
+            name="item_type",
         ),
+        Index("ix_inventory_items_owning_department_id", "owning_department_id"),
     )
 
-    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.uuid_generate_v4())
-    name = Column(Text, nullable=False)
-    generic_name = Column(Text)
-    strength = Column(String(50))
-    form = Column(String(50))
-    item_type = Column(String(50))
-    is_controlled_drug = Column(Boolean, nullable=False, default=False)
-    manufacturer = Column(Text)
-    owning_department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id"), nullable=True)
-    reorder_level = Column(Numeric(12, 2), nullable=False, default=0)
-    is_active = Column(Boolean, nullable=False, default=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
-
-class StockLocation(Base):
+class StockLocation(Base, UUIDPk, Timestamps):
     __tablename__ = "stock_locations"
-    __table_args__ = (
-        CheckConstraint(
-            "location_type IN ('central','pharmacy','lab','radiology','ward','emergency','ot')",
-            name="ck_stock_locations_location_type",
-        ),
+
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    location_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    department_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("departments.id"), nullable=True
+    )
+    facility_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("facilities.id"), nullable=False
     )
 
-    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.uuid_generate_v4())
-    name = Column(Text, nullable=False)
-    location_type = Column(String(50))
-    department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id"), nullable=True)
-    facility_id = Column(UUID(as_uuid=True), ForeignKey("facilities.id"), nullable=False)
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    __table_args__ = (
+        CheckConstraint(
+            "location_type IN ('central','pharmacy','lab','radiology','ward',"
+            "'emergency','ot')",
+            name="location_type",
+        ),
+        Index("ix_stock_locations_department_id", "department_id"),
+        Index("ix_stock_locations_facility_id", "facility_id"),
+    )
 
 
-class InventoryBatch(Base):
+class InventoryBatch(Base, UUIDPk, Timestamps):
     __tablename__ = "inventory_batches"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.uuid_generate_v4())
-    item_id = Column(UUID(as_uuid=True), ForeignKey("inventory_items.id"), nullable=False)
-    batch_number = Column(String(50), nullable=False)
-    expiry_date = Column(DateTime(timezone=False), nullable=False)  # DATE in DB
-    quantity = Column(Numeric(12, 2), nullable=False)
-    purchase_rate = Column(Numeric(12, 2))
-    issue_rate_mrp = Column(Numeric(12, 2))
-    stock_location_id = Column(UUID(as_uuid=True), ForeignKey("stock_locations.id"), nullable=False)
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    item_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("inventory_items.id"), nullable=False
+    )
+    batch_number: Mapped[str] = mapped_column(String(50), nullable=False)
+    expiry_date: Mapped[date] = mapped_column(Date, nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    purchase_rate: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    issue_rate_mrp: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    stock_location_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("stock_locations.id"), nullable=False
+    )
+    row_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
 
-
-class StockLedger(Base):
-    """Append-only. No update/delete methods should ever be called on this
-    model - the DB trigger trg_stock_ledger_block_update will reject it
-    anyway, but don't rely on the trigger as your only guard; the service
-    layer should never construct an UPDATE/DELETE against this table."""
-    __tablename__ = "stock_ledger"
     __table_args__ = (
-        CheckConstraint(
-            "transaction_type IN ('purchase','issue','return','transfer','consumption','adjustment','write_off')",
-            name="ck_stock_ledger_transaction_type",
+        CheckConstraint("quantity >= 0", name="quantity"),
+        UniqueConstraint(
+            "item_id", "batch_number", "stock_location_id",
         ),
-        CheckConstraint("quantity <> 0", name="ck_stock_ledger_quantity_nonzero"),
+        Index("ix_inventory_batches_stock_location_id", "stock_location_id"),
     )
 
-    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.uuid_generate_v4())
-    item_id = Column(UUID(as_uuid=True), ForeignKey("inventory_items.id"), nullable=False)
-    batch_id = Column(UUID(as_uuid=True), ForeignKey("inventory_batches.id"), nullable=True)
-    transaction_type = Column(String(50), nullable=False)
-    quantity = Column(Numeric(12, 2), nullable=False)
-    reference_type = Column(String(30))
-    reference_id = Column(UUID(as_uuid=True))
-    performed_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    reason = Column(Text)
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
+class StockLedger(Base, UUIDPk):
+    __tablename__ = "stock_ledger"
 
+    item_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("inventory_items.id"), nullable=False
+    )
+    batch_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("inventory_batches.id"), nullable=True
+    )
+    transaction_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    reference_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    reference_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    performed_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "transaction_type IN ('purchase','issue','return','transfer',"
+            "'consumption','adjustment','write_off')",
+            name="transaction_type",
+        ),
+        CheckConstraint("quantity <> 0", name="quantity_nonzero"),
+        CheckConstraint(
+            "(transaction_type IN ('purchase','return') AND quantity > 0) OR "
+            "(transaction_type IN ('issue','consumption','write_off') AND quantity < 0) OR "
+            "(transaction_type IN ('adjustment','transfer'))",
+            name="quantity_sign_matches_type",
+        ),
+        Index("ix_stock_ledger_item_id", "item_id"),
+        Index("ix_stock_ledger_batch_id", "batch_id"),
+        Index("ix_stock_ledger_performed_by", "performed_by"),
+    )
