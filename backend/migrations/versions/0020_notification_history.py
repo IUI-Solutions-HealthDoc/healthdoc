@@ -20,7 +20,6 @@ def upgrade() -> None:
         sa.Column("department_id", UUID(as_uuid=True),
                   sa.ForeignKey("departments.id"), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
     )
 
     op.create_index("ix_notification_history_department_id", "notification_history", ["department_id"])
@@ -29,8 +28,24 @@ def upgrade() -> None:
         postgresql_using="gin", postgresql_ops={"payload": "jsonb_path_ops"},
     )
 
+    op.execute("""
+        CREATE OR REPLACE FUNCTION trg_notification_history_block_update()
+        RETURNS trigger AS $$
+        BEGIN
+            RAISE EXCEPTION 'notification_history is append-only; % is not allowed', TG_OP;
+        END;
+        $$ LANGUAGE plpgsql;
+    """)
+    op.execute("""
+        CREATE TRIGGER trg_notification_history_block_update
+        BEFORE UPDATE OR DELETE ON notification_history
+        FOR EACH ROW EXECUTE FUNCTION trg_notification_history_block_update();
+    """)
+
 
 def downgrade() -> None:
+    op.execute("DROP TRIGGER IF EXISTS trg_notification_history_block_update ON notification_history;")
+    op.execute("DROP FUNCTION IF EXISTS trg_notification_history_block_update();")
     op.drop_index("ix_notification_history_payload", table_name="notification_history")
     op.drop_index("ix_notification_history_department_id", table_name="notification_history")
     op.drop_table("notification_history")

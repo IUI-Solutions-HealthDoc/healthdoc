@@ -1,26 +1,26 @@
 """Queue operations — create queue, token generation, automatic call-next,
 priority elevation, listing.
 
-Call-next is automatic: when a prescription/order is created for a visit,
-that's the "consultation over" signal. complete_by_visit_id() is the trigger
-point other modules call once they exist. Admin has manual overrides for
-edge cases; no other role can call-next or force-complete.
+Call-next is automatic: a prescription/order created for a visit is the
+"consultation over" signal; complete_by_visit_id() is the trigger point.
+Admin has manual overrides for edge cases only.
 """
 import uuid
 from datetime import date
 
 from fastapi import HTTPException
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-
+from app.common.business_date import get_business_date
 from app.common.enums import QueuePriority, QueueTokenStatus
 from app.common.redis import publish_event, queue_channel
 from app.departments.models import Department, Room
 from app.notifications.models import NotificationHistory
-from app.queue.models import Queue, QueueToken
+from app.queue.models import Queue, QueueCounter, QueueToken, QueueTokenPriorityChange
 from app.users.models import User
 
-PRIORITY_ORDER = {
+PRIORITY_RANK = {
     QueuePriority.EMERGENCY.value: 0,
     QueuePriority.DOCTOR_RECALL.value: 1,
     QueuePriority.ADMIN_OVERRIDE.value: 2,
@@ -30,7 +30,68 @@ PRIORITY_ORDER = {
     QueuePriority.NORMAL.value: 6,
 }
 
+TIER_ALLOWED_ROLES: dict[str, set[str]] = {
+    QueuePriority.SENIOR_CITIZEN.value: {"receptionist"},
+    QueuePriority.PREGNANT.value: {"receptionist"},
+    QueuePriority.FOLLOW_UP_RECALL.value: {"receptionist", "doctor"},
+    QueuePriority.DOCTOR_RECALL.value: {"doctor"},
+    QueuePriority.EMERGENCY.value: {"emergency", "doctor", "hod"},
+    QueuePriority.ADMIN_OVERRIDE.value: {"hod"},
+}
+
 CALLABLE_STATUSES = (QueueTokenStatus.WAITING.value, QueueTokenStatus.RECALLED.value)
+
+_NOT_FOUND = HTTPException(404, "Queue not found")
+
+
+# ---------------- CALLER CONTEXT RESOLUTION ----------------
+async def resolve_caller_facility_id(db: AsyncSession, keycloak_sub: str) -> uuid.UUID:
+    row = await db.execute(select(User.facility_id).where(User.keycloak_sub == keycloak_sub))
+    facility_id = row.scalar_one_or_none()
+    if facility_id is None:
+        raise HTTPException(403, "No matching user profile for this account")
+    return facility_id
+
+async def resolve_caller_full_context(
+    db: AsyncSession, keycloak_sub: str
+) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID | None]:
+    row = await db.execute(
+        select(User.id, User.facility_id, User.department_id).where(User.keycloak_sub == keycloak_sub)
+    )
+    result = row.one_or_none()
+    if result is None:
+        raise HTTPException(403, "No matching user profile for this account")
+    return result[0], result[1], result[2]
+
+
+# ---------------- FACILITY-SCOPED FETCH ----------------
+async def _get_scoped_queue(
+    db: AsyncSession, queue_id: uuid.UUID, caller_facility_id: uuid.UUID, for_update: bool = False
+) -> Queue:
+    q = select(Queue).where(Queue.id == queue_id)
+    if for_update:
+        q = q.with_for_update()
+    queue = (await db.execute(q)).scalar_one_or_none()
+    if queue is None or queue.facility_id != caller_facility_id:
+        raise _NOT_FOUND
+    return queue
+
+async def _get_scoped_token(
+    db: AsyncSession, token_id: uuid.UUID, caller_facility_id: uuid.UUID, for_update: bool = False
+) -> tuple[QueueToken, Queue]:
+    q = select(QueueToken).where(QueueToken.id == token_id)
+    if for_update:
+        q = q.with_for_update()
+    token = (await db.execute(q)).scalar_one_or_none()
+    if token is None:
+        raise HTTPException(404, "Token not found")
+ 
+    queue = (
+        await db.execute(select(Queue).where(Queue.id == token.queue_id).with_for_update())
+    ).scalar_one_or_none()
+    if queue is None or queue.facility_id != caller_facility_id:
+        raise HTTPException(404, "Token not found")
+    return token, queue
 
 
 # ---------------- CREATE QUEUE ----------------
@@ -41,7 +102,14 @@ async def create_queue(
     room_id: uuid.UUID | None,
     display_label: str | None,
     service_date: date,
+    caller_facility_id: uuid.UUID,
 ) -> Queue:
+    department = await db.get(Department, department_id)
+    if department is None:
+        raise HTTPException(404, "Department not found")
+    if department.facility_id != caller_facility_id:
+        raise HTTPException(404, "Department not found")
+    
     existing = (
         await db.execute(
             select(Queue).where(
@@ -56,6 +124,7 @@ async def create_queue(
 
     queue = Queue(
         id=uuid.uuid4(),
+        facility_id=department.facility_id,
         department_id=department_id,
         doctor_user_id=doctor_user_id,
         room_id=room_id,
@@ -68,24 +137,52 @@ async def create_queue(
     return queue
 
 
+async def _allocate_token_number(db: AsyncSession, department_id: uuid.UUID, business_date: date) -> int:
+    counter = (
+        await db.execute(
+            select(QueueCounter)
+            .where(QueueCounter.department_id == department_id, QueueCounter.counter_date == business_date)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+ 
+    if counter is None:
+        counter = QueueCounter(
+            id=uuid.uuid4(), department_id=department_id, counter_date=business_date, last_value=0
+        )
+        db.add(counter)
+        try:
+            await db.flush()
+        except IntegrityError:
+            await db.rollback()
+            counter = (
+                await db.execute(
+                    select(QueueCounter)
+                    .where(QueueCounter.department_id == department_id, QueueCounter.counter_date == business_date)
+                    .with_for_update()
+                )
+            ).scalar_one()
+ 
+    counter.last_value += 1
+    await db.flush()
+    return counter.last_value
+
+
 # ---------------- CREATE TOKEN ----------------
 async def create_token(
     db: AsyncSession,
     queue_id: uuid.UUID,
     visit_id: uuid.UUID,
     priority: str,
+    caller_facility_id: uuid.UUID,
 ) -> QueueToken:
     if visit_id is None:
         raise HTTPException(422, "visit_id is required to create a queue token")
 
-    queue = (
-        await db.execute(select(Queue).where(Queue.id == queue_id).with_for_update())
-    ).scalar_one_or_none()
-    if queue is None:
-        raise HTTPException(404, "Queue not found")
+    queue = await _get_scoped_queue(db, queue_id, caller_facility_id, for_update=True)
     if not queue.is_open:
         raise HTTPException(409, "Queue is closed")
-    if priority not in PRIORITY_ORDER:
+    if priority not in PRIORITY_RANK:
         raise HTTPException(422, f"Invalid priority '{priority}'")
 
     department = await db.get(Department, queue.department_id)
@@ -100,14 +197,19 @@ async def create_token(
         )
     ).scalar_one()
 
+    business_date = await get_business_date(db, queue.facility_id)
+    token_number = await _allocate_token_number(db, queue.department_id, business_date)
+
     token = QueueToken(
         id=uuid.uuid4(),
         queue_id=queue_id,
         visit_id=visit_id,
         sequence=next_seq,
-        token_display=f"{department.code}-{next_seq:03d}",
+        token_display=f"{department.code}-{token_number:03d}",
+        initial_priority=priority,
         status=QueueTokenStatus.WAITING.value,
         priority=priority,
+        priority_rank=PRIORITY_RANK[priority],
     )
     db.add(token)
     await db.flush()
@@ -122,16 +224,16 @@ async def _find_unresolved_called_token(db: AsyncSession, queue_id: uuid.UUID) -
             select(QueueToken).where(
                 QueueToken.queue_id == queue_id,
                 QueueToken.status == QueueTokenStatus.CALLED.value,
-            )
+            ).limit(1)
         )
     ).scalar_one_or_none()
 
 
 # ---------------- ADVANCE QUEUE (shared by manual + automatic paths) ----------------
 async def _advance_queue(db: AsyncSession, queue: Queue) -> QueueToken | None:
-    """Assumes `queue` is already locked by the caller. Returns None (no
-    exception) if closed, empty, or a stuck token exists — this can run
-    inside another module's transaction and must never raise there."""
+    # Assumes `queue` is already locked by the caller. Returns None if
+    # closed/empty/stuck -- can run inside another module's transaction
+    # and must never raise there."""
     if not queue.is_open:
         return None
     if await _find_unresolved_called_token(db, queue.id) is not None:
@@ -152,7 +254,7 @@ async def _advance_queue(db: AsyncSession, queue: Queue) -> QueueToken | None:
     if not candidates:
         return None
 
-    candidates.sort(key=lambda t: (PRIORITY_ORDER.get(t.priority, 99), t.created_at, t.sequence))
+    candidates.sort(key=lambda t: (t.priority_rank, t.created_at, t.sequence))
     next_token = candidates[0]
 
     next_token.status = QueueTokenStatus.CALLED.value
@@ -187,12 +289,12 @@ async def _advance_queue(db: AsyncSession, queue: Queue) -> QueueToken | None:
 
 
 # ---------------- ADMIN MANUAL OVERRIDE: CALL NEXT ----------------
-async def call_next_token(db: AsyncSession, queue_id: uuid.UUID) -> QueueToken:
-    queue = (
-        await db.execute(select(Queue).where(Queue.id == queue_id).with_for_update())
-    ).scalar_one_or_none()
-    if queue is None:
-        raise HTTPException(404, "Queue not found")
+async def call_next_token(
+    db: AsyncSession,
+    queue_id: uuid.UUID,
+    caller_facility_id: uuid.UUID,
+) -> QueueToken:
+    queue = await _get_scoped_queue(db, queue_id, caller_facility_id, for_update=True)
     if not queue.is_open:
         raise HTTPException(409, "Queue is closed")
 
@@ -238,10 +340,9 @@ async def _complete_token_and_advance(
 async def complete_by_visit_id(
     db: AsyncSession, visit_id: uuid.UUID
 ) -> tuple[QueueToken, QueueToken | None]:
-    """Call from the prescriptions/orders module, same DB transaction, right
-    after creating the prescription/order:
-        await complete_by_visit_id(db, prescription.visit_id)
-    """
+    # Call from prescriptions/orders, same DB transaction, right after
+    # creating the prescription/order:
+    # await complete_by_visit_id(db, prescription.visit_id)
     token = (
         await db.execute(
             select(QueueToken)
@@ -259,38 +360,93 @@ async def complete_by_visit_id(
 
 
 async def admin_force_complete(
-    db: AsyncSession, token_id: uuid.UUID
+    db: AsyncSession,
+    token_id: uuid.UUID,
+    caller_facility_id: uuid.UUID,
 ) -> tuple[QueueToken, QueueToken | None]:
-    token = (
-        await db.execute(select(QueueToken).where(QueueToken.id == token_id).with_for_update())
-    ).scalar_one_or_none()
-    if token is None:
-        raise HTTPException(404, "Token not found")
+    token, _queue = await _get_scoped_token(db, token_id, caller_facility_id, for_update=True)
     return await _complete_token_and_advance(db, token)
 
 
 # ---------------- PRIORITY ELEVATION ----------------
-async def elevate_priority(db: AsyncSession, token_id: uuid.UUID, new_priority: str) -> QueueToken:
-    if new_priority not in PRIORITY_ORDER:
+async def elevate_priority(
+    db: AsyncSession,
+    token_id: uuid.UUID,
+    new_priority: str,
+    reason: str,
+    caller_sub: str,
+    caller_roles: list[str],
+    caller_amr: list[str],
+    caller_facility_id: uuid.UUID,
+) -> QueueToken:
+    if new_priority not in PRIORITY_RANK:
         raise HTTPException(422, f"Invalid priority '{new_priority}'")
-
-    token = await db.get(QueueToken, token_id)
-    if token is None:
-        raise HTTPException(404, "Token not found")
-    if token.status not in CALLABLE_STATUSES:
+    if reason is None or len(reason.strip()) < 10:
+        raise HTTPException(422, "reason must be at least 10 characters")
+ 
+    token, queue = await _get_scoped_token(db, token_id, caller_facility_id, for_update=True)
+ 
+    if token.status != QueueTokenStatus.WAITING.value:
         raise HTTPException(409, f"Cannot change priority on a token with status '{token.status}'")
-
+ 
+    old_priority = token.priority
+    old_rank = PRIORITY_RANK[old_priority]
+    new_rank = PRIORITY_RANK[new_priority]
+ 
+    if new_rank == old_rank:
+        raise HTTPException(422, f"Token is already '{old_priority}'")
+ 
+    caller_user_id, _caller_facility_id, caller_department_id = await resolve_caller_full_context(
+        db, caller_sub
+    )
+ 
+    if new_rank < old_rank:
+        # Elevating -- role must be allowed for the target tier.
+        allowed_roles = TIER_ALLOWED_ROLES.get(new_priority, set())
+        if not allowed_roles & set(caller_roles):
+            raise HTTPException(403, f"Your role cannot set priority to '{new_priority}'")
+ 
+        if new_priority == QueuePriority.DOCTOR_RECALL.value:
+            if queue.doctor_user_id != caller_user_id:
+                raise HTTPException(403, "doctor_recall may only be set by this queue's own doctor")
+ 
+        if new_priority == QueuePriority.ADMIN_OVERRIDE.value:
+            if "hod" not in caller_roles:
+                raise HTTPException(403, "admin_override may only be set by hod")
+            if caller_department_id != queue.department_id:
+                raise HTTPException(403, "hod may only act within their own department")
+            if "otp" not in caller_amr:
+                raise HTTPException(403, "admin_override requires an active MFA session")
+    else:
+        # Demoting -- only hod, regardless of target tier.
+        if "hod" not in caller_roles:
+            raise HTTPException(403, "Only hod may lower a token's priority")
+        if caller_department_id != queue.department_id:
+            raise HTTPException(403, "hod may only act within their own department")
+ 
+    db.add(QueueTokenPriorityChange(
+        id=uuid.uuid4(),
+        queue_token_id=token.id,
+        from_priority=old_priority,
+        to_priority=new_priority,
+        reason=reason.strip(),
+        changed_by=caller_user_id,
+    ))
+ 
     token.priority = new_priority
+    token.priority_rank = new_rank
     await db.flush()
     await db.refresh(token)
     return token
 
 
 # ---------------- LIST QUEUE TOKENS ----------------
-async def list_queue_tokens(db: AsyncSession, queue_id: uuid.UUID) -> dict:
-    queue = (await db.execute(select(Queue).where(Queue.id == queue_id))).scalar_one_or_none()
-    if queue is None:
-        raise HTTPException(404, "Queue not found")
+async def list_queue_tokens(
+    db: AsyncSession,
+    queue_id: uuid.UUID,
+    caller_facility_id: uuid.UUID,
+) -> dict:
+    queue = await _get_scoped_queue(db, queue_id, caller_facility_id)
 
     doctor = await db.get(User, queue.doctor_user_id)
     room = await db.get(Room, queue.room_id) if queue.room_id else None
@@ -309,8 +465,8 @@ async def list_queue_tokens(db: AsyncSession, queue_id: uuid.UUID) -> dict:
         .scalars()
         .all()
     )
-    tokens.sort(key=lambda t: (PRIORITY_ORDER.get(t.priority, 99), t.created_at, t.sequence))
-
+    tokens.sort(key=lambda t: (t.priority_rank, t.created_at, t.sequence))
+    
     waiting_count = sum(1 for t in tokens if t.status in CALLABLE_STATUSES)
 
     now_serving = None

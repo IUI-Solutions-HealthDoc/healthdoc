@@ -16,12 +16,15 @@ def upgrade() -> None:
         sa.Column("id", UUID(as_uuid=True), primary_key=True,
                   server_default=sa.text("uuid_generate_v4()")),
         sa.Column("name", sa.Text(), nullable=False),
-        sa.Column("code", sa.String(20), nullable=False, unique=True),
+        sa.Column("code", sa.String(20), nullable=False),
         sa.Column("facility_id", UUID(as_uuid=True),
                   sa.ForeignKey("facilities.id"), nullable=False),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+
+        # not globally. Two hospitals can both have a "MED" department.
+        sa.UniqueConstraint("facility_id", "code", name="uq_department_facility_code"),
     )
 
     op.create_index("ix_departments_facility_id", "departments", ["facility_id"])

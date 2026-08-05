@@ -39,6 +39,11 @@ class User(Base, UUIDPk, Timestamps):
     facility_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False
     )
+
+    department_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("departments.id"), nullable=True
+    )
+    
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # department_id is added by migration 0005 (departments module) — B4 adds the
     # mapped column here in the same PR.

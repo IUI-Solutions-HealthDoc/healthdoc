@@ -27,6 +27,8 @@ class AuthUser(BaseModel):
     username: str = ""
     roles: list[str] = []
 
+    amr: list[str] = []
+
 
 async def _get_jwks() -> dict:
     if _jwks_cache["keys"] and time.time() - _jwks_cache["fetched_at"] < JWKS_TTL_SECONDS:
@@ -58,6 +60,8 @@ async def get_current_user(
         sub=claims["sub"],
         username=claims.get("preferred_username", ""),
         roles=claims.get("realm_access", {}).get("roles", []),
+
+        amr=claims.get("amr", []),
     )
 
 

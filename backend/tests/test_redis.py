@@ -42,35 +42,29 @@ async def test_redis_connection_ping():
 @pytest.mark.asyncio
 async def test_publish_and_subscribe_raw_message():
     channel = "test:raw"
-    pubsub = await subscribe(channel)
-    await asyncio.sleep(0.1)  # let the subscription register before publishing
+    async with subscribe(channel) as pubsub:
+        await asyncio.sleep(0.1)  # let the subscription register before publishing
 
-    await publish(channel, "hello")
+        await publish(channel, "hello")
 
-    msg = await asyncio.wait_for(_first_message(pubsub), timeout=2)
-    assert msg["data"] == "hello"
-
-    await pubsub.unsubscribe(channel)
-    await pubsub.aclose()
+        msg = await asyncio.wait_for(_first_message(pubsub), timeout=2)
+        assert msg["data"] == "hello"
 
 
 @pytest.mark.asyncio
 async def test_publish_event_shape():
     department_id = "test-dept"
     channel = queue_channel(department_id)
-    pubsub = await subscribe(channel)
-    await asyncio.sleep(0.1)
+    async with subscribe(channel) as pubsub:
+        await asyncio.sleep(0.1)
 
-    payload = {"queue_id": "Q1", "doctor_name": "Dr. A"}
-    await publish_event(channel, "token_called", payload)
+        payload = {"queue_id": "Q1", "doctor_name": "Dr. A"}
+        await publish_event(channel, "token_called", payload)
 
-    msg = await asyncio.wait_for(_first_message(pubsub), timeout=2)
-    event = json.loads(msg["data"])
-    assert event["event_type"] == "token_called"
-    assert event["payload"] == payload
-
-    await pubsub.unsubscribe(channel)
-    await pubsub.aclose()
+        msg = await asyncio.wait_for(_first_message(pubsub), timeout=2)
+        event = json.loads(msg["data"])
+        assert event["event_type"] == "token_called"
+        assert event["payload"] == payload
 
 
 @pytest.mark.asyncio
@@ -102,11 +96,12 @@ async def test_subscribe_raises_on_redis_error(monkeypatch):
     monkeypatch.setattr(client, "pubsub", _broken_pubsub)
 
     with pytest.raises(RedisError):
-        await subscribe("test:broken")
-
+        async with subscribe("test:broken"):
+            pass
 
 async def _first_message(pubsub):
     """Skip the subscribe-confirmation message; return the first real one."""
     async for msg in pubsub.listen():
         if msg["type"] == "message":
             return msg
+        

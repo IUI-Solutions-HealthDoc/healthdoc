@@ -55,6 +55,7 @@ class QueueTokenGenerateRequest(BaseModel):
 
 class TokenPriorityElevate(BaseModel):
     priority: str
+    reason: str
 
 class QueueTokenListItemOut(QueueTokenOut):
     doctor_name: str
@@ -71,3 +72,4 @@ class QueueTokenListOut(BaseModel):
 class CompleteAdvanceOut(BaseModel):
     completed_token: QueueTokenOut
     next_token: QueueTokenOut | None
+    

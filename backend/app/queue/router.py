@@ -1,18 +1,18 @@
-"""queue module router — endpoints land here; see this module's GitHub issues."""
 """queue module router — create queue, token generation, admin call-next
 override, force-complete override, priority elevation, listing.
-
+ 
 Doctors have no endpoints here — finishing a prescription/order elsewhere
 triggers the automatic advance via service.complete_by_visit_id(). Admin
 keeps manual overrides for edge cases.
 """
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.deps import require_roles
+from app.auth.deps import CurrentUser, require_roles
 from app.common.db import get_db
+from app.common.idempotency import check_idempotency, hash_request_body, record_idempotent_response
 from app.queue import service
 from app.queue.schemas import (
     CompleteAdvanceOut,
@@ -34,7 +34,8 @@ router = APIRouter(prefix="/queue", tags=["queue"])
     status_code=201,
     dependencies=[Depends(require_roles("receptionist", "admin"))],
 )
-async def create_queue(payload: QueueCreate, db: AsyncSession = Depends(get_db)) -> dict:
+async def create_queue(payload: QueueCreate, user: CurrentUser, db: AsyncSession = Depends(get_db)) -> dict:
+    caller_facility_id = await service.resolve_caller_facility_id(db, user.sub)
     queue = await service.create_queue(
         db,
         department_id=payload.department_id,
@@ -42,6 +43,7 @@ async def create_queue(payload: QueueCreate, db: AsyncSession = Depends(get_db))
         room_id=payload.room_id,
         display_label=payload.display_label,
         service_date=payload.service_date,
+        caller_facility_id=caller_facility_id,
     )
     return QueueOut.model_validate(queue).model_dump(mode="json")
 
@@ -53,15 +55,35 @@ async def create_queue(payload: QueueCreate, db: AsyncSession = Depends(get_db))
     dependencies=[Depends(require_roles("receptionist", "nurse", "emergency", "admin"))],
 )
 async def create_token(
-    payload: QueueTokenGenerateRequest, db: AsyncSession = Depends(get_db)
+    payload: QueueTokenGenerateRequest,
+    user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
 ) -> dict:
+    if not idempotency_key:
+        raise HTTPException(400, "Idempotency-Key header is required")
+ 
+    caller_user_id, caller_facility_id, _caller_department_id = await service.resolve_caller_full_context(
+        db, user.sub
+    )
+ 
+    request_hash = hash_request_body(payload)
+    existing = await check_idempotency(
+        db, idempotency_key, _CREATE_TOKEN_ENDPOINT, request_hash, caller_user_id
+    )
+    if existing is not None:
+        return existing.response_body
+ 
     token = await service.create_token(
         db,
         queue_id=payload.queue_id,
         visit_id=payload.visit_id,
         priority=payload.priority,
+        caller_facility_id=caller_facility_id,
     )
-    return QueueTokenOut.model_validate(token).model_dump(mode="json")
+    response_body = QueueTokenOut.model_validate(token).model_dump(mode="json")
+    await record_idempotent_response(db, idempotency_key, _CREATE_TOKEN_ENDPOINT, 201, response_body)
+    return response_body
 
 
 # ---------------- ADMIN MANUAL OVERRIDE: CALL NEXT ----------------
@@ -69,8 +91,9 @@ async def create_token(
     "/tokens/{queue_id}/call-next",
     dependencies=[Depends(require_roles("admin"))],
 )
-async def call_next(queue_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> dict:
-    token = await service.call_next_token(db, queue_id)
+async def call_next(queue_id: uuid.UUID, user: CurrentUser, db: AsyncSession = Depends(get_db)) -> dict:
+    caller_facility_id = await service.resolve_caller_facility_id(db, user.sub)
+    token = await service.call_next_token(db, queue_id, caller_facility_id)
     return QueueTokenOut.model_validate(token).model_dump(mode="json")
 
 
@@ -79,8 +102,9 @@ async def call_next(queue_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> 
     "/tokens/{token_id}/complete",
     dependencies=[Depends(require_roles("admin"))],
 )
-async def force_complete_token(token_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> dict:
-    completed_token, next_token = await service.admin_force_complete(db, token_id)
+async def force_complete_token(token_id: uuid.UUID, user: CurrentUser, db: AsyncSession = Depends(get_db)) -> dict:
+    caller_facility_id = await service.resolve_caller_facility_id(db, user.sub)
+    completed_token, next_token = await service.admin_force_complete(db, token_id, caller_facility_id)
     return CompleteAdvanceOut(
         completed_token=QueueTokenOut.model_validate(completed_token),
         next_token=QueueTokenOut.model_validate(next_token) if next_token else None,
@@ -90,12 +114,25 @@ async def force_complete_token(token_id: uuid.UUID, db: AsyncSession = Depends(g
 # ---------------- PRIORITY ELEVATION ----------------
 @router.patch(
     "/tokens/{token_id}/priority",
-    dependencies=[Depends(require_roles("receptionist", "admin"))],
+    dependencies=[Depends(require_roles("receptionist", "doctor", "emergency", "hod"))],
 )
 async def elevate_priority(
-    token_id: uuid.UUID, payload: TokenPriorityElevate, db: AsyncSession = Depends(get_db)
+    token_id: uuid.UUID,
+    payload: TokenPriorityElevate,
+    user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
 ) -> dict:
-    token = await service.elevate_priority(db, token_id, payload.priority)
+    caller_facility_id = await service.resolve_caller_facility_id(db, user.sub)
+    token = await service.elevate_priority(
+        db,
+        token_id,
+        payload.priority,
+        payload.reason,
+        caller_sub=user.sub,
+        caller_roles=user.roles,
+        caller_amr=user.amr,
+        caller_facility_id=caller_facility_id,
+    )
     return QueueTokenOut.model_validate(token).model_dump(mode="json")
 
 
@@ -104,8 +141,13 @@ async def elevate_priority(
     "/queues/{queue_id}/tokens",
     dependencies=[Depends(require_roles("doctor", "nurse", "receptionist", "admin"))],
 )
-async def list_queue_tokens(queue_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> dict:
-    result = await service.list_queue_tokens(db, queue_id)
+async def list_queue_tokens(
+    queue_id: uuid.UUID,
+    user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    caller_facility_id = await service.resolve_caller_facility_id(db, user.sub)
+    result = await service.list_queue_tokens(db, queue_id, caller_facility_id)
     return QueueTokenListOut(
         waiting_count=result["waiting_count"],
         now_serving=result["now_serving"],

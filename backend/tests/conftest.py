@@ -14,7 +14,7 @@ from app.common.db import Base
 from app.departments.models import Department, Room
 from app.users.models import Facility, User
 from app.queue import service
-from sqlalchemy import Column
+from sqlalchemy import Column, Table
 
 @pytest.fixture
 def client() -> TestClient:
@@ -30,10 +30,22 @@ def fake_redis(monkeypatch):
     # Patch the publish_event function used in your queue service
     monkeypatch.setattr("app.queue.service.publish_event", fake_publish)
 
-class Visit(Base):
-        __tablename__ = "visits"
-        id = Column(UUID(as_uuid=True), primary_key=True)  
+@pytest.fixture(autouse=True)
+def fake_business_date(monkeypatch):
+    async def fake_get_business_date(db, facility_id):
+        return date.today()
+ 
+    monkeypatch.setattr("app.queue.service.get_business_date", fake_get_business_date)
 
+
+def _ensure_visits_table_exists() -> None:
+    if "visits" not in Base.metadata.tables:
+        Table(
+            "visits", Base.metadata,
+            Column("id", UUID(as_uuid=True), primary_key=True),
+            extend_existing=True,
+        )
+        
 @compiles(JSONB, "sqlite")
 def _compile_jsonb_sqlite(type_, compiler, **kw):
     return "JSON"
@@ -43,6 +55,8 @@ def _compile_jsonb_sqlite(type_, compiler, **kw):
 async def db():
     """A fresh, empty, in-memory database — created and destroyed once per
     test. Has no connection to your real Postgres DB."""
+
+    _ensure_visits_table_exists()
 
     engine = create_async_engine(
         "sqlite+aiosqlite://", poolclass=StaticPool, connect_args={"check_same_thread": False},
@@ -85,6 +99,7 @@ async def queue(db, seed):
         room_id=room.id,
         display_label="Test Queue",
         service_date=date.today(),
+        caller_facility_id=dept.facility_id,
     )
     return q
  
