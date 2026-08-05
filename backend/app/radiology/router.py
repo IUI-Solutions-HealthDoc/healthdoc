@@ -4,11 +4,12 @@ radiologist draft + sign-off.
 """
 import uuid
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
-
+from sqlalchemy.exc import IntegrityError
 from app.common.db import get_db
 from app.auth.deps import get_current_user, require_roles, get_current_db_user, CurrentDbUser
 from app.radiology.fhir import build_diagnostic_report_bundle
@@ -20,6 +21,7 @@ from app.radiology.schemas import (
 )
 from app.radiology.models import RadiologyOrderItem, RadiologyReport
 
+_MAX_ACCESSION_RETRIES = 5
 
 router = APIRouter(prefix="/radiology", tags=["radiology"])
 
@@ -47,19 +49,39 @@ async def create_radiology_order_item(
         if order is None:
             raise HTTPException(status_code=404, detail="Order not found")
 
-    accession_number = await _generate_accession_number(db, prefix="RAD")
+   # NOTE (#9): a fully atomic counter (dedicated accession_counters
+    # table + migration) is the correct long-term fix, matching the
+    # billing_counters pattern the reviewer suggested — but that requires
+    # a new migration, and this branch's local migration chain is
+    # currently broken (missing revision 0009, blocked on syncing with
+    # staging/teammates' branches). Until that's unblocked, this uses a
+    # bounded retry on unique-constraint collision instead of a hard
+    # failure, plus a correct facility business date (IST, not raw UTC).
+    item = None
+    for attempt in range(_MAX_ACCESSION_RETRIES):
+        accession_number = await _generate_accession_number(db, prefix="RAD")
+        item = RadiologyOrderItem(
+            order_id=order_id,
+            accession_number=accession_number,
+            modality=payload.modality,
+            scan_type=payload.scan_type,
+            machine_id=payload.machine_id,
+            status="placed",
+            created_by=current_db_user.id,
+        )
+        db.add(item)
+        try:
+            await db.flush()
+            break
+        except IntegrityError:
+            await db.rollback()
+            if attempt == _MAX_ACCESSION_RETRIES - 1:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Could not generate a unique accession number, please retry",
+                )
+            continue
 
-    item = RadiologyOrderItem(
-        order_id=order_id,
-        accession_number=accession_number,
-        modality=payload.modality,
-        scan_type=payload.scan_type,
-        machine_id=payload.machine_id,
-        status="placed",
-        created_by=current_db_user.id,
-    )
-    db.add(item)
-    await db.flush()
     await _write_audit_log(db, table_name="radiology_order_items", row_id=item.id,
                             action="create", actor_id=current_db_user.id)
     await db.refresh(item)
@@ -226,15 +248,28 @@ async def get_fhir_bundle(
     return bundle
 
 
+_IST = ZoneInfo("Asia/Kolkata")
+
+
+def _facility_business_date() -> str:
+    """
+    Facility business date (IST), used for accession-number date stamps.
+    Previously used datetime.now(timezone.utc), which carries yesterday's
+    date between 00:00-05:30 IST. NOTE: this is a stand-in until a shared
+    facility_business_date() helper exists elsewhere in the codebase (none
+    found as of this fix) — switch to that if/when it lands.
+    """
+    return datetime.now(_IST).strftime("%Y%m%d")
+
+
 async def _generate_accession_number(db: AsyncSession, prefix: str) -> str:
-    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+    date_str = _facility_business_date()
     count_today = (await db.execute(
         select(func.count()).select_from(RadiologyOrderItem)
-        .where(RadiologyOrderItem.accession_number.like(f"{prefix}-{today}-%"))
+        .where(RadiologyOrderItem.accession_number.like(f"{prefix}-{date_str}-%"))
     )).scalar()
     seq = str(count_today + 1).zfill(5)
-    return f"{prefix}-{today}-{seq}"
-
+    return f"{prefix}-{date_str}-{seq}"
 
 async def _write_audit_log(db: AsyncSession, *, table_name: str, row_id: uuid.UUID,
                             action: str, actor_id: uuid.UUID) -> None:

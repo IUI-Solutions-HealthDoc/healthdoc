@@ -23,11 +23,13 @@ import asyncio
 import json
 import uuid
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from statistics import mean, median
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
+from sqlalchemy.exc import IntegrityError
 
 from app.common.db import get_db
 from app.auth.deps import get_current_user, require_roles, get_current_db_user, CurrentDbUser
@@ -38,8 +40,9 @@ from app.pathology.schemas import (
     LabResultAmend, LabResultHistoryOut,
     LabMISSummaryOut, TATByTestOut, StatusCountOut, PanicFrequencyOut,
 )
-router = APIRouter(prefix="/pathology", tags=["pathology"])
+_MAX_ACCESSION_RETRIES = 5
 
+router = APIRouter(prefix="/pathology", tags=["pathology"])
 
 @router.get("/ping")
 async def ping() -> dict:
@@ -70,28 +73,46 @@ async def create_lab_order_item(
         if order is None:
             raise HTTPException(status_code=404, detail="Order not found")
 
-    accession_number = await _generate_accession_number(db, prefix="LAB")
-
-    item = LabOrderItem(
-        order_id=order_id,
-        accession_number=accession_number,
-        test_code=payload.test_code,
-        test_name=payload.test_name,
-        sample_type=payload.sample_type,
-        department_id=payload.department_id,
-        estimated_minutes=payload.estimated_minutes,
-        status="placed",
-        created_by=current_db_user.id,
-    )
-    db.add(item)
-    await db.flush()
+    
+# NOTE (#9): a fully atomic counter (dedicated accession_counters
+    # table + migration) is the correct long-term fix, matching the
+    # billing_counters pattern the reviewer suggested — but that requires
+    # a new migration, and this branch's local migration chain is
+    # currently broken (missing revision 0009, blocked on syncing with
+    # staging/teammates' branches). Until that's unblocked, this uses a
+    # bounded retry on unique-constraint collision instead of a hard
+    # failure, plus a correct facility business date (IST, not raw UTC).
+    item = None
+    for attempt in range(_MAX_ACCESSION_RETRIES):
+        accession_number = await _generate_accession_number(db, prefix="LAB")
+        item = LabOrderItem(
+            order_id=order_id,
+            accession_number=accession_number,
+            test_code=payload.test_code,
+            test_name=payload.test_name,
+            sample_type=payload.sample_type,
+            department_id=payload.department_id,
+            estimated_minutes=payload.estimated_minutes,
+            status="placed",
+            created_by=current_db_user.id,
+        )
+        db.add(item)
+        try:
+            await db.flush()
+            break
+        except IntegrityError:
+            await db.rollback()
+            if attempt == _MAX_ACCESSION_RETRIES - 1:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Could not generate a unique accession number, please retry",
+                )
+            continue
 
     await _write_audit_log(db, table_name="lab_order_items", row_id=item.id,
                             action="create", actor_id=current_db_user.id)
     await db.refresh(item)
     return item
-
-
 @router.put(
     "/order-items/{item_id}/sample-collection",
     response_model=LabOrderItemOut,
@@ -153,14 +174,28 @@ async def list_lab_order_items(
     return LabOrderItemListOut(items=rows, page=page, page_size=page_size, total=total)
 
 
+_IST = ZoneInfo("Asia/Kolkata")
+
+
+def _facility_business_date() -> str:
+    """
+    Facility business date (IST), used for accession-number date stamps.
+    Previously used datetime.now(timezone.utc), which carries yesterday's
+    date between 00:00-05:30 IST. NOTE: this is a stand-in until a shared
+    facility_business_date() helper exists elsewhere in the codebase (none
+    found as of this fix) — switch to that if/when it lands.
+    """
+    return datetime.now(_IST).strftime("%Y%m%d")
+
+
 async def _generate_accession_number(db: AsyncSession, prefix: str) -> str:
-    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+    date_str = _facility_business_date()
     count_today = (await db.execute(
         select(func.count()).select_from(LabOrderItem)
-        .where(LabOrderItem.accession_number.like(f"{prefix}-{today}-%"))
+        .where(LabOrderItem.accession_number.like(f"{prefix}-{date_str}-%"))
     )).scalar()
     seq = str(count_today + 1).zfill(5)
-    return f"{prefix}-{today}-{seq}"
+    return f"{prefix}-{date_str}-{seq}"
 
 
 async def _write_audit_log(db: AsyncSession, *, table_name: str, row_id: uuid.UUID,
