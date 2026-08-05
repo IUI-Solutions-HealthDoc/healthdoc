@@ -10,7 +10,7 @@
     "realm": [
       {
         "name": "superadmin",
-        "description": "Cloud-only platform owner: facilities, facility admins, DPO appointments, cross-facility MIS. No clinical data access."
+        "description": "Cloud-only platform owner: facilities, facility admins, DPO appointments, cross-facility MIS. NEVER patient/clinical data \u2014 including no merge/unmerge."
       },
       {
         "name": "receptionist",
@@ -41,12 +41,16 @@
         "description": "Emergency / THID fast registration"
       },
       {
+        "name": "hod",
+        "description": "Head of Department: runs ONE department (roster, queue oversight/reassignment, indent approval, dept dashboard). Scoped by users.department_id. MFA required."
+      },
+      {
         "name": "supervisor",
-        "description": "THID merge approval, overrides"
+        "description": "Records authority: THID\u2192UHID merge approval, unmerge, identity overrides. MFA required. Deliberately NOT a department manager."
       },
       {
         "name": "admin",
-        "description": "Users, departments, registration-payment config, MIS"
+        "description": "Facility configuration: users + account approvals, departments/rooms, assigns HODs, module toggles, billing config, facility MIS. Not a clinical or records authority."
       },
       {
         "name": "auditor",

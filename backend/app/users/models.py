@@ -16,7 +16,7 @@ class Facility(Base, UUIDPk, Timestamps):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     state_code: Mapped[str] = mapped_column(String(5), nullable=False)
     district: Mapped[str | None] = mapped_column(Text)
-    facility_type: Mapped[str | None] = mapped_column(String(30))
+    facility_type: Mapped[str | None] = mapped_column(String(50))
     hfr_facility_id: Mapped[str | None] = mapped_column(String(50))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 

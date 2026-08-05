@@ -284,3 +284,21 @@ class Visit(Base, UUIDPk, Timestamps, Blame):
 - [ ] Deletion policy per §5; append-only tables have blocking triggers
 - [ ] Migration numbered per plan, has `downgrade()`, autogen diff reviewed
 - [ ] `make migrate && make revision m=check` yields an empty migration
+
+### Timestamps in models must be explicitly timezone-aware
+
+```python
+created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), ...)   # correct
+created_at: Mapped[datetime] = mapped_column(...)                            # WRONG
+```
+
+`Mapped[datetime]` with no explicit type infers a **naive** `DateTime`, while every
+migration creates `TIMESTAMPTZ`. The database stores an aware value, the ORM hands back
+a naive one, and every comparison in Python is then silently wrong by the facility's UTC
+offset — 5h30m in IST. Nothing errors; the numbers are just wrong.
+
+Always pass `DateTime(timezone=True)` explicitly, including for nullable columns
+(`sealed_at`, `verified_at`, `collected_at`, `accessed_at`, …).
+
+(Found independently in #276, #279 and #261 on the same day — it is a rule now, not a
+review comment.)

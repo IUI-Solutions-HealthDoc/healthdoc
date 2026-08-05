@@ -22,7 +22,7 @@ def upgrade() -> None:
         sa.Column("name", sa.Text(), nullable=False),
         sa.Column("state_code", sa.String(5), nullable=False),
         sa.Column("district", sa.Text()),
-        sa.Column("facility_type", sa.String(30)),
+        sa.Column("facility_type", sa.String(50)),
         sa.Column("hfr_facility_id", sa.String(50)),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False,
