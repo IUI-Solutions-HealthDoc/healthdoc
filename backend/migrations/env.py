@@ -20,6 +20,7 @@ from app.billing import models as billing_models  # noqa: E402, F401
 from app.inventory import models as inventory_models  # noqa: F401, E402
 from app.pharmacy import models as pharmacy_models  # noqa: F401, E402
 
+from app.ot import models as ot_models  # noqa: E402, F401
 
 target_metadata = Base.metadata
 
