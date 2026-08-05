@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Refuse commits made directly on a protected branch.
+#
+# staging is protected server-side, so such a commit cannot be pushed — it just
+# sits locally, silently, until the next push fails. Meanwhile pr-bundle.sh
+# checks PRs out and back, so the stranded commit is easy to forget about.
+# Catch it at commit time instead.
+#
+# Install:  ./scripts/hooks/install.sh
+# Bypass:   git commit --no-verify   (you almost never want this)
+
+PROTECTED="staging main master"
+BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+
+for p in $PROTECTED; do
+  if [ "$BRANCH" = "$p" ]; then
+    cat >&2 <<MSG
+
+✗ Refusing to commit directly on '$BRANCH' — it is protected on the remote,
+  so this commit could never be pushed.
+
+  Put the work on a branch instead:
+
+      git checkout -b <type>/<short-description>
+      git commit ...
+      git push -u origin HEAD
+      gh pr create --base $BRANCH --fill
+
+  Already staged? Nothing is lost — just run the checkout above and commit there.
+
+MSG
+    exit 1
+  fi
+done
+exit 0

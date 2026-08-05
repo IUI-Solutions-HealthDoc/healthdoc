@@ -1,0 +1,334 @@
+@layer theme, base, mui, components, utilities;
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --background: #ffffff;
+  --foreground: #001f54;
+
+  --card: #ffffff;
+  --card-foreground: #001f54;
+
+  --muted: #f4f6f9;
+  --muted-foreground: #4a6282;
+
+  --border: #d6dee8;
+  --input: #d6dee8;
+
+  --primary: #001f54;
+  --primary-foreground: #ffffff;
+
+  --accent: #e8eef5;
+  --accent-foreground: #001f54;
+
+  --ring: #001f54;
+
+  --success: #166534;
+  --success-muted: #dcfce7;
+  --warning: #b45309;
+  --warning-muted: #fef3c7;
+  --danger: #b91c1c;
+  --danger-muted: #fee2e2;
+  --info: #001f54;
+  --info-muted: #e8eef5;
+
+  /* Legacy aliases used by earlier Meridian wiring */
+  --color-brand-teal: var(--primary);
+  --color-brand-deep: #001536;
+  --color-canvas: var(--background);
+  --color-surface: var(--card);
+  --color-text-primary: var(--foreground);
+  --color-text-secondary: var(--muted-foreground);
+  --color-text-muted: var(--muted-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+}
+
+.dark {
+  --background: #000000;
+  --foreground: #ffffff;
+
+  --card: #0a0a0a;
+  --card-foreground: #ffffff;
+
+  --muted: #141414;
+  --muted-foreground: #a3a3a3;
+
+  --border: #262626;
+  --input: #262626;
+
+  --primary: #001f54;
+  --primary-foreground: #ffffff;
+
+  --accent: #001f54;
+  --accent-foreground: #ffffff;
+
+  --ring: #5b8fd4;
+
+  --success: #4ade80;
+  --success-muted: #052e16;
+  --warning: #fbbf24;
+  --warning-muted: #451a03;
+  --danger: #f87171;
+  --danger-muted: #450a0a;
+  --info: #93c5fd;
+  --info-muted: #001f54;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-ring: var(--ring);
+  --color-success: var(--success);
+  --color-success-muted: var(--success-muted);
+  --color-warning: var(--warning);
+  --color-warning-muted: var(--warning-muted);
+  --color-danger: var(--danger);
+  --color-danger-muted: var(--danger-muted);
+  --color-info: var(--info);
+  --color-info-muted: var(--info-muted);
+
+  --color-brand-teal: var(--color-brand-teal);
+  --color-brand-deep: var(--color-brand-deep);
+  --color-canvas: var(--color-canvas);
+  --color-surface: var(--color-surface);
+  --color-text-primary: var(--color-text-primary);
+  --color-text-secondary: var(--color-text-secondary);
+  --color-text-muted: var(--color-text-muted);
+
+  --font-sans: var(--font-ibm-plex-sans), "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: var(--font-ibm-plex-mono), "IBM Plex Mono", ui-monospace, monospace;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    @apply scroll-smooth;
+    height: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    margin: 0;
+    min-height: 100%;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply font-sans font-semibold tracking-tight text-foreground;
+  }
+
+  small,
+  .text-xs,
+  .text-sm,
+  label,
+  th,
+  caption {
+    @apply font-mono;
+  }
+
+  button,
+  .btn,
+  input,
+  select,
+  textarea {
+    font-family: var(--font-ibm-plex-sans), "IBM Plex Sans", system-ui, sans-serif;
+  }
+
+  button:not(:disabled),
+  .btn:not(:disabled) {
+    cursor: pointer;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background-color: color-mix(in srgb, var(--primary) 25%, transparent);
+    color: var(--foreground);
+  }
+}
+
+@layer components {
+  .surface-card {
+    @apply rounded-xl border border-border bg-card text-card-foreground shadow-sm;
+  }
+
+  .surface-muted {
+    @apply rounded-lg border border-border bg-muted;
+  }
+
+  .form-section-title {
+    @apply font-sans text-sm font-semibold text-foreground;
+  }
+
+  .file-input {
+    @apply w-full rounded-lg border border-dashed border-border bg-background px-3 py-2.5 font-sans text-sm text-foreground file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-primary-foreground hover:file:opacity-90;
+  }
+
+  /* ── Button base ───────────────────────────────────── */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    min-height: 2.5rem;
+    padding: 0.625rem 1rem;
+    border-radius: 0.5rem;
+    border: 1px solid transparent;
+    font-family: var(--font-ibm-plex-sans), "IBM Plex Sans", system-ui, sans-serif;
+    font-size: 0.875rem;
+    font-weight: 600;
+    line-height: 1.25rem;
+    white-space: nowrap;
+    text-decoration: none;
+    transition:
+      background-color 0.15s ease,
+      border-color 0.15s ease,
+      color 0.15s ease,
+      opacity 0.15s ease;
+  }
+
+  .btn:disabled,
+  .btn[aria-disabled="true"] {
+    opacity: 0.5;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+
+  .btn-sm {
+    min-height: 2.25rem;
+    padding: 0.5rem 0.875rem;
+    font-size: 0.8125rem;
+  }
+
+  .btn-lg {
+    min-height: 2.75rem;
+    padding: 0.75rem 1.25rem;
+    font-size: 0.9375rem;
+  }
+
+  .btn-icon {
+    min-height: 2.25rem;
+    width: 2.25rem;
+    padding: 0;
+  }
+
+  /* ── Button variants ───────────────────────────────── */
+  .btn-primary {
+    background-color: var(--primary);
+    border-color: var(--primary);
+    color: var(--primary-foreground);
+  }
+
+  .btn-primary:hover:not(:disabled) {
+    filter: brightness(1.1);
+  }
+
+  .btn-secondary {
+    background-color: var(--card);
+    border-color: var(--border);
+    color: var(--foreground);
+  }
+
+  .btn-secondary:hover:not(:disabled) {
+    background-color: var(--muted);
+  }
+
+  .btn-outline {
+    background-color: transparent;
+    border-color: var(--border);
+    color: var(--foreground);
+  }
+
+  .btn-outline:hover:not(:disabled) {
+    background-color: var(--muted);
+  }
+
+  .btn-ghost {
+    background-color: transparent;
+    border-color: transparent;
+    color: var(--foreground);
+  }
+
+  .btn-ghost:hover:not(:disabled) {
+    background-color: var(--muted);
+  }
+
+  .btn-danger {
+    background-color: var(--danger);
+    border-color: var(--danger);
+    color: #ffffff;
+  }
+
+  .btn-danger:hover:not(:disabled) {
+    filter: brightness(1.08);
+  }
+
+  .btn-success {
+    background-color: var(--success);
+    border-color: var(--success);
+    color: #ffffff;
+  }
+
+  .btn-success:hover:not(:disabled) {
+    filter: brightness(1.08);
+  }
+
+  .link-primary {
+    @apply font-medium text-primary hover:opacity-80;
+  }
+
+  .dark .link-primary {
+    color: var(--info);
+  }
+}
+
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  body * {
+    visibility: hidden;
+  }
+
+  #opd-fee-receipt,
+  #opd-fee-receipt * {
+    visibility: visible;
+  }
+
+  #opd-fee-receipt {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+}
