@@ -16,6 +16,10 @@ class Settings(BaseSettings):
 
     jwt_issuer: str = "http://keycloak:8080/realms/healthdoc"
     oidc_audience: str = "account"
+    keycloak_base_url: str = "http://keycloak:8080/auth"
+    keycloak_realm: str = "healthdoc"
+    keycloak_admin: str = "admin"
+    keycloak_admin_password: str = "change-me"
 
     minio_endpoint: str = "localhost:9000"
     minio_root_user: str = "healthdoc"
@@ -27,6 +31,10 @@ class Settings(BaseSettings):
     abdm_client_id: str = "change-me"
     abdm_client_secret: str = "change-me"
     abdm_hfr_facility_id: str = "change-me"
+
+    icd11_base_url: str = "http://icd11:80"
+    icd11_release: str = "2025-01"
+    icd11_linearization: str = "mms"
 
 
 @lru_cache

@@ -9,12 +9,9 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Import all module models here so autogenerate sees them, e.g.:
-# from app.patients import models  # noqa: F401
-from app.pathology import models as pathology_models  # noqa: F401
-from app.radiology import models as radiology_models  # noqa: F401
-from app.blood_bank import models as blood_bank_models  # noqa: F401
+# Import all module models here so autogenerate sees them:
 from app.common.db import Base  # noqa: E402
+from app.users import models as users_models  # noqa: E402, F401
 
 target_metadata = Base.metadata
 

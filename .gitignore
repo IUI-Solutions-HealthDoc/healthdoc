@@ -14,3 +14,4 @@ out/
 postgres-data/
 mongo-data/
 minio-data/
+.reviews/
