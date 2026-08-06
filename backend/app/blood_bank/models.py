@@ -35,8 +35,8 @@ class BloodUnit(Base, UUIDPk, Timestamps):
     volume_ml = Column(Integer, nullable=False)
     collected_at = Column(DateTime(timezone=True), nullable=True)
     expiry_date = Column(Date, nullable=False)
-    screening_status = Column(String(30), nullable=False, server_default="pending")
-    status = Column(String(30), nullable=False, server_default="available")
+    screening_status = Column(String(50), nullable=False, server_default="pending")
+    status = Column(String(50), nullable=False, server_default="available")
 
     issued_to_patient_id = Column(UUID(as_uuid=True), ForeignKey("patients.id", ondelete="RESTRICT"),
                                    nullable=True, index=True)

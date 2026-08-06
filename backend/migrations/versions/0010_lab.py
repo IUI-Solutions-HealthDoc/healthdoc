@@ -29,7 +29,7 @@ def upgrade() -> None:
                   sa.ForeignKey("departments.id", ondelete="RESTRICT"), nullable=True),
          sa.Column(
       "status",
-      sa.String(30),
+      sa.String(50),
       nullable=False,
       server_default=sa.text("'placed'")
  ),
@@ -61,7 +61,7 @@ def upgrade() -> None:
         sa.Column("is_current", sa.Boolean(), nullable=False),
         sa.Column("result_data", postgresql.JSONB(), nullable=False),
         sa.Column("remarks", sa.Text(), nullable=True),
-        sa.Column("status", sa.String(30), nullable=False),
+        sa.Column("status", sa.String(50), nullable=False),
         sa.Column("created_by", postgresql.UUID(as_uuid=True),
                   sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),

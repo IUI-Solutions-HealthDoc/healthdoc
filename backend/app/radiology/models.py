@@ -16,7 +16,7 @@ class RadiologyOrderItem(Base, UUIDPk, Timestamps, Blame):
     pacs_study_uid = Column(String(100), nullable=True)
     scheduled_at = Column(DateTime(timezone=True), nullable=True)
     scan_completed_at = Column(DateTime(timezone=True), nullable=True)  # TAT baseline
-    status = Column(String(30), nullable=False, server_default="placed")
+    status = Column(String(50), nullable=False, server_default="placed")
 
 
 class RadiologyReport(Base, UUIDPk, Timestamps):
@@ -33,7 +33,7 @@ class RadiologyReport(Base, UUIDPk, Timestamps):
     is_current = Column(Boolean, nullable=False)
     findings = Column(Text, nullable=False)
     impression = Column(Text, nullable=False)
-    status = Column(String(30), nullable=False)     # ResultStatus enum
+    status = Column(String(50), nullable=False)     # ResultStatus enum
 
     # NOTE: not using Blame here -- same reason as LabResult in pathology:
     # radiology_reports (migration 0011_radiology.py) only has created_by,

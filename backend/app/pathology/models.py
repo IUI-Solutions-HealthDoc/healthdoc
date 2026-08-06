@@ -23,7 +23,7 @@ class LabOrderItem(Base, UUIDPk, Timestamps, Blame):
     department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id", ondelete="RESTRICT"),
                             nullable=True, index=True)
     status = Column(
-        String(30),
+        String(50),
         nullable=False,
         server_default=text("'placed'")
     )
@@ -48,7 +48,7 @@ class LabResult(Base, UUIDPk, Timestamps):
     # amend_result endpoint for status='corrected' rows.
     amendment_reason = Column(Text, nullable=True)
 
-    status = Column(String(30), nullable=False)
+    status = Column(String(50), nullable=False)
 
     # NOTE: not using the Blame mixin here on purpose. Blame declares BOTH
     # created_by and updated_by, but lab_results (migration 0010_lab.py) is
