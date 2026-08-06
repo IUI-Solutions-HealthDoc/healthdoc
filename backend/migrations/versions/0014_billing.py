@@ -31,14 +31,29 @@ Owner: B7 (B7-W1-03 / B7-W3-01). Schema doc: HealthDoc_Database_Schema_v3_4 §3 
    row. See item 8 below.
 
 REMINDER (from the schema doc itself): "B7: unit-test that a payment can
-flip status on an issued invoice before merging 0014." Not yet done —
-can't run make migrate locally until 0002-0013 are available. MUST test
-this before merge. Also test: UPDATE/DELETE on payments/refunds must
-raise (item 8).
+flip status on an issued invoice before merging 0014." Done — see
+backend/tests/billing/test_billing_triggers.py and
+test_billing_flows.py. Also tested: UPDATE/DELETE on payments/refunds
+raise (item 8), conditional freeze on invoices/invoice_items.
+
+PR REVIEW FIXES (2 days ago, solutionsiui) applied in this revision:
+  - CHECK constraints for charge_category/mode/status now generated
+    from app.common.enums.{ChargeCategory,PaymentMode,PaymentStatus}
+    .sql_check() instead of hardcoded literal lists, so the DB
+    constraint and the enum class can't drift apart. invoices.status
+    is intentionally NOT swapped — no matching enum export was asked
+    for there, only a like-for-like 1:1 swap where one already exists.
+  - sensitivity / scheme_code widened varchar(30) -> varchar(50), repo
+    blanket rule for enum/status-ish columns (matches
+    audit_log_archive.verification_status's width elsewhere).
+  - invoices.row_version added (§4A optimistic concurrency) — see
+    models.py's Invoice docstring for how it's used.
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
+
+from app.common.enums import ChargeCategory, PaymentMode, PaymentStatus
 
 # revision identifiers, used by Alembic.
 revision = "0014"
@@ -70,8 +85,9 @@ def upgrade() -> None:
         sa.Column("discount_amount", sa.Numeric(12, 2), nullable=False, server_default="0"),
         sa.Column("scheme_adjustment", sa.Numeric(12, 2), nullable=False, server_default="0"),
         sa.Column("net_amount", sa.Numeric(12, 2), nullable=False, server_default="0"),
-        sa.Column("scheme_code", sa.String(30), nullable=True),
-        sa.Column("sensitivity", sa.String(30), nullable=False, server_default="critical"),
+        sa.Column("scheme_code", sa.String(50), nullable=True),
+        sa.Column("sensitivity", sa.String(50), nullable=False, server_default="critical"),
+        sa.Column("row_version", sa.Integer(), nullable=False, server_default="1"),
         sa.Column("created_by", postgresql.UUID(as_uuid=True),
                   sa.ForeignKey("users.id", ondelete="RESTRICT", name="fk_invoices_created_by"),
                   nullable=False),
@@ -109,11 +125,7 @@ def upgrade() -> None:
         sa.Column("unit_price", sa.Numeric(12, 2), nullable=False),
         sa.Column("amount", sa.Numeric(12, 2), nullable=False),
         sa.Column("created_at", sa.TIMESTAMP(timezone=True), nullable=False, server_default=sa.text("now()")),
-        sa.CheckConstraint(
-            "charge_category IN ('registration','consultation','lab','radiology','pharmacy',"
-            "'procedure','ipd_stay','blood','other')",
-            name="ck_invoice_items_charge_category",
-        ),
+        sa.CheckConstraint(ChargeCategory.sql_check("charge_category"), name="ck_invoice_items_charge_category"),
         sa.CheckConstraint("quantity > 0", name="ck_invoice_items_quantity_positive"),
         sa.CheckConstraint("unit_price >= 0", name="ck_invoice_items_unit_price_non_negative"),
         sa.CheckConstraint("amount >= 0", name="ck_invoice_items_amount_non_negative"),
@@ -139,7 +151,7 @@ def upgrade() -> None:
                   sa.ForeignKey("users.id", ondelete="RESTRICT", name="fk_payments_collected_by"),
                   nullable=False),
         sa.Column("collected_at", sa.TIMESTAMP(timezone=True), nullable=False),
-        sa.Column("sensitivity", sa.String(30), nullable=False, server_default="critical"),
+        sa.Column("sensitivity", sa.String(50), nullable=False, server_default="critical"),
         sa.Column("created_by", postgresql.UUID(as_uuid=True),
                   sa.ForeignKey("users.id", ondelete="RESTRICT", name="fk_payments_created_by"),
                   nullable=False),
@@ -149,8 +161,8 @@ def upgrade() -> None:
         sa.Column("created_at", sa.TIMESTAMP(timezone=True), nullable=False, server_default=sa.text("now()")),
         sa.Column("updated_at", sa.TIMESTAMP(timezone=True), nullable=False, server_default=sa.text("now()")),
         sa.UniqueConstraint("receipt_number", name="uq_payments_receipt_number"),
-        sa.CheckConstraint("mode IN ('cash','upi','card','netbanking')", name="ck_payments_mode"),
-        sa.CheckConstraint("status IN ('success','reversed')", name="ck_payments_status"),
+        sa.CheckConstraint(PaymentMode.sql_check("mode"), name="ck_payments_mode"),
+        sa.CheckConstraint(PaymentStatus.sql_check("status"), name="ck_payments_status"),
         sa.CheckConstraint("amount > 0", name="ck_payments_amount_positive"),
     )
     op.create_index("ix_payments_invoice_id", "payments", ["invoice_id"])

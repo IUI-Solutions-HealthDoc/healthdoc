@@ -23,15 +23,46 @@ Status/category values come from app/common/enums.py (ResultStatus,
 DispenseStatus, ChargeCategory, PaymentMode, PaymentStatus) instead of
 inline strings, per that file's own "never inline strings" rule.
 
-AUDIT LOGGING — intentionally NOT wired in this file. app/audit isn't
-implemented yet and nothing on the team has merged anything for it, so
-there's no real function, confirmed signature, or confirmed table
-shape to call into. Left as TODO comments at the call sites in
-build_invoice() / record_payment() / create_refund() — pick it up once
-app/audit exists and its owner confirms the interface. Payment/refund
-is explicitly listed as an audit event in docs/architecture.html §26.1,
-so this matters, but it's not this ticket's job to stub someone else's
-module.
+AUDIT LOGGING — wired in (issue #290, B7 rollout item). app/audit lives
+on `staging` (PR #261) and is pulled into this branch via
+`git merge origin/staging`. Invoice opts into the automatic
+before_flush/after_flush hook in app/audit/listeners.py (see
+models.Invoice's docstring) — every status/gross_amount/net_amount
+change from build_invoice()/record_payment()/create_refund() is
+captured for free, no call needed here for that part.
+invoice_items/payments/refunds have no facility_id column of their own
+(reached only via invoice_id/payment_id), so they cannot use that same
+automatic hook — their creation is logged with a direct, manual call to
+app.audit.service.write_audit_log() at the point each row is added
+below, using the invoice's own facility_id (already in scope) and the
+per-request actor populated by app.audit.deps.get_current_actor_dependency
+(wired into router.py on the three mutating endpoints). This is the
+architecturally-correct manual path per app/audit/service.py's own
+docstring ("use this for ... anything that bypasses the automatic
+hook"), not a workaround.
+
+BRANCH NOTE: if `import app.billing.service` (or router) ever raises
+`ModuleNotFoundError: No module named 'app.audit...'`, that means this
+checkout has fallen behind staging, not that the wiring below is wrong
+— run `git merge origin/staging` first. Do not strip this back out to
+"fix" that error; app/audit genuinely exists, it just needs pulling in.
+
+PR REVIEW FIX (blocker 2 — concurrent invoice builds could double-bill):
+_already_billed_reference_ids() below is still read-then-write and is
+still a real race on its own — the actual fix is a partial UNIQUE index
+on invoice_items(invoice_id, reference_type, reference_id), landing in
+migration 0033 (#285, owned by solutionsiui) alongside charge_master.
+Until this repo rebases onto that migration, _insert_invoice_item()
+wraps each line's insert in its own SAVEPOINT (db.begin_nested()) so
+that if two concurrent build_invoice() calls do race past the app-level
+check, at least the failure mode is "one line silently not
+double-added" rather than "500, and the whole batch's flush aborts".
+Once 0033's unique index lands, the same except-block starts catching
+IntegrityError for a real reason (constraint violation) instead of
+never firing at all — no further code change needed here, per review:
+"Keep your app-level check as a fast path, but let the database be
+what makes it true, and handle the conflict as a no-op rather than a
+500."
 """
 
 from __future__ import annotations
@@ -46,8 +77,11 @@ from zoneinfo import ZoneInfo
 import sqlalchemy as sa
 from fastapi import HTTPException, status
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit.actions import AuditAction
+from app.audit.service import write_audit_log
 from app.billing.models import Invoice, InvoiceItem, Payment, Refund
 from app.billing.pricing import (
     price_lab_test,
@@ -222,6 +256,41 @@ async def _already_billed_reference_ids(
         )
     )
     return set(result.scalars().all())
+
+
+async def _insert_invoice_item(db: AsyncSession, line: "ChargeLine", invoice_id: uuid.UUID) -> bool:
+    """
+    Insert one InvoiceItem inside its own SAVEPOINT. Returns True if the
+    line was actually added, False if it was skipped as a (likely
+    concurrent) duplicate.
+
+    See module docstring re: blocker #2. Today (pre-migration-0033) this
+    except-block essentially never fires — there is no DB constraint
+    backing the dedupe yet, so a race can still slip both rows in. Once
+    0033's partial UNIQUE index on
+    invoice_items(invoice_id, reference_type, reference_id) lands, the
+    same code starts doing real work: the nested transaction (SAVEPOINT)
+    means one duplicate line rolls back on its own without aborting the
+    rest of this build_invoice() call's flush.
+    """
+    try:
+        async with db.begin_nested():
+            db.add(
+                InvoiceItem(
+                    invoice_id=invoice_id,
+                    charge_category=line.charge_category,
+                    reference_type=line.reference_type,
+                    reference_id=line.reference_id,
+                    description=line.description,
+                    quantity=line.quantity,
+                    unit_price=line.unit_price,
+                    amount=line.amount,
+                )
+            )
+            await db.flush()
+    except IntegrityError:
+        return False
+    return True
 
 
 async def _aggregate_lab_charges(db: AsyncSession, visit_id: uuid.UUID, invoice_id: uuid.UUID) -> list[ChargeLine]:
@@ -467,21 +536,27 @@ async def build_invoice(
             net_amount=_money(Decimal(invoice.net_amount)),
         )
 
+    added_lines: list[ChargeLine] = []
     for line in priced_lines:
-        db.add(
-            InvoiceItem(
-                invoice_id=invoice.id,
-                charge_category=line.charge_category,
-                reference_type=line.reference_type,
-                reference_id=line.reference_id,
-                description=line.description,
-                quantity=line.quantity,
-                unit_price=line.unit_price,
-                amount=line.amount,
-            )
+        was_added = await _insert_invoice_item(db, line, invoice.id)
+        if was_added:
+            added_lines.append(line)
+        else:
+            skipped += 1  # lost the concurrent race — another call billed this reference_id first
+
+    if not added_lines:
+        return InvoiceBuildResponse(
+            visit_id=visit_id,
+            invoice_id=invoice.id,
+            invoice_number=invoice.invoice_number,
+            status=invoice.status,
+            lines_added=0,
+            lines_skipped_unpriced=skipped,
+            gross_amount=_money(Decimal(invoice.gross_amount)),
+            net_amount=_money(Decimal(invoice.net_amount)),
         )
 
-    added_total = sum((line.amount for line in priced_lines), Decimal("0"))
+    added_total = sum((line.amount for line in added_lines), Decimal("0"))
     invoice.gross_amount = _money(Decimal(invoice.gross_amount) + added_total)
     # net = gross - discount - scheme_adjustment. Discount/scheme
     # adjustment aren't touched by the builder (separate workflow) —
@@ -490,6 +565,7 @@ async def build_invoice(
         invoice.gross_amount - Decimal(invoice.discount_amount) - Decimal(invoice.scheme_adjustment)
     )
     invoice.updated_by = actor_user_id
+    invoice.row_version = invoice.row_version + 1
 
     # Flush now, inside this still-open transaction, so
     # trg_invoices_freeze / trg_invoice_items_freeze raise here — as a
@@ -497,15 +573,37 @@ async def build_invoice(
     # commit in get_db() after this function has already returned 200.
     await db.flush()
 
-    # TODO(billing): call into app.audit once it exists and its owner
-    # confirms the function name/signature. Not implemented here —
-    # app/audit isn't built yet on any branch, so there's nothing real
-    # to call. When it lands, this is a CRITICAL-sensitivity mutation
-    # (invoice gross/net change + new invoice_items rows) and should be
-    # logged with enough detail to answer "which charges were billed"
-    # (reference_ids / charge_categories / new invoice_item ids), not
-    # just a lines-added count — worth keeping in mind for whoever
-    # designs that call, not something to solve from billing's side.
+    # Manual audit — invoice_items has no facility_id column, so it
+    # can't opt into app/audit/listeners.py's automatic hook (see
+    # models.py docstrings). The Invoice UPDATE itself (gross/net_amount
+    # change above) IS captured automatically since Invoice opted in —
+    # this call is only for the new invoice_items rows, so "which
+    # charges were billed" (reference_ids/charge_categories) is on
+    # record, not just a lines-added count.
+    await write_audit_log(
+        db,
+        facility_id=invoice.facility_id,
+        action=AuditAction.CREATE,
+        resource_type="invoice_items",
+        user_id=actor_user_id,
+        resource_id=invoice.id,
+        patient_id=invoice.patient_id,
+        visit_id=invoice.visit_id,
+        new_value={
+            "invoice_id": str(invoice.id),
+            "lines_added": len(added_lines),
+            "added_total": str(added_total),
+            "charge_lines": [
+                {
+                    "charge_category": getattr(line.charge_category, "value", line.charge_category),
+                    "reference_type": line.reference_type,
+                    "reference_id": str(line.reference_id),
+                    "amount": str(line.amount),
+                }
+                for line in added_lines
+            ],
+        },
+    )
 
     await db.refresh(invoice)
 
@@ -514,7 +612,7 @@ async def build_invoice(
         invoice_id=invoice.id,
         invoice_number=invoice.invoice_number,
         status=invoice.status,
-        lines_added=len(priced_lines),
+        lines_added=len(added_lines),
         lines_skipped_unpriced=skipped,
         gross_amount=_money(Decimal(invoice.gross_amount)),
         net_amount=_money(Decimal(invoice.net_amount)),
@@ -633,7 +731,20 @@ async def _allocate_billing_number(
 async def _facility_timezone(db: AsyncSession, facility_id: uuid.UUID) -> str:
     result = await db.execute(sa.select(facilities_t.c.timezone).where(facilities_t.c.id == facility_id))
     return result.scalar_one()
-    """(total successful payments, total refunds against those payments) for one invoice."""
+
+
+async def _payment_totals_for_invoice(db: AsyncSession, invoice_id: uuid.UUID) -> tuple[Decimal, Decimal]:
+    """(total successful payments, total refunds against those payments) for one invoice.
+
+    BUG FIX: this function's `async def` line was missing in the
+    reviewed snapshot — its body had been left dangling as unreachable
+    dead code inside _facility_timezone() (after that function's own
+    `return`), and `_payment_totals_for_invoice` was called from three
+    places (record_payment, create_refund, get_pending_invoices) with no
+    matching definition anywhere in the module. That's a NameError on
+    first call, not caught by import-time checks — restored as its own
+    function here.
+    """
     paid_result = await db.execute(
         sa.select(sa.func.coalesce(sa.func.sum(Payment.amount), 0)).where(
             Payment.invoice_id == invoice_id,
@@ -731,6 +842,7 @@ async def record_payment(
     new_net_paid = net_paid_so_far + amount
     invoice.status = _invoice_status_for_balance(Decimal(invoice.net_amount), new_net_paid)
     invoice.updated_by = actor_user_id
+    invoice.row_version = invoice.row_version + 1
 
     # Flush now, inside this still-open transaction, so
     # trg_payments_block_update/_delete (which this code never
@@ -740,11 +852,29 @@ async def record_payment(
     # reasoning as build_invoice() above.
     await db.flush()
 
-    # TODO(billing): call into app.audit once it exists — payment
-    # collection is explicitly an audit event (architecture doc §26.1)
-    # and CRITICAL sync sensitivity (schema doc §37/§70). Not
-    # implemented here for the same reason as build_invoice()'s TODO:
-    # app/audit isn't built yet on any branch.
+    # Manual audit — payments has no facility_id column, so it can't
+    # opt into app/audit/listeners.py's automatic hook (see models.py).
+    # Payment collection is explicitly an audit event (architecture doc
+    # §26.1) and CRITICAL sync sensitivity (schema doc §37/§70).
+    # The Invoice status transition above IS captured automatically
+    # since Invoice opted in — this call covers the payment row itself.
+    await write_audit_log(
+        db,
+        facility_id=invoice.facility_id,
+        action=AuditAction.CREATE,
+        resource_type="payments",
+        user_id=actor_user_id,
+        resource_id=payment.id,
+        patient_id=invoice.patient_id,
+        visit_id=invoice.visit_id,
+        new_value={
+            "receipt_number": payment.receipt_number,
+            "invoice_id": str(invoice.id),
+            "amount": str(payment.amount),
+            "mode": payment.mode,
+            "invoice_status_after": invoice.status,
+        },
+    )
 
     await db.refresh(payment)
 
@@ -835,16 +965,38 @@ async def create_refund(
     new_net_paid = total_paid - (total_refunded + amount)
     invoice.status = _invoice_status_for_balance(Decimal(invoice.net_amount), new_net_paid)
     invoice.updated_by = actor_user_id
+    invoice.row_version = invoice.row_version + 1
 
     # Same reasoning as record_payment() above — flush inside this
     # still-open transaction so any trigger/constraint issue surfaces
     # as a real exception now.
     await db.flush()
 
-    # TODO(billing): call into app.audit once it exists — same note as
-    # record_payment(); refunds are the more sensitive of the two
-    # (core/always-on per v3.13, approved_by field) so this matters
-    # at least as much when app/audit lands.
+    # Manual audit — refunds has no facility_id column, so it can't
+    # opt into app/audit/listeners.py's automatic hook (see models.py).
+    # Refunds are the more sensitive of the two events (core/always-on
+    # per v3.13, carries approved_by) so this matters at least as much
+    # as the payment-side call in record_payment(). The Invoice status
+    # transition above IS captured automatically since Invoice opted in
+    # — this call covers the refund row itself.
+    await write_audit_log(
+        db,
+        facility_id=invoice.facility_id,
+        action=AuditAction.CREATE,
+        resource_type="refunds",
+        user_id=actor_user_id,
+        resource_id=refund.id,
+        patient_id=invoice.patient_id,
+        visit_id=invoice.visit_id,
+        reason=body.reason,
+        new_value={
+            "refund_number": refund.refund_number,
+            "payment_id": str(payment.id),
+            "amount": str(refund.amount),
+            "approved_by": str(actor_user_id),
+            "invoice_status_after": invoice.status,
+        },
+    )
 
     await db.refresh(refund)
 

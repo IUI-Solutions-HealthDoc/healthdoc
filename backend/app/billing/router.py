@@ -6,9 +6,9 @@ B7-W3-02 (#189) MIS. Updated for schema doc v3.13.
 MODULE GATING — v3.13 changed the "Only these five modules are optional"
 list (§3 0027): pharmacy|lab|radiology|ot|blood_bank, and explicitly
 lists "refunds" under Core — always on. There is no "billing_refunds"
-ModuleCode anymore. The refund endpoint below no longer carries a
-require_module() gate — flag to the team that app/common/enums.ModuleCode
-needs the same correction if it still has BILLING_REFUNDS defined.
+ModuleCode anymore (confirmed against app/common/enums.ModuleCode — it
+only defines the five toggleable modules). The refund endpoint below
+carries no require_module() gate.
 
 IDEMPOTENCY — v3.13 §4A.1 requires an Idempotency-Key header on every
 POST that creates something, explicitly naming "payments, refunds".
@@ -16,6 +16,39 @@ Both POST endpoints below enforce it (400 if missing, 409 on key reuse
 with a different body) via service.check_idempotency/store_idempotency
 against the shared idempotency_keys table (0002, owned by B1 — read/
 write only, no schema change made here).
+
+PR REVIEW FIX (blocker 1 — app did not start):
+CurrentUser (app/auth/deps.py) is already
+Annotated[AuthUser, Depends(get_current_user)]. Every endpoint here used
+to write `_user: CurrentUser = Depends(require_roles(...))`, which
+supplies a dependency on BOTH the Annotated default AND the explicit
+Depends() default — FastAPI refuses at import time
+("Cannot specify `Depends` in `Annotated` and default value together").
+That aborted app.main's import, which also aborted pytest collection for
+the WHOLE repo, not just billing. Fixed by typing the parameter as the
+plain `AuthUser` class (not the CurrentUser alias) wherever an explicit
+Depends(require_roles(...)) is given — see app/audit/deps.py for another
+module already using this exact pattern correctly.
+
+AUDIT (app/audit, issue #290 — B7 rollout item):
+The three mutating endpoints below (build, payment, refund) now also
+depend on app.audit.deps.get_current_actor_dependency, alongside
+require_roles(). That populates the per-request AuditActor context
+(app/audit/context.py) so service.py's manual write_audit_log() calls
+for invoice_items/payments/refunds (see service.py — those tables lack
+a facility_id column and can't use the automatic listeners.py hook) get
+a real user_id/role/ip_address/device_id instead of falling back to
+None. Read-only endpoints (preview, MIS, pmjay-eligibility) don't need
+this — nothing is written there for anyone to attribute.
+
+BRANCH NOTE: this only imports cleanly once app/audit is actually
+present on your checkout. It lives on `staging` (PR #261, merged
+there) — if this branch was cut before that merge, or has since fallen
+behind, `import app.billing.router` will raise
+`ModuleNotFoundError: No module named 'app.audit...'`. Fix is
+`git merge origin/staging` into this branch, NOT stripping the audit
+wiring back out — the module genuinely exists, it just needs to be
+pulled in locally.
 """
 
 import uuid
@@ -24,7 +57,9 @@ from datetime import date
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.deps import CurrentUser, require_roles
+from app.audit.context import AuditActor
+from app.audit.deps import get_current_actor_dependency
+from app.auth.deps import AuthUser, require_roles
 from app.billing import service
 from app.billing.schemas import (
     DailyRevenueResponse,
@@ -76,7 +111,7 @@ async def ping() -> dict:
 async def preview_visit_invoice(
     visit_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: CurrentUser = Depends(require_roles(*_BILLING_ROLES)),
+    _user: AuthUser = Depends(require_roles(*_BILLING_ROLES)),
 ) -> InvoicePreviewResponse:
     return await service.preview_invoice(db, visit_id)
 
@@ -91,7 +126,8 @@ async def build_visit_invoice(
     visit_id: uuid.UUID,
     body: InvoiceBuildRequest = InvoiceBuildRequest(),
     db: AsyncSession = Depends(get_db),
-    user: CurrentUser = Depends(require_roles(*_BILLING_ROLES)),
+    user: AuthUser = Depends(require_roles(*_BILLING_ROLES)),
+    _actor: AuditActor = Depends(get_current_actor_dependency),
 ) -> InvoiceBuildResponse:
     # §4A.1 lists "orders" but not invoices/invoice_items explicitly —
     # not adding Idempotency-Key enforcement here until that's confirmed
@@ -114,7 +150,7 @@ async def build_visit_invoice(
 async def get_pmjay_eligibility(
     visit_id: uuid.UUID,
     patient_id: uuid.UUID,
-    _user: CurrentUser = Depends(require_roles(*_BILLING_ROLES)),
+    _user: AuthUser = Depends(require_roles(*_BILLING_ROLES)),
 ) -> PMJAYEligibilityResponse:
     return service.check_pmjay_eligibility(patient_id=patient_id, visit_id=visit_id)
 
@@ -137,7 +173,8 @@ async def record_invoice_payment(
     body: PaymentCreate,
     idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
     db: AsyncSession = Depends(get_db),
-    user: CurrentUser = Depends(require_roles(*_BILLING_ROLES)),
+    user: AuthUser = Depends(require_roles(*_BILLING_ROLES)),
+    _actor: AuditActor = Depends(get_current_actor_dependency),
 ) -> PaymentOut:
     key = _require_idempotency_key(idempotency_key)
     endpoint = "POST /billing/invoices/{invoice_id}/payments"
@@ -168,7 +205,8 @@ async def record_payment_refund(
     body: RefundCreate,
     idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
     db: AsyncSession = Depends(get_db),
-    user: CurrentUser = Depends(require_roles(*_REFUND_APPROVAL_ROLES)),
+    user: AuthUser = Depends(require_roles(*_REFUND_APPROVAL_ROLES)),
+    _actor: AuditActor = Depends(get_current_actor_dependency),
 ) -> RefundOut:
     key = _require_idempotency_key(idempotency_key)
     endpoint = "POST /billing/payments/{payment_id}/refunds"
@@ -206,7 +244,7 @@ async def get_daily_revenue(
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
     db: AsyncSession = Depends(get_db),
-    user: CurrentUser = Depends(require_roles(*_MIS_ROLES)),
+    user: AuthUser = Depends(require_roles(*_MIS_ROLES)),
 ) -> DailyRevenueResponse:
     facility_id = await service.facility_id_for_user(db, keycloak_sub=user.sub)
     return await service.get_daily_revenue(db, facility_id=facility_id, date_from=date_from, date_to=date_to)
@@ -219,7 +257,7 @@ async def get_daily_revenue(
 )
 async def get_pending_invoices(
     db: AsyncSession = Depends(get_db),
-    user: CurrentUser = Depends(require_roles(*_MIS_ROLES)),
+    user: AuthUser = Depends(require_roles(*_MIS_ROLES)),
 ) -> PendingInvoicesResponse:
     facility_id = await service.facility_id_for_user(db, keycloak_sub=user.sub)
     return await service.get_pending_invoices(db, facility_id=facility_id)
@@ -234,7 +272,7 @@ async def get_scheme_breakdown(
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
     db: AsyncSession = Depends(get_db),
-    user: CurrentUser = Depends(require_roles(*_MIS_ROLES)),
+    user: AuthUser = Depends(require_roles(*_MIS_ROLES)),
 ) -> SchemeBreakdownResponse:
     facility_id = await service.facility_id_for_user(db, keycloak_sub=user.sub)
     return await service.get_scheme_breakdown(db, facility_id=facility_id, date_from=date_from, date_to=date_to)

@@ -27,6 +27,32 @@ Until then, prices come from two places:
 Do not extend the static tables below with real hospital tariffs —
 that data belongs in a DB-backed catalog, not source code. This is
 placeholder data for dev/test only.
+
+PR REVIEW (2 days ago, solutionsiui) — pricing.py is superseded, not
+rewritten:
+Schema v3.14 adds `charge_master` (migration 0033, #285, owned by
+solutionsiui) — effective-dated tariffs, scheme_code for PM-JAY rates,
+price superseded by insert so history is reconstructible; invoice_items
+gains charge_master_id. That migration hasn't landed in this branch yet
+(0014 is still the latest billing migration here), and its exact column
+names aren't confirmed anywhere available to this module — repointing
+the functions below to query `charge_master` NOW would mean guessing at
+a schema this file has no authoritative source for, which is exactly
+the mistake this module's isolation was built to avoid in the first
+place.
+
+What IS safe to do now, and is done: nothing changes about the public
+functions' signatures or the PriceResult contract, so the swap the
+reviewer asked for — "repoint pricing.py at charge_master" — really
+will be a small, isolated diff to this file's internals once 0033 is
+rebased in and its real column names are visible. service.py (the only
+caller) never needs to change. Two rules already agreed with the
+reviewer, worth restating here so whoever makes that later diff doesn't
+relitigate them: unit_price must be copied onto the invoice_items row
+at accrual time, never joined at read time (a later tariff revision
+must not retroactively change an issued invoice); and a charge with no
+matching tariff row must stay priced=False, never become a silent
+₹0 line.
 """
 
 from __future__ import annotations
