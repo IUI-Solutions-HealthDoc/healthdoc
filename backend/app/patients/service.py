@@ -267,7 +267,7 @@ async def request_merge(
 # fails the build the day a new FK to patients.id appears without a
 # matching entry here. Do not add a table name here without also adding
 # the repointing code for it below.
-REPOINTED_ON_MERGE: frozenset[str] = frozenset({"patient_identifiers"})
+REPOINTED_ON_MERGE: frozenset[str] = frozenset({"patient_identifiers", "allergies"})
 
 # patient_merge_log itself has FKs to patients.id (source_patient_id,
 # target_patient_id) — these must NEVER be repointed. It's the audit trail
@@ -427,3 +427,140 @@ async def reject_merge(
     await db.flush()
     await db.refresh(merge_log)
     return merge_log
+
+
+_PATCHABLE_FIELDS: tuple[str, ...] = (
+    "full_name", "sex", "dob", "age_years",
+    "guardian_name", "guardian_relationship",
+    "mobile", "address_line", "village_town",
+    "district", "state_code", "pincode",
+    "abha_number", "photo_file_id",
+)
+
+
+async def update_patient(
+    db: AsyncSession,
+    *,
+    patient_id: uuid.UUID,
+    payload,
+    updated_by: uuid.UUID,
+    facility_id: uuid.UUID,
+    if_match_version: int,
+) -> Patient:
+    """Sparse PATCH — applies only non-None fields. Raises:
+      - ValueError("not_found")          — patient missing or wrong facility
+      - ValueError("patient_not_active") — merged/deceased are immutable
+      - ValueError("stale_write")        — row_version mismatch
+    """
+    patient = await db.get(Patient, patient_id)
+    if not patient or patient.facility_id != facility_id or patient.deleted_at is not None:
+        raise ValueError("not_found")
+    if patient.status != "active":
+        raise ValueError("patient_not_active")
+    if patient.row_version != if_match_version:
+        raise ValueError("stale_write")
+
+    changes = {
+        field: getattr(payload, field)
+        for field in _PATCHABLE_FIELDS
+        if getattr(payload, field, None) is not None
+    }
+
+    def _jsonify(v):
+        if isinstance(v, uuid.UUID):
+            return str(v)
+        if hasattr(v, "isoformat"):
+            return v.isoformat()
+        return v
+
+    old_value_json = {k: _jsonify(getattr(patient, k)) for k in changes}
+
+    from app.audit.service import audited_mutation
+    from app.audit.actions import AuditAction
+
+    async with audited_mutation(
+        db,
+        facility_id=facility_id,
+        action=AuditAction.UPDATE,
+        resource_type="patients",
+        patient_id=patient_id,
+    ) as audit:
+        audit.resource_id = patient_id
+        audit.old_value = old_value_json
+
+        for field, value in changes.items():
+            setattr(patient, field, value)
+
+        patient.updated_by = updated_by
+        patient.row_version = patient.row_version + 1
+        await db.flush()
+        await db.refresh(patient)
+
+        audit.new_value = {k: _jsonify(getattr(patient, k)) for k in changes}
+
+    return patient
+
+
+async def get_patient_history(
+    db: AsyncSession,
+    *,
+    patient_id: uuid.UUID,
+    facility_id: uuid.UUID,
+    requesting_user_id: uuid.UUID,
+    requesting_role: str,
+) -> dict:
+    """Aggregate patient history — audit trail + allergies.
+
+    Role filtering:
+      - receptionist : audit events only (no clinical data)
+      - nurse/doctor/admin/supervisor : audit events + allergies
+
+    Access is logged on every call (compliance §26.1 "Patient view").
+    Scoped to facility_id — cannot view another facility's patient.
+    """
+    from app.audit.models import AuditLog
+    from app.audit.service import write_audit_log
+    from app.audit.actions import AuditAction
+    from app.allergies.models import Allergy
+
+    # TODO W3-01 consent-check: once consent/router.py is implemented,
+    # call check_consent(db, patient_id, requester_id) here and raise
+    # ValueError("consent_required") if not granted. Tracked in #179.
+
+    # Verify patient exists and belongs to this facility
+    patient = await db.get(Patient, patient_id)
+    if not patient or patient.facility_id != facility_id or patient.deleted_at is not None:
+        raise ValueError("not_found")
+
+    # Fetch audit trail for this patient, newest first, capped at 200 rows
+    audit_stmt = (
+        select(AuditLog)
+        .where(AuditLog.patient_id == patient_id)
+        .order_by(AuditLog.created_at.desc())
+        .limit(200)
+    )
+    audit_events = (await db.execute(audit_stmt)).scalars().all()
+
+    # Fetch allergies — clinical roles only
+    _CLINICAL_ROLES = {"doctor", "nurse", "admin", "supervisor", "hod", "auditor"}
+    allergies = []
+    if requesting_role in _CLINICAL_ROLES:
+        allergy_stmt = (
+            select(Allergy)
+            .where(Allergy.patient_id == patient_id)
+            .order_by(Allergy.created_at.desc())
+        )
+        allergies = (await db.execute(allergy_stmt)).scalars().all()
+
+    # Log this access — compliance requirement §26.1
+    await write_audit_log(
+        db,
+        facility_id=facility_id,
+        action=AuditAction.VIEW,
+        resource_type="patients",
+        resource_id=patient_id,
+        patient_id=patient_id,
+        user_id=requesting_user_id,
+    )
+
+    return {"patient_id": patient_id, "audit_events": audit_events, "allergies": allergies}

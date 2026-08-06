@@ -199,3 +199,90 @@ async def reject_patient_merge(
             raise HTTPException(409, {"code": "self_approval_not_allowed"})
         raise HTTPException(400, str(e))
     return merge_log
+
+
+from fastapi import Header
+from app.patients.schemas import PatientUpdate
+from app.patients.service import update_patient
+
+
+@router.patch(
+    "/{patient_id}",
+    response_model=PatientOut,
+    dependencies=[Depends(require_roles("receptionist", "admin"))],
+)
+async def update_patient_endpoint(
+    patient_id: uuid.UUID,
+    payload: PatientUpdate,
+    current_db_user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+    if_match: str = Header(..., alias="If-Match"),
+) -> Patient:
+    """Sparse PATCH — only supplied fields written.
+    Requires If-Match: <row_version> header for optimistic locking."""
+    try:
+        if_match_version = int(if_match)
+    except ValueError:
+        raise HTTPException(400, {"code": "invalid_if_match"})
+
+    try:
+        patient = await update_patient(
+            db,
+            patient_id=patient_id,
+            payload=payload,
+            updated_by=current_db_user.id,
+            facility_id=current_db_user.facility_id,
+            if_match_version=if_match_version,
+        )
+    except ValueError as e:
+        code = str(e)
+        if code == "not_found":
+            raise HTTPException(404, {"code": "patient_not_found"})
+        if code == "patient_not_active":
+            raise HTTPException(409, {"code": "patient_not_active"})
+        if code == "stale_write":
+            raise HTTPException(409, {"code": "stale_write", "message": "Re-fetch and retry"})
+        raise HTTPException(400, str(e))
+
+    return patient
+
+
+from app.patients.schemas import PatientHistoryResponse
+from app.patients.service import get_patient_history
+from app.audit.deps import get_current_actor_dependency
+from app.audit.context import AuditActor
+
+
+@router.get(
+    "/{patient_id}/history",
+    response_model=PatientHistoryResponse,
+    dependencies=[Depends(require_roles(
+        "receptionist", "admin", "supervisor", "doctor", "nurse", "hod", "auditor"
+    ))],
+)
+async def get_patient_history_endpoint(
+    patient_id: uuid.UUID,
+    current_db_user: CurrentDbUser,
+    actor: AuditActor = Depends(get_current_actor_dependency),
+    db: AsyncSession = Depends(get_db),
+) -> PatientHistoryResponse:
+    """Aggregate patient history — audit trail + allergies (role-filtered).
+
+    Receptionists see audit events only.
+    Clinical roles (doctor/nurse/admin/supervisor) also see allergies.
+    Every call is access-logged per compliance §26.1.
+    """
+    try:
+        result = await get_patient_history(
+            db,
+            patient_id=patient_id,
+            facility_id=current_db_user.facility_id,
+            requesting_user_id=current_db_user.id,
+            requesting_role=actor.role or "",
+        )
+    except ValueError as e:
+        if str(e) == "not_found":
+            raise HTTPException(404, {"code": "patient_not_found"})
+        raise HTTPException(400, str(e))
+
+    return PatientHistoryResponse(**result)
