@@ -1,5 +1,3 @@
-from sqlalchemy import text
-
 from app.common.db import Base
 from app.inventory import models as inventory_models  # noqa: F401
 from app.pharmacy import models as pharmacy_models  # noqa: F401
