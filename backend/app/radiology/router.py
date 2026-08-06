@@ -247,6 +247,7 @@ async def get_fhir_bundle(
         patient_id=patient_id,
     )
     return bundle
+python -c "import ast; ast.parse(open('app/blood_bank/models.py', encoding='utf-8').read()); print('blood_bank OK')"
 
 
 _IST = ZoneInfo("Asia/Kolkata")
