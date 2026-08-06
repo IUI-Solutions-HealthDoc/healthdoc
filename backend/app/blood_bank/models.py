@@ -31,7 +31,7 @@ class BloodUnit(Base, UUIDPk, Timestamps):
     donor_id = Column(UUID(as_uuid=True), ForeignKey("blood_donors.id", ondelete="RESTRICT"),
                        nullable=False, index=True)
     bag_number = Column(String(30), unique=True, nullable=False)
-    blood_group = Column(String(7), nullable=False)
+    blood_group = Column(String(30), nullable=False)
     volume_ml = Column(Integer, nullable=False)
     collected_at = Column(DateTime(timezone=True), nullable=True)
     expiry_date = Column(Date, nullable=False)

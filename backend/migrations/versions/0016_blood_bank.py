@@ -64,7 +64,7 @@ def upgrade() -> None:
         sa.Column("donor_id", postgresql.UUID(as_uuid=True),
                   sa.ForeignKey("blood_donors.id", ondelete="RESTRICT"), nullable=False),
         sa.Column("bag_number", sa.String(30), nullable=False, unique=True),
-        sa.Column("blood_group", sa.String(7), nullable=False),
+        sa.Column("blood_group", sa.String(30), nullable=False),
         sa.Column("volume_ml", sa.Integer(), nullable=False),
         sa.Column("collected_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("expiry_date", sa.Date(), nullable=False),
@@ -83,6 +83,9 @@ def upgrade() -> None:
     )
     op.create_check_constraint(
         "ck_blood_units_status", "blood_units", BloodUnitStatus.sql_check("status"),
+    )
+    op.create_check_constraint(
+        "ck_blood_units_blood_group", "blood_units", BloodGroup.sql_check("blood_group"),
     )
     op.create_index("ix_blood_units_donor_id", "blood_units", ["donor_id"])
     op.create_index("ix_blood_units_issued_to_patient_id", "blood_units", ["issued_to_patient_id"])
