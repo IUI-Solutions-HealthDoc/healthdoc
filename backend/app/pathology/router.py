@@ -293,36 +293,33 @@ async def verify_result(
     if current is None:
         raise HTTPException(status_code=404, detail="No result found for this item")
 
+    if current.status != "preliminary":
+        raise HTTPException(
+            status_code=409,
+            detail="Only a preliminary result can be verified; use amend for a finalized result",
+        )
+
     if str(current.created_by) == str(current_db_user.id):
         raise HTTPException(
             status_code=403,
             detail="Verifying pathologist must be different from the person who entered the result",
         )
 
-    current.is_current = False
-    await db.flush()
-
-    new_result = LabResult(
-        lab_order_item_id=item_id,
-        version=current.version + 1,
-        is_current=True,
-        result_data=payload.result_data if payload.result_data is not None else current.result_data,
-        remarks=payload.remarks if payload.remarks is not None else current.remarks,
-        status="final",
-        created_by=current_db_user.id,
-    )
-    db.add(new_result)
+    # Verification is a status transition on the SAME row, not a new
+    # version — only amend_result (a genuine correction) mints a new
+    # version. See reviewer note on PR #260.
+    current.status = "final"
 
     item = await db.get(LabOrderItem, item_id)
     item.status = "released"
 
-    await _write_audit_log(db, table_name="lab_results", row_id=new_result.id,
-                            action="create", actor_id=current_db_user.id)
+    await _write_audit_log(db, table_name="lab_results", row_id=current.id,
+                            action="verify", actor_id=current_db_user.id)
     await db.flush()
-    await db.refresh(new_result)
+    await db.refresh(current)
 
-    tat_delta = new_result.created_at - (item.collected_at or item.created_at)
-    result_out = LabResultOut.model_validate(new_result)
+    tat_delta = current.updated_at - (item.collected_at or item.created_at)
+    result_out = LabResultOut.model_validate(current)
     result_out.tat_minutes = int(tat_delta.total_seconds() // 60)
     return result_out
 
@@ -426,24 +423,21 @@ async def lab_mis_summary(
         for status_name, count in status_counts.items()
     ]
 
-    results_result = await db.execute(
-        select(LabResult).where(
+    results_rows = (await db.execute(
+        select(LabResult, LabOrderItem)
+        .join(LabOrderItem, LabResult.lab_order_item_id == LabOrderItem.id)
+        .where(
             LabResult.created_at >= date_from,
             LabResult.created_at <= date_to,
             LabResult.status.in_(["final", "corrected"]),
         )
-    )
-    results = results_result.scalars().all()
-    total_results = len(results)
+    )).all()
+    total_results = len(results_rows)
 
     tat_map: dict[str, list[float]] = {}
     panic_map: dict[str, dict[str, int]] = {}
 
-    for result in results:
-        item = await db.get(LabOrderItem, result.lab_order_item_id)
-        if item is None:
-            continue
-
+    for result, item in results_rows:
         baseline = item.collected_at or item.created_at
         tat_minutes = (result.created_at - baseline).total_seconds() / 60
         tat_map.setdefault(item.test_name, []).append(tat_minutes)
@@ -452,7 +446,6 @@ async def lab_mis_summary(
         panic_map[item.test_name]["total"] += 1
         if _check_critical(result.result_data):
             panic_map[item.test_name]["critical"] += 1
-
     tat_by_test = [
         TATByTestOut(
             test_name=name,
