@@ -1,6 +1,9 @@
 """patients module router — B2-W1-02: registration endpoint."""
 import uuid
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException ,Header
+from typing import Annotated
+import hashlib, json
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import CurrentDbUser, require_roles
@@ -14,11 +17,19 @@ from app.users.models import Facility
 
 router = APIRouter(prefix="/patients", tags=["patients"])
 
+async def idempotency_guard(
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+    db: AsyncSession = Depends(get_db),
+) -> str:
+    if not idempotency_key:
+        raise HTTPException(400, {"code": "missing_idempotency_key",
+            "message": "Idempotency-Key header is required for this endpoint"})
+    return idempotency_key
+
 
 @router.get("/ping")
 async def ping() -> dict:
     return {"module": "patients", "status": "stub"}
-
 
 @router.post(
     "",
@@ -30,6 +41,7 @@ async def register_patient(
     payload: PatientCreate,
     current_db_user: CurrentDbUser,
     db: AsyncSession = Depends(get_db),
+    idempotency_key: str = Depends(idempotency_guard),  
 ) -> Patient:
     facility = await db.get(Facility, payload.facility_id)
     if not facility:

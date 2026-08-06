@@ -10,16 +10,22 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.common.db import Base
-from app.common.models import UUIDPk, Timestamps, Blame
+from app.common.models import UUIDPk, Timestamps, Blame, Versioned
 from app.common.enums import (
     Sex, IdentityPath, IdentityStatus, PatientStatus,
     IdentifierType, MergeStatus, MergeSourceType,
 )
 
 
-class Patient(Base, UUIDPk, Timestamps, Blame):
+class Patient(Base, UUIDPk, Timestamps, Blame, Versioned):
     __tablename__ = "patients"
     __table_args__ = (
+        # Short names here — app.common.db's NAMING_CONVENTION auto-prefixes
+        # every CheckConstraint as ck_<table>_<name> (see db.py). Passing the
+        # already-prefixed form double-prefixes it (ck_patients_ck_patients_
+        # status), which stops matching what migration 0037 actually named
+        # the constraint in the database. This bit us once already — see
+        # PR review discussion on constraint naming.
         CheckConstraint("dob IS NOT NULL OR age_years IS NOT NULL", name="dob_or_age"),
         CheckConstraint("uhid IS NOT NULL OR thid IS NOT NULL", name="has_identifier"),
         CheckConstraint(Sex.sql_check("sex"), name="sex"),
@@ -61,6 +67,8 @@ class Patient(Base, UUIDPk, Timestamps, Blame):
 class PatientIdentifier(Base, UUIDPk, Timestamps):
     __tablename__ = "patient_identifiers"
     __table_args__ = (
+        # Unique constraint left as-is per team decision — only check
+        # constraints were in scope for the ck_<table>_<column> rename.
         UniqueConstraint("patient_id", "identifier_type", name="patient_identifier_type"),
         CheckConstraint(IdentifierType.sql_check("identifier_type"), name="identifier_type"),
     )
@@ -93,6 +101,10 @@ class PatientMergeLog(Base, UUIDPk, Timestamps):
 
     status: Mapped[str] = mapped_column(String(50), nullable=False)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Should-fix (PR review): reject_merge previously overwrote this same
+    # `reason` column with why the merge was refused, destroying why it was
+    # requested in the first place. Both matter for audit — kept separate.
+    decision_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     unmerge_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     before_snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)
