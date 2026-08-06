@@ -89,6 +89,9 @@ services:
       - ../infra/minio/init-buckets.sh:/init/init-buckets.sh:ro
 
   orthanc:
+    # PACS — only needed when the radiology module is enabled at this facility.
+    # Start with: docker compose --profile radiology up -d
+    profiles: ["radiology"]
     image: orthancteam/orthanc:latest
     environment:
       ORTHANC__REGISTERED_USERS: '{"${ORTHANC_USER}": "${ORTHANC_PASSWORD}"}'
@@ -100,6 +103,10 @@ services:
       - "127.0.0.1:${ORTHANC_DICOM_PORT:-4242}:4242"   # DICOM
 
   icd11:
+    # Optional at the edge: run locally, point ICD11_BASE_URL at a shared district
+    # instance, or omit entirely (catalog-only mode from the icd_codes table).
+    # Start with: docker compose --profile icd11 up -d
+    profiles: ["icd11"]
     # WHO ICD-11 API, self-hosted — offline coding at the facility edge.
     # First pull is large (several GB); dev machines can comment this out and
     # set ICD11_BASE_URL to the WHO cloud API instead.

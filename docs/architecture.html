@@ -246,6 +246,11 @@ staging, and each facility. Nginx is the single entry point; nothing else is exp
   <div class="step crit"><b>8 · One transaction</b>mutation + <code>audit_logs</code> row commit together or roll back together</div>
   <div class="step ok"><b>9 · Envelope out</b><code>{success,data,error,meta}</code></div>
 </div>
+<div class="note warn"><b>Reliability contracts (§4A):</b> every creating POST needs an <code>Idempotency-Key</code>
+(a retry on a flaky rural link must never create a second patient or a second payment); every mutable clinical/financial
+row carries <code>row_version</code> and PATCH requires <code>If-Match</code> (no silent lost updates between two
+clinicians); clinical notes reach Mongo <b>via the outbox</b>, never a direct dual-write; uploads are validated by
+sniffed magic bytes and served <code>attachment</code> + <code>nosniff</code>.</div>
 <div class="note warn"><b>Failure rule:</b> if the audit insert fails, the business write rolls back too (B7-W1-04).
 If consent fails, return 403 <em>and</em> write the denial to <code>data_access_log</code>.</div>
 </div>
@@ -281,25 +286,31 @@ another module's tables</b>. Owner key: B1 Tech Lead · B2 Priyanshu · B3 Adity
 <tr><td><code>notifications</code></td><td>B4</td><td>event broadcast + durable history</td><td>notification_history</td><td>Redis pub/sub → WS</td><td>(in-app toasts, displays)</td></tr>
 <tr><td><code>pathology</code></td><td>B5</td><td>lab worklist: accession, samples, versioned results, verification</td><td>lab_order_items, lab_results</td><td>orders, billing (lab lines), files, notifications</td><td>lab</td></tr>
 <tr><td><code>radiology</code></td><td>B5</td><td>radiology worklist, Orthanc/PACS link, versioned reports</td><td>radiology_order_items, radiology_reports</td><td>orders, Orthanc REST, billing, files</td><td>radiology</td></tr>
-<tr><td><code>blood_bank</code></td><td>B5</td><td>donors + units (schema-first)</td><td>blood_donors, blood_units</td><td>patients, orders</td><td>(W3+)</td></tr>
+<tr><td><code>blood_bank</code></td><td>B5</td><td>donors, eligibility, units, screening, issue</td><td>blood_donors, blood_units</td><td>patients, orders, billing (blood lines), audit</td><td><b>blood-bank</b> (donor register, unit inventory, screening, issue) — <b>route was missing, add it</b></td></tr>
 <tr><td><code>inventory</code></td><td>B6</td><td>item/batch master, FEFO, GRN, indents, dual-signoff adjustments, ledger</td><td>suppliers, inventory_items, stock_locations, inventory_batches, stock_ledger, grn*, indent*, adjustments</td><td>audit</td><td>inventory</td></tr>
 <tr><td><code>pharmacy</code></td><td>B6</td><td>prescription queue → FEFO dispense (versioned), substitutions</td><td>pharmacy_dispenses, pharmacy_dispense_items, facility_settings</td><td>orders/prescriptions (reads), inventory, billing (pharmacy lines)</td><td>pharmacy/prescription-queue, pharmacy/dispense</td></tr>
 <tr><td><code>billing</code></td><td>B7</td><td>invoice per visit, line accrual, payments, refunds, gapless numbering</td><td>invoices, invoice_items, payments, refunds, billing_counters</td><td>audit</td><td>billing, admin (config/MIS)</td></tr>
 <tr><td><code>consent</code></td><td>B7</td><td>consent purposes/records/withdrawals; access gating; break-glass</td><td>consent_purposes, consent_records, consent_withdrawals, data_access_log, consent_renewal_reminders</td><td>audit, notifications</td><td>consent</td></tr>
 <tr><td><code>audit</code>, <code>security_audit</code></td><td>B7</td><td>hash-chained audit log, middleware, integrity checks, viewer API</td><td>audit_logs, audit_log_archive, audit_integrity_checks</td><td>MinIO (archives)</td><td>audit-viewer</td></tr>
 <tr><td><code>files</code></td><td>B7</td><td>MinIO uploads, presigned URLs, access logging</td><td>files, file_access_log</td><td>MinIO</td><td>(embedded viewers)</td></tr>
+<tr><td><code>integrations/abdm/fhir</code></td><td>B1 + module owners</td><td>FHIR R4 bundle build/validate; per-module resource mappers (OPConsultation, DiagnosticReport, Prescription, DischargeSummary, WellnessRecord)</td><td>— (Mongo fhir_bundles, PG fhir_bundle_transactions)</td><td>encounters, lab, pharmacy, ipd, patients</td><td>admin/abdm-sync</td></tr>
 <tr><td><code>integrations/abdm</code></td><td>B2+B7</td><td>ABHA verify (identity), HIP/HIU data exchange, consent manager bridge, FHIR</td><td>— (Mongo: abdm_raw_payloads, fhir_bundles)</td><td>ABDM Gateway V3, patients, consent, files</td><td>admin/abdm-sync</td></tr>
 <tr><td><code>outbox</code></td><td>B1</td><td>edge→cloud sync queue, conflict resolution by sensitivity</td><td>(outbox tables, W4+)</td><td>all modules' change feeds</td><td>—</td></tr>
 <tr><td><code>reports</code>, <code>nursing</code>, <code>encounters</code>…</td><td>—</td><td>MIS dashboards, eMAR/vitals (W3+)</td><td>—</td><td>read-only cross-module service calls</td><td>reports, nurse/*</td></tr>
 </table>
 
-<div class="note good"><b>Per-facility module toggles:</b> lab, radiology, pharmacy, inventory, IPD, OT,
-blood bank, emergency, patient portal, ABDM, and refunds can each be switched off per hospital
+<div class="note good"><b>Per-facility module toggles — exactly four:</b> <b>pharmacy, lab (pathology), radiology, OT, blood bank</b>
+can each be switched off per hospital
 (<code>facility_modules</code>, admin-only, audited). Disabled ⇒ no worklist, no billing accrual, endpoints answer
 409 <code>module_disabled</code>, and the frontend hides the surface via <code>GET /facility/capabilities</code> —
 but clinical records still complete: orders flip to <code>external_referral</code>, prescriptions still print.
-Core modules (identity, registration, OPD, queue, billing, consent, audit) can never be disabled. Lab
-sub-departments (pathology/biochemistry/microbiology/hematology) and radiology modalities toggle via module config.</div>
+Everything else is core and can never be disabled — including <b>inventory</b> (consumables/reagents exist without a
+dispensary), IPD, emergency, ABDM and refunds. Procedures are recorded via <code>procedure_records</code> (owned by
+orders, not OT) so a minor procedure is captured and billable at a facility with no theatre. Any combination of the four, including all four off, must
+yield a working hospital: ordering never disappears (orders become <code>external_referral</code>), outside reports come
+back via <code>order_external_results</code>, billing bills only the lines that exist, and infra follows the toggle —
+<code>orthanc</code> and <code>icd11</code> run behind Compose <b>profiles</b>, so a facility without radiology never
+runs a PACS. Disabling never deletes data; re-enabling never rewrites history.</div>
 <div class="note"><b>Boundary rule:</b> importing another module's <em>models</em> is allowed only for FK typing;
 querying another module's tables directly in SQL is a PR-rejection offense. Cross-module data goes through that
 module's service functions, so schema changes stay local to their owner.</div>
@@ -409,6 +420,7 @@ supervisor-approved merge into a UHID later writes <code>patient_merge_log</code
 
 <h3>6.2 OPD consultation (doctor)</h3>
 <div class="card"><div class="flow">
+  <div class="step alt"><b>Priority elevation</b>waiting tokens only · reason mandatory · role-scoped tier (admin_override = HOD + MFA) · appended to <code>queue_token_priority_changes</code> + audit</div>
   <div class="step"><b>Call next</b>next by priority tier then FIFO; updates <code>queues.now_serving_token_id</code> and pushes to the public OPD display board (WS/SSE) — patient outside sees their <code>MED-042</code> · Dr. Sharma · Room 3</div>
   <div class="step"><b>Encounter</b>created under the visit; vitals pulled if nurse recorded</div>
   <div class="step"><b>Diagnoses</b>ICD-11 search (local WHO container) — stem + post-coordination; ICD-10 fallback</div>
@@ -525,8 +537,11 @@ the first mismatch. Old partitions archive to MinIO with file hashes.</div></div
 <h2><span class="no">8.</span> Security architecture (DPDP / ABDM / CERT-In)</h2>
 <div class="grid g3">
   <div class="card"><h3 style="margin-top:0">Identity &amp; access</h3>
-    <p style="font-size:13.5px">Keycloak realm <code>healthdoc</code>; 12 roles (superadmin, receptionist, doctor, nurse, lab_tech,
-    radiology_tech, pharmacist, emergency, supervisor, admin, auditor, patient). Superadmin is cloud-only —
+    <p style="font-size:13.5px">Keycloak realm <code>healthdoc</code>; 13 roles (superadmin, receptionist, doctor, nurse, lab_tech,
+    radiology_tech, pharmacist, emergency, <b>hod</b>, supervisor, admin, auditor, patient). Four authority roles are
+    separated by design: superadmin = platform (never patient data, incl. no merge/unmerge) · admin = facility config
+    (appoints HODs) · hod = runs ONE department, scoped by <code>users.department_id</code> · supervisor = records
+    authority (merge/unmerge, different-approver rule). MFA required for admin, hod, supervisor. Superadmin is cloud-only —
     it owns facilities and appoints admins/DPOs but can never read clinical data. Staff accounts are created
     via a maker-checker flow (<code>user_account_requests</code>): requester ≠ approver, approval atomically
     creates the Keycloak account + profile row. OIDC + PKCE, 15-min access tokens,
@@ -588,7 +603,7 @@ chain order, empty-diff autogenerate check before merge — see <code>database-s
 
 </main>
 <footer>
-HealthDoc architecture · generated 2026-07-17 · sources: database-schema.md v3.5, schema-conventions.md,
+HealthDoc architecture · generated 2026-07-17 · sources: database-schema.md v3.11, schema-conventions.md,
 ADR 0001 (identity &amp; photo — in force), ADR 0002 (full departmental billing), infra/docker-compose.yml,
 .github issue plan (W1–W8). Binding order on conflicts: ADRs → database-schema.md → this document.
 </footer>

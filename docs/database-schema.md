@@ -27,6 +27,16 @@ this document".
 | v2 | 2026-07-17 | ADR 0002: full departmental billing replaces registration-payment model; users table extended |
 | v2.1 | 2026-07-17 | Review hardening: mobile varchar(20), enum widths varchar(30), FK + audit indexes, single versioning pattern, 0018 retired |
 | v2.2 | 2026-07-17 | Security pass: crypto key_version on patient_identifiers, PII rules for notification payloads and error messages, page_size cap, retention notes; synced with architecture.html |
+| v3.15 | 2026-08-05 | **Doc↔migration drift found reviewing #264:** `facilities.timezone` has been specified in §3 since v3.0 but was never created by 0002 — every `TZ-DATE` correction the review process demands references a column that does not exist. Same for `idempotency_keys`, listed under 0002 and read by `billing/service.py`, created by no migration. Both land in new revision **0003a**, inserted after 0003 rather than appended, so they arrive before the migrations that depend on them. Adds the correction-revision convention (letter suffix) and an explicit prohibition on retargeting `down_revision` to an earlier revision to avoid a missing one — two heads stop *all* migrations, not just the offending branch |
+| v3.14 | 2026-07-28 | **Clinical & financial gaps found in review:** `allergies` table + ingredient-code matching rule + server-side prescribing gate (0032); `charge_master` with effective-dated and scheme tariffs, plus `UNIQUE (invoice_id, reference_type, reference_id)` to stop double-billing (0033); partial unique index enforcing one active admission per bed and a transfer destination on discharges (0034). Drug–drug interaction checking explicitly ruled out of scope pending a licensed database |
+| v3.13 | 2026-07-28 | **PR-review corrections (found reviewing #265):** `departments.code` unique per facility not globally (global unique makes multi-facility impossible); `queue_counters` rescoped to (department, business date) so two doctors in one department cannot both issue `MED-001` to the same display board; `initial_priority` on `queue_tokens`; partial unique on live `visit_id` (a double-click at the desk otherwise 500s that patient's consultation completion forever); enum column widths corrected to varchar(50) per the blanket rule |
+| v3.12 | 2026-07-23 | **Verification pass:** executable spec tests (10 passing) proving the timezone, race, invariant and concurrency findings; `scripts/spec_check.py` doc↔code drift checker added to CI; **restored §governance + user_account_requests/policies/outbox_events/idempotency_keys definitions silently dropped by an earlier edit**; fixed stale facility_modules block |
+| v3.11 | 2026-07-23 | **§4A reliability & safety contracts:** idempotency keys, optimistic concurrency (row_version/If-Match), Mongo dual-write via outbox, file-upload validation, visit auto-close, DPDP erasure position, public-display hardening, Keycloak SPOF mitigation, backup RPO/RTO + paper fallback |
+| v3.10 | 2026-07-23 | `blood_bank` made optional (5 toggleable modules); `procedure_records` added so procedures are recordable + billable without an OT |
+| v3.9 | 2026-07-23 | **Architecture hardening:** async per-facility audit chaining, mandatory partition maintenance + DEFAULT partitions, facility timezone + business-date rule, break_glass_grants table, merge repointing rule (clinical safety), financial invariants, queue_counters, consent-expiry job, ICD-11 edge fallbacks, sync clock authority |
+| v3.8 | 2026-07-22 | Role model resolved: `hod` role added (13 total), superadmin barred from merge/unmerge, unmerge → supervisor w/ different-approver rule, admin vs hod boundary, MFA on all authority roles; priority-elevation design + `queue_token_priority_changes` table |
+| v3.7 | 2026-07-22 | Blood-bank API contract + frontend surface added; FHIR R4 conversion contract (resource mappers per module, coding/PII rules) |
+| v3.6 | 2026-07-22 | Completeness audit: added missing table definitions + map rows for 0029 policies (ABAC), 0030 ABHA linking token, 0031 outbox_events |
 | v3.5 | 2026-07-21 | OPD display board: queues gain room_id/display_label/now_serving_token_id/is_open; public /queue/display/{dept} board endpoint + SSE stream; token→doctor link and no-PII display contract documented |
 | v3.4.1 | 2026-07-21 | Precision pass: invoice trigger frozen/mutable column lists, enum width rule → varchar(50), uhid NULL-unique note, no-FK-to-audit policy, facility_modules seeding, self-approval 409, UUID-only URL params; v3.5 backlog recorded |
 | v3.4 | 2026-07-20 | Account governance: superadmin role (cloud-only, no clinical access), user_account_requests maker-checker (0028), documented /users, /audit/*, /reports/kpis endpoint contracts |
@@ -100,14 +110,15 @@ do not merge out of order.**
 | Rev | Slug | Tables | Owner (issue) |
 |---|---|---|---|
 | 0001 | extensions | uuid-ossp, pgcrypto, pg_trgm | B1 — merged ✅ |
-| 0002 | facilities_users | facilities, users | B1 |
-| 0003 | audit | audit_logs, audit_log_archive, audit_integrity_checks | B7 (B7-W1-01) |
-| 0004 | consent | consent_purposes, consent_records, consent_withdrawals, data_access_log, consent_renewal_reminders | B7 (B7-W1-02) |
+| 0002 | facilities_users | facilities, users, ~~idempotency_keys~~ (see 0003a) | B1 — merged ✅ |
+| 0003 | audit | audit_logs, audit_log_archive, audit_integrity_checks | B7 (B7-W1-01) — merged ✅ |
+| 0003a | facilities_fixes | ALTER facilities: **timezone**, widen facility_type; **idempotency_keys** | B1 — corrections to 0002, `down_revision = "0003"` |
+| 0004 | consent | consent_purposes, consent_records, consent_withdrawals, data_access_log, consent_renewal_reminders, break_glass_grants | B7 (B7-W1-02) |
 | 0005 | departments_rooms | departments, rooms | B4 (B4-W1-01) |
 | 0006 | patients | patients, patient_identifiers, patient_merge_log | B2 (B2-W1-01) |
 | 0007 | visits_encounters | visits, encounters, icd_codes, diagnoses | B3 (B3-W1-01) |
-| 0008 | orders_prescriptions | orders, prescriptions, prescription_items | B3 (B3-W1-01) |
-| 0009 | rosters_queues | rosters, queues, queue_tokens | B4 (B4-W1-01) |
+| 0008 | orders_prescriptions | orders, prescriptions, prescription_items, procedure_records, order_external_results | B3 (B3-W1-01) |
+| 0009 | rosters_queues | rosters, queues, queue_counters, queue_tokens, queue_token_priority_changes | B4 (B4-W1-01) |
 | 0010 | lab | lab_order_items, lab_results | B5 (B5-W1-01) |
 | 0011 | radiology | radiology_order_items, radiology_reports | B5 (B5-W1-01) |
 | 0012 | inventory | suppliers, inventory_items, stock_locations, inventory_batches, stock_ledger (+ FK prescription_items→inventory_items) | B6 (B6-W1-01) |
@@ -127,10 +138,31 @@ do not merge out of order.**
 | 0026 | fhir_notifications | fhir_bundle_transactions, discharge_notifications | B7 + B4 (W6) |
 | 0027 | facility_modules | facility_modules (+ orders.fulfilment_mode) | B1 (W3) |
 | 0028 | user_account_requests | user_account_requests | B1 (W3) |
+| 0029 | abac_policies | policies | B1 (W2-02) |
+| 0030 | abha_linking_token | ALTER patients: abha_linking_token_encrypted, abha_linking_key_version, abha_linked_at | B1 (W3-02) |
+| 0031 | outbox | outbox_events (+ seq_outbox) | B1 (W6-01) |
+| 0032 | allergies | allergies, ALTER inventory_items | B3 (B3-W?-01) |
+| 0033 | charge_master | charge_master, ALTER invoice_items | B7 (B7-W?-01) |
+| 0034 | ipd_bed_integrity | ALTER admissions, ALTER discharges | B4 (B4-W?-01) |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
 CI runs `alembic upgrade head` — a broken chain fails the PR.
+
+> **Never point `down_revision` at an earlier revision "because the real one isn't in my
+> folder yet."** Two migrations both claiming `"0002"` create two heads, and Alembic then
+> refuses to run *anything* — including revisions that have nothing to do with either
+> file. The cost lands on the whole team, not on the branch that did it. Point at the
+> number the map says, even if that revision doesn't exist yet; your PR will fail CI
+> until it lands, which is the correct and visible outcome. (PR #264 forked at 0002 this
+> way; #297 was the same failure from the other end.)
+
+**Correction revisions (`0003a`, `0011a`, …).** A merged migration can't be edited, so a
+gap found after the fact needs a new revision. If the fix is needed *early* — because
+later migrations depend on it — insert it with a letter suffix immediately after the
+revision it corrects, rather than appending it at the end where it would arrive last.
+Whoever owns the next revision repoints their `down_revision` to it. That is the only
+sanctioned way to insert into the middle of the chain.
 
 **About 0018:** Alembic revision ids are labels, not a sequence — `0019.down_revision
 = "0017"` is a perfectly linear chain. The number 0018 is retired: **nobody may ever
@@ -146,7 +178,16 @@ Notation: every table implicitly starts with
 `updated_by UUID NULL → users.id`. Only the *other* columns are listed.
 `→` means FK to that table's `id`. All FKs `ON DELETE RESTRICT` unless stated.
 
-Two blanket rules (they override anything narrower shown inline):
+Three blanket rules (they override anything narrower shown inline):
+
+- **Business dates use the facility's timezone, never UTC.** Timestamps are `timestamptz`
+  UTC — correct — but every *date-typed business key* (`queues.service_date`,
+  `billing_counters.counter_date`, `queue_counters` daily reset, the `YYYYMMDD` in
+  receipt/order/accession numbers, UHID year, KPI period boundaries) must be computed as
+  `(now() AT TIME ZONE f.timezone)::date` using `facilities.timezone`. Using `now()::date`
+  makes everything between **00:00 and 05:30 IST belong to yesterday** — early-morning OPD
+  tokens continue yesterday's sequence and receipts carry the wrong date. Never call
+  `CURRENT_DATE` in business logic.
 
 - **Enum-backed columns** (status, type, mode, priority, category, path, channel) are
   always `varchar(50)` — this rule OVERRIDES any narrower width shown inline in §3.
@@ -201,8 +242,13 @@ code            varchar(20) UNIQUE NOT NULL      -- e.g. JPR001, used inside UHI
 name            text NOT NULL
 state_code      varchar(5) NOT NULL              -- e.g. RJ
 district        text
-facility_type   varchar(30)                      -- phc | chc | district_hospital | medical_college
+facility_type   varchar(50)                      -- phc | chc | district_hospital | medical_college
 hfr_facility_id varchar(50)                      -- ABDM Health Facility Registry id
+timezone        varchar(50) NOT NULL DEFAULT 'Asia/Kolkata'  -- IANA tz; drives ALL business dates
+                                                 -- NOT created by 0002 despite being specified
+                                                 -- here since v3.0 — added by 0003a. Every
+                                                 -- TZ-DATE fix references this column, so it
+                                                 -- must land before 0004. (Found v3.15.)
 is_active       boolean NOT NULL DEFAULT true
 ```
 
@@ -225,9 +271,28 @@ since departments doesn't exist yet at 0002.)
 
 ### 0003 — audit (B7, Vani's design adopted with renames)
 
-**audit_logs** — append-only, hash-chained, partitioned monthly by `created_at`
-(PK is `(id, created_at)` because of partitioning). Trigger `trg_audit_logs_block_update`
-rejects UPDATE/DELETE. No `updated_at` on append-only tables.
+**audit_logs** — append-only, hash-chained **per facility**, partitioned monthly by
+`created_at` (PK is `(id, created_at)` because of partitioning). Trigger
+`trg_audit_logs_block_update` rejects UPDATE/DELETE. No `updated_at` on append-only tables.
+
+> **Chaining is asynchronous and facility-scoped — read this before building 0003.**
+> A hash chain is a single-writer structure; computing `prev_hash` inline on every
+> mutation would serialize the entire hospital behind one lock and, under concurrency,
+> two transactions reading the same `prev_hash` would fork the chain. And because each
+> facility writes offline then syncs, one global chain is impossible by construction.
+> Therefore:
+> 1. The mutation transaction writes the audit row **synchronously** with
+>    `facility_id`, `chain_seq = nextval('seq_audit_<facility>')`, and
+>    `prev_hash/entry_hash/signature` **NULL**. This keeps the "no write without a
+>    trace, same transaction, rollback together" guarantee at full write throughput.
+> 2. A **single-threaded sealer job per facility** walks unsealed rows in `chain_seq`
+>    order and fills `prev_hash`, `entry_hash`, `signature`. Sealing is idempotent and
+>    restartable.
+> 3. The chain is **per `facility_id`** — the cloud stores and verifies each facility's
+>    chain independently and **never re-chains on ingest**. `audit_integrity_checks`
+>    records one result per (facility, partition).
+> 4. `sealed_at IS NULL` older than the SLA (default 15 min) is an alert — it means the
+>    sealer is down, which is itself an integrity event.
 **Policy: no table may foreign-key to `audit_logs.id`** — its PK is `(id, created_at)`
 (partitioned) and partitions get archived; reference audit rows by value, never by FK.
 ```
@@ -245,10 +310,13 @@ new_value       jsonb
 reason          text
 ip_address      inet
 device_id       text
-prev_hash       char(64)
-entry_hash      char(64) NOT NULL                -- sha256(prev_hash + payload), trigger-computed
-signature       text NOT NULL                    -- Ed25519, app-signed
-signer_key_id   text NOT NULL
+chain_seq       bigint NOT NULL                  -- per-facility monotonic order (seq_audit_<facility>)
+prev_hash       char(64) NULL                    -- NULL until sealed
+entry_hash      char(64) NULL                    -- sha256(prev_hash + canonical payload), sealer-computed
+signature       text NULL                        -- Ed25519, sealer-signed
+signer_key_id   text NULL
+sealed_at       timestamptz NULL                 -- NULL = not yet chained (alert if > 15 min old)
+UNIQUE (facility_id, chain_seq)
 INDEX ix_audit_logs_user_id (user_id, created_at)        -- partitioned index
 INDEX ix_audit_logs_patient_id (patient_id, created_at)  -- partitioned index
 INDEX ix_audit_logs_resource (resource_type, resource_id)
@@ -256,12 +324,22 @@ INDEX ix_audit_logs_resource (resource_type, resource_id)
 Partitioning only prunes by time — per-user / per-patient audit trails need these
 indexes (created on the partitioned parent, so each monthly partition inherits them).
 
+> **Partition maintenance is mandatory, not optional (0003 + 0004).** If next month's
+> partition does not exist, the audit INSERT fails — and because the audit write shares
+> the mutation's transaction, **every write in the hospital fails**. That is a
+> hospital-wide outage at 00:00 on the 1st.
+> Required in the migration: (a) a `DEFAULT` partition on both `audit_logs` and
+> `data_access_log` as the never-fail safety net, and (b) a scheduled job
+> (`pg_partman`, or a cron calling a `create_next_partitions()` function) that keeps
+> **at least 3 months ahead** provisioned. Monitoring alerts if the furthest partition
+> is < 60 days out. Rows landing in DEFAULT are an alert, not a failure.
+
 **audit_log_archive** `[no Blame]`
 ```
 facility_id UUID NOT NULL → facilities · partition_name text · period_start date ·
 period_end date · row_count bigint · object_storage_bucket text · object_storage_key text ·
 archive_file_hash char(64) · archived_at timestamptz · verified_at timestamptz ·
-verification_status varchar(30) CHECK pending|verified|failed
+verification_status varchar(50) CHECK pending|verified|failed
 ```
 
 **audit_integrity_checks**
@@ -287,7 +365,7 @@ is_active       boolean NOT NULL DEFAULT true
 patient_id      UUID NOT NULL                    -- FK added in 0006
 visit_id        UUID NULL                        -- FK added in 0007
 purpose_id      UUID NOT NULL → consent_purposes
-granted_by_type varchar(30) CHECK patient|guardian|nominee
+granted_by_type varchar(50) CHECK patient|guardian|nominee
 granted_by_user_id UUID NULL → users
 guardian_name   text
 guardian_relationship varchar(50)
@@ -295,17 +373,17 @@ guardian_id_proof_file_id UUID NULL              -- FK added in 0019
 granted_at      timestamptz
 expires_at      timestamptz NULL                 -- NULLABLE per issue spec
 scope           text[]
-channel         varchar(30) CHECK verbal|written|digital_otp|abdm_consent_manager
+channel         varchar(50) CHECK verbal|written|digital_otp|abdm_consent_manager
 consent_artefact_id text
 consent_artefact_signature text
-status          varchar(30) NOT NULL DEFAULT 'granted'   -- ConsentStatus enum
+status          varchar(50) NOT NULL DEFAULT 'granted'   -- ConsentStatus enum
 status_changed_at timestamptz
 ```
 
 **consent_withdrawals** — append-only; insert flips parent `consent_records.status → revoked`
 ```
 consent_id UUID NOT NULL → consent_records ·
-withdrawn_by_type varchar(30) CHECK patient|guardian|nominee|system_expiry ·
+withdrawn_by_type varchar(50) CHECK patient|guardian|nominee|system_expiry ·
 withdrawn_by_user_id UUID NULL → users · withdrawn_at timestamptz · reason text ·
 cascaded_actions jsonb · cascade_deadline timestamptz · cascade_completed_at timestamptz
 ```
@@ -314,17 +392,38 @@ cascaded_actions jsonb · cascade_deadline timestamptz · cascade_completed_at t
 ```
 consent_id UUID NULL → consent_records · user_id UUID NOT NULL → users · role text ·
 resource_type text · resource_id UUID · patient_id UUID NULL · purpose_code varchar(50) ·
-access_channel varchar(30) CHECK ui|api|abdm_hiu|export ·
+access_channel varchar(50) CHECK ui|api|abdm_hiu|export ·
 emergency_access boolean NOT NULL DEFAULT false ·         -- break-glass flag
 consent_required boolean · consent_verified boolean · accessed_at timestamptz NOT NULL
 INDEX ix_data_access_log_user_id (user_id, accessed_at) ·
 INDEX ix_data_access_log_patient_id (patient_id, accessed_at)
 ```
 
+**break_glass_grants** (0004, B7) — the thing that makes the 2-hour window real
+```
+patient_id UUID NOT NULL                          -- FK added in 0006
+granted_to_user_id UUID NOT NULL → users
+justification text NOT NULL                       -- ≥20 chars, mandatory
+granted_at timestamptz NOT NULL DEFAULT now()
+expires_at timestamptz NOT NULL                   -- granted_at + 2h (facility-configurable)
+revoked_at timestamptz NULL · revoked_by UUID NULL → users
+reviewed_at timestamptz NULL · reviewed_by UUID NULL → users · review_outcome text
+INDEX ix_break_glass_grants_patient_id (patient_id, expires_at)
+INDEX ix_break_glass_grants_granted_to_user_id (granted_to_user_id, expires_at)
+```
+Clinical reads consult this table when consent is absent: a grant is active iff
+`now() < expires_at AND revoked_at IS NULL`. Every read under a grant still writes
+`data_access_log` with `emergency_access=true`. Unreviewed expired grants appear on the
+DPO/compliance queue — that is the mandatory review, and it now has a table to work from.
+
+> **Consent expiry is a job, not a column.** `expires_at` alone changes nothing — a
+> scheduled task must flip `status → expired` when it passes (and emit the reminder rows).
+> Until it runs, an expired consent still reads as `granted`. Owner: B7, alongside 0004.
+
 **consent_renewal_reminders**
 ```
 consent_id UUID NOT NULL → consent_records · remind_at timestamptz · sent_at timestamptz ·
-notification_channel varchar(30)
+notification_channel varchar(50)
 ```
 
 ### 0005 — departments, rooms (B4)
@@ -332,9 +431,13 @@ notification_channel varchar(30)
 **departments**
 ```
 name        text NOT NULL
-code        varchar(20) UNIQUE NOT NULL          -- used in token numbers, e.g. MED
+code        varchar(20) NOT NULL                 -- used in token numbers, e.g. MED
 facility_id UUID NOT NULL → facilities
 is_active   boolean NOT NULL DEFAULT true
+UNIQUE (facility_id, code)                       -- per facility, NOT global. Two facilities
+                                                 -- both having a "MED" department is normal;
+                                                 -- a global unique makes multi-facility
+                                                 -- deployment impossible. (Corrected v3.13.)
 ```
 
 **rooms**
@@ -354,7 +457,7 @@ deferred FK on `audit_logs.department_id`.
 uhid            varchar(30) UNIQUE NULL          -- IN-RJ-JPR001-2026-000042-7; NULL only while THID
 thid            varchar(25) UNIQUE NULL          -- TH-JPR001-260714-0007; emergency path
 full_name       text NOT NULL
-sex             varchar(30) NOT NULL             -- Sex enum
+sex             varchar(50) NOT NULL             -- Sex enum
 dob             date NULL
 age_years       int NULL
    CHECK (dob IS NOT NULL OR age_years IS NOT NULL)  -- ck_patients_dob_or_age
@@ -364,9 +467,9 @@ mobile          varchar(20)                      -- contact only, NEVER identity
 address_line    text · village_town text · district text · state_code varchar(5) · pincode varchar(6)
 photo_file_id   UUID NULL                        -- MinIO ref via files (FK added 0019); photo mandatory per ADR 0001
 abha_number     varchar(17) UNIQUE NULL
-identity_path   varchar(30) NOT NULL             -- IdentityPath enum (ADR 0001)
-identity_status varchar(30) NOT NULL DEFAULT 'verified'  -- IdentityStatus enum
-status          varchar(30) NOT NULL DEFAULT 'active'    -- PatientStatus: active|merged|deceased
+identity_path   varchar(50) NOT NULL             -- IdentityPath enum (ADR 0001)
+identity_status varchar(50) NOT NULL DEFAULT 'verified'  -- IdentityStatus enum
+status          varchar(50) NOT NULL DEFAULT 'active'    -- PatientStatus: active|merged|deceased
 merged_into_patient_id UUID NULL → patients
 facility_id     UUID NOT NULL → facilities
 deleted_at      timestamptz NULL · deleted_by UUID NULL → users
@@ -380,7 +483,7 @@ CHECK (uhid IS NOT NULL OR thid IS NOT NULL)     -- ck_patients_has_identifier
 **patient_identifiers**
 ```
 patient_id      UUID NOT NULL → patients
-identifier_type varchar(30) NOT NULL             -- aadhaar | abha | voter_id | other
+identifier_type varchar(50) NOT NULL             -- aadhaar | abha | voter_id | other
 identifier_value_encrypted bytea NOT NULL        -- AES-256-GCM, app-layer, never queried
 identifier_blind_index char(64) NOT NULL         -- HMAC-SHA256; THE dedup lookup column
 key_version     smallint NOT NULL DEFAULT 1      -- which crypto key pair produced this row;
@@ -396,14 +499,28 @@ versioned; new writes use the newest `key_version`, lookups compute the blind in
 every active version until a background re-index completes. Keys live in env/secret
 manager only — never in the DB, never in the repo.
 
+> **Merge repointing — clinical safety rule (0006, B2).** Setting
+> `merged_into_patient_id` is NOT sufficient. If child rows keep pointing at the source
+> patient, `/patients/{id}/history` returns **half the record** and a clinician can miss
+> a prior result or allergy. Binding rule:
+> **In the merge transaction, every child row is repointed to the target patient** —
+> `visits, encounters, orders, prescriptions, lab_order_items, radiology_order_items,
+> admissions, invoices, patient_identifiers, files, vitals, consent_records` — and the
+> full pre-merge state is captured in `patient_merge_log.before_snapshot` so unmerge can
+> restore it exactly. The source row stays with `status='merged'` and
+> `merged_into_patient_id` set (never deleted), so old links/printouts still resolve.
+> **Additionally, every patient read resolves the merge pointer**: a request for a merged
+> patient returns the target's record with `merged_from` noted — belt and braces, because
+> a missed repoint must never silently truncate a clinical history.
+
 **patient_merge_log** — append-only (status changes = new rows)
 ```
-source_type varchar(30) NOT NULL                 -- thid | duplicate_uhid
+source_type varchar(50) NOT NULL                 -- thid | duplicate_uhid
 source_patient_id UUID NOT NULL → patients
 target_patient_id UUID NOT NULL → patients
 requested_by UUID NOT NULL → users · requested_at timestamptz NOT NULL
 approved_by UUID NULL → users · approved_at timestamptz
-status varchar(30) NOT NULL                      -- pending | approved | rejected | unmerged
+status varchar(50) NOT NULL                      -- pending | approved | rejected | unmerged
 reason text · unmerge_reason text
 before_snapshot jsonb NOT NULL · after_snapshot jsonb
 ```
@@ -416,8 +533,8 @@ visit_number  varchar(30) UNIQUE NOT NULL        -- VST-<FACILITYCODE>-<YYYYMMDD
 patient_id    UUID NOT NULL → patients
 facility_id   UUID NOT NULL → facilities
 department_id UUID NULL → departments
-visit_type    varchar(30) NOT NULL               -- VisitType enum: opd|ipd|emergency|teleconsult
-status        varchar(30) NOT NULL DEFAULT 'registered'  -- VisitStatus enum
+visit_type    varchar(50) NOT NULL               -- VisitType enum: opd|ipd|emergency|teleconsult
+status        varchar(50) NOT NULL DEFAULT 'registered'  -- VisitStatus enum
 visit_date    timestamptz NOT NULL
 INDEX ix_visits_patient_id_visit_date (patient_id, visit_date)
 ```
@@ -426,7 +543,7 @@ INDEX ix_visits_patient_id_visit_date (patient_id, visit_date)
 ```
 visit_id        UUID NOT NULL → visits
 provider_user_id UUID NOT NULL → users           -- the doctor
-encounter_type  varchar(30)                      -- consultation | follow_up | emergency | ward_round
+encounter_type  varchar(50)                      -- consultation | follow_up | emergency | ward_round
 chief_complaint text
 started_at      timestamptz · ended_at timestamptz
 INDEX ix_encounters_visit_id (visit_id) · INDEX ix_encounters_provider_user_id (provider_user_id)
@@ -436,7 +553,7 @@ not a text column here.
 
 **icd_codes** — local ICD catalog (seeded ICD-10 now; ICD-11 rows sync in Phase 2)
 ```
-version        varchar(30) NOT NULL              -- icd10 | icd11
+version        varchar(50) NOT NULL              -- icd10 | icd11
 code           varchar(30) NOT NULL              -- 'E11' or ICD-11 stem '5A11'
 title          text NOT NULL
 icd_uri        text NULL                         -- ICD-11 Foundation URI (permanent even if code changes)
@@ -449,16 +566,23 @@ UNIQUE (version, code) · INDEX ix_icd_codes_icd_uri (icd_uri)
 ```
 encounter_id   UUID NOT NULL → encounters
 icd_code       varchar(30) NOT NULL              -- stem code
-icd_version    varchar(30) NOT NULL              -- icd10 | icd11
+icd_version    varchar(50) NOT NULL              -- icd10 | icd11
 icd_code_id    UUID NULL → icd_codes             -- catalog link when picked from catalog
 icd_uri        text NULL                         -- ICD-11 Foundation URI
 post_coordinated_code text NULL                  -- full cluster, e.g. '5A11&XS0T' (ICD-11 only)
 diagnosis_text text NOT NULL
-diagnosis_type varchar(30) NOT NULL              -- provisional | final | differential
+diagnosis_type varchar(50) NOT NULL              -- provisional | final | differential
 is_primary     boolean NOT NULL DEFAULT false
 INDEX ix_diagnoses_icd_code_icd_version (icd_code, icd_version)
 ```
 
+> **ICD-11 edge footprint:** the WHO container is several GB. A district hospital runs it
+> locally; a PHC on small hardware may not be able to. Supported fallbacks, in order:
+> (1) local container, (2) a shared district instance over the LAN/WAN
+> (`ICD11_BASE_URL` points at it), (3) catalog-only mode — the seeded `icd_codes` table
+> serves search with no container at all (degraded: no post-coordination lookup).
+> Deployment picks one per facility; the API contract is identical in all three.
+>
 > **ICD-11 in the MVP:** the WHO ICD-API container (`icd11` service) is part of the
 > compose stack — diagnosis search works offline at the facility edge. Doctors code in
 > ICD-11 (stem + optional post-coordination cluster) with ICD-10 still accepted for
@@ -478,9 +602,9 @@ completed chargeable work accrues lines onto the visit invoice (ADR 0002).
 order_number varchar(30) UNIQUE NOT NULL         -- ORD-<YYYYMMDD>-<SEQ6>
 encounter_id UUID NOT NULL → encounters
 patient_id   UUID NOT NULL → patients
-order_type   varchar(30) NOT NULL                -- lab | radiology | pharmacy | procedure | blood
-priority     varchar(30) NOT NULL DEFAULT 'routine'  -- routine | urgent | stat
-status       varchar(30) NOT NULL DEFAULT 'placed'   -- OrderStatus enum
+order_type   varchar(50) NOT NULL                -- lab | radiology | pharmacy | procedure | blood
+priority     varchar(50) NOT NULL DEFAULT 'routine'  -- routine | urgent | stat
+status       varchar(50) NOT NULL DEFAULT 'placed'   -- OrderStatus enum
 ordered_at   timestamptz NOT NULL DEFAULT now()
 INDEX ix_orders_order_type_status (order_type, status)
 INDEX ix_orders_patient_id (patient_id) · INDEX ix_orders_encounter_id (encounter_id)
@@ -500,7 +624,7 @@ medicine_item_id UUID NULL                       -- → inventory_items, FK adde
 medicine_name   text NOT NULL                    -- free-text fallback / snapshot of name
 dosage varchar(50) · frequency varchar(50) · duration_days int · route varchar(30)
 instructions text
-status varchar(30) NOT NULL DEFAULT 'prescribed' -- PrescriptionItemStatus enum
+status varchar(50) NOT NULL DEFAULT 'prescribed' -- PrescriptionItemStatus enum
 INDEX ix_prescription_items_prescription_id (prescription_id)
 ```
 
@@ -511,7 +635,7 @@ INDEX ix_prescription_items_prescription_id (prescription_id)
 staff_user_id UUID NOT NULL → users
 department_id UUID NOT NULL → departments
 room_id       UUID NULL → rooms
-shift         varchar(30) NOT NULL               -- morning | evening | night
+shift         varchar(50) NOT NULL               -- morning | evening | night
 roster_date   date NOT NULL
 is_available  boolean NOT NULL DEFAULT true
 UNIQUE (staff_user_id, roster_date, shift)
@@ -527,28 +651,99 @@ room_id        UUID NULL → rooms                 -- where this doctor sits tod
 display_label  varchar(50)                       -- optional friendly name shown on the board,
                                                  -- e.g. "Dr. Sharma · OPD-1"; defaults to doctor full_name
 now_serving_token_id UUID NULL → queue_tokens    -- the token currently called (updated on call-next)
+                                                 -- NOTE: circular FK with queue_tokens.queue_id.
+                                                 -- Nullable by design: insert the queue, then the
+                                                 -- token, then UPDATE. Sync ships queues before tokens.
 service_date   date NOT NULL
 is_open        boolean NOT NULL DEFAULT true      -- doctor arrived / desk open
 UNIQUE (department_id, doctor_user_id, service_date)
 INDEX ix_queues_department_id_service_date (department_id, service_date)
 ```
 
+**queue_counters** — race-safe token allocator, scoped per department per day (mirrors `billing_counters`)
+```
+department_id UUID NOT NULL → departments
+counter_date  date NOT NULL                      -- facility business date, not UTC
+last_value    int  NOT NULL DEFAULT 0
+UNIQUE (department_id, counter_date)
+```
+**Scope is (department, date), NOT (queue).** A per-queue counter makes every doctor in
+Medicine start at 1, so `MED-001` is issued to two different patients on the same day —
+who then stand in front of the *same* department display board and hear the same number
+called over the same PA. The token string must be unique on the board that shows it.
+`queue_tokens.sequence` stays per-queue for `UNIQUE (queue_id, sequence)` ordering;
+`token_display` is allocated from this department-scoped counter. (Corrected v3.13.)
+
 **queue_tokens**
 ```
 queue_id     UUID NOT NULL → queues
 visit_id     UUID NULL → visits
-sequence     int NOT NULL                        -- allocated per queue, race-safe (advisory lock or counters row)
-token_display varchar(20) NOT NULL               -- what screens show: <DEPT_CODE>-<SEQ3>, e.g. MED-042
-status       varchar(30) NOT NULL DEFAULT 'waiting'   -- QueueTokenStatus enum (incl. skipped/recalled/transferred)
-priority     varchar(30) NOT NULL DEFAULT 'normal'    -- QueuePriority enum
+sequence     int NOT NULL                        -- per-queue arrival order (1,2,3... within this
+                                                 -- doctor's queue). Ordering only — NOT the number
+                                                 -- printed on the slip.
+token_display varchar(20) NOT NULL               -- what screens show: <DEPT_CODE>-<SEQ3>, e.g. MED-042.
+                                                 -- Allocated from queue_counters (department, date)
+                                                 -- with SELECT ... FOR UPDATE in the token transaction
+                                                 -- (same pattern as billing_counters).
+                                                 -- NOT a Postgres sequence, NOT MAX()+1.
+                                                 -- Unique per (department, business date).
+initial_priority varchar(50) NOT NULL            -- the tier the token was ISSUED at; never updated.
+                                                 -- "issued normal, now emergency" must stay answerable.
+status       varchar(50) NOT NULL DEFAULT 'waiting'   -- QueueTokenStatus enum (incl. skipped/recalled/transferred)
+priority     varchar(50) NOT NULL DEFAULT 'normal'    -- QueuePriority enum
 called_at    timestamptz · completed_at timestamptz
-UNIQUE (queue_id, sequence)                      -- NOT a global unique token string
+UNIQUE (queue_id, sequence)                      -- arrival order within one doctor's queue
+UNIQUE (token_display, <department, business date>)  -- enforced via the counter; the printed
+                                                 -- number is unambiguous on the board that shows it
+PARTIAL UNIQUE (visit_id) WHERE status NOT IN ('completed','cancelled','no_show')
+                                                 -- one live token per visit. Without it a
+                                                 -- double-click at the desk issues two, and
+                                                 -- complete_by_visit_id() then 500s forever
+                                                 -- on that patient. (Added v3.13.)
 -- The doctor a token is for = queues.doctor_user_id via queue_id. The token STRING stays
 -- dept+sequence (MED-042); the display resolves doctor + room from the queue, so a token
 -- can be moved to another doctor (transferred) without reprinting the number.
 ```
 Priority sort (high→low): `emergency, doctor_recall, admin_override, senior_citizen,
 pregnant, follow_up_recall, normal`; ties by `created_at` ascending.
+
+**queue_token_priority_changes** (0009) — append-only elevation trail; one row per change
+```
+queue_token_id UUID NOT NULL → queue_tokens
+from_priority varchar(50) NOT NULL · to_priority varchar(50) NOT NULL
+reason text NOT NULL                              -- mandatory, free text ≥10 chars
+changed_by UUID NOT NULL → users · changed_at timestamptz NOT NULL
+INDEX ix_queue_token_priority_changes_queue_token_id (queue_token_id)
+INDEX ix_queue_token_priority_changes_changed_by_changed_at (changed_by, changed_at)
+```
+
+#### Priority elevation — how it actually works (B4-W2-01)
+
+Elevation = moving a waiting token to a higher tier *after* it was issued. It is the most
+abusable action in the whole OPD (it literally lets someone jump a queue of sick people),
+so it is authority-scoped, reason-mandatory, fully logged, and visible.
+
+**Who may set which tier:**
+
+| Tier | Who can set it | When |
+|---|---|---|
+| `senior_citizen`, `pregnant` | receptionist (or auto at registration from `dob`/clinical flag) | evidence-based, low risk — usually assigned at issue, not elevated |
+| `follow_up_recall` | receptionist, doctor | patient returning within the same visit (e.g. after a lab test) |
+| `doctor_recall` | the queue's own doctor only | doctor wants this patient back now (results arrived, deterioration) |
+| `emergency` | emergency role, doctor, **hod** | clinical urgency — triage decision |
+| `admin_override` | **hod** only (not admin) | administrative exception (VIP protocol, court order, staff patient). Deliberately the *most* logged tier |
+
+**Rules (all enforced server-side, not in the UI):**
+
+1. **Elevation only, by default.** Moving a token *down* a tier requires `hod` and is logged the same way — a receptionist can never demote.
+2. **Reason is mandatory** (≥10 chars) on every change; no reason ⇒ `422`. It is displayed to staff on the queue list next to the token.
+3. **Never reorders history.** Only `waiting` tokens can be re-prioritized. A token that is `called`, `in_service`, or `completed` is immutable — `409`.
+4. **Takes effect on the next `call-next`**, never mid-consultation.
+5. **Every change writes `queue_token_priority_changes` + `audit_logs` in the same transaction.** `initial_priority` is preserved on the token so "issued as normal, now emergency" is always answerable.
+6. **`admin_override` requires a second signal** — the HOD's own MFA session (`amr` contains `otp`), same gate as break-glass.
+7. **Abuse detection:** the HOD dashboard (B4-W5-01) surfaces elevations per user per day; `> 5/day` by one user is an alert, not a block. The `(changed_by, changed_at)` index exists for exactly this query.
+8. **The public display never shows the tier or reason** — only token, doctor, room (PII/fairness rule).
+9. The 30-minute token edit window (B4-W2-01) applies to *correcting* an issue mistake; elevation is not bounded by it and can happen any time the token is still `waiting`.
 
 ### 0010 / 0011 — lab, radiology (B5)
 
@@ -560,9 +755,9 @@ Lab and radiology do **not** have their own order-header tables — the header i
 order_id        UUID NOT NULL → orders           -- order.order_type = 'lab'
 accession_number varchar(30) UNIQUE NOT NULL     -- LAB-<YYYYMMDD>-<SEQ5>
 test_code varchar(30) · test_name text NOT NULL
-sample_type varchar(30) NOT NULL
+sample_type varchar(50) NOT NULL
 department_id UUID NULL → departments
-status varchar(30) NOT NULL DEFAULT 'placed'     -- OrderStatus enum
+status varchar(50) NOT NULL DEFAULT 'placed'     -- OrderStatus enum
 estimated_minutes int
 ```
 
@@ -573,7 +768,7 @@ version     int NOT NULL                         -- 1, 2, 3...
 is_current  boolean NOT NULL
 result_data jsonb NOT NULL
 remarks     text
-status      varchar(30) NOT NULL                 -- ResultStatus: pending|preliminary|final|corrected
+status      varchar(50) NOT NULL                 -- ResultStatus: pending|preliminary|final|corrected
 created_by  UUID NOT NULL → users
 UNIQUE (lab_order_item_id, version)
 UNIQUE INDEX uq_lab_results_current ON (lab_order_item_id) WHERE is_current
@@ -588,7 +783,7 @@ scan_type text NOT NULL
 machine_id varchar(50)
 pacs_study_uid varchar(100)                      -- Orthanc StudyInstanceUID
 scheduled_at timestamptz
-status varchar(30) NOT NULL DEFAULT 'placed'
+status varchar(50) NOT NULL DEFAULT 'placed'
 ```
 
 **radiology_reports** — append-only, versioned; same shape as lab_results but
@@ -601,8 +796,8 @@ status varchar(30) NOT NULL DEFAULT 'placed'
 **inventory_items**
 ```
 name text NOT NULL · generic_name text · strength varchar(50)
-form varchar(30)        -- tablet|capsule|injection|syrup|ointment|fluid|reagent|consumable|film|implant|blood_component
-item_type varchar(30)   -- medicine|reagent|consumable|film|implant|blood_component
+form varchar(50)        -- tablet|capsule|injection|syrup|ointment|fluid|reagent|consumable|film|implant|blood_component
+item_type varchar(50)   -- medicine|reagent|consumable|film|implant|blood_component
 is_controlled_drug boolean NOT NULL DEFAULT false
 manufacturer text
 owning_department_id UUID NULL → departments
@@ -613,7 +808,7 @@ is_active boolean NOT NULL DEFAULT true
 **stock_locations**
 ```
 name text NOT NULL
-location_type varchar(30)   -- central|pharmacy|lab|radiology|ward|emergency|ot
+location_type varchar(50)   -- central|pharmacy|lab|radiology|ward|emergency|ot
 department_id UUID NULL → departments
 facility_id UUID NOT NULL → facilities
 ```
@@ -634,9 +829,9 @@ INDEX ix_inventory_batches_fefo ON (item_id, expiry_date ASC) WHERE quantity > 0
 **stock_ledger** — append-only (issue wording; was `stock_transactions` in draft)
 ```
 item_id UUID NOT NULL → inventory_items · batch_id UUID NULL → inventory_batches
-transaction_type varchar(30) NOT NULL            -- purchase|issue|return|transfer|consumption|adjustment|write_off
+transaction_type varchar(50) NOT NULL            -- purchase|issue|return|transfer|consumption|adjustment|write_off
 quantity numeric(12,2) NOT NULL CHECK (quantity <> 0)   -- signed: +in / -out
-reference_type varchar(30) · reference_id UUID   -- e.g. 'pharmacy_dispense', 'grn'
+reference_type varchar(50) · reference_id UUID   -- e.g. 'pharmacy_dispense', 'grn'
 performed_by UUID NOT NULL → users · reason text
 ```
 
@@ -646,7 +841,7 @@ no `previous_version_id` — the previous row is simply `version - 1`)
 ```
 prescription_id UUID NOT NULL → prescriptions
 visit_id UUID NULL → visits
-status varchar(30) NOT NULL                      -- DispenseStatus enum (§enums)
+status varchar(50) NOT NULL                      -- DispenseStatus enum (§enums)
 dispensed_by UUID NOT NULL → users
 version int NOT NULL · is_current boolean NOT NULL
 UNIQUE (prescription_id, version)
@@ -671,7 +866,7 @@ is_substitute boolean NOT NULL DEFAULT false · substitute_reason text
 item_id → inventory_items · batch_id → inventory_batches
 quantity_change numeric(12,2) NOT NULL CHECK (<> 0) · reason text NOT NULL
 first_approver_id UUID NOT NULL → users · second_approver_id UUID NULL → users
-status varchar(30) NOT NULL                      -- pending|approved|rejected
+status varchar(50) NOT NULL                      -- pending|approved|rejected
 CHECK (first_approver_id <> second_approver_id)  -- ck_adjustments_distinct_approvers
 ```
 **facility_settings** (was `hospital_settings`) — `facility_id UUID PK → facilities · stock_deduction_policy varchar(30) CHECK on_acceptance|on_dispense`
@@ -695,7 +890,7 @@ invoice_number varchar(30) UNIQUE NOT NULL       -- INV-<FACILITY>-<YYYYMMDD>-<S
 visit_id UUID NOT NULL → visits
 patient_id UUID NOT NULL → patients
 facility_id UUID NOT NULL → facilities
-status varchar(30) NOT NULL DEFAULT 'draft'      -- InvoiceStatus: draft|issued|partially_paid|paid|waived|cancelled
+status varchar(50) NOT NULL DEFAULT 'draft'      -- InvoiceStatus: draft|issued|partially_paid|paid|waived|cancelled
 gross_amount numeric(12,2) NOT NULL DEFAULT 0
 discount_amount numeric(12,2) NOT NULL DEFAULT 0
 scheme_adjustment numeric(12,2) NOT NULL DEFAULT 0
@@ -708,8 +903,8 @@ INDEX ix_invoices_visit_id (visit_id)
 **invoice_items** — frozen by the parent's trigger once invoice leaves `draft`
 ```
 invoice_id UUID NOT NULL → invoices
-charge_category varchar(30) NOT NULL             -- ChargeCategory: registration|consultation|lab|radiology|pharmacy|procedure|ipd_stay|blood|other
-reference_type varchar(30) · reference_id UUID   -- source row: 'lab_order_items', 'admissions', ...
+charge_category varchar(50) NOT NULL             -- ChargeCategory: registration|consultation|lab|radiology|pharmacy|procedure|ipd_stay|blood|other
+reference_type varchar(50) · reference_id UUID   -- source row: 'lab_order_items', 'admissions', ...
 description text NOT NULL
 quantity numeric(10,2) NOT NULL DEFAULT 1 CHECK (> 0)
 unit_price numeric(12,2) NOT NULL CHECK (>= 0)
@@ -722,8 +917,8 @@ receipt_number varchar(30) UNIQUE NOT NULL       -- RCP-<FACILITY>-<YYYYMMDD>-<S
 invoice_id UUID NOT NULL → invoices
 amount numeric(12,2) NOT NULL CHECK (> 0)
 currency char(3) NOT NULL DEFAULT 'INR'
-mode varchar(30) NOT NULL                        -- PaymentMode: cash|upi|card|netbanking
-status varchar(30) NOT NULL DEFAULT 'success'    -- PaymentStatus: success|reversed
+mode varchar(50) NOT NULL                        -- PaymentMode: cash|upi|card|netbanking
+status varchar(50) NOT NULL DEFAULT 'success'    -- PaymentStatus: success|reversed
 collected_by UUID NOT NULL → users · collected_at timestamptz NOT NULL
 sensitivity varchar(30) NOT NULL DEFAULT 'critical'
 ```
@@ -736,6 +931,17 @@ amount numeric(12,2) NOT NULL CHECK (> 0)
 reason text NOT NULL
 approved_by UUID NOT NULL → users · refunded_at timestamptz NOT NULL
 ```
+
+**Financial invariants (enforced, not assumed).** Row-spanning rules a CHECK cannot
+express are enforced in the billing service **inside the same transaction**, and asserted
+by a nightly reconciliation job that raises a P1 on any breach:
+
+- `sum(invoice_items.amount) = invoices.gross_amount` (recomputed on every line change)
+- `sum(payments.amount WHERE status='success') <= invoices.net_amount` — no overpayment
+- `sum(refunds.amount for a payment) <= payments.amount` — no over-refund
+- `invoice.status` is derived, never client-set: `0 < paid < net ⇒ partially_paid`,
+  `paid = net ⇒ paid`, `scheme_adjustment = gross ⇒ waived`
+- Every line's `amount = quantity * unit_price` (app-computed, never client-supplied)
 
 **billing_counters** — gapless allocator for invoice/receipt/refund numbers:
 `facility_id → facilities · counter_type varchar(30) (invoice|receipt|refund) ·
@@ -754,7 +960,7 @@ visit_id UUID NOT NULL → visits
 patient_id UUID NOT NULL → patients
 ward_id UUID NOT NULL → wards · bed_id UUID NOT NULL → beds
 admitted_at timestamptz NOT NULL · reason text
-status varchar(30) NOT NULL DEFAULT 'admitted'   -- AdmissionStatus enum
+status varchar(50) NOT NULL DEFAULT 'admitted'   -- AdmissionStatus enum
 ```
 
 **discharges** `[Blame]` — table name plural; discharge checks invoice settlement per
@@ -762,7 +968,7 @@ facility policy (ADR 0002) but is never hard-blocked for emergency/DAMA cases
 ```
 admission_id UUID UNIQUE NOT NULL → admissions
 discharged_at timestamptz NOT NULL
-discharge_type varchar(30) NOT NULL              -- discharged|dama|deceased|absconded|transferred
+discharge_type varchar(50) NOT NULL              -- discharged|dama|deceased|absconded|transferred
 discharge_summary text                           -- long form → Mongo clinical_notes
 follow_up_date date NULL
 ```
@@ -788,8 +994,8 @@ bag_number varchar(30) UNIQUE NOT NULL
 blood_group varchar(7) NOT NULL
 volume_ml int NOT NULL CHECK (> 0)
 collected_at timestamptz · expiry_date date NOT NULL
-screening_status varchar(30) NOT NULL DEFAULT 'pending'  -- pending|passed|failed
-status varchar(30) NOT NULL DEFAULT 'available'          -- BloodUnitStatus enum
+screening_status varchar(50) NOT NULL DEFAULT 'pending'  -- pending|passed|failed
+status varchar(50) NOT NULL DEFAULT 'available'          -- BloodUnitStatus enum
 issued_to_patient_id UUID NULL → patients
 ```
 
@@ -818,6 +1024,7 @@ Also in 0019: add the deferred FKs — `patients.photo_file_id`,
 
 ### 0020 — notification_history (B4)
 
+**notification_history**
 ```
 event_type varchar(50) NOT NULL                  -- token_called, token_status_changed, ...
 payload jsonb NOT NULL                           -- jsonb, not json (Suprita draft had json)
@@ -852,9 +1059,9 @@ UNIQUE INDEX uq_dpo_active_facility ON (facility_id) WHERE is_active
 ```
 grievance_number varchar(30) UNIQUE NOT NULL      -- GRV-<FACILITY>-<YYYYMMDD>-<SEQ4>
 patient_id UUID NOT NULL → patients · facility_id UUID NOT NULL → facilities
-grievance_type varchar(30) NOT NULL               -- access|correction|erasure|consent|breach|other
+grievance_type varchar(50) NOT NULL               -- access|correction|erasure|consent|breach|other
 description text NOT NULL
-status varchar(30) NOT NULL DEFAULT 'pending'     -- pending|under_review|resolved|escalated_dpb|closed
+status varchar(50) NOT NULL DEFAULT 'pending'     -- pending|under_review|resolved|escalated_dpb|closed
 assigned_to UUID NULL → users · due_at timestamptz NOT NULL   -- created_at + 90 days, app-set
 resolution text · resolved_at timestamptz · escalation_reason text
 INDEX ix_patient_grievances_status_due_at (status, due_at)
@@ -870,7 +1077,7 @@ dpb_detailed_report_at timestamptz                -- DPDP: within 72 h (extensio
 patients_notified_at timestamptz                  -- affected Data Principals, without delay
 affected_patients_count int
 nature text NOT NULL · extent text · mitigation_measures text · root_cause text
-status varchar(30) NOT NULL DEFAULT 'open'        -- open|contained|reported|closed
+status varchar(50) NOT NULL DEFAULT 'open'        -- open|contained|reported|closed
 facility_id UUID NOT NULL → facilities
 ```
 
@@ -914,7 +1121,7 @@ handed_over_to UUID NOT NULL → users
 **intake_output_records** (0023) `[Blame]` — IPD fluid balance
 ```
 admission_id UUID NOT NULL → admissions · recorded_at timestamptz NOT NULL
-entry_type varchar(30) NOT NULL                   -- intake_oral|intake_iv|output_urine|output_drain|output_other
+entry_type varchar(50) NOT NULL                   -- intake_oral|intake_iv|output_urine|output_drain|output_other
 volume_ml int NOT NULL CHECK (volume_ml > 0) · notes text
 ```
 
@@ -929,7 +1136,7 @@ moved_at timestamptz NOT NULL · reason text · moved_by UUID NOT NULL → users
 **purchase_orders / purchase_order_items** (0024, B6) `[Blame]` — precede GRN
 ```
 purchase_orders: po_number varchar(30) UNIQUE NOT NULL · supplier_id → suppliers ·
-  status varchar(30) (draft|approved|sent|partially_received|received|cancelled) ·
+  status varchar(50) (draft|approved|sent|partially_received|received|cancelled) ·
   approved_by UUID NULL → users · expected_date date
 purchase_order_items: purchase_order_id → purchase_orders CASCADE · item_id →
   inventory_items · quantity numeric CHECK (>0) · unit_price numeric(12,2)
@@ -939,7 +1146,7 @@ purchase_order_items: purchase_order_id → purchase_orders CASCADE · item_id �
 **stock_transfers / stock_transfer_items** (0024, B6) `[Blame]`
 ```
 stock_transfers: from_location_id → stock_locations · to_location_id → stock_locations ·
-  status varchar(30) (requested|in_transit|received|cancelled) · CHECK (from ≠ to)
+  status varchar(50) (requested|in_transit|received|cancelled) · CHECK (from ≠ to)
 stock_transfer_items: stock_transfer_id CASCADE · item_id · batch_id · quantity CHECK (>0)
 ```
 Each leg writes `stock_ledger` (`transfer` out / in). **Damage write-offs are NOT a new
@@ -949,7 +1156,7 @@ table** — 0024 adds `adjustments.adjustment_type varchar(30)`
 **machine_maintenance_logs** (0024, B6/B5) `[Blame]` — radiology/lab equipment
 ```
 machine_id varchar(50) NOT NULL · department_id UUID NULL → departments
-maintenance_type varchar(30) (preventive|breakdown|calibration|qa_check)
+maintenance_type varchar(50) (preventive|breakdown|calibration|qa_check)
 performed_at timestamptz NOT NULL · performed_by_vendor text · downtime_minutes int · notes text
 ```
 
@@ -959,7 +1166,7 @@ staff_certifications: user_id → users · certification_name text NOT NULL ·
   issuing_body text · certificate_file_id UUID NULL → files ·
   issued_on date · valid_until date NULL · INDEX (user_id, valid_until)
 staff_training_records: user_id → users · training_name text NOT NULL ·
-  training_type varchar(30) (induction|clinical|digital_health|safety|other) ·
+  training_type varchar(50) (induction|clinical|digital_health|safety|other) ·
   completed_on date NOT NULL · score numeric(5,2) NULL · trainer text
 ```
 
@@ -975,7 +1182,7 @@ UNIQUE (facility_id, kpi_code, period_start, period_end)
 ```
 bundle_id varchar(100) NOT NULL · abdm_request_id varchar(100)
 direction varchar(30) (hip_push|hiu_pull) · care_context_linked boolean
-gateway_response_status varchar(30) · signed_by_hpr_id varchar(50)
+gateway_response_status varchar(50) · signed_by_hpr_id varchar(50)
 patient_id UUID NULL → patients · consent_id UUID NULL → consent_records
 transmitted_at timestamptz NOT NULL
 INDEX ix_fhir_bundle_transactions_patient_id (patient_id, transmitted_at)
@@ -985,7 +1192,7 @@ INDEX ix_fhir_bundle_transactions_patient_id (patient_id, transmitted_at)
 ```
 discharge_id UUID NOT NULL → discharges
 target_module varchar(30) NOT NULL                -- pharmacy|billing|nursing|lab|radiology|patient
-status varchar(30) NOT NULL DEFAULT 'queued'      -- NotificationStatus enum
+status varchar(50) NOT NULL DEFAULT 'queued'      -- NotificationStatus enum
 sent_at timestamptz · acknowledged_at timestamptz · acknowledged_by UUID NULL → users
 UNIQUE (discharge_id, target_module)
 ```
@@ -993,7 +1200,7 @@ UNIQUE (discharge_id, target_module)
 **facility_modules** (0027, B1) — per-hospital module switchboard
 ```
 facility_id UUID NOT NULL → facilities
-module_code varchar(30) NOT NULL                 -- ModuleCode enum: lab|radiology|pharmacy|inventory|ipd|ot|blood_bank|emergency|patient_portal|abdm|billing_refunds
+module_code varchar(50) NOT NULL                 -- ModuleCode enum — EXACTLY FIVE: pharmacy|lab|radiology|ot|blood_bank
 is_enabled boolean NOT NULL DEFAULT true
 config jsonb NOT NULL DEFAULT '{}'               -- module sub-config, e.g. lab: {"departments": ["PATH","BIO"]}, radiology: {"modalities": ["xray","usg"]}
 disabled_reason text
@@ -1001,45 +1208,105 @@ UNIQUE (facility_id, module_code)
 ```
 No row = enabled (default-on) — but **on facility creation the service seeds one row
 per ModuleCode with `is_enabled = true`**, so operations always sees explicit rows and
-toggling is a plain UPDATE. Default-on is only the safety net for pre-seeding rows.
-Changes are admin-only and audited like any mutation.
-Core modules can NEVER be disabled: patients, registration, encounters/opd, queue,
-departments, billing (invoices/payments), consent, audit, files, users, notifications.
+toggling is a plain UPDATE. Changes are admin-only and audited like any mutation.
+
+**Only these five modules are optional. Everything else is core and can never be
+disabled** — the toggle API rejects any other module_code with `422`:
+
+| Optional (5) | Why it can be absent |
+|---|---|
+| `pharmacy` | facility has no dispensary; patients buy outside |
+| `lab` (pathology) | no in-house lab; samples referred out |
+| `radiology` | no imaging equipment |
+| `ot` | no operating theatre; surgical cases referred |
+| `blood_bank` | no licensed blood storage; units sourced from a district blood bank |
+
+**Core — always on:** patients, registration, encounters/opd, queue, departments, billing,
+consent, audit, files, users, notifications, **inventory, ipd, emergency, patient_portal,
+abdm, refunds**. Inventory stays core precisely *because* pharmacy is
+optional — consumables, reagents and ward stock exist even with no dispensary, so the
+stock ledger must never disappear.
 
 Also in 0027: `ALTER orders ADD fulfilment_mode varchar(30) NOT NULL DEFAULT 'internal'`
 (`internal | external_referral`).
 
-### Module toggle behavior — flows bend, never break
+### Module toggle behavior — the flow must never break
 
-The rule everywhere: **disabling a module removes its worklist and its billing accrual,
-never the clinical record.**
+Design contract: **turning a module off removes its worklist, its inventory movements and
+its billing lines — never the clinical record, never the patient's ability to be treated,
+never a screen the user relies on elsewhere.** Every one of the four is independently
+switchable, and any combination (including all four off) must yield a working hospital.
 
-| Module off | What still works | What changes |
-|---|---|---|
-| radiology / lab (pathology) | Doctor still records the order (clinical completeness) | Order saved with `fulfilment_mode='external_referral'`; no accession, no worklist entry, no invoice line; printout carries the referral. Lab sub-departments (pathology, biochemistry, microbiology, hematology) are `departments` rows — toggle individually via `config.departments`. |
-| pharmacy | Prescriptions still created + printed | No dispense queue, no FEFO/stock movements, no pharmacy invoice lines; items stay `prescribed`. |
-| inventory | — | Pharmacy requires inventory; enabling pharmacy with inventory off is a 422 at config time. |
-| ipd / ot | OPD, emergency stabilization | No admission/OT endpoints; emergency flow ends in `transferred` with referral note. |
-| blood_bank | Ordering `order_type='blood'` as external referral | No donor/unit management. |
-| abdm | Registration via Aadhaar/demographics paths | ABHA path hidden; sync jobs idle; nothing queued. |
-| patient_portal | Everything internal | Portal login disabled for that facility. |
-| billing_refunds | Invoices, payments | Refund endpoints disabled (some facilities route refunds through treasury manually). |
+| Module OFF | Still fully works | What changes | Where the work goes |
+|---|---|---|---|
+| **pharmacy** | consultation, prescribing, printing, billing | no dispense queue, no FEFO pick, no stock deduction, no pharmacy invoice lines; items stay `prescribed` | prescription printed for an outside chemist |
+| **lab** (pathology) | ordering, diagnosis, results *viewing* | no accession, no sample workflow, no lab worklist, no lab invoice lines | order flagged `external_referral`; outside report attached back via §external results |
+| **radiology** | ordering, diagnosis, report *viewing* | no accession, no modality scheduling, **no PACS/Orthanc needed at all** | order flagged `external_referral`; outside film/report attached back |
+| **ot** | OPD, IPD, emergency, discharge, **procedure recording** | no OT scheduling/records; procedures are recorded via `procedure_records` (below) and still billable | complex surgery referred; minor procedures done at the bedside/OPD are still captured |
+| **blood_bank** | ordering blood, transfusion recording, billing | no donor register, no unit inventory, no screening | `order_type='blood'` becomes `external_referral`; unit sourced from the district blood bank and recorded via `order_external_results` |
 
-Enforcement (one place each):
+**The rules that make this hold:**
 
-- **Backend:** `require_module("radiology")` dependency (like `require_roles`) on every
-  module router — disabled ⇒ `409 {"code": "module_disabled", "module": "radiology"}`.
-  Order creation validates `order_type` against enabled modules and flips
-  `fulfilment_mode` to `external_referral` instead of failing.
-- **Frontend:** `GET /api/v1/facility/capabilities` →
-  `{"modules": {"lab": true, "radiology": false, ...}, "config": {...}}` — fetched at
-  login; navigation, order-type pickers, and dashboards render only enabled modules.
-  A 409 `module_disabled` from a stale tab shows "not offered at this facility", not an error page.
-- **Billing invariant:** the invoice engine never checks modules — it bills whatever
-  lines exist. A disabled module simply never writes lines, so totals stay correct at
-  every facility mix. Registration/consultation lines are unaffected.
-- **Sync/cloud:** toggles are facility-scoped rows that sync like any master data; the
-  cloud MIS sees every facility's mix.
+1. **Ordering never disappears.** A doctor can always record what the patient needs —
+   clinical completeness is not conditional on the hospital owning the equipment. The
+   order is created with `fulfilment_mode='external_referral'` instead of being refused.
+2. **Billing is untouched.** The invoice engine bills the lines that exist; a disabled
+   module simply writes none. Registration and consultation lines are unaffected, totals
+   stay correct, and the ADR-0002 invariants hold at every facility mix.
+3. **Results can still come back** — see *external results* below. Without this, "lab off"
+   would mean the patient's outside test result has nowhere to live, and the record would
+   be permanently incomplete. This is the piece that makes independence real.
+4. **No cross-module import breaks.** Modules call each other's *service functions*, and
+   every such call is guarded: a disabled module's service returns a documented empty
+   result (`[]`, `None`, or `unavailable`) — it never raises, never 500s. Callers must
+   handle the empty case; that is a review checklist item.
+5. **Infra follows the toggle.** `orthanc` (radiology) and `icd11` run behind Docker
+   Compose **profiles**; a facility with radiology off never pulls or runs the PACS
+   image. Nothing in the app assumes those containers exist.
+6. **UI hides, never 404s.** `GET /facility/capabilities` drives navigation; a stale tab
+   hitting a disabled endpoint gets `409 module_disabled` and shows "not offered at this
+   facility" — an explanatory state, not an error page.
+7. **Re-enabling is safe and non-destructive.** Historical `external_referral` orders stay
+   external forever (never retro-converted); only new orders flow internally. Turning a
+   module off does **not** delete its data — existing rows stay readable so the record is
+   never rewritten by a config change.
+8. **Reports degrade silently.** MIS tiles for a disabled module are hidden, not zeroed —
+   "0 lab tests" is a lie; absent is the truth.
+
+**procedure_records** (0008, B3) — procedures exist **independently of the OT module**
+```
+order_id UUID NULL → orders                       -- when raised as order_type='procedure'
+encounter_id UUID NOT NULL → encounters
+patient_id UUID NOT NULL → patients
+procedure_name text NOT NULL
+procedure_code varchar(30) NULL · code_system varchar(30) NULL   -- ICD-11/SNOMED when coded
+setting varchar(50) NOT NULL                      -- opd_minor | bedside | emergency | ot
+ot_schedule_id UUID NULL → ot_schedules           -- ONLY when setting='ot' and the module is on
+performed_by UUID NOT NULL → users · assisted_by UUID NULL → users
+started_at timestamptz · ended_at timestamptz
+outcome text · complications text
+INDEX ix_procedure_records_encounter_id (encounter_id)
+INDEX ix_procedure_records_patient_id (patient_id)
+```
+This closes the gap where a suture, dressing, catheterisation or minor OPD procedure had
+nowhere to be recorded unless the facility had an operating theatre. It is owned by
+**orders/B3, not the OT module**, so it works with `ot` disabled; `ot_schedules`/`ot_records`
+become the *scheduling* layer that only a facility with a theatre needs. Billing reads
+`procedure_records` for the `procedure` charge category — so procedures are billable at
+every facility, OT or not.
+
+**order_external_results** (0008, B3) — makes off-site fulfilment clinically complete
+```
+order_id UUID NOT NULL → orders                   -- an order with fulfilment_mode='external_referral'
+provider_name text                                -- outside lab / imaging centre
+summary text NOT NULL                             -- what the outside report says (typed by the clinician)
+result_file_id UUID NULL                          -- FK added in 0019: scan/photo of the report
+observed_on date · recorded_by UUID NOT NULL → users · recorded_at timestamptz NOT NULL
+INDEX ix_order_external_results_order_id (order_id)
+```
+Append-only: a corrected outside report is a **new row** (same versioning philosophy as
+`lab_results`). This table is owned by orders/B3 — deliberately **not** by the lab module,
+so it exists and works when lab and radiology are switched off.
 
 **user_account_requests** (0028, B1) — maker-checker for staff accounts
 ```
@@ -1051,28 +1318,94 @@ designation varchar(100) · employee_id varchar(30) · registration_number varch
 qualification varchar(100) · email varchar(255) · mobile varchar(20)
 justification text NOT NULL
 requested_by UUID NOT NULL → users
-status varchar(30) NOT NULL DEFAULT 'pending'    -- ApprovalStatus: pending|approved|rejected
+status varchar(50) NOT NULL DEFAULT 'pending'    -- ApprovalStatus: pending|approved|rejected
 decided_by UUID NULL → users · decided_at timestamptz · rejection_reason text
 created_user_id UUID NULL → users                -- set when approval creates the account
 INDEX ix_user_account_requests_facility_id_status (facility_id, status)
 ```
 
-### Account & role governance (v3.4)
+**idempotency_keys** (0002, B1) — see §4A.1; makes a retried POST replay, never re-execute
+```
+key varchar(64) NOT NULL · endpoint varchar(120) NOT NULL
+request_hash char(64) NOT NULL                   -- same key + different body ⇒ 409
+response_status int · response_body jsonb
+user_id UUID NULL → users
+UNIQUE (key, endpoint)
+INDEX ix_idempotency_keys_created_at (created_at)   -- 24h expiry sweep
+```
 
-- **superadmin** (new Keycloak realm role, cloud-only): creates facilities, appoints
-  facility admins and DPOs, sees cross-facility MIS. **Cannot read clinical data** —
-  platform ownership and patient care are deliberately separated. The first superadmin
-  is seeded at deployment (realm import), the same way dev users are seeded locally.
-- **User creation is maker-checker.** Any admin/HOD files a `user_account_requests`
-  row; a *different* approver decides (facility admin approves staff; superadmin
-  approves facility admins). Nobody approves their own request — enforced in the
-  service, evidenced by `requested_by ≠ decided_by`.
+### 0029–0031 — B1 auth / ABDM / sync tables
+
+**policies** (0029, B1) — ABAC rules evaluated after RBAC (`common/abac.py`)
+```
+name           text NOT NULL
+subject_role   varchar(50) NOT NULL             -- Keycloak realm role
+resource_type  varchar(50) NOT NULL             -- 'patients', 'invoices', ...
+action         varchar(50) NOT NULL             -- read|create|update|delete
+effect         varchar(50) NOT NULL DEFAULT 'allow'   -- allow|deny (explicit deny wins)
+condition      jsonb NULL                       -- e.g. {"same_facility": true}
+is_active      boolean NOT NULL DEFAULT true
+INDEX ix_policies_subject_role_resource_type_action (subject_role, resource_type, action)
+```
+No matching policy ⇒ RBAC decision stands (skeleton default; tighten to deny-all in W7).
+
+**patients additions** (0030, B1) — ABHA linking token, encrypted like Aadhaar
+```
+abha_linking_token_encrypted bytea NULL          -- AES-256-GCM, never plaintext
+abha_linking_key_version smallint NULL           -- rotation, same scheme as patient_identifiers
+abha_linked_at timestamptz NULL
+```
+
+**outbox_events** (0031, B1) — transactional outbox: the edge→cloud sync queue.
+Written in the SAME transaction as the business mutation; shipped in `sequence` order.
+Also carries clinical-note projections to Mongo (§4A.3) so a note can never be lost.
+```
+aggregate_type varchar(50) NOT NULL              -- 'patient', 'invoice', 'encounter_note', ...
+aggregate_id   UUID NOT NULL
+event_type     varchar(50) NOT NULL
+payload        jsonb NOT NULL
+sensitivity    varchar(50) NOT NULL DEFAULT 'normal'   -- SyncSensitivity; critical never auto-resolves
+status         varchar(50) NOT NULL DEFAULT 'pending'  -- pending|sent|failed
+attempts       int NOT NULL DEFAULT 0 · last_error text · sent_at timestamptz
+sequence       bigint DEFAULT nextval('seq_outbox')    -- global ship order
+INDEX ix_outbox_events_status_sequence (status, sequence)
+```
+Worker uses `FOR UPDATE SKIP LOCKED` so multiple shippers never double-send.
+
+### Account & role governance
+
+#### Authority roles — who decides what (13 realm roles)
+
+Four roles carry decision authority. They are **deliberately separated** so no single
+person can both run a department and rewrite patient identity:
+
+| Role | Domain | Owns | Explicitly does NOT |
+|---|---|---|---|
+| **superadmin** | platform (cloud only) | facilities, appoint facility admins + DPO, cross-facility MIS | **any patient/clinical data — including merge and unmerge** |
+| **admin** | facility configuration | users + account-request approval, departments/rooms, **assigns HODs**, module toggles, billing config, facility MIS | run a department; approve merges; clinical decisions |
+| **hod** | ONE department (scoped by `users.department_id`) | roster/availability, queue oversight + reassignment, `admin_override` priority, indent approval, department dashboard | act outside their department; identity merges |
+| **supervisor** | patient records authority | THID→UHID merge approval, **unmerge**, identity overrides | manage a department, configure the facility |
+
+Rules:
+
+- **MFA (TOTP) is required for `admin`, `hod`, and `supervisor`** — every authority role.
+- **Unmerge is `supervisor`, never `superadmin`** (superadmin has no clinical access at
+  all). Unmerge is maker-checker like account creation: the approving supervisor must be
+  a **different person** from the one who approved the original merge
+  (`patient_merge_log.approved_by`), and the facility admin is notified.
+- **`hod` is department-scoped in code**, not by convention: every HOD endpoint filters on
+  the caller's `users.department_id`; a HOD of Medicine cannot touch Surgery's roster.
+- **admin configures, hod operates.** Admin creates the department and appoints its HOD;
+  the HOD then runs it. Neither can do the other's job.
+- **User creation is maker-checker.** Any admin/HOD files a `user_account_requests` row; a
+  *different* approver decides (facility admin approves staff; superadmin approves facility
+  admins). Nobody approves their own request — enforced in the service, evidenced by
+  `requested_by ≠ decided_by`, and rejected with `409 self_approval_not_allowed`.
 - **Approval is atomic:** approving creates the Keycloak account (temporary password,
   requested roles) and the `users` profile row in one flow; failure rolls both back.
-  Direct `POST /users` (no request) remains available to admins for bootstrap, and is
-  audited like everything else.
-- **No self-elevation:** granting `admin` or `superadmin` roles always requires
-  superadmin approval; role changes are audit-logged with old/new role lists.
+- **No self-elevation:** granting `admin` or `superadmin` always requires superadmin
+  approval; role changes are audit-logged with old/new role lists.
+- The first superadmin is seeded at deployment (realm import), like the dev users.
 
 ### Index strategy addendum (v3)
 
@@ -1085,6 +1418,133 @@ INDEX ix_user_account_requests_facility_id_status (facility_id, status)
 - **BRIN on `created_at`/`accessed_at`** inside audit/access-log partitions — near-zero
   write cost, fast range scans; partition pruning handles month granularity, BRIN
   handles ranges within a partition.
+
+### 0032 — allergies (B3) — **patient safety, v3.14**
+
+Until this exists the prescribing screen has nothing structured to check against, and
+an allergy recorded as free text in a consultation note is invisible to the prescriber.
+This is the most common preventable medication harm in any hospital system; NABH
+requires it documented and ABDM/FHIR needs it as `AllergyIntolerance`.
+
+**allergies** `[Blame]` — corrected, never deleted (see `AllergyStatus`)
+```
+patient_id       UUID NOT NULL → patients
+allergen_type    varchar(50) NOT NULL             -- AllergenType enum
+substance_text   text NOT NULL                    -- ALWAYS populated, even when coded.
+                                                  -- Rural reality: the attendant says
+                                                  -- "penicillin injection" and that is
+                                                  -- the whole record. Never lose it.
+ingredient_code  varchar(50) NULL                 -- THE matchable key (see below)
+inventory_item_id UUID NULL → inventory_items     -- optional, only if a stocked item
+reaction         text NULL                        -- "rash", "swelling", "collapse"
+severity         varchar(50) NOT NULL             -- AllergySeverity enum
+status           varchar(50) NOT NULL DEFAULT 'active'   -- AllergyStatus enum
+onset_date       date NULL
+recorded_by      UUID NOT NULL → users
+verified_by      UUID NULL → users · verified_at timestamptz NULL
+row_version      int NOT NULL DEFAULT 1
+INDEX ix_allergies_patient_id_status (patient_id, status)
+```
+
+> **Matching rule — the part that makes this work or not.**
+> Matching an allergy on `inventory_item_id` is *useless*: a patient allergic to
+> penicillin must also trigger on amoxicillin, ampicillin and cloxacillin, which are
+> different rows in `inventory_items`. The check therefore matches on
+> **`ingredient_code`**, and `0032` also does
+> `ALTER TABLE inventory_items ADD COLUMN ingredient_code varchar(50) NULL` (WHO ATC
+> level-5, or a local ingredient list where ATC is unavailable), plus
+> `INDEX ix_inventory_items_ingredient_code`.
+> An allergy with `ingredient_code IS NULL` is **display-only** — it shows in the banner
+> but cannot block, and the UI must say so. Silently failing to match is the one outcome
+> worse than not having the feature.
+
+**Prescribing gate (contract, enforced server-side):**
+
+1. `GET /patients/{id}/allergies` is called when the **consultation opens**, not when
+   the prescription is written. The banner is persistent and always visible; a modal
+   shown at save time is dismissed reflexively and does not count as a check.
+2. `POST /prescriptions/{id}/items` matches the item's `ingredient_code` against the
+   patient's `active` allergies. On a hit: **`409 allergy_conflict`** with the allergy
+   row in the envelope. `severity = 'anaphylaxis'` cannot be overridden by any role.
+3. Any other severity may be overridden with `override_reason` (≥20 chars), which is
+   stored on `prescription_items.allergy_override_reason` and written to `audit_logs`
+   in the same transaction.
+4. **Drug–drug interaction checking is explicitly out of scope** and must not be faked.
+   It requires a licensed interaction database; a partial implementation that misses
+   interactions is more dangerous than none, because clinicians calibrate their trust to
+   what the system claims to do. Revisit as a paid integration, tracked separately.
+
+### 0033 — charge_master (B7) — **v3.14**
+
+`invoice_items.unit_price` is currently typed by whoever creates the line. That means
+two clerks charge different amounts for the same test, "what was the tariff on 12 March"
+is unanswerable, and PM-JAY rates — which are *mandated*, not suggested — cannot be
+enforced, making an overcharge a compliance breach rather than a pricing mistake.
+
+**charge_master** `[Blame]` — effective-dated; a price is never UPDATEd, a new row supersedes it
+```
+facility_id     UUID NOT NULL → facilities
+charge_code     varchar(30) NOT NULL             -- stable across price changes
+description     text NOT NULL
+charge_category varchar(50) NOT NULL             -- ChargeCategory enum (same as invoice_items)
+unit_price      numeric(12,2) NOT NULL CHECK (>= 0)
+scheme_code     varchar(30) NULL                 -- NULL = general tariff; 'PMJAY' = scheme rate
+effective_from  date NOT NULL · effective_to date NULL
+is_active       boolean NOT NULL DEFAULT true
+UNIQUE (facility_id, charge_code, scheme_code, effective_from)
+INDEX ix_charge_master_lookup (facility_id, charge_code, scheme_code, effective_from DESC)
+CHECK (effective_to IS NULL OR effective_to > effective_from)
+```
+
+Also in 0033: `ALTER TABLE invoice_items ADD COLUMN charge_master_id UUID NULL → charge_master`.
+
+**Accrual rules:**
+
+1. `unit_price` is **copied onto the invoice line at accrual time**, not joined at read
+   time. A tariff revision must never retroactively change an issued invoice — the
+   `trg_invoices_freeze` trigger already protects the totals, and this keeps the line
+   items consistent with them.
+2. **`UNIQUE (invoice_id, reference_type, reference_id)` on `invoice_items`.** Without
+   it, a lab result finalised twice bills twice, and nothing currently prevents that.
+   This single constraint is the difference between an accrual service that is safe to
+   retry and one that silently double-charges patients.
+3. Bed-day accrual is time-based, not event-driven: a nightly job charges one `ipd_stay`
+   line per completed bed-day using the **facility business date**
+   (`(now() AT TIME ZONE facilities.timezone)::date`), not UTC. The idempotency key is
+   `('admissions', admission_id, business_date)`.
+4. A charge with no matching `charge_master` row is a **`409 no_tariff`**, not a
+   zero-rupee line. Silent zero-rating is how revenue disappears.
+
+### 0034 — IPD bed integrity (B4) — **v3.14**
+
+**One active admission per bed** is currently left to the service layer, so a single bug
+double-books a bed — and the second patient's admission looks perfectly valid. Make it
+impossible in the database:
+
+```sql
+CREATE UNIQUE INDEX uq_admissions_active_bed
+  ON admissions (bed_id) WHERE status = 'admitted';
+```
+
+Same partial-unique pattern as `uq_pharmacy_dispenses_current`. One line, and the race
+stops existing rather than being handled.
+
+> **`beds.status` is a denormalised mirror of `admissions` and can drift from it** —
+> the same class of problem as `inventory_batches.quantity` vs `stock_ledger`. Treat
+> `admissions` as authoritative: `beds.status` is maintained in the same transaction, and
+> a reconciliation job flags any bed whose status disagrees with its active admission.
+
+**Transfer destination** — a `transferred` discharge currently records no destination,
+so a patient leaves the system with no forward reference. Also in 0034:
+
+```
+ALTER discharges ADD destination_facility_id   UUID NULL → facilities   -- in-network
+ALTER discharges ADD destination_facility_name text NULL                -- outside the network
+CHECK (discharge_type <> 'transferred'
+       OR destination_facility_id IS NOT NULL
+       OR destination_facility_name IS NOT NULL)
+```
+
 
 ## 4. API field contract (backend → frontend)
 
@@ -1131,9 +1591,13 @@ Backend: return plain dicts/Pydantic models; the middleware wraps them.
 | `/billing/payments/{id}/refunds` | POST | `id, refund_number, amount, reason, approved_by, refunded_at` |
 | `/queue/tokens` | POST | `id, queue_id, visit_id, sequence, token_display, status, priority, created_at` |
 | `/queue/queues/{id}/tokens` | GET (staff) | one doctor's list, sorted by priority tier then `created_at`; each token adds `doctor_name, room_number`; header has `waiting_count, now_serving (token_display)` |
+| `/queue/tokens/{id}/priority` | PATCH | elevate/change tier: `{to_priority, reason}` → token + `{from_priority, to_priority, changed_by, changed_at}`. Role-gated per the table in §3 0009; `422` if reason <10 chars; `409` if token is not `waiting`; `admin_override` needs MFA |
+| `/queue/tokens/{id}/priority-history` | GET | append-only trail from `queue_token_priority_changes` |
 | `/queue/tokens/{id}/call-next` | POST (doctor) | calls the next token: sets `status="called", called_at`, updates `queues.now_serving_token_id`, and publishes a `token_called` event to the department display feed |
 | **`/queue/display/{department_id}`** | **GET — PUBLIC (no auth)** | the wall board outside OPD: `{department, queues: [{doctor_name, room_number, now_serving (token_display), next_tokens: [token_display,…], waiting_count, is_open}]}`. Contains **only** token strings, doctor names, and rooms — **never** patient names, UHID, or mobile. |
 | `/departments`, `/rooms`, `/rosters` | CRUD | columns as-is (§3, 0005/0009) |
+| `/procedures` | POST/GET | `id, encounter_id, patient_id, procedure_name, procedure_code, setting, ot_schedule_id, performed_by, started_at, ended_at, outcome` — works with the OT module OFF (`setting` = opd_minor/bedside/emergency) |
+| `/orders/{id}/external-results` | POST/GET | `id, order_id, provider_name, summary, result_file_id, observed_on, recorded_by, recorded_at` — records an outside lab/imaging report; works when lab/radiology modules are OFF |
 | `/orders` | POST | `id, order_number, encounter_id, patient_id, order_type, priority, status, ordered_at` |
 | `/lab/order-items/{id}/results` | POST/GET | `id, lab_order_item_id, version, is_current, status, result_data, remarks, created_by, created_at` |
 | `/radiology/order-items/{id}/reports` | POST/GET | same but `findings, impression, pacs_study_uid` |
@@ -1141,6 +1605,15 @@ Backend: return plain dicts/Pydantic models; the middleware wraps them.
 | `/inventory/items`, `/inventory/batches` | CRUD | columns as-is; batch list always FEFO-sorted |
 | `/admissions`, `/discharges` | POST | columns as-is (§3, 0015) |
 | `/notifications/history` | GET | `id, event_type, payload, department_id, created_at` |
+| `/blood-bank/donors` | POST/GET/PATCH | `id, patient_id, full_name, sex, age_years, blood_group, mobile, weight_kg, hemoglobin_g_dl, last_donation_date, next_eligible_date, is_eligible, remarks` — eligibility computed server-side (hb/weight/interval), never client-supplied |
+| `/blood-bank/donors/{id}/eligibility` | GET | `is_eligible, reasons[], next_eligible_date` |
+| `/blood-bank/units` | POST/GET | `id, donor_id, bag_number, blood_group, volume_ml, collected_at, expiry_date, screening_status, status, issued_to_patient_id` |
+| `/blood-bank/units/{id}/screen` | POST | sets `screening_status` (pending→passed/failed); failed units auto-move to `discarded` |
+| `/blood-bank/units/{id}/issue` | POST | reserves/issues a unit against `orders` (order_type='blood'); writes audit |
+| `/blood-bank/inventory` | GET | stock by blood group: `{group, available, reserved, expiring_in_7d}` — feeds the dashboard |
+| `/abdm/fhir/bundles` | POST | build + persist a bundle: `{record_type, patient_id, encounter_id}` → `{bundle_id, record_type, validation: {valid, errors[]}}` |
+| `/abdm/fhir/bundles/{id}` | GET | the stored FHIR R4 document Bundle (from Mongo `fhir_bundles`) |
+| `/abdm/fhir/transactions` | GET | `id, bundle_id, abdm_request_id, direction, care_context_linked, gateway_response_status, signed_by_hpr_id, transmitted_at` (audit trail, §3 0026) |
 | `/grievances` | POST/GET | `id, grievance_number, grievance_type, status, due_at, assigned_to, resolution, resolved_at` |
 | `/vitals` | POST/GET | `id, patient_id, encounter_id, admission_id, measured_at, bmi, whr, temp_c, pulse_bpm, bp_systolic, bp_diastolic, spo2_pct` |
 | `/diagnoses/icd-search?q=` | GET | `items[]: {code, title, icd_uri, is_postcoordinable, version}` — proxies the local WHO ICD-11 container + local `icd_codes` catalog (ICD-10) |
@@ -1184,6 +1657,138 @@ Every request: `Authorization: Bearer <Keycloak JWT>`. Backend guards with
 403 = wrong role — the frontend treats them differently (redirect vs "no access" banner).
 
 ---
+
+
+## 4A. Reliability & safety contracts (v3.11 — apply to every module)
+
+These are cross-cutting failure modes found in architecture review. Each is a binding
+rule, not a suggestion; reviewers check them like the schema rules.
+
+### 4A.1 Idempotency — mandatory on every unsafe POST
+
+The network at a rural facility drops mid-request constantly. Without idempotency a
+retry creates **a second patient, a second payment, a second dispense**. Duplicate money
+and duplicate identities are the two worst outcomes this system can produce.
+
+- Every `POST` that creates something (patients, visits, orders, payments, refunds,
+  dispenses, tokens, procedures) **requires an `Idempotency-Key` header** (client-generated
+  UUID, stable across retries of the same user action).
+- Table **`idempotency_keys`** (0002, B1): `key varchar(64) PK-unique · endpoint varchar(120)
+  · request_hash char(64) · response_status int · response_body jsonb · user_id UUID →
+  users · created_at timestamptz`. `UNIQUE (key, endpoint)`.
+- Behaviour: first call executes and stores the response; a repeat with the same key
+  **replays the stored response** (never re-executes). Same key + different body ⇒ `409
+  idempotency_key_reuse`. Keys expire after 24 h.
+- Missing header on a required endpoint ⇒ `400`. The frontend generates the key when the
+  form is opened, not when it is submitted.
+
+### 4A.2 Optimistic concurrency — no silent lost updates
+
+Two clinicians open the same encounter; both save; the first edit vanishes with no trace.
+Unacceptable in a clinical record.
+
+- Every mutable clinical/financial row carries **`row_version int NOT NULL DEFAULT 1`**
+  (added to the `Timestamps` mixin family as `Versioned`).
+- `GET` returns it as `ETag`; `PATCH`/`PUT` **must** send `If-Match`. Mismatch ⇒
+  `409 stale_write` with the current row so the UI can show a diff.
+- Bumped by the service on every update, in the same transaction.
+- Distinct from `updated_at` (sync) — this protects *concurrent editors inside one
+  facility*, which sync-tier rules do not cover.
+
+### 4A.3 Mongo dual-write — clinical notes must not vanish
+
+Clinical notes/FHIR payloads live in Mongo but the encounter lives in Postgres. A naive
+"commit Postgres, then write Mongo" loses the note whenever the second write fails —
+silently, and it is the part a doctor actually typed.
+
+- **Postgres is the transaction boundary.** The note is written as an `outbox_events` row
+  in the *same transaction* as the encounter; a worker projects it into Mongo.
+- `encounters.note_status varchar(50) NOT NULL DEFAULT 'pending'` (`pending|stored|failed`)
+  makes an unprojected note **visible**, never silently missing.
+- The UI reads the note from the outbox payload until `stored` — the clinician always sees
+  what they typed.
+- Never write Mongo directly from a request handler.
+
+### 4A.4 File upload validation — the presigned-URL XSS path
+
+`files` stores `content_type` and `size_bytes` but nothing said they were *validated*.
+An HTML file uploaded as `report.jpg` and served from a presigned URL is stored XSS
+against staff sessions.
+
+- Allow-list by **sniffed** magic bytes, never the client-supplied `Content-Type` or
+  extension: `image/jpeg, image/png, application/pdf, application/dicom`.
+- Max 25 MB (matches nginx `client_max_body_size`); reject empty files.
+- Store `sha256` (already present) and **re-derive `content_type` server-side** before
+  persisting the row.
+- Serve every download with `Content-Disposition: attachment` and
+  `X-Content-Type-Options: nosniff`; never `text/html` — even for a file that claims to be.
+- Malware scanning (ClamAV sidecar) is required before production; MVP records
+  `scan_status varchar(50) DEFAULT 'skipped'` on `files` so the gap is visible, not implicit.
+
+### 4A.5 Visit lifecycle closure — no immortal visits
+
+Nothing closed a visit, so `registered`/`in_queue` visits accumulate forever, their
+invoices stay `draft`, and wait-time KPIs are meaningless.
+
+- A visit auto-closes at the facility's end-of-day (facility timezone) if it never reached
+  consultation ⇒ `status='lwbs'`; if consulted but not closed ⇒ `closed`.
+- The job is idempotent, audited (`action='auto_close_visit'`), and never closes an
+  `admitted` visit — IPD visits close at discharge.
+- Draft invoices on an auto-closed visit are **issued or cancelled** by policy, never left
+  in `draft` (a draft invoice is unbilled revenue and a reconciliation blocker).
+
+### 4A.6 DPDP erasure vs medical-record retention
+
+`patient_grievances.grievance_type` includes `erasure`, but clinical data is never deleted
+and audit is append-only. A grievance officer currently has no defensible answer.
+
+- **Clinical records are exempt from erasure** while statutory retention applies (clinical
+  establishment record-keeping rules); the response is a *lawful refusal with reason*, not
+  silence. Record it in `patient_grievances.resolution`.
+- **Non-clinical contact PII is erasable**: mobile, email, address may be nulled on
+  request; identity and clinical rows stay.
+- Erasure of identifiers means **destroying the encrypted value + blind index** row in
+  `patient_identifiers` (the patient stays, the Aadhaar link goes).
+- Every erasure decision is audited. Never a hard delete of the patient row.
+
+### 4A.7 Public display endpoint hardening
+
+`/queue/display/{department_id}` and its SSE stream are unauthenticated by design (a wall
+screen has no login) — which makes them the system's only public write-free attack surface.
+
+- Dedicated nginx zone: 5 r/s per IP, burst 10, and a 5-second server-side cache (the
+  board changes only on call-next).
+- Response is capped (next 10 tokens per queue) — never the full day's list.
+- SSE connections per IP capped; idle connections closed after 1 h.
+- Payload remains token + doctor + room only. No patient identifier, ever.
+
+### 4A.8 Keycloak is a single point of failure for login
+
+If the Keycloak container dies at a facility, **nobody can log in** and the hospital stops —
+even though Postgres and the API are healthy.
+
+- JWKS is cached with a long TTL so *existing* sessions and token validation survive a
+  Keycloak outage.
+- Access-token lifetime at the edge is 8 h (not 15 min) with refresh, so a mid-shift
+  Keycloak restart does not evict working clinicians. (Cloud stays at 15 min.)
+- A documented **local break-glass admin** procedure exists for restoring Keycloak from
+  its realm export; the realm JSON is version-controlled, so recovery is minutes not hours.
+- Keycloak is included in the facility backup set (§4A.9), not just Postgres.
+
+### 4A.9 Backup, RPO/RTO and the single-server edge
+
+The facility edge is one box. "Offline-resilient" covers the *network*, not the *hardware*.
+
+| Aspect | Target |
+|---|---|
+| RPO (max data loss) | 15 minutes — WAL archiving to local disk + hourly off-box copy |
+| RTO (time to restore) | 4 hours at a district hospital, next business day at a PHC |
+| What is backed up | Postgres (PITR), Mongo, MinIO objects, Keycloak realm+users, `.env`/secrets separately |
+| Restore drill | quarterly, on staging, from a real facility backup — a backup never restored is not a backup |
+| Hardware failure | documented **paper fallback**: registration slips + token pad; entered retrospectively with `created_at` backdated and `entered_retrospectively=true` audited |
+
+Cloud sync is *not* a backup — it is asynchronous and lossy by design (unsynced rows die
+with the box).
 
 ## 5. Per-developer fix lists (your draft → this schema)
 
@@ -1276,6 +1881,19 @@ requirements. (Not HIPAA — that is US law; reviewers sometimes suggest it by h
 Access control model: Keycloak realm roles (receptionist, doctor, nurse, lab_tech,
 radiology_tech, pharmacist, emergency, supervisor, admin, auditor, patient) enforced
 per-endpoint by `app/auth/deps.require_roles`; department scoping via `users.department_id`.
+
+### Sync clock authority (v3.9)
+
+`updated_at` drives last-writer-wins, so a drifting edge clock can silently overwrite
+newer cloud data. NTP (B1-W1-06) reduces skew but does not guarantee it. Binding rules:
+
+- Every synced row also carries the **server-stamped ingest time** at the cloud; conflict
+  resolution for `important` and `critical` tiers uses (facility_id, chain/outbox
+  `sequence`) — a monotonic per-facility counter — **not** wall-clock alone.
+- If an edge's clock is more than 60 s from the cloud at sync handshake, the sync is
+  **refused** and raised as an operational alert; a wrong clock corrupts ordering and
+  audit timestamps, so failing loudly beats merging wrongly.
+- `critical` (financial) never auto-resolves regardless of clock — unchanged.
 
 ## 8. v3.5 / v4 backlog (recorded, deliberately deferred)
 

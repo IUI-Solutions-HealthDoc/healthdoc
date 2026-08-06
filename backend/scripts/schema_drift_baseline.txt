@@ -1,0 +1,25 @@
+# Known schema drift — accepted, tracked, and expected to shrink to nothing.
+#
+# Why this file exists: schema_drift_check.py found real defects that already exist on
+# staging. Making it a hard gate on day one would turn every PR red for problems no
+# author caused. Wrapping it in `|| true` would have been the other, worse answer — a
+# gate that reports success without running is how facilities.timezone survived since
+# v3.0 in the first place.
+#
+# So: entries listed here are reported but do not fail the build. Anything NOT listed
+# fails immediately. Drift can therefore only shrink.
+#
+# Format: one finding per line, exactly as the checker prints it inside the brackets.
+#   MISSING-COLUMN facilities.timezone
+#   MISSING-TABLE  0002 idempotency_keys
+#
+# Adding a line requires a reason and an owner. Deleting one requires nothing — that is
+# the direction we want this file to move. The checker warns if a line here is stale
+# (i.e. the drift is fixed) so entries can't outlive their cause.
+
+# --- facilities.timezone -----------------------------------------------------------
+# Specified in §3 since v3.0, created by no migration. Found reviewing PR #264 (Ajay).
+# Fix: revision 0003a, being split out of #264 into its own PR.
+# Owner: Ajay85720. Blocks: every TZ-DATE correction, incl. #269.
+# Delete this line the moment 0003a merges.
+MISSING-COLUMN facilities.timezone

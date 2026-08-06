@@ -19,9 +19,12 @@ from app.auth.deps import CurrentUser
 from app.common.db import get_db
 from app.common.enums import ModuleCode
 
+# Core = everything that is NOT in ModuleCode. Never gate these.
 CORE_MODULES = frozenset({
     "patients", "registration", "opd", "encounters", "queue", "departments",
     "billing", "consent", "audit", "files", "users", "notifications",
+    "inventory", "ipd", "emergency", "patient_portal", "abdm",
+    "orders", "nursing", "wards", "reports", "outbox", "security_audit",
 })
 
 
