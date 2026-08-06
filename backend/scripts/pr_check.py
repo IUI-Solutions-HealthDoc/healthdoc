@@ -247,9 +247,13 @@ def check_file(path: pathlib.Path) -> list[Finding]:
                     if len(n.body) == 1 and isinstance(n.body[0], ast.Pass):
                         f.append(Finding(BLOCK, "MIG-DOWNGRADE", rel, n.lineno,
                             "downgrade() is empty (pass).", "conventions §1.10"))
-        if not re.search(r'^revision\s*=\s*["\']\d{4}["\']', src, re.M):
+        # 4 digits, optionally one lowercase letter for a correction revision inserted
+        # after an already-merged one (schema v3.15: '0003a' fixes gaps in 0003/0002
+        # and must land BEFORE 0004, so it cannot simply be appended at the end).
+        if not re.search(r'^revision\s*=\s*["\']\d{4}[a-z]?["\']', src, re.M):
             f.append(Finding(BLOCK, "MIG-REVISION", rel, 1,
-                "revision must be a 4-digit zero-padded string (e.g. '0007').", "schema §2"))
+                "revision must be 4 zero-padded digits, optionally + one letter for a "
+                "correction revision (e.g. '0007', '0003a').", "schema §2"))
         if re.search(r'^revision\s*=\s*["\']0018["\']', src, re.M):
             f.append(Finding(BLOCK, "MIG-0018", rel, 1,
                 "Revision 0018 is retired and must never be created.", "schema §2"))

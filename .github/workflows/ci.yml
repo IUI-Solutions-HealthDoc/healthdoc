@@ -30,8 +30,13 @@ jobs:
           POSTGRES_PASSWORD: healthdoc
           POSTGRES_DB: healthdoc_test
         ports: ["5432:5432"]
+        # -d is not optional here: pg_isready defaults the database name to the
+        # username, so `-U healthdoc` probes for a database called "healthdoc" while
+        # POSTGRES_DB creates "healthdoc_test". The probe then fails forever with
+        # 'database "healthdoc" does not exist', the service never reports healthy,
+        # and the job dies before running a single step.
         options: >-
-          --health-cmd "pg_isready -U healthdoc"
+          --health-cmd "pg_isready -U healthdoc -d healthdoc_test"
           --health-interval 5s --health-timeout 5s --health-retries 10
 
     env:

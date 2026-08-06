@@ -212,6 +212,35 @@ def parse_map(doc_text: str) -> dict[str, set[str]]:
 
 # ----------------------------------------------------------------------------
 
+def load_baseline() -> set[str]:
+    """Accepted, already-existing drift — see schema_drift_baseline.txt.
+
+    Deliberately a file rather than `|| true` in CI. A blanket suppression hides the
+    next defect as well as this one; a baseline only ever hides the specific findings
+    someone wrote down, so drift can shrink but not grow.
+    """
+    path = pathlib.Path(__file__).with_name("schema_drift_baseline.txt")
+    if not path.is_file():
+        return set()
+    out = set()
+    for line in path.read_text().splitlines():
+        line = line.split("#")[0].strip()
+        if line:
+            out.add(re.sub(r"\s+", " ", line))
+    return out
+
+
+def _key(finding: str) -> str:
+    """'[MISSING-COLUMN] §3 documents facilities.timezone, and ...' -> the stable bit."""
+    m = re.match(r"\[(MISSING-COLUMN)\] §3 documents ([a-z_]+\.[a-z_]+)", finding)
+    if m:
+        return f"{m.group(1)} {m.group(2)}"
+    m = re.match(r"\[(MISSING-TABLE)\] §2 says (\S+) creates '([a-z_]+)'", finding)
+    if m:
+        return f"{m.group(1)} {m.group(2)} {m.group(3)}"
+    return finding
+
+
 def main() -> int:
     doc_path, versions = _locate()
     doc_text = doc_path.read_text()
@@ -252,21 +281,34 @@ def main() -> int:
             warnings.append(f"[UNDOCUMENTED] {table}.{col} exists in a migration "
                             f"but is not in §3.")
 
+    # Split off drift that is already written down and owned.
+    baseline = load_baseline()
+    seen_keys = {_key(b) for b in blockers}
+    accepted = [b for b in blockers if _key(b) in baseline]
+    blockers = [b for b in blockers if _key(b) not in baseline]
+    stale = sorted(baseline - seen_keys)
+
     scope = len(created & doc_tables.keys())
     print(f"SCHEMA DRIFT — {scope} table(s) in scope "
           f"({len(doc_tables)} documented, {len(created)} created on disk), "
-          f"{len(blockers)} blocker(s), {len(warnings)} warning(s)")
-    if not blockers and not warnings:
+          f"{len(blockers)} blocker(s), {len(warnings)} warning(s), "
+          f"{len(accepted)} baselined")
+    if not blockers and not warnings and not accepted:
         print("  OK — every documented column of every built table exists in a migration.")
     for b in blockers:
         print(f"  ✗ {b}")
     for w in warnings:
         print(f"  ! {w}")
+    for a in accepted:
+        print(f"  · {a}\n      (baselined — see scripts/schema_drift_baseline.txt)")
+    for s in stale:
+        print(f"  ! stale baseline entry '{s}' — this drift is fixed; delete the line.")
     if blockers:
         print("\n  A column in the doc that no migration creates is worse than an "
               "undocumented one:\n  code written against the spec fails at runtime, "
               "and reviews demand fixes that\n  reference it. Add the migration, or "
-              "correct the doc.")
+              "correct the doc.\n  If this drift predates your change, add it to "
+              "schema_drift_baseline.txt with an owner.")
     return 1 if blockers else 0
 
 
