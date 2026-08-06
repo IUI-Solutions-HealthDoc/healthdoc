@@ -23,6 +23,40 @@ class PatientCreate(BaseModel):
         return self
 
 
+class PatientUpdate(BaseModel):
+    """PATCH /patients/{id} — all fields optional, only supplied fields written.
+
+    `reason` is not stored on the patient row — it is forwarded to the
+    audit log's `reason` column so reviewers know WHY a field changed,
+    not just what changed (schema doc §26.1 Audit Events).
+    """
+    full_name: str | None = None
+    sex: str | None = None
+    dob: date | None = None
+    age_years: int | None = None
+    mobile: str | None = None
+    abha_number: str | None = None
+    guardian_name: str | None = None
+    guardian_relationship: str | None = None
+    address_line: str | None = None
+    village_town: str | None = None
+    district: str | None = None
+    state_code: str | None = None
+    pincode: str | None = None
+    reason: str | None = None  # audit reason, not stored on patient row
+
+    @model_validator(mode="after")
+    def _at_least_one_field(self) -> "PatientUpdate":
+        updateable = (
+            "full_name", "sex", "dob", "age_years", "mobile", "abha_number",
+            "guardian_name", "guardian_relationship",
+            "address_line", "village_town", "district", "state_code", "pincode",
+        )
+        if not any(getattr(self, f) is not None for f in updateable):
+            raise ValueError("At least one patient field must be supplied for update")
+        return self
+
+
 class PatientOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -101,3 +135,4 @@ class MergeLogOut(BaseModel):
     approved_at: datetime | None
     status: str
     reason: str | None
+    decision_reason: str | None = None

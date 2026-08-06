@@ -11,8 +11,11 @@ from app.common.db import get_db
 from app.patients.models import Patient
 from app.patients.schemas import (
     PatientCreate, PatientOut,
+    PatientUpdate,
     PatientSearchRequest, PatientSearchResponse, PatientSearchResult,)
-from app.patients.service import generate_uhid, build_aadhaar_identifier, search_patients, mask_mobile
+from app.audit.context import AuditActor
+from app.audit.deps import get_current_actor_dependency
+from app.patients.service import generate_uhid, build_aadhaar_identifier, search_patients, mask_mobile, update_patient
 from app.users.models import Facility
 
 router = APIRouter(prefix="/patients", tags=["patients"])
@@ -118,6 +121,41 @@ async def search_patients_endpoint(
         for patient, score, matched_on in results
     ]
     return PatientSearchResponse(items=items, page=payload.page, page_size=payload.page_size, total=total)
+
+
+@router.patch(
+    "/{patient_id}",
+    response_model=PatientOut,
+    dependencies=[Depends(require_roles("receptionist", "admin"))],
+)
+async def update_patient_endpoint(
+    patient_id: uuid.UUID,
+    payload: PatientUpdate,
+    current_db_user: CurrentDbUser,
+    # get_current_actor_dependency resolves JWT sub -> users.id and stores
+    # the actor in request-scoped context so write_audit_log() picks it up
+    # automatically (ip_address, user_id, role) — no need to thread them
+    # through the service call by hand.
+    actor: AuditActor = Depends(get_current_actor_dependency),
+    db: AsyncSession = Depends(get_db),
+) -> Patient:
+    try:
+        return await update_patient(
+            db,
+            patient_id=patient_id,
+            facility_id=current_db_user.facility_id,
+            payload=payload,
+            updated_by=current_db_user.id,
+            reason=payload.reason,
+        )
+    except ValueError as e:
+        code = str(e)
+        if code == "patient_not_found":
+            raise HTTPException(404, {"code": "patient_not_found"})
+        if code == "cannot_update_merged_patient":
+            raise HTTPException(409, {"code": "cannot_update_merged_patient"})
+        raise HTTPException(400, str(e))
+
 
 from app.patients.schemas import MergeRequestCreate, MergeActionRequest, MergeLogOut
 from app.patients.service import request_merge, approve_merge, reject_merge

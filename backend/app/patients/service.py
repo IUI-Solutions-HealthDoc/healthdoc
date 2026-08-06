@@ -18,6 +18,8 @@ from sqlalchemy import text, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.security import encrypt_pii, aadhaar_blind_index, aadhaar_blind_indexes_all_versions, current_hmac_key_version, current_aes_key_version
+from app.audit.actions import AuditAction
+from app.audit.service import audited_mutation
 from app.patients.models import Patient, PatientIdentifier, PatientMergeLog
 
 
@@ -291,6 +293,96 @@ async def find_duplicate_by_aadhaar(
         .limit(1)
     )
     return (await db.execute(stmt)).scalars().first()
+
+
+# Columns that PATCH /patients/{id} is allowed to change.
+# identity_path / identity_status / status / uhid / thid are deliberately
+# excluded — those travel through dedicated workflows (ABHA verification,
+# merge, UHID generation), not a generic update.
+_PATIENT_UPDATEABLE_FIELDS: tuple[str, ...] = (
+    "full_name", "sex", "dob", "age_years", "mobile", "abha_number",
+    "guardian_name", "guardian_relationship",
+    "address_line", "village_town", "district", "state_code", "pincode",
+)
+
+
+async def update_patient(
+    db: AsyncSession,
+    *,
+    patient_id: uuid.UUID,
+    facility_id: uuid.UUID,
+    payload: "PatientUpdate",
+    updated_by: uuid.UUID,
+    reason: str | None = None,
+) -> Patient:
+    """W2-03: update a patient record with full audit trail.
+
+    Uses audited_mutation() (app/audit/service.py) rather than the automatic
+    listener path for two reasons:
+      1. The audit row needs a `reason` field, which the listener has no way
+         to capture — it only sees column deltas, not request-level intent.
+      2. Patient has not yet been added to listeners.AUDITABLE_MODULE_PREFIXES
+         (that rollout is B7's — adding it unilaterally would double-write an
+         audit row the moment B7 flips the switch). When that rollout happens,
+         this explicit call and the opt-in attributes should be reviewed
+         together.
+
+    The audit row and the patient UPDATE share the same transaction via
+    get_db() — if either fails, both roll back (see audit/service.py docstring).
+    """
+    from app.patients.schemas import PatientUpdate  # local import — avoids circular
+
+    patient = await db.get(Patient, patient_id)
+    if patient is None or patient.deleted_at is not None:
+        raise ValueError("patient_not_found")
+    # Facility scoping — same rule as search (blocker 4): a receptionist at
+    # facility A must never be able to update a patient registered at facility B,
+    # even with a valid patient_id. Return 404 rather than 403 to avoid leaking
+    # that the patient exists at another facility.
+    if patient.facility_id != facility_id:
+        raise ValueError("patient_not_found")
+    if patient.status == "merged":
+        raise ValueError("cannot_update_merged_patient")
+
+    # Capture only the fields that are actually being changed, for old/new diff.
+    fields_being_changed = [
+        f for f in _PATIENT_UPDATEABLE_FIELDS
+        if getattr(payload, f, None) is not None
+    ]
+
+    async with audited_mutation(
+        db,
+        facility_id=patient.facility_id,
+        action=AuditAction.UPDATE,
+        resource_type="patients",
+        patient_id=patient.id,
+    ) as audit:
+        audit.resource_id = patient.id
+        audit.old_value = {f: _json_safe_value(getattr(patient, f)) for f in fields_being_changed}
+        audit.reason = reason
+
+        for field in fields_being_changed:
+            setattr(patient, field, getattr(payload, field))
+
+        patient.updated_by = updated_by
+        audit.new_value = {f: _json_safe_value(getattr(patient, f)) for f in fields_being_changed}
+
+    await db.flush()
+    await db.refresh(patient)
+    return patient
+
+
+def _json_safe_value(v: object) -> object:
+    """Coerce date/UUID to strings so old_value/new_value are JSONB-serialisable.
+    Mirrors listeners._json_safe() — kept local to avoid importing from audit
+    until the Patient model fully opts into the listener rollout."""
+    from datetime import date, datetime
+    from uuid import UUID
+    if isinstance(v, UUID):
+        return str(v)
+    if isinstance(v, (datetime, date)):
+        return v.isoformat()
+    return v
 
 
 def _patient_snapshot(patient: "Patient") -> dict:

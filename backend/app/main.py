@@ -11,6 +11,7 @@ from sqlalchemy import text
 from app.common.config import get_settings
 from app.common.db import SessionLocal
 from app.common.envelope import EnvelopeMiddleware
+from app.audit import listeners as _audit_listeners  # noqa: F401 — registers SQLAlchemy session hooks
 from app.common.mongo import get_mongo
 from app.common.redis import get_redis
 
