@@ -21,6 +21,7 @@ STILL OPEN (flagged, not silently fixed - see TODOs inline):
 """
 import asyncio
 import json
+import os
 import uuid
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
@@ -200,8 +201,19 @@ async def _generate_accession_number(db: AsyncSession, prefix: str) -> str:
 
 async def _write_audit_log(db: AsyncSession, *, table_name: str, row_id: uuid.UUID,
                             action: str, actor_id: uuid.UUID) -> None:
-    pass
-
+    """
+    STUB (#10) — audit logging is owned by a teammate's module
+    (app/audit/models.py + migration 0003), not yet landed. Raises when
+    AUDIT_LOG_ENFORCED=true so CI/staging can catch anyone relying on this
+    silently working; stays a no-op otherwise so local dev isn't blocked.
+    Swap for the real call once app/audit lands — do not implement it here
+    (out of this module's scope).
+    """
+    if os.getenv("AUDIT_LOG_ENFORCED", "false").lower() == "true":
+        raise NotImplementedError(
+            f"_write_audit_log stub called for {table_name}/{row_id} "
+            f"(action={action}) — app/audit not yet implemented"
+        )
 
 # --- #184: result entry (technician) + dual-verify pathologist approval ---
 
