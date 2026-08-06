@@ -72,7 +72,7 @@ async def get_current_user(
             await _get_jwks(),
             algorithms=["RS256"],
             issuer=get_settings().jwt_issuer,
-            options={"verify_aud": False},
+            options={"verify_aud": False}, # tighten per-client in W2 hardening
         )
     except JWTError as exc:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, f"Invalid token: {exc}") from exc
