@@ -8,9 +8,7 @@ from alembic import op
 from sqlalchemy.dialects.postgresql import UUID
 
 revision = "0025"
-# TODO: update to "0024" (or whatever the actual predecessor is) when rebasing onto staging.
-# Set to "0002" here because 0003–0024 are other teams' migrations not in this folder.
-down_revision = "0002"
+down_revision = "0024"
 branch_labels = None
 depends_on = None
 

@@ -93,3 +93,23 @@ async def ship_pending(db: AsyncSession, cloud_send, batch: int = 100) -> int:
         await db.commit()
 
     return sent
+
+
+async def reap_stranded(db: AsyncSession, stale_minutes: int = 10) -> int:
+    """Return in_flight rows older than `stale_minutes` back to pending.
+
+    If a process dies between claiming a row and updating its status, the row
+    stays in_flight forever. This reaper moves them back to pending so they can
+    be retried. Call periodically from the background worker.
+    """
+    result = await db.execute(text("""
+        UPDATE outbox_events
+        SET status = 'pending'
+        WHERE status = 'in_flight'
+          AND updated_at < now() - make_interval(mins => :mins)
+        RETURNING id
+    """), {"mins": stale_minutes})
+    reaped = len(result.all())
+    if reaped:
+        await db.commit()
+    return reaped

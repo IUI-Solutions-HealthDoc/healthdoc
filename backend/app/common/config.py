@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     pii_encryption_key: str = "change-me"
     aadhaar_hmac_key: str = "change-me"
 
+    # CORS — comma-separated extra origins. Default is empty (only Electron + https://localhost).
+    # Set to "http://localhost:3000" in .env for Next.js dev; never hardcode dev origins.
+    cors_origins: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -12,15 +12,6 @@ class CheckedEnum(str, Enum):
         vals = ", ".join(f"'{v.value}'" for v in cls)
         return f"{column} IN ({vals})"
 
-    @classmethod
-    def values(cls) -> set[str]:
-        """The raw values, for validation and tests.
-
-        Use this instead of hardcoding a list anywhere — a literal list is how the
-        doc and the code drift apart, which is what spec_check.py exists to catch.
-        """
-        return {v.value for v in cls}
-
 
 class Sex(CheckedEnum):
     MALE = "male"
@@ -438,59 +429,18 @@ class DischargeNotificationTarget(CheckedEnum):
 class ModuleCode(CheckedEnum):
     """The ONLY per-facility toggleable modules (facility_modules).
 
-    Exactly five. Everything else — patients, registration, opd/encounters, queue,
-    departments, billing, consent, audit, files, users, notifications, inventory,
-    ipd, emergency, patient_portal, abdm, refunds — is CORE and can never be
-    disabled (see common/modules.CORE_MODULES).
-
-    Inventory is deliberately core *because* pharmacy is optional: consumables,
-    reagents and ward stock exist even with no dispensary.
+    Exactly five. Everything else — patients, registration, opd, encounters,
+    queue, departments, billing, consent, audit, files, users, notifications,
+    emergency, patient_portal, abdm, billing_refunds — is CORE and can never
+    be disabled. Core modules live in common/modules.CORE_MODULES.
     """
-    PHARMACY = "pharmacy"
-    LAB = "lab"                 # pathology
+    LAB = "lab"
     RADIOLOGY = "radiology"
+    PHARMACY = "pharmacy"
     OT = "ot"
     BLOOD_BANK = "blood_bank"
-    EMERGENCY = "emergency"
-    PATIENT_PORTAL = "patient_portal"
-    ABDM = "abdm"
-    BILLING_REFUNDS = "billing_refunds"
-
-
-class ProcedureSetting(CheckedEnum):
-    """Where a procedure happened — decoupled from the OT module so minor
-    procedures are recordable and billable at a facility with no theatre."""
-    OPD_MINOR = "opd_minor"
-    BEDSIDE = "bedside"
-    EMERGENCY = "emergency"
-    OT = "ot"
 
 
 class FulfilmentMode(CheckedEnum):
     INTERNAL = "internal"
     EXTERNAL_REFERRAL = "external_referral"
-
-class AllergenType(CheckedEnum):
-    DRUG = "drug"
-    FOOD = "food"
-    ENVIRONMENTAL = "environmental"
-    OTHER = "other"
-
-
-class AllergySeverity(CheckedEnum):
-    """Reaction severity as observed. `anaphylaxis` is deliberately separate from
-    `severe` — it drives a hard block at prescribing, not a warning."""
-    MILD = "mild"
-    MODERATE = "moderate"
-    SEVERE = "severe"
-    ANAPHYLAXIS = "anaphylaxis"
-
-
-class AllergyStatus(CheckedEnum):
-    """Allergy records are corrected, never deleted — a removed allergy that was
-    real is the failure mode this enum exists to prevent. `refuted` = clinically
-    ruled out; `entered_in_error` = wrong patient/typo."""
-    ACTIVE = "active"
-    INACTIVE = "inactive"
-    REFUTED = "refuted"
-    ENTERED_IN_ERROR = "entered_in_error"

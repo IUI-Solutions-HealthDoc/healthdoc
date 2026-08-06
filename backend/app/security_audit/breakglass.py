@@ -13,6 +13,8 @@ This does NOT return clinical data itself — it mints a short-lived grant that 
 history/read endpoints honour (they check for an active break_glass grant when consent
 is absent).
 """
+import json
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
@@ -86,8 +88,10 @@ async def break_glass(payload: BreakGlassRequest,
             INSERT INTO notification_history (id, event_type, payload, created_at)
             VALUES (uuid_generate_v4(), 'break_glass_used',
                     CAST(:p AS jsonb), :ts)
-        """), {"p": f'{{"target":"{target}","patient_id":"{payload.patient_id}",'
-                     f'"by":"{user.username}","expires_at":"{expires.isoformat()}"}}',
+        """), {"p": json.dumps({"target": target,
+                               "patient_id": payload.patient_id,
+                               "by": user.username,
+                               "expires_at": expires.isoformat()}),
                "ts": now})
 
     return {"granted": True, "patient_id": payload.patient_id,

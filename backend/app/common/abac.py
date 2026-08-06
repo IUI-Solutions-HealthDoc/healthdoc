@@ -5,8 +5,8 @@ attributes, is this specific action allowed?". Policies live in the `policies` t
 (migration 0029) and are matched against a small attribute dict the caller passes.
 
 Usage in a module service:
-    from app.common.abac import enforce
-    await enforce(db, user, action="read", resource_type="patients",
+    from app.common.abac import enforce_if_policy_exists
+    await enforce_if_policy_exists(db, user, action="read", resource_type="patients",
                   attrs={"facility_id": row.facility_id})
 
 Default posture: deny-by-default. If at least one policy matches the
@@ -75,7 +75,13 @@ def _condition_holds(condition: dict | None, user: AuthUser, attrs: dict) -> boo
     return True
 
 
-async def enforce(db: AsyncSession, user: AuthUser, **kw: Any) -> None:
+async def enforce_if_policy_exists(db: AsyncSession, user: AuthUser, **kw: Any) -> None:
+    """Enforce ABAC — but only if a matching policy exists.
+
+    Named explicitly to signal that a True return does NOT mean 'ABAC approved';
+    it may mean 'no policy exists'. Rename to enforce() once the posture flips
+    to deny-all in W7 hardening.
+    """
     allowed, reason = await evaluate(db, user, **kw)
     if not allowed:
         raise HTTPException(403, {"code": "abac_denied",

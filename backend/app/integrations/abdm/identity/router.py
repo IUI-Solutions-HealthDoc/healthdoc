@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.deps import AuthUser, get_current_user, require_roles
 from app.common.config import get_settings
 from app.common.db import get_db
+from app.common.security import encrypt_pii
 from app.outbox.service import enqueue
 
 log = logging.getLogger("healthdoc.abdm")
@@ -72,16 +73,15 @@ async def link_abha(payload: AbhaCapture,
     gateway_result = await _verify_with_gateway(payload.abha_number)
     gateway_verified = gateway_result is not None
 
-    # from app.common.security import encrypt_pii  # B2-W1-03 provides this
-    # blob, key_version = encrypt_pii(payload.linking_token)
+    blob, key_version = encrypt_pii(payload.linking_token)
     await db.execute(text("""
         UPDATE patients
         SET abha_number = :abha,
-            abha_linking_token_encrypted = :blob,     -- encrypt_pii(payload.linking_token)
+            abha_linking_token_encrypted = :blob,
             abha_linking_key_version = :kv,
             abha_linked_at = now(), updated_at = now(), updated_by = :uid
         WHERE id = :pid
-    """), {"abha": payload.abha_number, "blob": b"<encrypted>", "kv": 1,
+    """), {"abha": payload.abha_number, "blob": blob, "kv": key_version,
            "pid": payload.patient_id, "uid": user.sub})
     await enqueue(db, aggregate_type="patient", aggregate_id=payload.patient_id,
                   event_type="abha_linked", payload={"abha_number": payload.abha_number},

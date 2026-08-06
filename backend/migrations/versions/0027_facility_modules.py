@@ -10,9 +10,7 @@ from alembic import op
 from sqlalchemy.dialects.postgresql import UUID
 
 revision = "0027"
-# TODO: update to "0026" (or whatever the actual predecessor is) when rebasing onto staging.
-# Set to "0002" here because 0003–0026 are other teams' migrations not in this folder.
-down_revision = "0002"
+down_revision = "0026"
 branch_labels = None
 depends_on = None
 
@@ -38,8 +36,7 @@ def upgrade() -> None:
         sa.UniqueConstraint("facility_id", "module_code",
                             name="uq_facility_modules_facility_id_module_code"),
         sa.CheckConstraint(
-            "module_code IN ('lab','radiology','pharmacy','inventory','ipd','ot',"
-            "'blood_bank','emergency','patient_portal','abdm','billing_refunds')",
+            "module_code IN ('lab','radiology','pharmacy','ot','blood_bank')",
             name="ck_facility_modules_module_code",
         ),
     )
