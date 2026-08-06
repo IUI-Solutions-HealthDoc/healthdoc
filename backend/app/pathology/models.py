@@ -7,22 +7,21 @@ from app.common.db import Base
 class LabOrderItem(Base, UUIDPk, Timestamps, Blame):
     __tablename__ = "lab_order_items"
 
-    order_id = Column(UUID(as_uuid=True), nullable=False, index=True)  # order.order_type = 'lab'; no FK yet — app.orders has no models.py
+    order_id = Column(UUID(as_uuid=True), ForeignKey("orders.id", ondelete="RESTRICT"),
+                       nullable=False, index=True)  # order.order_type = 'lab'
     accession_number = Column(String(30), unique=True, nullable=False)
     test_code = Column(String(30), nullable=True)
     test_name = Column(Text, nullable=False)
     sample_type = Column(String(30), nullable=False)
 
-    # ADDED for #166 — sample collection (barcode, timestamp) was previously
+    # ADDED for #166 -- sample collection (barcode, timestamp) was previously
     # computed in the router but never persisted anywhere. See migration
     # 00XX_lab_barcode_collected_at.py.
     barcode = Column(String(50), unique=True, nullable=True)
     collected_at = Column(DateTime(timezone=True), nullable=True)
 
-    # NOTE: FK to departments.id intentionally omitted — app.departments has no
-    # models.py yet (confirmed 2026-07-30).
-    department_id = Column(UUID(as_uuid=True), nullable=True, index=True)
-
+    department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id", ondelete="RESTRICT"),
+                            nullable=True, index=True)
     status = Column(
         String(30),
         nullable=False,
@@ -44,7 +43,7 @@ class LabResult(Base, UUIDPk, Timestamps):
     result_data = Column(JSONB, nullable=False)
     remarks = Column(Text, nullable=True)
 
-    # ADDED for #218 — required reason when a finalized result is amended.
+    # ADDED for #218 -- required reason when a finalized result is amended.
     # NULL for original preliminary/final versions; required by the
     # amend_result endpoint for status='corrected' rows.
     amendment_reason = Column(Text, nullable=True)
@@ -53,7 +52,7 @@ class LabResult(Base, UUIDPk, Timestamps):
 
     # NOTE: not using the Blame mixin here on purpose. Blame declares BOTH
     # created_by and updated_by, but lab_results (migration 0010_lab.py) is
-    # append-only/versioned — rows are never updated in place, so there is
+    # append-only/versioned -- rows are never updated in place, so there is
     # no updated_by column in the DB. Declaring it via Blame would create a
     # model attribute with no matching column. created_by alone gets the
     # real FK by hand instead, now that app.users exists on staging.

@@ -7,9 +7,8 @@ from app.common.db import Base
 class BloodDonor(Base, UUIDPk, Timestamps, Blame):
     __tablename__ = "blood_donors"
 
-    # NOTE: FK to patients.id intentionally omitted — app.patients has no
-    # models.py yet (confirmed 2026-07-31). Revisit as a separate FK pass.
-    patient_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+    patient_id = Column(UUID(as_uuid=True), ForeignKey("patients.id", ondelete="RESTRICT"),
+                         nullable=True, index=True)
     full_name = Column(Text, nullable=False)
     sex = Column(String(30), nullable=True)
     dob = Column(Date, nullable=True)
@@ -39,5 +38,5 @@ class BloodUnit(Base, UUIDPk, Timestamps):
     screening_status = Column(String(30), nullable=False, server_default="pending")
     status = Column(String(30), nullable=False, server_default="available")
 
-    # NOTE: FK to patients.id intentionally omitted — same reason as above.
-    issued_to_patient_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+    issued_to_patient_id = Column(UUID(as_uuid=True), ForeignKey("patients.id", ondelete="RESTRICT"),
+                                   nullable=True, index=True)
