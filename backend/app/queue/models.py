@@ -26,6 +26,10 @@ class Queue(Base, UUIDPk, Timestamps):
         UniqueConstraint("department_id", "doctor_user_id", "service_date", name="uq_queue_doctor_date"),
     )
 
+    __audit_resource_type__ = "queues"
+    __audit_facility_id_field__ = "facility_id"
+    __audit_department_id_field__ = "department_id"
+
     facility_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("facilities.id"), nullable=False)
     department_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("departments.id"), nullable=False)
     doctor_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
@@ -58,7 +62,11 @@ class QueueToken(Base, UUIDPk, Timestamps):
     __table_args__ = (
         UniqueConstraint("queue_id", "sequence", name="uq_queue_token_sequence"),
     )
+    __audit_resource_type__ = "queue_tokens"
+    __audit_facility_id_field__ = "facility_id"
+    __audit_visit_id_field__ = "visit_id"
 
+    facility_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("facilities.id"), nullable=False)
     queue_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("queues.id"), nullable=False)
     visit_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("visits.id"), nullable=False)
     sequence: Mapped[int] = mapped_column(Integer, nullable=False)

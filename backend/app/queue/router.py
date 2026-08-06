@@ -7,12 +7,14 @@ keeps manual overrides for edge cases.
 """
 import uuid
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit.deps import AuditActor, get_current_actor_dependency
 from app.auth.deps import CurrentUser, require_roles
 from app.common.db import get_db
 from app.common.idempotency import check_idempotency, hash_request_body, record_idempotent_response
+from app.common.redis import publish_event
 from app.queue import service
 from app.queue.schemas import (
     CompleteAdvanceOut,
@@ -34,7 +36,12 @@ router = APIRouter(prefix="/queue", tags=["queue"])
     status_code=201,
     dependencies=[Depends(require_roles("receptionist", "admin"))],
 )
-async def create_queue(payload: QueueCreate, user: CurrentUser, db: AsyncSession = Depends(get_db)) -> dict:
+async def create_queue(
+    payload: QueueCreate,
+    user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+    actor: AuditActor = Depends(get_current_actor_dependency),
+) -> dict:
     caller_facility_id = await service.resolve_caller_facility_id(db, user.sub)
     queue = await service.create_queue(
         db,
@@ -49,6 +56,9 @@ async def create_queue(payload: QueueCreate, user: CurrentUser, db: AsyncSession
 
 
 # ---------------- CREATE TOKEN ----------------
+_CREATE_TOKEN_ENDPOINT = "POST /queue/tokens"
+
+
 @router.post(
     "/tokens",
     status_code=201,
@@ -59,6 +69,7 @@ async def create_token(
     user: CurrentUser,
     db: AsyncSession = Depends(get_db),
     idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    actor: AuditActor = Depends(get_current_actor_dependency),
 ) -> dict:
     if not idempotency_key:
         raise HTTPException(400, "Idempotency-Key header is required")
@@ -91,25 +102,46 @@ async def create_token(
     "/tokens/{queue_id}/call-next",
     dependencies=[Depends(require_roles("admin"))],
 )
-async def call_next(queue_id: uuid.UUID, user: CurrentUser, db: AsyncSession = Depends(get_db)) -> dict:
-    caller_facility_id = await service.resolve_caller_facility_id(db, user.sub)
-    token = await service.call_next_token(db, queue_id, caller_facility_id)
-    return QueueTokenOut.model_validate(token).model_dump(mode="json")
 
+async def call_next(
+    queue_id: uuid.UUID,
+    user: CurrentUser,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    actor: AuditActor = Depends(get_current_actor_dependency),
+) -> dict:
+    caller_facility_id = await service.resolve_caller_facility_id(db, user.sub)
+    token, pending_event = await service.call_next_token(db, queue_id, caller_facility_id)
+    if pending_event is not None:
+        background_tasks.add_task(
+            publish_event, pending_event["channel"], pending_event["event_type"], pending_event["payload"]
+        )
+    return QueueTokenOut.model_validate(token).model_dump(mode="json")
 
 # ---------------- ADMIN MANUAL OVERRIDE: FORCE-COMPLETE ----------------
 @router.post(
     "/tokens/{token_id}/complete",
     dependencies=[Depends(require_roles("admin"))],
 )
-async def force_complete_token(token_id: uuid.UUID, user: CurrentUser, db: AsyncSession = Depends(get_db)) -> dict:
+async def force_complete_token(
+    token_id: uuid.UUID,
+    user: CurrentUser,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    actor: AuditActor = Depends(get_current_actor_dependency),
+) -> dict:
     caller_facility_id = await service.resolve_caller_facility_id(db, user.sub)
-    completed_token, next_token = await service.admin_force_complete(db, token_id, caller_facility_id)
+    completed_token, next_token, pending_event = await service.admin_force_complete(
+        db, token_id, caller_facility_id
+    )
+    if pending_event is not None:
+        background_tasks.add_task(
+            publish_event, pending_event["channel"], pending_event["event_type"], pending_event["payload"]
+        )
     return CompleteAdvanceOut(
         completed_token=QueueTokenOut.model_validate(completed_token),
         next_token=QueueTokenOut.model_validate(next_token) if next_token else None,
     ).model_dump(mode="json")
-
 
 # ---------------- PRIORITY ELEVATION ----------------
 @router.patch(
@@ -121,6 +153,7 @@ async def elevate_priority(
     payload: TokenPriorityElevate,
     user: CurrentUser,
     db: AsyncSession = Depends(get_db),
+    actor: AuditActor = Depends(get_current_actor_dependency),
 ) -> dict:
     caller_facility_id = await service.resolve_caller_facility_id(db, user.sub)
     token = await service.elevate_priority(

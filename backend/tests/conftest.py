@@ -1,20 +1,30 @@
 import uuid
 from datetime import date
+from itertools import count
 
 import pytest
 from fastapi.testclient import TestClient
 import pytest_asyncio
-from sqlalchemy.dialects.postgresql import UUID,JSONB
+from sqlalchemy.dialects.postgresql import UUID,JSONB, INET
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.pool import StaticPool
 
 from app.main import app
 from app.common.db import Base
+from app.audit.models import AuditLog
 from app.departments.models import Department, Room
 from app.users.models import Facility, User
 from app.queue import service
-from sqlalchemy import Column, Table
+from sqlalchemy import Column, Table, event
+
+_test_chain_seq_counter = count(1)
+ 
+ 
+@event.listens_for(AuditLog, "before_insert")
+def _assign_test_chain_seq(mapper, connection, target):
+    if target.chain_seq is None:
+        target.chain_seq = next(_test_chain_seq_counter)
 
 @pytest.fixture
 def client() -> TestClient:
@@ -28,7 +38,8 @@ def fake_redis(monkeypatch):
         return True
 
     # Patch the publish_event function used in your queue service
-    monkeypatch.setattr("app.queue.service.publish_event", fake_publish)
+    monkeypatch.setattr("app.queue.service.publish_event", fake_publish, raising=False)
+    monkeypatch.setattr("app.queue.router.publish_event", fake_publish, raising=False)
 
 @pytest.fixture(autouse=True)
 def fake_business_date(monkeypatch):
@@ -38,10 +49,16 @@ def fake_business_date(monkeypatch):
     monkeypatch.setattr("app.queue.service.get_business_date", fake_get_business_date)
 
 
-def _ensure_visits_table_exists() -> None:
-    if "visits" not in Base.metadata.tables:
+def _ensure_stub_tables_exist() -> None:
+    referenced_tables: set[str] = set()
+    for table in Base.metadata.tables.values():
+        for fk in table.foreign_keys:
+            referenced_tables.add(fk.target_fullname.split(".")[0])
+ 
+    missing = referenced_tables - set(Base.metadata.tables.keys())
+    for table_name in missing:
         Table(
-            "visits", Base.metadata,
+            table_name, Base.metadata,
             Column("id", UUID(as_uuid=True), primary_key=True),
             extend_existing=True,
         )
@@ -49,18 +66,25 @@ def _ensure_visits_table_exists() -> None:
 @compiles(JSONB, "sqlite")
 def _compile_jsonb_sqlite(type_, compiler, **kw):
     return "JSON"
- 
+
+@compiles(INET, "sqlite")
+def _compile_inet_sqlite(type_, compiler, **kw):
+    return "TEXT" 
  
 @pytest_asyncio.fixture
 async def db():
     """A fresh, empty, in-memory database — created and destroyed once per
     test. Has no connection to your real Postgres DB."""
 
-    _ensure_visits_table_exists()
+    _ensure_stub_tables_exist()
 
     engine = create_async_engine(
         "sqlite+aiosqlite://", poolclass=StaticPool, connect_args={"check_same_thread": False},
     )
+    @event.listens_for(engine.sync_engine, "connect")
+    def _register_uuid_generate_v4(dbapi_connection, connection_record):
+        dbapi_connection.create_function("uuid_generate_v4", 0, lambda: str(uuid.uuid4()))
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
  

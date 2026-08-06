@@ -6,7 +6,7 @@ Call-next is automatic: a prescription/order created for a visit is the
 Admin has manual overrides for edge cases only.
 """
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone
 
 from fastapi import HTTPException
 from sqlalchemy import func, select
@@ -14,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.common.business_date import get_business_date
 from app.common.enums import QueuePriority, QueueTokenStatus
-from app.common.redis import publish_event, queue_channel
+from app.common.redis import queue_channel
 from app.departments.models import Department, Room
 from app.notifications.models import NotificationHistory
 from app.queue.models import Queue, QueueCounter, QueueToken, QueueTokenPriorityChange
@@ -202,6 +202,7 @@ async def create_token(
 
     token = QueueToken(
         id=uuid.uuid4(),
+        facility_id=queue.facility_id,
         queue_id=queue_id,
         visit_id=visit_id,
         sequence=next_seq,
@@ -230,14 +231,14 @@ async def _find_unresolved_called_token(db: AsyncSession, queue_id: uuid.UUID) -
 
 
 # ---------------- ADVANCE QUEUE (shared by manual + automatic paths) ----------------
-async def _advance_queue(db: AsyncSession, queue: Queue) -> QueueToken | None:
+async def _advance_queue(db: AsyncSession, queue: Queue) -> tuple[QueueToken | None, dict | None]:
     # Assumes `queue` is already locked by the caller. Returns None if
     # closed/empty/stuck -- can run inside another module's transaction
     # and must never raise there."""
     if not queue.is_open:
-        return None
+        return None, None
     if await _find_unresolved_called_token(db, queue.id) is not None:
-        return None
+        return None, None
 
     candidates = (
         (
@@ -252,13 +253,13 @@ async def _advance_queue(db: AsyncSession, queue: Queue) -> QueueToken | None:
         .all()
     )
     if not candidates:
-        return None
+        return None, None
 
     candidates.sort(key=lambda t: (t.priority_rank, t.created_at, t.sequence))
     next_token = candidates[0]
 
     next_token.status = QueueTokenStatus.CALLED.value
-    next_token.called_at = func.now()
+    next_token.called_at = datetime.now(timezone.utc)
     queue.now_serving_token_id = next_token.id
 
     await db.flush()
@@ -284,8 +285,12 @@ async def _advance_queue(db: AsyncSession, queue: Queue) -> QueueToken | None:
     ))
     await db.flush()
 
-    await publish_event(queue_channel(queue.department_id), "token_called", payload)
-    return next_token
+    pending_event = {
+        "channel": queue_channel(queue.department_id),
+        "event_type": "token_called",
+        "payload": payload,
+    }
+    return next_token, pending_event
 
 
 # ---------------- ADMIN MANUAL OVERRIDE: CALL NEXT ----------------
@@ -293,7 +298,7 @@ async def call_next_token(
     db: AsyncSession,
     queue_id: uuid.UUID,
     caller_facility_id: uuid.UUID,
-) -> QueueToken:
+) -> tuple[QueueToken, dict | None]:
     queue = await _get_scoped_queue(db, queue_id, caller_facility_id, for_update=True)
     if not queue.is_open:
         raise HTTPException(409, "Queue is closed")
@@ -306,16 +311,16 @@ async def call_next_token(
             f"resolve it first (e.g. admin_force_complete) before calling the next one",
         )
 
-    next_token = await _advance_queue(db, queue)
+    next_token, pending_event = await _advance_queue(db, queue)
     if next_token is None:
         raise HTTPException(404, "No waiting tokens in this queue")
-    return next_token
+    return next_token, pending_event
 
 
 # ---------------- COMPLETE + ADVANCE (automatic trigger core) ----------------
 async def _complete_token_and_advance(
     db: AsyncSession, token: QueueToken
-) -> tuple[QueueToken, QueueToken | None]:
+) -> tuple[QueueToken, QueueToken | None, dict | None]:
     if token.status != QueueTokenStatus.CALLED.value:
         raise HTTPException(409, f"Token must be 'called' to complete it (currently '{token.status}')")
 
@@ -326,20 +331,20 @@ async def _complete_token_and_advance(
         raise HTTPException(404, "Queue not found")
 
     token.status = QueueTokenStatus.COMPLETED.value
-    token.completed_at = func.now()
+    token.completed_at = datetime.now(timezone.utc)
     if queue.now_serving_token_id == token.id:
         queue.now_serving_token_id = None
 
     await db.flush()
     await db.refresh(token)
 
-    next_token = await _advance_queue(db, queue)
-    return token, next_token
+    next_token, pending_event = await _advance_queue(db, queue)
+    return token, next_token, pending_event
 
 
 async def complete_by_visit_id(
     db: AsyncSession, visit_id: uuid.UUID
-) -> tuple[QueueToken, QueueToken | None]:
+) -> tuple[QueueToken, QueueToken | None, dict | None]:
     # Call from prescriptions/orders, same DB transaction, right after
     # creating the prescription/order:
     # await complete_by_visit_id(db, prescription.visit_id)
@@ -363,7 +368,7 @@ async def admin_force_complete(
     db: AsyncSession,
     token_id: uuid.UUID,
     caller_facility_id: uuid.UUID,
-) -> tuple[QueueToken, QueueToken | None]:
+) -> tuple[QueueToken, QueueToken | None, dict | None]:
     token, _queue = await _get_scoped_token(db, token_id, caller_facility_id, for_update=True)
     return await _complete_token_and_advance(db, token)
 

@@ -70,6 +70,7 @@ def upgrade() -> None:
         "queue_tokens",
         sa.Column("id", UUID(as_uuid=True), primary_key=True,
                   server_default=sa.text("uuid_generate_v4()")),
+        sa.Column("facility_id", UUID(as_uuid=True), sa.ForeignKey("facilities.id"), nullable=False),          
         sa.Column("queue_id", UUID(as_uuid=True), sa.ForeignKey("queues.id"), nullable=False),
         sa.Column("visit_id", UUID(as_uuid=True), sa.ForeignKey("visits.id"), nullable=False),
         sa.Column("sequence", sa.Integer(), nullable=False),
@@ -88,6 +89,7 @@ def upgrade() -> None:
         sa.CheckConstraint(QueuePriority.sql_check("priority"), name="ck_queue_tokens_priority"),
     )
 
+    op.create_index("ix_queue_tokens_facility_id", "queue_tokens", ["facility_id"])
     op.create_index("ix_queue_tokens_visit_id", "queue_tokens", ["visit_id"])
     op.create_index(
         "ix_queue_tokens_active", "queue_tokens", ["queue_id", "priority_rank", "created_at"],

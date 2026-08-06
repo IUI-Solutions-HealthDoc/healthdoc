@@ -151,7 +151,7 @@ async def test_two_doctors_same_department_share_counter_no_collision(db, seed):
 async def test_call_next_respects_priority_over_age(db, queue):
     await service.create_token(db, queue.id, uuid.uuid4(), "normal", queue.facility_id)
     emergency_tok = await service.create_token(db, queue.id, uuid.uuid4(), "emergency", queue.facility_id)
-    called = await service.call_next_token(db, queue.id, queue.facility_id)
+    called, _pending_event = await service.call_next_token(db, queue.id, queue.facility_id)
     assert called.id == emergency_tok.id
 
 
@@ -162,20 +162,19 @@ async def test_call_next_wrong_facility_404(db, queue):
     assert exc.value.status_code == 404
 
 
-async def test_call_next_publishes_no_pii(db, queue, monkeypatch):
-    published = []
-
-    async def fake_publish(channel, event_type, payload):
-        published.append(payload)
-
-    monkeypatch.setattr(service, "publish_event", fake_publish)
+async def test_call_next_returns_pending_event_with_no_pii(db, queue):
     await service.create_token(db, queue.id, uuid.uuid4(), "normal", queue.facility_id)
-    await service.call_next_token(db, queue.id, queue.facility_id)
-
-    assert len(published) == 1
-    assert set(published[0].keys()) == {
+    called, pending_event = await service.call_next_token(db, queue.id, queue.facility_id)
+ 
+    assert pending_event is not None
+    assert pending_event["event_type"] == "token_called"
+    assert pending_event["channel"] == f"queue:{queue.department_id}"
+    payload = pending_event["payload"]
+    assert set(payload.keys()) == {
         "department_id", "queue_id", "doctor_name", "room_number", "token_display", "now_serving",
     }
+    assert payload["token_display"] == called.token_display
+ 
     rows = (await db.execute(select(NotificationHistory))).scalars().all()
     assert len(rows) == 1
 
