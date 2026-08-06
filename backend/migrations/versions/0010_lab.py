@@ -27,12 +27,12 @@ def upgrade() -> None:
         sa.Column("sample_type", sa.String(30), nullable=False),
         sa.Column("department_id", postgresql.UUID(as_uuid=True),
                   sa.ForeignKey("departments.id", ondelete="RESTRICT"), nullable=True),
-         sa.Column(
-      "status",
-      sa.String(50),
-      nullable=False,
-      server_default=sa.text("'placed'")
- ),
+        sa.Column(
+            "status",
+            sa.String(50),
+            nullable=False,
+            server_default=sa.text("'placed'")
+        ),
         sa.Column("estimated_minutes", sa.Integer(), nullable=True),
         sa.Column("created_by", postgresql.UUID(as_uuid=True),
                   sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False),
