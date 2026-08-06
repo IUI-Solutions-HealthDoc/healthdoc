@@ -3,25 +3,78 @@ on:
   pull_request:
   push:
     branches: [staging, main]
+
+# Every step here either passes or fails the build. No `|| true`, no
+# `|| echo "not yet created"`. A gate that reports success without running is
+# worse than no gate: it produces a green tick that people trust.
+#
+# This has bitten us three times — `pytest -q || echo "no tests yet"` swallowed
+# every test failure for weeks; `check_migration_integrity.py || true` hid a
+# forked revision chain; and the frontend showed green while `npm run build`
+# had never once succeeded (undeclared autoprefixer). If a step is genuinely
+# not ready, delete the step rather than neutering it.
+
 jobs:
   backend:
     runs-on: ubuntu-latest
     defaults: { run: { working-directory: backend } }
+
+    # Real Postgres, so the DB-backed tests actually execute. Without this the
+    # audit chain-seq, partition and append-only-trigger tests error out on
+    # connection refused — which the old `|| echo` then reported as success.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: healthdoc
+          POSTGRES_PASSWORD: healthdoc
+          POSTGRES_DB: healthdoc_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U healthdoc"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+
+    env:
+      TEST_DATABASE_URL: postgresql+asyncpg://healthdoc:healthdoc@localhost:5432/healthdoc_test
+      DATABASE_URL: postgresql+asyncpg://healthdoc:healthdoc@localhost:5432/healthdoc_test
+
     steps:
       - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      - run: pip install -r requirements.txt || echo "requirements.txt not yet created"
-      - run: pip install ruff pytest && ruff check . || true
-      - run: pytest -q || echo "no tests yet"
-      - name: Spec drift check (docs vs enums)
-        run: python scripts/spec_check.py ..
-      - name: PR convention check (blockers fail the build)
+
+      - name: Install dependencies
         run: |
-          git fetch --no-tags --depth=50 origin staging || true
-          python scripts/pr_check.py
+          pip install -r requirements.txt
+          pip install ruff pytest pytest-asyncio
+
+      - name: Lint (style only — does not block)
+        run: ruff check . || true
+
+      - name: Import check (the app must actually start)
+        run: python -c "import app.main; print('app imports OK')"
+
       - name: Migration chain integrity
-        run: python scripts/check_migration_integrity.py || true
+        run: python scripts/check_migration_integrity.py
+
+      - name: Migrations must apply to a real database
+        run: alembic upgrade head
+
+      - name: Spec drift check (docs vs enums.py)
+        run: python scripts/spec_check.py ..
+
+      - name: Schema drift check (docs vs migrations)
+        run: python scripts/schema_drift_check.py
+
+      - name: PR convention check
+        run: |
+          git fetch --no-tags --depth=50 origin staging
+          python scripts/pr_check.py
+
+      - name: Tests
+        run: pytest -q
+
   frontend:
     runs-on: ubuntu-latest
     defaults: { run: { working-directory: frontend } }
@@ -29,9 +82,18 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: "20" }
-      - run: npm ci || npm install || echo "package.json not yet created"
+
+      - name: Install dependencies
+        run: npm ci
+
       - run: npm run lint --if-present
+
       - name: Frontend convention check
         run: node scripts/fe_check.mjs --all
+
       - run: npm run test --if-present
-      - run: npm run build --if-present
+
+      # Not --if-present: the build is the point. main shipped for weeks with a
+      # build that had never succeeded because the script was "absent enough".
+      - name: Build
+        run: npm run build

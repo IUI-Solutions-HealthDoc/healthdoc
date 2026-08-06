@@ -26,17 +26,37 @@ def main() -> int:
     for pair in re.findall(r'^\*\*([a-z_]+) / ([a-z_]+)\*\*', doc, re.M):
         defined.update(pair)
     mapsec = doc.split('## 2. Migration map')[1].split('## 3.')[0]
-    SKIP = {'and','the','skipped','never','create','stub','only','schema','fk','alter','uuid','ossp',
-            'pgcrypto','pg_trgm','patients','seq_outbox','fulfilment_mode','adjustment_type',
-            'consent_manager_id','notification_history'} 
+
+    # Prose words that appear in the Tables cell but never name a table.
+    SKIP = {'and', 'the', 'skipped', 'never', 'create', 'stub', 'only', 'schema', 'fk',
+            'alter', 'uuid', 'ossp', 'pgcrypto', 'pg_trgm', 'seq_outbox', 'widen',
+            'widened', 'see', 'plus', 'with'}
+
+    # "ALTER <table>: col_a, col_b" names COLUMNS, not tables. Strip those clauses
+    # before looking for table names — otherwise every altered column has to be
+    # hand-added to SKIP, which is how this check accumulated `guardian`/`abha`/
+    # `_id`/`_type` prefix hacks and still broke on the next migration to use it
+    # (0003a: 'timezone' and 'widen' were both reported as missing tables).
+    alter_clause = re.compile(r'\bALTER\s+[a-z_]+\s*:[^;|]*', re.I)
+
+    # "(+ orders.fulfilment_mode)" / "(+ FK consent_records.consent_manager_id)" —
+    # the (+ ...) notation always means "and this column/FK on an existing table",
+    # never "and this new table". Same reasoning as the ALTER clause above.
+    plus_clause = re.compile(r'\(\+[^)]*\)')
+
     for line in mapsec.splitlines():
         if not line.startswith('| 00'):
             continue
         cells = line.split('|')
-        if len(cells) < 4: continue
-        for t in re.findall(r'\b([a-z_]{4,})\b', cells[3]):
-            if t in SKIP or t in defined or t.endswith('_type') or t.endswith('_id') \
-               or t.startswith('is_') or t.startswith('guardian') or t.startswith('abha'):
+        if len(cells) < 4:
+            continue
+        # Drop struck-through entries (~~x~~) — those are documented as NOT created here.
+        cell = re.sub(r'~~[^~]+~~', ' ', cells[3])
+        cell = plus_clause.sub(' ', cell)
+        cell = alter_clause.sub(' ', cell)
+        cell = cell.replace('*', ' ')
+        for t in re.findall(r'\b([a-z_]{4,})\b', cell):
+            if t in SKIP or t in defined:
                 continue
             problems.append(f"table '{t}' is in the migration map but has no **definition** block")
 

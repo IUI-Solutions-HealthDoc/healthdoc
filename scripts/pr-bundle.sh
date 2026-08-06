@@ -31,6 +31,7 @@ TOOLDIR=$(mktemp -d)
 git show origin/staging:backend/scripts/pr_check.py               > "$TOOLDIR/pr_check.py" 2>/dev/null || true
 git show origin/staging:backend/scripts/spec_check.py             > "$TOOLDIR/spec_check.py" 2>/dev/null || true
 git show origin/staging:backend/scripts/check_migration_integrity.py > "$TOOLDIR/check_migration_integrity.py" 2>/dev/null || true
+git show origin/staging:backend/scripts/schema_drift_check.py      > "$TOOLDIR/schema_drift_check.py" 2>/dev/null || true
 git show origin/staging:frontend/scripts/fe_check.mjs             > "$TOOLDIR/fe_check.mjs" 2>/dev/null || true
 git show origin/staging:docs/database-schema.md                   > "$TOOLDIR/database-schema.md" 2>/dev/null || true
 
@@ -77,6 +78,9 @@ fi
 echo
 echo "\$ check_migration_integrity.py"
 (cd backend && python3 "$TOOLDIR/check_migration_integrity.py" 2>&1) || true
+echo
+echo "\$ schema_drift_check.py"
+(cd backend && python3 "$TOOLDIR/schema_drift_check.py" 2>&1) || true
 if git diff --name-only "$BASE" HEAD | grep -q '^frontend/'; then
   echo
   echo "\$ fe_check.mjs"
