@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import importlib.util
 import os
 import sys
 import uuid
@@ -59,10 +60,36 @@ TEST_DATABASE_URL = os.environ.get(
 )
 
 # Migration filenames start with a digit, so they can't be `import`-ed as
-# a plain statement — importlib.import_module takes the dotted path as a
-# string instead. Adjust this path if your versions/ package layout
-# differs from migrations.versions.0019_files.
-migration_0019 = importlib.import_module("migrations.versions.0019_files")
+# a plain statement. Load by FILE PATH rather than dotted module path:
+# 0019 lives in versions/ when its predecessors are merged and in
+# pending/ when they aren't, and pending/ is deliberately not a package
+# (no __init__.py — alembic must not see those files), so
+# import_module("migrations.versions.0019_files") raises ModuleNotFoundError
+# the moment 0019 is parked. That is what happened: parking 0019 turned
+# every backend CI run red at COLLECTION time, on every open PR, with an
+# error naming a file most authors had never touched.
+#
+# Nothing below needs 0019 to be in the alembic chain — `engine` runs its
+# upgrade() through an isolated MigrationContext (see module docstring).
+# Only the module object is needed, so look in both homes.
+def _load_migration_0019():
+    here = os.path.dirname(os.path.abspath(__file__))
+    migrations_dir = os.path.join(here, "..", "..", "migrations")
+    for home in ("versions", "pending"):
+        path = os.path.normpath(os.path.join(migrations_dir, home, "0019_files.py"))
+        if os.path.exists(path):
+            spec = importlib.util.spec_from_file_location("migration_0019", path)
+            assert spec and spec.loader
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module
+    raise RuntimeError(
+        "0019_files.py not found in migrations/versions/ or migrations/pending/ "
+        "— if it was renamed, update tests/files/conftest.py."
+    )
+
+
+migration_0019 = _load_migration_0019()
 
 # asyncpg prepares each statement individually and rejects a
 # semicolon-joined multi-statement string ("cannot insert multiple
