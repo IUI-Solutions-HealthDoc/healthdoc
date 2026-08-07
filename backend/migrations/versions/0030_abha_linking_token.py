@@ -18,9 +18,15 @@ def upgrade() -> None:
     op.add_column("patients", sa.Column("abha_linking_token_encrypted", sa.LargeBinary(), nullable=True))
     op.add_column("patients", sa.Column("abha_linking_key_version", sa.SmallInteger(), nullable=True))
     op.add_column("patients", sa.Column("abha_linked_at", sa.DateTime(timezone=True), nullable=True))
+    op.create_check_constraint(
+        "ck_patients_abha_token_key_version",
+        "patients",
+        "(abha_linking_token_encrypted IS NULL) = (abha_linking_key_version IS NULL)",
+    )
 
 
 def downgrade() -> None:
+    op.drop_constraint("ck_patients_abha_token_key_version", "patients", type_="check")
     op.drop_column("patients", "abha_linked_at")
     op.drop_column("patients", "abha_linking_key_version")
     op.drop_column("patients", "abha_linking_token_encrypted")
