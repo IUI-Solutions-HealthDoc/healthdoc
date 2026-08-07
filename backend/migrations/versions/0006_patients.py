@@ -57,12 +57,18 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['updated_by'], ['users.id'], ),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('abha_number'),
-    sa.UniqueConstraint('thid'),
+    # thid uniqueness = partial index, not a plain constraint, so a soft-deleted
+    # row never permanently blocks reissuing that THID to a new emergency patient.
+    # Mirrors the uhid partial index above — same reasoning, same fix (PR review).
     )
     # uhid uniqueness = partial index, not a plain constraint, so a soft-deleted
     # (deleted_at IS NOT NULL) row never blocks reissuing/correcting a UHID.
     op.create_index(
         'uq_patients_uhid', 'patients', ['uhid'],
+        unique=True, postgresql_where=sa.text('deleted_at IS NULL'),
+    )
+    op.create_index(
+        'uq_patients_thid', 'patients', ['thid'],
         unique=True, postgresql_where=sa.text('deleted_at IS NULL'),
     )
     op.create_index(
@@ -128,5 +134,6 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_patient_identifiers_identifier_blind_index'), table_name='patient_identifiers')
     op.drop_table('patient_identifiers')
     op.drop_index('ix_patients_full_name_trgm', table_name='patients')
+    op.drop_index('uq_patients_thid', table_name='patients')
     op.drop_index('uq_patients_uhid', table_name='patients')
     op.drop_table('patients')
