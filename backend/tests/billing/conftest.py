@@ -122,27 +122,41 @@ async def db(engine) -> AsyncSession:
 
 
 async def seed_facility(db: AsyncSession, *, timezone_name: str = "Asia/Kolkata", code: str | None = None) -> uuid.UUID:
+    """state_code is NOT NULL with no default on the real facilities
+    table (confirmed via \\d facilities against a merged-in staging
+    migration) -- billing itself never reads state_code, this is purely
+    to satisfy the real schema's constraint."""
     facility_id = uuid.uuid4()
     code = code or f"TST{str(facility_id)[:5].upper()}"
     await db.execute(
         sa.text(
-            "INSERT INTO facilities (id, code, name, timezone) "
-            "VALUES (:id, :code, :name, :tz)"
+            "INSERT INTO facilities (id, code, name, state_code, timezone) "
+            "VALUES (:id, :code, :name, :state_code, :tz)"
         ),
-        {"id": facility_id, "code": code, "name": f"Test Facility {code}", "tz": timezone_name},
+        {
+            "id": facility_id, "code": code[:20], "name": f"Test Facility {code}",
+            "state_code": "DL", "tz": timezone_name,
+        },
     )
     return facility_id
 
 
 async def seed_user(db: AsyncSession, *, facility_id: uuid.UUID, keycloak_sub: str | None = None) -> uuid.UUID:
+    """full_name is NOT NULL with no default on the real users table
+    (confirmed via \\d users) -- billing reads keycloak_sub/id only,
+    full_name is purely to satisfy the real schema's constraint."""
     user_id = uuid.uuid4()
     keycloak_sub = keycloak_sub or f"sub-{user_id}"
+    username = keycloak_sub[:100]
     await db.execute(
         sa.text(
-            "INSERT INTO users (id, facility_id, keycloak_sub, username) "
-            "VALUES (:id, :facility_id, :sub, :username)"
+            "INSERT INTO users (id, facility_id, keycloak_sub, username, full_name) "
+            "VALUES (:id, :facility_id, :sub, :username, :full_name)"
         ),
-        {"id": user_id, "facility_id": facility_id, "sub": keycloak_sub, "username": keycloak_sub},
+        {
+            "id": user_id, "facility_id": facility_id, "sub": keycloak_sub[:64],
+            "username": username, "full_name": "Test User",
+        },
     )
     return user_id
 
@@ -228,4 +242,39 @@ async def draft_invoice(
 ) -> uuid.UUID:
     return await seed_draft_invoice(
         db, facility_id=facility, patient_id=patient, visit_id=visit, created_by=user,
+    )
+
+
+# ---------------------------------------------------------------------
+# FK-resolution stubs — NOT ORM models, just enough sa.Table() shape so
+# SQLAlchemy's flush-time dependency sort can resolve string ForeignKeys
+# like Invoice.patient_id -> "patients.id". These tables are real in
+# Postgres (created via stub_schema.sql / real migrations), but were
+# never declared as Python Table objects anywhere importable from this
+# test suite (patients/visits modules aren't written yet; facilities/
+# users are real migrations, not declarative Base subclasses). Once
+# those modules exist for real and get imported by app.main, this block
+# becomes redundant and should be deleted.
+# ---------------------------------------------------------------------
+from app.common.db import Base as _Base  # noqa: E402
+
+if "facilities" not in _Base.metadata.tables:
+    sa.Table(
+        "facilities", _Base.metadata,
+        sa.Column("id", sa.dialects.postgresql.UUID(as_uuid=True), primary_key=True),
+    )
+if "users" not in _Base.metadata.tables:
+    sa.Table(
+        "users", _Base.metadata,
+        sa.Column("id", sa.dialects.postgresql.UUID(as_uuid=True), primary_key=True),
+    )
+if "patients" not in _Base.metadata.tables:
+    sa.Table(
+        "patients", _Base.metadata,
+        sa.Column("id", sa.dialects.postgresql.UUID(as_uuid=True), primary_key=True),
+    )
+if "visits" not in _Base.metadata.tables:
+    sa.Table(
+        "visits", _Base.metadata,
+        sa.Column("id", sa.dialects.postgresql.UUID(as_uuid=True), primary_key=True),
     )

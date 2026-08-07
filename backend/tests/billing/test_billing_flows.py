@@ -27,7 +27,7 @@ from fastapi import HTTPException
 from app.billing import service
 from app.billing.schemas import PaymentCreate, RefundCreate
 from app.common.enums import PaymentMode
-from tests.billing.conftest import seed_draft_invoice, seed_patient, seed_user, seed_visit
+from tests.billing.conftest import seed_draft_invoice, seed_facility, seed_patient, seed_user, seed_visit
 
 pytestmark = pytest.mark.asyncio
 
@@ -110,18 +110,36 @@ class TestBuildInvoice:
 
 
 class TestConcurrentBuildInvoice:
-    """Blocker #2 regression — see this module's docstring."""
+    """Blocker #2 regression — see this module's docstring.
 
-    async def test_two_concurrent_builds_bill_each_charge_at_most_once(
-        self, engine, facility, patient, visit, user, draft_invoice,
-    ):
-        await _seed_billable_lab_charge_standalone(engine, visit_id=visit, test_code="CBC")
+    Deliberately does NOT use the facility/patient/visit/user/
+    draft_invoice fixtures — those insert through the shared `db`
+    fixture, which holds everything in one UNCOMMITTED transaction
+    until teardown. The two racing sessions below are separate real
+    connections, and a separate Postgres connection can never see
+    another connection's uncommitted rows -- so this test seeds every
+    prerequisite itself, through its own committed session, exactly
+    like _seed_billable_lab_charge_standalone already did for the lab
+    charge alone.
+    """
 
-        # Two independent sessions/transactions racing on the same visit,
-        # simulating a double-clicked button / retried request.
+    async def test_two_concurrent_builds_bill_each_charge_at_most_once(self, engine):
         from sqlalchemy.ext.asyncio import async_sessionmaker
 
         session_factory = async_sessionmaker(bind=engine, expire_on_commit=False)
+
+        async with session_factory() as session:
+            async with session.begin():
+                facility = await seed_facility(session)
+                patient = await seed_patient(session, facility_id=facility)
+                user = await seed_user(session, facility_id=facility)
+                visit = await seed_visit(session, facility_id=facility, patient_id=patient)
+                draft_invoice = await seed_draft_invoice(
+                    session, facility_id=facility, patient_id=patient,
+                    visit_id=visit, created_by=user,
+                )
+
+        await _seed_billable_lab_charge_standalone(engine, visit_id=visit, test_code="CBC")
 
         async def run_build():
             async with session_factory() as session:
