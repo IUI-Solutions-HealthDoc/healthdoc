@@ -14,8 +14,7 @@ class PatientCreate(BaseModel):
     mobile: str | None = None
     abha_number: str | None = None
     aadhaar_number: str | None = None
-    facility_id: uuid.UUID
-    
+
     @model_validator(mode="after")
     def _dob_or_age_required(self) -> "PatientCreate":
         if self.dob is None and self.age_years is None:
@@ -83,7 +82,6 @@ class PatientSearchRequest(BaseModel):
     uhid: str | None = None
     aadhaar_number: str | None = None
     abha_number: str | None = None
-    facility_id: uuid.UUID | None = None
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1, le=100)
 

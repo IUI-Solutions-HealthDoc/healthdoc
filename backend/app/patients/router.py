@@ -1,28 +1,38 @@
-"""patients module router — B2-W1-02: registration endpoint."""
+"""patients module router — registration, search, update, merge endpoints."""
 import uuid
-from fastapi import APIRouter, Depends, HTTPException ,Header
 from typing import Annotated
-import hashlib, json
 
+from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.deps import CurrentDbUser, require_roles
-from app.common.db import get_db
-from app.patients.models import Patient
-from app.patients.schemas import (
-    PatientCreate, PatientOut,
-    PatientUpdate,
-    PatientSearchRequest, PatientSearchResponse, PatientSearchResult,)
 from app.audit.context import AuditActor
 from app.audit.deps import get_current_actor_dependency
-from app.patients.service import generate_uhid, build_aadhaar_identifier, search_patients, mask_mobile, update_patient
+from app.auth.deps import CurrentDbUser, require_roles
+from app.common.db import get_db
+from app.common.idempotency import (
+    check_idempotency, hash_request_body, record_idempotent_response,
+)
+from app.patients.models import Patient
+from app.patients.schemas import (
+    MergeActionRequest, MergeLogOut, MergeRequestCreate,
+    PatientCreate, PatientOut,
+    PatientSearchRequest, PatientSearchResponse, PatientSearchResult,
+    PatientUpdate,
+)
+from app.patients.service import (
+    approve_merge, build_aadhaar_identifier, find_duplicate_by_aadhaar,
+    generate_uhid, mask_mobile, reject_merge, request_merge,
+    search_patients, update_patient,
+)
 from app.users.models import Facility
 
 router = APIRouter(prefix="/patients", tags=["patients"])
 
-async def idempotency_guard(
+_REGISTER_ENDPOINT = "POST /patients"
+
+
+async def _require_idempotency_key(
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
-    db: AsyncSession = Depends(get_db),
 ) -> str:
     if not idempotency_key:
         raise HTTPException(400, {"code": "missing_idempotency_key",
@@ -32,7 +42,8 @@ async def idempotency_guard(
 
 @router.get("/ping")
 async def ping() -> dict:
-    return {"module": "patients", "status": "stub"}
+    return {"module": "patients", "status": "ok"}
+
 
 @router.post(
     "",
@@ -44,20 +55,57 @@ async def register_patient(
     payload: PatientCreate,
     current_db_user: CurrentDbUser,
     db: AsyncSession = Depends(get_db),
-    idempotency_key: str = Depends(idempotency_guard),  
+    idempotency_key: str = Depends(_require_idempotency_key),
 ) -> Patient:
-    facility = await db.get(Facility, payload.facility_id)
+    """Register a new patient.
+
+    facility_id comes from the authenticated user's token — never from the
+    request body (B3 fix: a receptionist at facility A must not be able to
+    register patients into facility B).
+
+    Idempotency-Key header required: a network retry with the same key
+    returns the original patient instead of creating a duplicate (real
+    reserve-then-store, not just header presence check).
+    """
+    # Real idempotency: reserve the key before doing any work, replay if seen
+    request_hash = hash_request_body(payload)
+    existing = await check_idempotency(
+        db, idempotency_key, _REGISTER_ENDPOINT, request_hash,
+        user_id=current_db_user.id,
+    )
+    if existing is not None:
+        return existing.response_body  # replay stored response
+
+    facility = await db.get(Facility, current_db_user.facility_id)
     if not facility:
         raise HTTPException(404, "Facility not found")
 
-    uhid = await generate_uhid(db, state_code=facility.state_code, facility_code=facility.code)
+    # B8: duplicate Aadhaar check before insert
+    if payload.aadhaar_number:
+        duplicate = await find_duplicate_by_aadhaar(
+            db,
+            aadhaar_number=payload.aadhaar_number,
+            facility_id=current_db_user.facility_id,
+        )
+        if duplicate:
+            raise HTTPException(409, {
+                "code": "duplicate_aadhaar",
+                "candidate_patient_id": str(duplicate.id),
+                "message": "A patient with this Aadhaar number already exists",
+            })
+
+    # TZ fix: derive year from facility's local timezone, not UTC
+    uhid = await generate_uhid(
+        db,
+        state_code=facility.state_code,
+        facility_code=facility.code,
+        facility_timezone=facility.timezone,
+    )
 
     if payload.aadhaar_number:
         identity_path = "aadhaar_mobile"
-        identity_status = "identity_unverified"
     else:
         identity_path = "demographics_only"
-        identity_status = "identity_unverified"
 
     patient = Patient(
         uhid=uhid,
@@ -67,9 +115,9 @@ async def register_patient(
         age_years=payload.age_years,
         mobile=payload.mobile,
         abha_number=payload.abha_number,
-        facility_id=payload.facility_id,
+        facility_id=current_db_user.facility_id,  # B3: from token, not payload
         identity_path=identity_path,
-        identity_status=identity_status,
+        identity_status="identity_unverified",
         created_by=current_db_user.id,
     )
     db.add(patient)
@@ -84,7 +132,13 @@ async def register_patient(
         await db.flush()
 
     await db.refresh(patient)
+
+    # Store response so retries replay it without re-running registration
+    response = PatientOut.model_validate(patient).model_dump(mode="json")
+    await record_idempotent_response(db, idempotency_key, _REGISTER_ENDPOINT, 201, response)
+
     return patient
+
 
 @router.post(
     "/search",
@@ -93,8 +147,15 @@ async def register_patient(
 )
 async def search_patients_endpoint(
     payload: PatientSearchRequest,
+    current_db_user: CurrentDbUser,  # B4: facility_id from token
     db: AsyncSession = Depends(get_db),
 ) -> PatientSearchResponse:
+    """Search patients within the caller's facility only.
+
+    facility_id is always sourced from current_db_user — never from the
+    request body (B4 fix: cross-facility search is consent-gated, not a
+    default behaviour any receptionist can trigger by supplying a UUID).
+    """
     results, total = await search_patients(
         db,
         full_name=payload.full_name,
@@ -103,7 +164,7 @@ async def search_patients_endpoint(
         uhid=payload.uhid,
         aadhaar_number=payload.aadhaar_number,
         abha_number=payload.abha_number,
-        facility_id=payload.facility_id,
+        facility_id=current_db_user.facility_id,  # B4: unconditional, from token
         page=payload.page,
         page_size=payload.page_size,
     )
@@ -120,7 +181,9 @@ async def search_patients_endpoint(
         )
         for patient, score, matched_on in results
     ]
-    return PatientSearchResponse(items=items, page=payload.page, page_size=payload.page_size, total=total)
+    return PatientSearchResponse(
+        items=items, page=payload.page, page_size=payload.page_size, total=total,
+    )
 
 
 @router.patch(
@@ -132,10 +195,6 @@ async def update_patient_endpoint(
     patient_id: uuid.UUID,
     payload: PatientUpdate,
     current_db_user: CurrentDbUser,
-    # get_current_actor_dependency resolves JWT sub -> users.id and stores
-    # the actor in request-scoped context so write_audit_log() picks it up
-    # automatically (ip_address, user_id, role) — no need to thread them
-    # through the service call by hand.
     actor: AuditActor = Depends(get_current_actor_dependency),
     db: AsyncSession = Depends(get_db),
 ) -> Patient:
@@ -157,10 +216,6 @@ async def update_patient_endpoint(
         raise HTTPException(400, str(e))
 
 
-from app.patients.schemas import MergeRequestCreate, MergeActionRequest, MergeLogOut
-from app.patients.service import request_merge, approve_merge, reject_merge
-
-
 @router.post(
     "/merge",
     status_code=201,
@@ -173,7 +228,7 @@ async def request_patient_merge(
     db: AsyncSession = Depends(get_db),
 ) -> MergeLogOut:
     try:
-        merge_log = await request_merge(
+        return await request_merge(
             db,
             source_patient_id=payload.source_patient_id,
             target_patient_id=payload.target_patient_id,
@@ -183,7 +238,6 @@ async def request_patient_merge(
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
-    return merge_log
 
 
 @router.post(
@@ -197,12 +251,11 @@ async def approve_patient_merge(
     db: AsyncSession = Depends(get_db),
 ) -> MergeLogOut:
     try:
-        merge_log = await approve_merge(db, merge_log_id=merge_id, approved_by=current_db_user.id)
+        return await approve_merge(db, merge_log_id=merge_id, approved_by=current_db_user.id)
     except ValueError as e:
         if str(e) == "self_approval_not_allowed":
             raise HTTPException(409, {"code": "self_approval_not_allowed"})
         raise HTTPException(400, str(e))
-    return merge_log
 
 
 @router.post(
@@ -217,9 +270,11 @@ async def reject_patient_merge(
     db: AsyncSession = Depends(get_db),
 ) -> MergeLogOut:
     try:
-        merge_log = await reject_merge(db, merge_log_id=merge_id, rejected_by=current_db_user.id, reason=payload.reason)
+        return await reject_merge(
+            db, merge_log_id=merge_id,
+            rejected_by=current_db_user.id, reason=payload.reason,
+        )
     except ValueError as e:
         if str(e) == "self_approval_not_allowed":
             raise HTTPException(409, {"code": "self_approval_not_allowed"})
         raise HTTPException(400, str(e))
-    return merge_log

@@ -14,6 +14,29 @@ branch_labels = None
 depends_on = None
 
 
+def _create_sequences_for_existing_facilities() -> None:
+    """Called at the end of upgrade() — creates UHID sequences for all
+    facilities that exist at deploy time so the registration endpoint
+    never needs CREATE SEQUENCE in the request path."""
+    import zoneinfo
+    from datetime import datetime
+    from sqlalchemy import text
+    conn = op.get_bind()
+    rows = conn.execute(
+        text("SELECT code, timezone FROM facilities WHERE is_active = true")
+    ).fetchall()
+    for code, tz_name in rows:
+        try:
+            tz = zoneinfo.ZoneInfo(tz_name)
+        except Exception:
+            tz = zoneinfo.ZoneInfo("Asia/Kolkata")
+        year = datetime.now(tz).year
+        safe_code = code.lower().replace("-", "_")
+        seq_name = f"seq_uhid_{safe_code}_{year}"
+        conn.execute(text(f'CREATE SEQUENCE IF NOT EXISTS "{seq_name}"'))
+
+
+
 def upgrade() -> None:
     op.create_table('patients',
     sa.Column('id', sa.UUID(), server_default=sa.text('uuid_generate_v4()'), nullable=False),
@@ -124,6 +147,7 @@ def upgrade() -> None:
     )
     op.create_index(op.f('ix_patient_merge_log_source_patient_id'), 'patient_merge_log', ['source_patient_id'], unique=False)
     op.create_index(op.f('ix_patient_merge_log_target_patient_id'), 'patient_merge_log', ['target_patient_id'], unique=False)
+    _create_sequences_for_existing_facilities()
 
 
 def downgrade() -> None:
@@ -137,3 +161,4 @@ def downgrade() -> None:
     op.drop_index('uq_patients_thid', table_name='patients')
     op.drop_index('uq_patients_uhid', table_name='patients')
     op.drop_table('patients')
+

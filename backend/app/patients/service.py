@@ -92,8 +92,17 @@ def validate_uhid(uhid: str) -> bool:
     return recomputed == check_digit
 
 
-def _current_year() -> int:
-    return datetime.now(timezone.utc).year
+def _current_year_for_facility(facility_timezone: str) -> int:
+    """Derives the current year in the facility's local timezone.
+
+    Using UTC .year means patients registered between 00:00 and 05:30 IST
+    on 1 January get last year's UHID — wrong forever, and they land on a
+    different sequence (seq_uhid_<fac>_<wrong_year>). Schema doc rule:
+    business dates must use facilities.timezone, never UTC directly.
+    """
+    import zoneinfo
+    tz = zoneinfo.ZoneInfo(facility_timezone)
+    return datetime.now(tz).year
 
 
 def _sequence_name(facility_code: str, year: int) -> str:
@@ -108,20 +117,39 @@ def _sequence_name(facility_code: str, year: int) -> str:
 
 
 async def _next_sequence(db: AsyncSession, facility_code: str, year: int) -> int:
+    """Advance and return the next value from this facility+year UHID sequence.
+
+    Sequences are pre-created at facility-insert time (Facility after_insert
+    event in app/users/models.py) and for existing facilities by migration 0006.
+    No DDL runs here — CREATE SEQUENCE inside a request path is not safe under
+    concurrent first-registrations (IF NOT EXISTS is not atomic in Postgres).
+
+    The except branch is a last-resort fallback for dev/test environments or
+    facilities that predate the after_insert hook. It catches only
+    undefined_object (pgcode 42P01) so genuine errors still surface.
+    """
+    from sqlalchemy.exc import ProgrammingError
+
     seq_name = _sequence_name(facility_code, year)
+    try:
+        result = await db.execute(
+            text("SELECT nextval(:seq_name)"), {"seq_name": seq_name}
+        )
+        return result.scalar()
+    except ProgrammingError as exc:
+        pgcode = getattr(getattr(exc, "orig", None), "pgcode", None)
+        if pgcode != "42P01":  # 42P01 = undefined_object
+            raise
+        # Sequence missing — create and retry once (dev/test fallback only).
+        await db.execute(text(f'CREATE SEQUENCE IF NOT EXISTS "{seq_name}"'))
+        result = await db.execute(
+            text("SELECT nextval(:seq_name)"), {"seq_name": seq_name}
+        )
+        return result.scalar()
 
-    # DDL: identifier cannot be parametrized, hence the regex validation above.
-    await db.execute(text(f'CREATE SEQUENCE IF NOT EXISTS "{seq_name}"'))
 
-    # DML: nextval() takes a regclass — the sequence name here IS a bind
-    # parameter value (implicitly cast to regclass), not a raw identifier,
-    # so this call is fully injection-safe regardless of facility_code.
-    result = await db.execute(text("SELECT nextval(:seq_name)"), {"seq_name": seq_name})
-    return result.scalar()
-
-
-async def generate_uhid(db: AsyncSession, state_code: str, facility_code: str) -> str:
-    year = _current_year()
+async def generate_uhid(db: AsyncSession, state_code: str, facility_code: str, facility_timezone: str = "Asia/Kolkata") -> str:
+    year = _current_year_for_facility(facility_timezone)
     next_seq = await _next_sequence(db, facility_code, year)
     seq_str = str(next_seq).zfill(6)
     # Check digit now covers every digit in the identifier (should-fix, PR
