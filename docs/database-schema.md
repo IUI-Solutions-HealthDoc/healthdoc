@@ -27,6 +27,7 @@ this document".
 | v2 | 2026-07-17 | ADR 0002: full departmental billing replaces registration-payment model; users table extended |
 | v2.1 | 2026-07-17 | Review hardening: mobile varchar(20), enum widths varchar(30), FK + audit indexes, single versioning pattern, 0018 retired |
 | v2.2 | 2026-07-17 | Security pass: crypto key_version on patient_identifiers, PII rules for notification payloads and error messages, page_size cap, retention notes; synced with architecture.html |
+| v3.16 | 2026-08-07 | **`idempotency_keys` spec aligned to 0003a (#302).** Unique key becomes `(key, user_id, endpoint)` — keys are client-generated, so `(key, endpoint)` alone would replay one user's stored response to another, which is a cross-user leak wearing a replay's clothes. Expiry moves to an `expires_at` column with a 24h default rather than sweeping on `created_at`; two expiry mechanisms eventually disagree. Open, non-blocking: `user_id NOT NULL` excludes unauthenticated POSTs (ABDM callbacks) from idempotency, and `response_body` should be `jsonb` |
 | v3.15 | 2026-08-05 | **Doc↔migration drift found reviewing #264:** `facilities.timezone` has been specified in §3 since v3.0 but was never created by 0002 — every `TZ-DATE` correction the review process demands references a column that does not exist. Same for `idempotency_keys`, listed under 0002 and read by `billing/service.py`, created by no migration. Both land in new revision **0003a**, inserted after 0003 rather than appended, so they arrive before the migrations that depend on them. Adds the correction-revision convention (letter suffix) and an explicit prohibition on retargeting `down_revision` to an earlier revision to avoid a missing one — two heads stop *all* migrations, not just the offending branch |
 | v3.14 | 2026-07-28 | **Clinical & financial gaps found in review:** `allergies` table + ingredient-code matching rule + server-side prescribing gate (0032); `charge_master` with effective-dated and scheme tariffs, plus `UNIQUE (invoice_id, reference_type, reference_id)` to stop double-billing (0033); partial unique index enforcing one active admission per bed and a transfer destination on discharges (0034). Drug–drug interaction checking explicitly ruled out of scope pending a licensed database |
 | v3.13 | 2026-07-28 | **PR-review corrections (found reviewing #265):** `departments.code` unique per facility not globally (global unique makes multi-facility impossible); `queue_counters` rescoped to (department, business date) so two doctors in one department cannot both issue `MED-001` to the same display board; `initial_priority` on `queue_tokens`; partial unique on live `visit_id` (a double-click at the desk otherwise 500s that patient's consultation completion forever); enum column widths corrected to varchar(50) per the blanket rule |
@@ -295,6 +296,8 @@ since departments doesn't exist yet at 0002.)
 >    sealer is down, which is itself an integrity event.
 **Policy: no table may foreign-key to `audit_logs.id`** — its PK is `(id, created_at)`
 (partitioned) and partitions get archived; reference audit rows by value, never by FK.
+
+**audit_logs**
 ```
 facility_id     UUID NOT NULL → facilities       -- (was hospital_id in draft)
 user_id         UUID NULL → users
@@ -1324,15 +1327,25 @@ created_user_id UUID NULL → users                -- set when approval creates 
 INDEX ix_user_account_requests_facility_id_status (facility_id, status)
 ```
 
-**idempotency_keys** (0002, B1) — see §4A.1; makes a retried POST replay, never re-execute
+**idempotency_keys** (0003a, B1) — see §4A.1; makes a retried POST replay, never re-execute
 ```
-key varchar(64) NOT NULL · endpoint varchar(120) NOT NULL
-request_hash char(64) NOT NULL                   -- same key + different body ⇒ 409
-response_status int · response_body jsonb
-user_id UUID NULL → users
-UNIQUE (key, endpoint)
-INDEX ix_idempotency_keys_created_at (created_at)   -- 24h expiry sweep
+key varchar(255) NOT NULL · endpoint varchar(255) NOT NULL
+request_hash varchar(64) NOT NULL                -- same key + different body ⇒ 409
+response_status smallint · response_body text
+user_id UUID NOT NULL → users ON DELETE CASCADE
+expires_at timestamptz NOT NULL DEFAULT now() + interval '24 hours'
+UNIQUE (key, user_id, endpoint)
+INDEX ix_idempotency_keys_expires_at (expires_at)   -- expiry sweep
 ```
+> `user_id` is in the unique key deliberately. Idempotency keys are client-generated,
+> so two users can emit the same key against the same endpoint; scoping only by
+> `(key, endpoint)` would hand the second caller the first caller's stored response —
+> a cross-user data leak dressed up as a replay. (Adopted from 0003a, v3.16.)
+>
+> Two open items, tracked but not blocking: `user_id NOT NULL` locks out
+> idempotency for unauthenticated POSTs (ABDM callbacks, webhooks) — revisit when
+> the first such endpoint lands; and `response_body` should become `jsonb`, since
+> every response we store is JSON and `text` gives up querying it.
 
 ### 0029–0031 — B1 auth / ABDM / sync tables
 

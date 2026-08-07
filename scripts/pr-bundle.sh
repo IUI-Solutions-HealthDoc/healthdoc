@@ -25,6 +25,13 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
   exit 2
 fi
 
+# Fetch BEFORE snapshotting the checkers. Snapshotting from a stale
+# origin/staging ref, then merging the freshly-fetched staging into the PR,
+# runs OLD checkers against a NEW tree — which is how #265 got 20 phantom
+# "audit_logs column missing" blockers: the merge brought in the doc change
+# from #317 while the snapshot still held the checker from before it.
+git fetch -q --no-tags origin staging 2>/dev/null
+
 # The checkers live on staging; a PR branch predates them. Snapshot them
 # to a temp dir first so they still run after we check the PR out.
 TOOLDIR=$(mktemp -d)
@@ -36,14 +43,36 @@ git show origin/staging:frontend/scripts/fe_check.mjs             > "$TOOLDIR/fe
 git show origin/staging:docs/database-schema.md                   > "$TOOLDIR/database-schema.md" 2>/dev/null || true
 
 ORIGINAL_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-cleanup() { git checkout -q "$ORIGINAL_BRANCH" 2>/dev/null || true; }
+cleanup() {
+  git merge --abort 2>/dev/null || git reset -q --hard HEAD 2>/dev/null || true
+  git checkout -q "$ORIGINAL_BRANCH" 2>/dev/null || true
+}
 trap cleanup EXIT
 
-git fetch -q --no-tags origin staging 2>/dev/null
 if ! gh pr checkout "$PR" -f 2>/tmp/ghco.err; then
   echo "✗ gh pr checkout $PR failed:"; sed 's/^/    /' /tmp/ghco.err; exit 2
 fi
 BASE=$(git merge-base HEAD origin/staging)
+
+# ---- Run the checkers against base-merged-with-head, which is what CI tests ----
+#
+# Checking out the PR head alone means every branch opened before a recent staging
+# change gets flagged for that change. After 0003a merged, ~12 open PRs would each
+# have reported "facilities.timezone missing" — a defect none of them caused and
+# none of them would see in CI. False alarms at that rate teach people to skip the
+# output, which costs more than the check is worth.
+#
+# HEAD still points at the PR head commit during a --no-commit merge, so the diff
+# below remains the PR's own changes; only the working tree the checkers read is
+# merged.
+MERGE_NOTE="merged with origin/staging (same as CI)"
+if ! git merge --no-commit --no-ff -q origin/staging >/dev/null 2>&1; then
+  CONFLICTED=$(git diff --name-only --diff-filter=U | tr '\n' ' ')
+  git merge --abort 2>/dev/null || true
+  MERGE_NOTE="⚠ CONFLICTS with staging — checks below ran on the PR head ALONE.
+        Conflicting: ${CONFLICTED:-unknown}
+        This PR cannot merge until the author rebases."
+fi
 
 echo "=========================================================="
 echo "PR #$PR BUNDLE"
@@ -63,6 +92,8 @@ git diff --stat "$BASE" HEAD
 
 echo
 echo "---------- AUTOMATED CHECKS ----------"
+echo "state:  $MERGE_NOTE"
+echo
 echo "\$ pr_check.py (from staging)"
 python3 "$TOOLDIR/pr_check.py" --all 2>&1 || true
 echo

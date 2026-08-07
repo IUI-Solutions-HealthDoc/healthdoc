@@ -17,9 +17,9 @@
 # the direction we want this file to move. The checker warns if a line here is stale
 # (i.e. the drift is fixed) so entries can't outlive their cause.
 
-# --- facilities.timezone -----------------------------------------------------------
-# Specified in §3 since v3.0, created by no migration. Found reviewing PR #264 (Ajay).
-# Fix: revision 0003a, being split out of #264 into its own PR.
-# Owner: Ajay85720. Blocks: every TZ-DATE correction, incl. #269.
-# Delete this line the moment 0003a merges.
-MISSING-COLUMN facilities.timezone
+# (empty — no accepted drift)
+#
+# facilities.timezone was the only entry. Specified in §3 since v3.0, created by no
+# migration, found reviewing PR #264, fixed by revision 0003a in #302, removed here.
+# The file stayed empty for about four hours. That is the intended lifespan of a
+# baseline entry.

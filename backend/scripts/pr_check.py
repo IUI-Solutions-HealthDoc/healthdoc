@@ -168,20 +168,38 @@ def check_file(path: pathlib.Path) -> list[Finding]:
             continue
 
         # --- race conditions on identifier allocation -------------------------
-        if (re.search(r"\bmax\s*\(", ln, re.I)
-                and re.search(r"\+\s*1|\bfunc\.max\b", ln, re.I)):
-            f.append(Finding(BLOCK, "SEQ-RACE", rel, i,
-                "MAX(col)+1 allocation races under concurrency (duplicate UHID/token/receipt).",
-                "conventions §2.2: use a counters row with SELECT … FOR UPDATE"))
+        # COUNT(*) is as unsafe as MAX() for allocating an identifier, and the
+        # two halves are usually on different lines:
+        #     count_today = (await db.execute(select(func.count())...)).scalar()
+        #     seq = str(count_today + 1).zfill(5)
+        # A single-line rule missed exactly that on #260's accession numbers.
+        # So: look ahead a few lines from the count/max for the "+ 1".
+        if re.search(r"\bmax\s*\(|\bcount\s*\(|\bfunc\.(max|count)\b", ln, re.I):
+            window = "\n".join(lines[i - 1:i + 4])
+            if re.search(r"\+\s*1\b", window):
+                f.append(Finding(BLOCK, "SEQ-RACE", rel, i,
+                    "MAX()/COUNT()+1 allocation races under concurrency "
+                    "(duplicate UHID/token/accession/receipt).",
+                    "conventions §2.2: use a counters row with UPDATE … RETURNING"))
 
         # --- timezone / business date ----------------------------------------
-        if re.search(r"CURRENT_DATE|now\(\)::date|utcnow\(\)\.date\(\)|datetime\.now\(\)\.date\(\)", ln):
+        # .year and .month matter as much as .date(): a UHID embeds the year, so
+        # a UTC read gives last year's identifier — permanently — between 00:00
+        # and 05:30 IST on 1 January. Missed on #299 because the rule only knew
+        # about .date().
+        if re.search(r"CURRENT_DATE|now\(\)::date|utcnow\(\)\.(date\(\)|year|month)"
+                     r"|datetime\.now\(\s*(timezone\.utc|tz=timezone\.utc)?\s*\)\.(date\(\)|year|month)",
+                     ln):
             f.append(Finding(BLOCK, "TZ-DATE", rel, i,
                 "Business date computed in UTC/naive — 00:00–05:30 IST resolves to YESTERDAY.",
                 "schema §3: (now() AT TIME ZONE facilities.timezone)::date"))
 
         # --- money as float ---------------------------------------------------
-        if (i not in downgrade_lines
+        # '_pct'/'percent'/'ratio' fields are ratios, not money — float is fine
+        # there. Without this, `panic_rate_pct: float` was reported as money
+        # drift on #260 because "rate" is a money hint.
+        _is_ratio = re.search(r"_pct\b|percent|ratio|_rate_pct", ln, re.I)
+        if (i not in downgrade_lines and not _is_ratio
                 and re.search(r"\b(Float|REAL|DOUBLE|float)\b", ln)
                 and any(h in ln.lower() for h in MONEY_HINTS)):
             f.append(Finding(BLOCK, "MONEY-FLOAT", rel, i,
@@ -189,8 +207,16 @@ def check_file(path: pathlib.Path) -> list[Finding]:
                 "conventions §1.6: NUMERIC(12,2)"))
 
         # --- Aadhaar plaintext -------------------------------------------------
-        if re.search(r"aadhaar", ln, re.I) and re.search(r"print\(|logger|logging|f\"|'\)", ln) \
-           and not re.search(r"blind_index|encrypted|hash|#", ln, re.I):
+        # The sink must be a real one. The previous pattern included `')`, which
+        # matches the closing quote of any list literal — so
+        # `IN ('aadhaar', 'abha', ...)` in a CHECK constraint was reported as a
+        # plaintext leak. That fired 4 times on #299 against a migration doing
+        # exactly the right thing, and a false blocker on a PII rule is worse
+        # than most: it's the one people are most likely to be told off over.
+        _sink = re.search(r"\bprint\s*\(|\blogger\b|\blogging\b", ln)
+        _fstring_interp = re.search(r"f\"[^\"]*\{|f'[^']*\{", ln)
+        if (re.search(r"aadhaar", ln, re.I) and (_sink or _fstring_interp)
+                and not re.search(r"blind_index|encrypted|hash|#", ln, re.I)):
             f.append(Finding(BLOCK, "PII-AADHAAR", rel, i,
                 "Possible Aadhaar in a log/plaintext path.",
                 "conventions §1.7 / §8: encrypted + blind index only, never logged"))

@@ -83,10 +83,37 @@ def parse_doc_tables(doc_text: str) -> dict[str, set[str]]:
     sec3 = re.split(r"\n## 4\.", sec[1])[0]
     tables: dict[str, set[str]] = {}
 
-    # Style A — fenced: **table**\n```\ncol  type ...\n```
-    for name, body in re.findall(r"^\*\*([a-z_]+)\*\*[^\n]*\n```\n(.*?)\n```",
-                                 sec3, re.S | re.M):
-        tables.setdefault(name, set()).update(_columns_from_block(body))
+    # Style A — **table_name** followed by a fenced column block, allowing a few
+    # lines of prose in between.
+    #
+    # A strictly adjacent match missed `audit_logs`: it has a two-line
+    # **Policy: …** note between the header and the fence, so the biggest table
+    # in the schema reported zero documented columns and was silently never
+    # checked. But "nearest bold header anywhere above" is far too loose — §3
+    # also contains prose and example fences, and that version attributed
+    # sentences to audit_logs as column names.
+    #
+    # So: scan forward from each header, at most PROSE_GAP lines, and stop at
+    # the next header. A block that isn't reached that way isn't a column list.
+    PROSE_GAP = 6
+    lines = sec3.splitlines()
+    header_re = re.compile(r"^\*\*([a-z][a-z0-9_]*)\*\*")
+    for i, line in enumerate(lines):
+        h = header_re.match(line)
+        if not h:
+            continue
+        for j in range(i + 1, min(i + 1 + PROSE_GAP, len(lines))):
+            if header_re.match(lines[j]):
+                break                      # next table started; this one has no fence
+            if lines[j].startswith("```"):
+                body: list[str] = []
+                for k in range(j + 1, len(lines)):
+                    if lines[k].startswith("```"):
+                        break
+                    body.append(lines[k])
+                tables.setdefault(h.group(1), set()).update(
+                    _columns_from_block("\n".join(body)))
+                break
 
     # Style B — inline: **table** — `col type · col type · ...`
     for name, body in re.findall(r"^\*\*([a-z_]+)\*\*[^\n]*?—\s*`([^`]+)`", sec3, re.M):
@@ -165,6 +192,45 @@ def parse_migrations(versions: pathlib.Path) -> tuple[dict[str, set[str]], set[s
                             bucket.add(col)
 
         # Raw SQL: partitioning, triggers and ALTERs that autogenerate can't express.
+        #
+        # The column list has to be parsed too, not just the table name. Partitioned
+        # tables (audit_logs, data_access_log) are raw SQL precisely because Alembic
+        # can't emit PARTITION BY — so recording the table as "created" with zero
+        # columns made every documented column of those tables look missing. On #266
+        # that produced 12 false blockers against a migration that defines all 12.
+        for m in re.finditer(
+            r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-z_]+)\s*\((.*?)\)\s*"
+            r"(?:PARTITION\s+BY|;)", src, re.I | re.S):
+            table, body = m.group(1), m.group(2)
+            created.add(table)
+            bucket = found.setdefault(table, set())
+            # Strip -- comments BEFORE splitting on commas. A comment like
+            # "-- Per-facility monotonic write order, gaplessly assigned by"
+            # contains a comma, which otherwise splits mid-comment and made the
+            # next real column ('chain_seq') invisible while inventing a column
+            # called 'gaplessly'. Both audit_logs columns it hid are ones other
+            # reviews depend on.
+            body = re.sub(r"--[^\n]*", "", body)
+            depth = 0
+            current: list[str] = []
+            parts: list[str] = []
+            for ch in body:                      # split on top-level commas only —
+                if ch == "(":                    # VARCHAR(50) and CHECK (x IN (…))
+                    depth += 1                   # both contain commas of their own
+                elif ch == ")":
+                    depth -= 1
+                if ch == "," and depth == 0:
+                    parts.append("".join(current)); current = []
+                else:
+                    current.append(ch)
+            parts.append("".join(current))
+            for part in parts:
+                line = part.strip().split("--")[0].strip()
+                token = re.match(r"^([a-z][a-z0-9_]*)\b", line)
+                if token and token.group(1).upper() not in (
+                        "CONSTRAINT", "PRIMARY", "FOREIGN", "UNIQUE", "CHECK", "LIKE"):
+                    bucket.add(token.group(1))
+        # Tables created by raw SQL with no inline column list still count as created.
         for m in re.finditer(r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-z_]+)",
                              src, re.I):
             created.add(m.group(1))
