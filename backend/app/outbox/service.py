@@ -12,6 +12,9 @@ Flow:
      d. Exhausted rows (max attempts) move to 'dead_letter' — no infinite retry
 
 A failed publish NEVER rolls back the business write.
+
+Run one shipper for streams that require sequence order. Concurrent shippers preserve
+at-least-once delivery but can send unrelated unlocked rows out of sequence.
 """
 import json
 from typing import Any
@@ -48,7 +51,7 @@ async def ship_pending(db: AsyncSession, cloud_send, batch: int = 100) -> int:
     # FOR UPDATE SKIP LOCKED prevents concurrent workers from claiming the same row.
     rows = (await db.execute(text("""
         UPDATE outbox_events
-        SET status = 'in_flight'
+        SET status = 'in_flight', updated_at = now()
         WHERE id IN (
             SELECT id FROM outbox_events
             WHERE status = 'pending'
@@ -73,7 +76,7 @@ async def ship_pending(db: AsyncSession, cloud_send, batch: int = 100) -> int:
         if ok:
             await db.execute(text("""
                 UPDATE outbox_events
-                SET status = 'sent', attempts = attempts + 1, sent_at = now()
+                SET status = 'sent', attempts = attempts + 1, sent_at = now(), updated_at = now()
                 WHERE id = :id
             """), {"id": r["id"]})
             sent += 1
@@ -86,7 +89,8 @@ async def ship_pending(db: AsyncSession, cloud_send, batch: int = 100) -> int:
                         ELSE 'pending'
                     END,
                     attempts = attempts + 1,
-                    last_error = 'send failed at attempt ' || (attempts + 1)::text
+                    last_error = 'send failed at attempt ' || (attempts + 1)::text,
+                    updated_at = now()
                 WHERE id = :id
             """), {"id": r["id"], "max": MAX_ATTEMPTS})
         # Commit each row's status update individually so partial progress is saved
