@@ -36,6 +36,16 @@ class Settings(BaseSettings):
     icd11_release: str = "2025-01"
     icd11_linearization: str = "mms"
 
+    # Crypto keys — MUST be base64-encoded 32 random bytes in production.
+    # security.py refuses to start if these are still placeholders.
+    # Generate: python3 -c "import os, base64; print(base64.b64encode(os.urandom(32)).decode())"
+    pii_encryption_key: str = "change-me"
+    aadhaar_hmac_key: str = "change-me"
+
+    # CORS — comma-separated extra origins. Default is empty (only Electron + https://localhost).
+    # Set to "http://localhost:3000" in .env for Next.js dev; never hardcode dev origins.
+    cors_origins: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -3,6 +3,7 @@ import importlib
 import logging
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from app.common.config import get_settings
@@ -29,6 +30,29 @@ app = FastAPI(
     openapi_url=f"{settings.api_prefix}/openapi.json",
 )
 app.add_middleware(EnvelopeMiddleware)
+
+# B1-W4-02: CORS locked to the Electron/desktop origin only (no wildcard).
+# Extra origins (e.g. http://localhost:3000 for browser dev) come from settings.
+_ALLOWED_ORIGINS = [
+    "app://healthdoc",           # Electron packaged app custom scheme
+    "https://localhost",         # nginx edge (browser dev)
+] + [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+)
+
+
+@app.on_event("startup")
+async def _validate_crypto_keys() -> None:
+    """Fail at boot if crypto keys are still placeholders — not on first patient."""
+    from app.common.security import _get_encryption_key, _get_hmac_key
+    _get_encryption_key()
+    _get_hmac_key()
+    log.info("Crypto keys validated")
 
 
 @app.get(f"{settings.api_prefix}/health")
@@ -65,3 +89,18 @@ for name in MODULES:
         app.include_router(module.router, prefix=settings.api_prefix)
     except ModuleNotFoundError:
         log.warning("module app.%s has no router.py yet — skipped", name)
+
+# B1-owned routers that don't live at app/<name>/router.py — included explicitly.
+# NOTE: breakglass router is NOT registered yet — break_glass_grants (0004),
+# data_access_log (0004), and notification_history (0020) are unmerged.
+# Registering it would make the emergency path 500 with UndefinedTable.
+# Re-add once #266 (0004) and #??? (0020) merge.
+_B1_ROUTERS = [
+    "app.integrations.abdm.identity.router",  # ABHA capture (W6-01)
+]
+for path in _B1_ROUTERS:
+    try:
+        mod = importlib.import_module(path)
+        app.include_router(mod.router, prefix=settings.api_prefix)
+    except ModuleNotFoundError as exc:
+        log.warning("B1 router %s not importable: %s", path, exc)
