@@ -46,6 +46,12 @@ class Settings(BaseSettings):
     # Set to "http://localhost:3000" in .env for Next.js dev; never hardcode dev origins.
     cors_origins: str = ""
 
+    # Where data_access_log rows go when the database write fails
+    # (app/consent/access_log_fallback.py). MUST point at a mounted volume in
+    # deployment — the whole point is surviving a Postgres outage, and a path
+    # inside an ephemeral container filesystem doesn't.
+    data_access_log_fallback_path: str = "/var/log/healthdoc/data_access_log_fallback.jsonl"
+
 
 @lru_cache
 def get_settings() -> Settings:

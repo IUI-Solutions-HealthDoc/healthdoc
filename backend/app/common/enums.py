@@ -343,6 +343,27 @@ class FileAction(CheckedEnum):
     DELETE_ATTEMPT = "delete_attempt"
 
 
+class ScanStatus(CheckedEnum):
+    """Malware-scan state of an uploaded file (§4A.4).
+
+    `skipped` is the MVP default and is deliberately NOT a synonym for
+    `clean`: no ClamAV sidecar is wired up yet, so every row says plainly
+    that no scan happened rather than implying one did. When scanning
+    lands, the serving endpoint gates on `clean` — at which point every
+    existing `skipped` row needs a backfill decision, not a silent pass.
+
+    `failed` (the scanner errored) is separate from `infected` (the
+    scanner ran and found something) because the responses differ: one is
+    an operational problem, the other is an incident.
+    """
+
+    SKIPPED = "skipped"
+    PENDING = "pending"
+    CLEAN = "clean"
+    INFECTED = "infected"
+    FAILED = "failed"
+
+
 # --- v3 compliance wave (DPDP Rules 2025 + NABH DHS 2nd Ed) ---
 
 class GrievanceType(CheckedEnum):
