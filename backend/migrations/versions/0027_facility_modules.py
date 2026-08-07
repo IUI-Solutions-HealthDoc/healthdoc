@@ -7,7 +7,7 @@ can be toggled.
 """
 import sqlalchemy as sa
 from alembic import op
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 revision = "0027"
 down_revision = "0026"
@@ -26,9 +26,11 @@ def upgrade() -> None:
                   nullable=False),
         sa.Column("module_code", sa.String(50), nullable=False),
         sa.Column("is_enabled", sa.Boolean(), nullable=False, server_default=sa.true()),
+        sa.Column("config", JSONB(), nullable=False, server_default=sa.text("'{}'::jsonb")),
         sa.Column("enabled_at", sa.DateTime(timezone=True),
                   server_default=sa.func.now()),
         sa.Column("disabled_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("disabled_reason", sa.Text(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False,
                   server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False,
@@ -43,34 +45,19 @@ def upgrade() -> None:
     op.create_index("ix_facility_modules_facility_id",
                      "facility_modules", ["facility_id"])
 
-    # orders.fulfilment_mode — internal | external_referral
-    # This ALTER runs only if the orders table exists (it may come from another migration).
-    # Using execute to be safe against table-not-yet-existing scenarios.
-    op.execute("""
-        DO $$
-        BEGIN
-            IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'orders') THEN
-                IF NOT EXISTS (SELECT 1 FROM information_schema.columns
-                               WHERE table_name = 'orders' AND column_name = 'fulfilment_mode') THEN
-                    ALTER TABLE orders ADD COLUMN fulfilment_mode VARCHAR(50)
-                        NOT NULL DEFAULT 'internal';
-                    ALTER TABLE orders ADD CONSTRAINT ck_orders_fulfilment_mode
-                        CHECK (fulfilment_mode IN ('internal', 'external_referral'));
-                END IF;
-            END IF;
-        END $$;
-    """)
+    op.add_column(
+        "orders",
+        sa.Column("fulfilment_mode", sa.String(50), nullable=False, server_default="internal"),
+    )
+    op.create_check_constraint(
+        "ck_orders_fulfilment_mode",
+        "orders",
+        "fulfilment_mode IN ('internal', 'external_referral')",
+    )
 
 
 def downgrade() -> None:
-    op.execute("""
-        DO $$
-        BEGIN
-            IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'orders') THEN
-                ALTER TABLE orders DROP CONSTRAINT IF EXISTS ck_orders_fulfilment_mode;
-                ALTER TABLE orders DROP COLUMN IF EXISTS fulfilment_mode;
-            END IF;
-        END $$;
-    """)
+    op.drop_constraint("ck_orders_fulfilment_mode", "orders", type_="check")
+    op.drop_column("orders", "fulfilment_mode")
     op.drop_index("ix_facility_modules_facility_id", table_name="facility_modules")
     op.drop_table("facility_modules")
