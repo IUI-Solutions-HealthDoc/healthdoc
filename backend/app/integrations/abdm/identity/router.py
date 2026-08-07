@@ -12,7 +12,7 @@ import logging
 from typing import Annotated
 
 import httpx
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -69,20 +69,31 @@ async def _verify_with_gateway(abha_number: str) -> dict | None:
 async def link_abha(payload: AbhaCapture,
                     user: Annotated[AuthUser, Depends(get_current_user)],
                     db: AsyncSession = Depends(get_db)) -> dict:
+    user_row = (await db.execute(
+        text("SELECT id, facility_id FROM users WHERE keycloak_sub = :sub"),
+        {"sub": user.sub},
+    )).mappings().one_or_none()
+    if user_row is None:
+        raise HTTPException(403, "Authenticated user has no HealthDoc profile")
+
     # Try verifying with ABDM — gracefully degrade if gateway is down
     gateway_result = await _verify_with_gateway(payload.abha_number)
     gateway_verified = gateway_result is not None
 
     blob, key_version = encrypt_pii(payload.linking_token)
-    await db.execute(text("""
+    result = await db.execute(text("""
         UPDATE patients
         SET abha_number = :abha,
             abha_linking_token_encrypted = :blob,
             abha_linking_key_version = :kv,
-            abha_linked_at = now(), updated_at = now(), updated_by = :uid
-        WHERE id = :pid
+            abha_linked_at = now(), updated_at = now(), updated_by = :uid,
+            identity_status = CASE WHEN :verified THEN identity_status ELSE 'identity_unverified' END
+        WHERE id = :pid AND facility_id = :facility_id
     """), {"abha": payload.abha_number, "blob": blob, "kv": key_version,
-           "pid": payload.patient_id, "uid": user.sub})
+           "pid": payload.patient_id, "uid": user_row["id"],
+           "facility_id": user_row["facility_id"], "verified": gateway_verified})
+    if result.rowcount != 1:
+        raise HTTPException(404, "Patient not found in caller facility")
     await enqueue(db, aggregate_type="patient", aggregate_id=payload.patient_id,
                   event_type="abha_linked", payload={"abha_number": payload.abha_number},
                   sensitivity="important")

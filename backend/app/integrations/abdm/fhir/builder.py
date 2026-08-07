@@ -83,8 +83,9 @@ def validate_min(bundle: dict) -> list[str]:
     if bundle.get("type") != "document":
         errs.append("Bundle.type must be 'document'")
     entries = bundle.get("entry", [])
-    if not entries or entries[0]["resource"].get("resourceType") != "Composition":
+    first_resource = entries[0].get("resource", {}) if entries else {}
+    if first_resource.get("resourceType") != "Composition":
         errs.append("first entry must be a Composition")
-    if not any(e["resource"].get("resourceType") == "Patient" for e in entries):
+    if not any(e.get("resource", {}).get("resourceType") == "Patient" for e in entries):
         errs.append("bundle must contain a Patient")
     return errs
