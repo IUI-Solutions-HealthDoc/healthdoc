@@ -16,13 +16,24 @@ import pytest
 from app.allergies.service import OVERRIDE_REASON_MIN_CHARS
 from app.common.enums import AllergenType, AllergySeverity, AllergyStatus
 
-MIGRATIONS = Path(__file__).resolve().parents[1] / "migrations" / "versions"
+_MIGRATIONS_ROOT = Path(__file__).resolve().parents[1] / "migrations"
+
+# 0032-0034 chain off 0031, which is not merged yet. Alembic builds the whole revision
+# map before running anything, so an unresolvable down_revision breaks EVERY upgrade —
+# including `upgrade 0003`, which is all staging currently has. Until 0031 lands they
+# live in migrations/pending/, out of Alembic's path but still under test: the
+# constraints below are the reason these files exist, and they must not rot while
+# parked. Search both directories so this file needs no edit when they move back.
+_SEARCH_PATHS = (_MIGRATIONS_ROOT / "versions", _MIGRATIONS_ROOT / "pending")
 
 
 def _src(name: str) -> str:
-    matches = list(MIGRATIONS.glob(f"{name}*.py"))
-    assert matches, f"migration {name} not found"
-    return matches[0].read_text()
+    for directory in _SEARCH_PATHS:
+        matches = sorted(directory.glob(f"{name}*.py")) if directory.is_dir() else []
+        if matches:
+            return matches[0].read_text()
+    searched = " or ".join(str(p) for p in _SEARCH_PATHS)
+    raise AssertionError(f"migration {name} not found in {searched}")
 
 
 # --------------------------------------------------------------------------

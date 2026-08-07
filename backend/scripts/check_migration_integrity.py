@@ -106,7 +106,7 @@ def main() -> int:
     # and reporting it as one trains everyone to ignore this checker.
     mapped_revs: set[str] = set()
     if DOC.exists():
-        mapped_revs = set(re.findall(r"^\|\s*(\d{4})\s*\|", DOC.read_text(), re.M))
+        mapped_revs = set(re.findall(r"^\|\s*(\d{4}[a-z]?)\s*\|", DOC.read_text(), re.M))
     pending: list[str] = []
 
     # broken links
@@ -153,7 +153,7 @@ def main() -> int:
     # doc agreement
     if DOC.exists():
         doc = DOC.read_text()
-        mapped = set(re.findall(r"^\|\s*(\d{4})\s*\|", doc, re.M))
+        mapped = set(re.findall(r"^\|\s*(\d{4}[a-z]?)\s*\|", doc, re.M))
         for rev in sorted(known - mapped):
             problems.append(
                 f"revision '{rev}' exists on disk but is not in the §2 migration map")

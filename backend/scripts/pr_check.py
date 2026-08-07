@@ -83,6 +83,35 @@ def _prose_line_numbers(src: str) -> set[int]:
     return prose
 
 
+def _downgrade_line_numbers(src: str) -> set[int]:
+    """Lines inside a migration's downgrade() body.
+
+    A downgrade exists to restore the PREVIOUS schema state, so by definition it
+    recreates things the current rules forbid. Reverting `facility_type` to
+    varchar(30) is what a correct downgrade of a widening migration looks like —
+    flagging it as an ENUM-WIDTH violation asks the author to write a downgrade
+    that doesn't downgrade. (Found on PR #264, migration 0035.)
+
+    Only shape rules ("the schema must look like X") skip these lines. Danger
+    rules — SEQ-RACE, PII-AADHAAR, MONGO-DUALWRITE, TZ-DATE — still apply: a
+    downgrade that leaks Aadhaar or races on a counter is wrong in either
+    direction.
+    """
+    import ast
+
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return set()
+
+    for node in ast.walk(tree):
+        if (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and node.name == "downgrade"):
+            end = node.end_lineno or node.lineno
+            return set(range(node.lineno, end + 1))
+    return set()
+
+
 def check_file(path: pathlib.Path) -> list[Finding]:
     rel_norm = str(path).replace("\\", "/")
     # Tests deliberately contain anti-patterns (they prove the patterns are wrong);
@@ -93,6 +122,23 @@ def check_file(path: pathlib.Path) -> list[Finding]:
         src = path.read_text()
     except Exception:
         return []
+
+    # --- unresolved merge conflict markers ------------------------------------
+    # Checked before anything else and returned immediately: a file with conflict
+    # markers is not valid Python, so every AST-based rule below silently skips it
+    # and the file reports clean. That is exactly what happened on PR #284 —
+    # pr_check said "0 blockers" on three files that could not even be imported.
+    conflict_lines = [
+        i for i, ln in enumerate(src.splitlines(), 1)
+        if ln.startswith(("<<<<<<< ", "=======", ">>>>>>> ")) and ln.rstrip() != "======="
+        or ln.rstrip() == "======="
+        and any(o.startswith("<<<<<<< ") for o in src.splitlines())
+    ]
+    if conflict_lines:
+        return [Finding(BLOCK, "MERGE-CONFLICT", str(path), conflict_lines[0],
+                        f"Unresolved merge conflict markers on {len(conflict_lines)} line(s) "
+                        f"— the file is not valid source and every other check skips it.",
+                        "resolve the conflict, then re-run the checks")]
     f: list[Finding] = []
     rel = str(path)
     lines = src.splitlines()
@@ -105,6 +151,9 @@ def check_file(path: pathlib.Path) -> list[Finding]:
     # thing. (Found on PR #271: the SEQ-RACE rule fired on Priyanshu's docstring
     # documenting that he used a Postgres sequence precisely to avoid MAX+1.)
     prose_lines = _prose_line_numbers(src)
+
+    # Shape rules skip downgrade() — see _downgrade_line_numbers. Danger rules don't.
+    downgrade_lines = _downgrade_line_numbers(src) if is_migration else set()
 
     for i, ln in enumerate(lines, 1):
         s = ln.strip()
@@ -119,27 +168,55 @@ def check_file(path: pathlib.Path) -> list[Finding]:
             continue
 
         # --- race conditions on identifier allocation -------------------------
-        if (re.search(r"\bmax\s*\(", ln, re.I)
-                and re.search(r"\+\s*1|\bfunc\.max\b", ln, re.I)):
-            f.append(Finding(BLOCK, "SEQ-RACE", rel, i,
-                "MAX(col)+1 allocation races under concurrency (duplicate UHID/token/receipt).",
-                "conventions §2.2: use a counters row with SELECT … FOR UPDATE"))
+        # COUNT(*) is as unsafe as MAX() for allocating an identifier, and the
+        # two halves are usually on different lines:
+        #     count_today = (await db.execute(select(func.count())...)).scalar()
+        #     seq = str(count_today + 1).zfill(5)
+        # A single-line rule missed exactly that on #260's accession numbers.
+        # So: look ahead a few lines from the count/max for the "+ 1".
+        if re.search(r"\bmax\s*\(|\bcount\s*\(|\bfunc\.(max|count)\b", ln, re.I):
+            window = "\n".join(lines[i - 1:i + 4])
+            if re.search(r"\+\s*1\b", window):
+                f.append(Finding(BLOCK, "SEQ-RACE", rel, i,
+                    "MAX()/COUNT()+1 allocation races under concurrency "
+                    "(duplicate UHID/token/accession/receipt).",
+                    "conventions §2.2: use a counters row with UPDATE … RETURNING"))
 
         # --- timezone / business date ----------------------------------------
-        if re.search(r"CURRENT_DATE|now\(\)::date|utcnow\(\)\.date\(\)|datetime\.now\(\)\.date\(\)", ln):
+        # .year and .month matter as much as .date(): a UHID embeds the year, so
+        # a UTC read gives last year's identifier — permanently — between 00:00
+        # and 05:30 IST on 1 January. Missed on #299 because the rule only knew
+        # about .date().
+        if re.search(r"CURRENT_DATE|now\(\)::date|utcnow\(\)\.(date\(\)|year|month)"
+                     r"|datetime\.now\(\s*(timezone\.utc|tz=timezone\.utc)?\s*\)\.(date\(\)|year|month)",
+                     ln):
             f.append(Finding(BLOCK, "TZ-DATE", rel, i,
                 "Business date computed in UTC/naive — 00:00–05:30 IST resolves to YESTERDAY.",
                 "schema §3: (now() AT TIME ZONE facilities.timezone)::date"))
 
         # --- money as float ---------------------------------------------------
-        if re.search(r"\b(Float|REAL|DOUBLE|float)\b", ln) and any(h in ln.lower() for h in MONEY_HINTS):
+        # '_pct'/'percent'/'ratio' fields are ratios, not money — float is fine
+        # there. Without this, `panic_rate_pct: float` was reported as money
+        # drift on #260 because "rate" is a money hint.
+        _is_ratio = re.search(r"_pct\b|percent|ratio|_rate_pct", ln, re.I)
+        if (i not in downgrade_lines and not _is_ratio
+                and re.search(r"\b(Float|REAL|DOUBLE|float)\b", ln)
+                and any(h in ln.lower() for h in MONEY_HINTS)):
             f.append(Finding(BLOCK, "MONEY-FLOAT", rel, i,
                 "Money must never be float — paise drift is unrecoverable.",
                 "conventions §1.6: NUMERIC(12,2)"))
 
         # --- Aadhaar plaintext -------------------------------------------------
-        if re.search(r"aadhaar", ln, re.I) and re.search(r"print\(|logger|logging|f\"|'\)", ln) \
-           and not re.search(r"blind_index|encrypted|hash|#", ln, re.I):
+        # The sink must be a real one. The previous pattern included `')`, which
+        # matches the closing quote of any list literal — so
+        # `IN ('aadhaar', 'abha', ...)` in a CHECK constraint was reported as a
+        # plaintext leak. That fired 4 times on #299 against a migration doing
+        # exactly the right thing, and a false blocker on a PII rule is worse
+        # than most: it's the one people are most likely to be told off over.
+        _sink = re.search(r"\bprint\s*\(|\blogger\b|\blogging\b", ln)
+        _fstring_interp = re.search(r"f\"[^\"]*\{|f'[^']*\{", ln)
+        if (re.search(r"aadhaar", ln, re.I) and (_sink or _fstring_interp)
+                and not re.search(r"blind_index|encrypted|hash|#", ln, re.I)):
             f.append(Finding(BLOCK, "PII-AADHAAR", rel, i,
                 "Possible Aadhaar in a log/plaintext path.",
                 "conventions §1.7 / §8: encrypted + blind index only, never logged"))
@@ -151,7 +228,7 @@ def check_file(path: pathlib.Path) -> list[Finding]:
                 "architecture §4: modules never read os.environ"))
 
         # --- enum column width + inline strings ---------------------------------
-        if is_model and re.search(r"String\((\d{1,2})\)", ln):
+        if is_model and i not in downgrade_lines and re.search(r"String\((\d{1,2})\)", ln):
             width = int(re.search(r"String\((\d{1,2})\)", ln).group(1))
             if width < 50 and any(h in ln.lower() for h in ENUM_COL_HINTS):
                 f.append(Finding(BLOCK, "ENUM-WIDTH", rel, i,
@@ -196,9 +273,13 @@ def check_file(path: pathlib.Path) -> list[Finding]:
                     if len(n.body) == 1 and isinstance(n.body[0], ast.Pass):
                         f.append(Finding(BLOCK, "MIG-DOWNGRADE", rel, n.lineno,
                             "downgrade() is empty (pass).", "conventions §1.10"))
-        if not re.search(r'^revision\s*=\s*["\']\d{4}["\']', src, re.M):
+        # 4 digits, optionally one lowercase letter for a correction revision inserted
+        # after an already-merged one (schema v3.15: '0003a' fixes gaps in 0003/0002
+        # and must land BEFORE 0004, so it cannot simply be appended at the end).
+        if not re.search(r'^revision\s*=\s*["\']\d{4}[a-z]?["\']', src, re.M):
             f.append(Finding(BLOCK, "MIG-REVISION", rel, 1,
-                "revision must be a 4-digit zero-padded string (e.g. '0007').", "schema §2"))
+                "revision must be 4 zero-padded digits, optionally + one letter for a "
+                "correction revision (e.g. '0007', '0003a').", "schema §2"))
         if re.search(r'^revision\s*=\s*["\']0018["\']', src, re.M):
             f.append(Finding(BLOCK, "MIG-0018", rel, 1,
                 "Revision 0018 is retired and must never be created.", "schema §2"))

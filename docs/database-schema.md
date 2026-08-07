@@ -27,6 +27,8 @@ this document".
 | v2 | 2026-07-17 | ADR 0002: full departmental billing replaces registration-payment model; users table extended |
 | v2.1 | 2026-07-17 | Review hardening: mobile varchar(20), enum widths varchar(30), FK + audit indexes, single versioning pattern, 0018 retired |
 | v2.2 | 2026-07-17 | Security pass: crypto key_version on patient_identifiers, PII rules for notification payloads and error messages, page_size cap, retention notes; synced with architecture.html |
+| v3.16 | 2026-08-07 | **`idempotency_keys` spec aligned to 0003a (#302).** Unique key becomes `(key, user_id, endpoint)` — keys are client-generated, so `(key, endpoint)` alone would replay one user's stored response to another, which is a cross-user leak wearing a replay's clothes. Expiry moves to an `expires_at` column with a 24h default rather than sweeping on `created_at`; two expiry mechanisms eventually disagree. Open, non-blocking: `user_id NOT NULL` excludes unauthenticated POSTs (ABDM callbacks) from idempotency, and `response_body` should be `jsonb` |
+| v3.15 | 2026-08-05 | **Doc↔migration drift found reviewing #264:** `facilities.timezone` has been specified in §3 since v3.0 but was never created by 0002 — every `TZ-DATE` correction the review process demands references a column that does not exist. Same for `idempotency_keys`, listed under 0002 and read by `billing/service.py`, created by no migration. Both land in new revision **0003a**, inserted after 0003 rather than appended, so they arrive before the migrations that depend on them. Adds the correction-revision convention (letter suffix) and an explicit prohibition on retargeting `down_revision` to an earlier revision to avoid a missing one — two heads stop *all* migrations, not just the offending branch |
 | v3.14 | 2026-07-28 | **Clinical & financial gaps found in review:** `allergies` table + ingredient-code matching rule + server-side prescribing gate (0032); `charge_master` with effective-dated and scheme tariffs, plus `UNIQUE (invoice_id, reference_type, reference_id)` to stop double-billing (0033); partial unique index enforcing one active admission per bed and a transfer destination on discharges (0034). Drug–drug interaction checking explicitly ruled out of scope pending a licensed database |
 | v3.13 | 2026-07-28 | **PR-review corrections (found reviewing #265):** `departments.code` unique per facility not globally (global unique makes multi-facility impossible); `queue_counters` rescoped to (department, business date) so two doctors in one department cannot both issue `MED-001` to the same display board; `initial_priority` on `queue_tokens`; partial unique on live `visit_id` (a double-click at the desk otherwise 500s that patient's consultation completion forever); enum column widths corrected to varchar(50) per the blanket rule |
 | v3.12 | 2026-07-23 | **Verification pass:** executable spec tests (10 passing) proving the timezone, race, invariant and concurrency findings; `scripts/spec_check.py` doc↔code drift checker added to CI; **restored §governance + user_account_requests/policies/outbox_events/idempotency_keys definitions silently dropped by an earlier edit**; fixed stale facility_modules block |
@@ -109,8 +111,9 @@ do not merge out of order.**
 | Rev | Slug | Tables | Owner (issue) |
 |---|---|---|---|
 | 0001 | extensions | uuid-ossp, pgcrypto, pg_trgm | B1 — merged ✅ |
-| 0002 | facilities_users | facilities, users, idempotency_keys | B1 |
-| 0003 | audit | audit_logs, audit_log_archive, audit_integrity_checks | B7 (B7-W1-01) |
+| 0002 | facilities_users | facilities, users, ~~idempotency_keys~~ (see 0003a) | B1 — merged ✅ |
+| 0003 | audit | audit_logs, audit_log_archive, audit_integrity_checks | B7 (B7-W1-01) — merged ✅ |
+| 0003a | facilities_fixes | ALTER facilities: **timezone**, widen facility_type; **idempotency_keys** | B1 — corrections to 0002, `down_revision = "0003"` |
 | 0004 | consent | consent_purposes, consent_records, consent_withdrawals, data_access_log, consent_renewal_reminders, break_glass_grants | B7 (B7-W1-02) |
 | 0005 | departments_rooms | departments, rooms | B4 (B4-W1-01) |
 | 0006 | patients | patients, patient_identifiers, patient_merge_log | B2 (B2-W1-01) |
@@ -146,6 +149,21 @@ do not merge out of order.**
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
 CI runs `alembic upgrade head` — a broken chain fails the PR.
+
+> **Never point `down_revision` at an earlier revision "because the real one isn't in my
+> folder yet."** Two migrations both claiming `"0002"` create two heads, and Alembic then
+> refuses to run *anything* — including revisions that have nothing to do with either
+> file. The cost lands on the whole team, not on the branch that did it. Point at the
+> number the map says, even if that revision doesn't exist yet; your PR will fail CI
+> until it lands, which is the correct and visible outcome. (PR #264 forked at 0002 this
+> way; #297 was the same failure from the other end.)
+
+**Correction revisions (`0003a`, `0011a`, …).** A merged migration can't be edited, so a
+gap found after the fact needs a new revision. If the fix is needed *early* — because
+later migrations depend on it — insert it with a letter suffix immediately after the
+revision it corrects, rather than appending it at the end where it would arrive last.
+Whoever owns the next revision repoints their `down_revision` to it. That is the only
+sanctioned way to insert into the middle of the chain.
 
 **About 0018:** Alembic revision ids are labels, not a sequence — `0019.down_revision
 = "0017"` is a perfectly linear chain. The number 0018 is retired: **nobody may ever
@@ -228,6 +246,10 @@ district        text
 facility_type   varchar(50)                      -- phc | chc | district_hospital | medical_college
 hfr_facility_id varchar(50)                      -- ABDM Health Facility Registry id
 timezone        varchar(50) NOT NULL DEFAULT 'Asia/Kolkata'  -- IANA tz; drives ALL business dates
+                                                 -- NOT created by 0002 despite being specified
+                                                 -- here since v3.0 — added by 0003a. Every
+                                                 -- TZ-DATE fix references this column, so it
+                                                 -- must land before 0004. (Found v3.15.)
 is_active       boolean NOT NULL DEFAULT true
 ```
 
@@ -274,6 +296,8 @@ since departments doesn't exist yet at 0002.)
 >    sealer is down, which is itself an integrity event.
 **Policy: no table may foreign-key to `audit_logs.id`** — its PK is `(id, created_at)`
 (partitioned) and partitions get archived; reference audit rows by value, never by FK.
+
+**audit_logs**
 ```
 facility_id     UUID NOT NULL → facilities       -- (was hospital_id in draft)
 user_id         UUID NULL → users
@@ -446,6 +470,11 @@ mobile          varchar(20)                      -- contact only, NEVER identity
 address_line    text · village_town text · district text · state_code varchar(5) · pincode varchar(6)
 photo_file_id   UUID NULL                        -- MinIO ref via files (FK added 0019); photo mandatory per ADR 0001
 abha_number     varchar(17) UNIQUE NULL
+abha_linking_token_encrypted bytea NULL          -- AES-256-GCM, added by 0030. NEVER plaintext
+abha_linking_key_version smallint NULL           -- which key encrypted the token above
+abha_linked_at  timestamptz NULL                 -- when the ABHA was linked to a care context
+                                                 -- CHECK: token and key_version are both-or-neither —
+                                                 -- a blob with no key version cannot be decrypted.
 identity_path   varchar(50) NOT NULL             -- IdentityPath enum (ADR 0001)
 identity_status varchar(50) NOT NULL DEFAULT 'verified'  -- IdentityStatus enum
 status          varchar(50) NOT NULL DEFAULT 'active'    -- PatientStatus: active|merged|deceased
@@ -1303,15 +1332,25 @@ created_user_id UUID NULL → users                -- set when approval creates 
 INDEX ix_user_account_requests_facility_id_status (facility_id, status)
 ```
 
-**idempotency_keys** (0002, B1) — see §4A.1; makes a retried POST replay, never re-execute
+**idempotency_keys** (0003a, B1) — see §4A.1; makes a retried POST replay, never re-execute
 ```
-key varchar(64) NOT NULL · endpoint varchar(120) NOT NULL
-request_hash char(64) NOT NULL                   -- same key + different body ⇒ 409
-response_status int · response_body jsonb
-user_id UUID NULL → users
-UNIQUE (key, endpoint)
-INDEX ix_idempotency_keys_created_at (created_at)   -- 24h expiry sweep
+key varchar(255) NOT NULL · endpoint varchar(255) NOT NULL
+request_hash varchar(64) NOT NULL                -- same key + different body ⇒ 409
+response_status smallint · response_body text
+user_id UUID NOT NULL → users ON DELETE CASCADE
+expires_at timestamptz NOT NULL DEFAULT now() + interval '24 hours'
+UNIQUE (key, user_id, endpoint)
+INDEX ix_idempotency_keys_expires_at (expires_at)   -- expiry sweep
 ```
+> `user_id` is in the unique key deliberately. Idempotency keys are client-generated,
+> so two users can emit the same key against the same endpoint; scoping only by
+> `(key, endpoint)` would hand the second caller the first caller's stored response —
+> a cross-user data leak dressed up as a replay. (Adopted from 0003a, v3.16.)
+>
+> Two open items, tracked but not blocking: `user_id NOT NULL` locks out
+> idempotency for unauthenticated POSTs (ABDM callbacks, webhooks) — revisit when
+> the first such endpoint lands; and `response_body` should become `jsonb`, since
+> every response we store is JSON and `text` gives up querying it.
 
 ### 0029–0031 — B1 auth / ABDM / sync tables
 
