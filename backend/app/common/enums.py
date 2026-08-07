@@ -1,4 +1,4 @@
-"""Canonical enumerated values — single source of truth (docs/schema-conventions.md §7).
+"""Canonical enumerated values â€” single source of truth (docs/schema-conventions.md Â§7).
 
 Adding a value: PR touching this file + the doc, Tech Lead review. Never inline strings.
 Stored as varchar + CHECK constraint; use .sql_check() in __table_args__.
@@ -300,9 +300,3 @@ class ScreeningStatus(CheckedEnum):
     PASSED = "passed"
     FAILED = "failed"
 
-
-class BloodUnitStatus(BaseEnum):
-    AVAILABLE = "available"
-    RESERVED = "reserved"
-    ISSUED = "issued"
-    EXPIRED = "expired"
