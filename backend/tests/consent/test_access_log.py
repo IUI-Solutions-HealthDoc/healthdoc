@@ -108,7 +108,7 @@ class TestMissingPatientIdParam:
         import app.consent.access_log_fallback as fallback_module
 
         fallback_path = tmp_path / "fallback.jsonl"
-        monkeypatch.setattr(fallback_module, "FALLBACK_LOG_PATH", str(fallback_path))
+        monkeypatch.setattr(fallback_module, "_fallback_log_path", lambda: str(fallback_path))
 
         dependency = log_patient_data_access(
             resource_type="patients", purpose_code="direct_treatment"
@@ -135,7 +135,7 @@ class TestDbWriteFailureFallback:
         import app.consent.access_log_fallback as fallback_module
 
         fallback_path = tmp_path / "fallback.jsonl"
-        monkeypatch.setattr(fallback_module, "FALLBACK_LOG_PATH", str(fallback_path))
+        monkeypatch.setattr(fallback_module, "_fallback_log_path", lambda: str(fallback_path))
 
         class _ExplodingSessionCtx:
             async def __aenter__(self):
@@ -170,7 +170,8 @@ class TestRoleSelection:
         import app.consent.access_log_fallback as fallback_module
 
         monkeypatch.setattr(
-            fallback_module, "FALLBACK_LOG_PATH", str(tmp_path / "fallback.jsonl")
+            fallback_module, "_fallback_log_path",
+            lambda: str(tmp_path / "fallback.jsonl"),
         )
 
         called_with = {}

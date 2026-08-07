@@ -31,7 +31,7 @@ volume for this path, rows written to the fallback between the last
 volume flush and container death are still lost. That's a smaller and
 much rarer window than "every DB hiccup loses the row silently", which
 is the problem this replaces — not a claim that this is bulletproof.
-Configure FALLBACK_LOG_PATH to a mounted volume in deployment.
+Set DATA_ACCESS_LOG_FALLBACK_PATH to a mounted volume in deployment.
 
 RECOVERY
 --------
@@ -62,16 +62,19 @@ import threading
 import uuid
 from datetime import datetime, timezone
 
+from app.common.config import get_settings
+
 logger = logging.getLogger(__name__)
 
-# PR #266 review: pr_check flags this — settings should live in
-# app/common/config.py's Settings (data_access_log_fallback_path), not a
-# direct os.environ.get() here. Not applied in this PR: config.py is
-# outside the consent module, out of scope for this branch to edit.
-# Flagged back on the PR for whoever owns common/config.py.
-FALLBACK_LOG_PATH = os.environ.get(
-    "DATA_ACCESS_LOG_FALLBACK_PATH", "/var/log/healthdoc/data_access_log_fallback.jsonl"
-)
+# Resolved: `data_access_log_fallback_path` now lives in Settings
+# (app/common/config.py), added by the reviewer rather than sent back — Vani
+# was right that config.py is outside the consent module's scope to edit.
+#
+# Read lazily rather than at import: a module-level get_settings() call binds
+# the value at import time, so tests that monkeypatch the env see the old path
+# and write to the real one.
+def _fallback_log_path() -> str:
+    return get_settings().data_access_log_fallback_path
 
 # One process-wide lock: this fires rarely (only on DB failure), so
 # contention is a non-issue; correctness of "never interleave two
@@ -89,7 +92,7 @@ def increment_fallback_counter(reason: str) -> None:
         "data_access_log fallback write triggered (reason=%s) — clinical access "
         "was NOT logged to the primary table, see fallback file at %s",
         reason,
-        FALLBACK_LOG_PATH,
+        _fallback_log_path(),
     )
 
 
@@ -106,13 +109,14 @@ def _write_fallback_row_sync(row: dict, *, failure_reason: str) -> bool:
         "_failure_reason": failure_reason,
     }
     try:
-        os.makedirs(os.path.dirname(FALLBACK_LOG_PATH), exist_ok=True)
+        path = _fallback_log_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         line = json.dumps(payload, default=str) + "\n"
         with _write_lock:
             # Open in append mode + explicit flush/fsync: a crash right
             # after this call should not lose the line sitting in an
             # OS buffer.
-            with open(FALLBACK_LOG_PATH, "a", encoding="utf-8") as f:
+            with open(path, "a", encoding="utf-8") as f:
                 f.write(line)
                 f.flush()
                 os.fsync(f.fileno())

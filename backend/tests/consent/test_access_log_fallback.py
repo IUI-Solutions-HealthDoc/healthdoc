@@ -20,7 +20,7 @@ from app.consent.access_log_fallback import serialise_row_for_fallback, write_fa
 class TestWriteFallbackRow:
     async def test_creates_parent_directory_and_appends_a_json_line(self, tmp_path, monkeypatch):
         target = tmp_path / "nested" / "dir" / "fallback.jsonl"
-        monkeypatch.setattr(fallback_module, "FALLBACK_LOG_PATH", str(target))
+        monkeypatch.setattr(fallback_module, "_fallback_log_path", lambda: str(target))
 
         row = serialise_row_for_fallback(
             user_id=uuid.uuid4(),
@@ -46,7 +46,7 @@ class TestWriteFallbackRow:
 
     async def test_appends_multiple_rows_without_clobbering(self, tmp_path, monkeypatch):
         target = tmp_path / "fallback.jsonl"
-        monkeypatch.setattr(fallback_module, "FALLBACK_LOG_PATH", str(target))
+        monkeypatch.setattr(fallback_module, "_fallback_log_path", lambda: str(target))
 
         for i in range(3):
             row = serialise_row_for_fallback(
@@ -74,7 +74,8 @@ class TestWriteFallbackRow:
         disk full, permissions). Must not raise — the caller (access_log.py)
         has nothing else to fall back to at that point."""
         monkeypatch.setattr(
-            fallback_module, "FALLBACK_LOG_PATH", "/proc/this-path-cannot-be-created/x.jsonl"
+            fallback_module, "_fallback_log_path",
+            lambda: "/proc/this-path-cannot-be-created/x.jsonl",
         )
         row = serialise_row_for_fallback(
             user_id=None, role=None, resource_type="patients", resource_id=None,
