@@ -1,9 +1,9 @@
 from sqlalchemy import Boolean, CheckConstraint, Column, Date, DateTime, ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 
-from app.common.database import Base
+from app.common.db import Base
 from app.common.enums import AdmissionStatus, BedStatus, DischargeType
-from app.common.mixins import Blame, Timestamps, UUIDPk
+from app.common.models import Blame, Timestamps, UUIDPk
 
 
 class Ward(Base, UUIDPk, Timestamps):
