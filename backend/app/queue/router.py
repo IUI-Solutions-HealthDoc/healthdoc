@@ -93,7 +93,10 @@ async def create_token(
         caller_facility_id=caller_facility_id,
     )
     response_body = QueueTokenOut.model_validate(token).model_dump(mode="json")
-    await record_idempotent_response(db, idempotency_key, _CREATE_TOKEN_ENDPOINT, 201, response_body)
+    await record_idempotent_response(
+        db, idempotency_key, _CREATE_TOKEN_ENDPOINT, 201, response_body,
+        user_id=caller_user_id,
+    )
     return response_body
 
 

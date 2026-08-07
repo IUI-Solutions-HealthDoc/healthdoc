@@ -16,7 +16,7 @@ from app.audit.models import AuditLog
 from app.departments.models import Department, Room
 from app.users.models import Facility, User
 from app.queue import service
-from sqlalchemy import Column, Table, event
+from sqlalchemy import ARRAY, Column, Table, event
 
 _test_chain_seq_counter = count(1)
  
@@ -69,7 +69,21 @@ def _compile_jsonb_sqlite(type_, compiler, **kw):
 
 @compiles(INET, "sqlite")
 def _compile_inet_sqlite(type_, compiler, **kw):
-    return "TEXT" 
+    return "TEXT"
+
+
+@compiles(ARRAY, "sqlite")
+def _compile_array_sqlite(type_, compiler, **kw):
+    """`Base.metadata.create_all` here materialises EVERY model in the app, not
+    just the queue module's — so a Postgres-only type anywhere in the project
+    breaks these tests. `consent_records.scope` (ARRAY(Text), migration 0004)
+    did exactly that the moment 0004 merged.
+
+    TEXT is only good enough to make the DDL render; nothing here reads or
+    writes that column. If a test ever needs real array semantics it belongs on
+    Postgres, like tests/consent and tests/audit already are.
+    """
+    return "TEXT"
  
 @pytest_asyncio.fixture
 async def db():
@@ -82,8 +96,13 @@ async def db():
         "sqlite+aiosqlite://", poolclass=StaticPool, connect_args={"check_same_thread": False},
     )
     @event.listens_for(engine.sync_engine, "connect")
-    def _register_uuid_generate_v4(dbapi_connection, connection_record):
+    def _register_pg_functions(dbapi_connection, connection_record):
         dbapi_connection.create_function("uuid_generate_v4", 0, lambda: str(uuid.uuid4()))
+        # break_glass_grants (0004) has CHECK (char_length(justification) >= 20).
+        # SQLite spells it length(). Same reason as the type shims above: this
+        # conftest creates every table in the app, so one module's Postgres-ism
+        # breaks another module's tests.
+        dbapi_connection.create_function("char_length", 1, lambda s: len(s) if s else 0)
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

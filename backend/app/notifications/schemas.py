@@ -16,6 +16,7 @@ class NotificationHistoryOut(BaseModel):
     payload: Dict[str, Any]
     department_id: uuid.UUID | None
     created_at: datetime
-    updated_at: datetime
+    # No updated_at: notification_history is append-only with a block-update
+    # trigger, so the table has no such column and model_validate() would raise.
 
     model_config = ConfigDict(from_attributes=True)

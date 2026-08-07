@@ -14,7 +14,7 @@ Usage pattern in a router:
     if existing is not None:
         return existing.response_body   # replay, don't re-run anything
     # ... do the real work ...
-    await record_idempotent_response(db, key, "POST /queue/tokens", 201, response_body)
+    await record_idempotent_response(db, key, "POST /queue/tokens", 201, response_body, user_id)
 """
 import hashlib
 import uuid
@@ -49,7 +49,11 @@ async def check_idempotency(
     """
     existing = (
         await db.execute(
-            select(IdempotencyKey).where(IdempotencyKey.key == key, IdempotencyKey.endpoint == endpoint)
+            select(IdempotencyKey).where(
+                IdempotencyKey.key == key,
+                IdempotencyKey.endpoint == endpoint,
+                IdempotencyKey.user_id == user_id,
+            )
         )
     ).scalar_one_or_none()
 
@@ -71,7 +75,11 @@ async def check_idempotency(
             await db.rollback()
             existing = (
                 await db.execute(
-                    select(IdempotencyKey).where(IdempotencyKey.key == key, IdempotencyKey.endpoint == endpoint)
+                    select(IdempotencyKey).where(
+                IdempotencyKey.key == key,
+                IdempotencyKey.endpoint == endpoint,
+                IdempotencyKey.user_id == user_id,
+            )
                 )
             ).scalar_one()
 
@@ -96,10 +104,18 @@ async def check_idempotency(
 
 async def record_idempotent_response(
     db: AsyncSession, key: str, endpoint: str, response_status: int, response_body: dict,
+    user_id: uuid.UUID | None = None,
 ) -> None:
+    """user_id must be the same one passed to check_idempotency — the row is
+    keyed on (key, user_id, endpoint), so omitting it here would fail to find
+    the reservation this call is meant to complete."""
     row = (
         await db.execute(
-            select(IdempotencyKey).where(IdempotencyKey.key == key, IdempotencyKey.endpoint == endpoint)
+            select(IdempotencyKey).where(
+                IdempotencyKey.key == key,
+                IdempotencyKey.endpoint == endpoint,
+                IdempotencyKey.user_id == user_id,
+            )
         )
     ).scalar_one()
     row.response_status = response_status

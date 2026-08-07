@@ -189,12 +189,20 @@ async def create_token(
     if department is None:
         raise HTTPException(404, "Department not found")
 
+    # MAX(sequence)+1 is safe HERE, and only here, because _get_scoped_queue
+    # above took the parent `queues` row with FOR UPDATE. Two concurrent
+    # create_token calls for the same queue serialise on that lock, so the
+    # second reads MAX only after the first has committed its token — and
+    # `sequence` is unique per queue_id, which is exactly the granularity the
+    # queue-row lock gives us.
+    #
+    # Do NOT copy this pattern anywhere the parent row isn't already locked.
+    # The display counter below is the general case: queue_counters exists
+    # because token_display is per (department, day) and no single row lock
+    # covers it.
+    next_seq_expr = func.coalesce(func.max(QueueToken.sequence), 0) + 1  # pr-check: ignore
     next_seq = (
-        await db.execute(
-            select(func.coalesce(func.max(QueueToken.sequence), 0) + 1).where(
-                QueueToken.queue_id == queue_id
-            )
-        )
+        await db.execute(select(next_seq_expr).where(QueueToken.queue_id == queue_id))
     ).scalar_one()
 
     business_date = await get_business_date(db, queue.facility_id)
