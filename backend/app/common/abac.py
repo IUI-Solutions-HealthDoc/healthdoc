@@ -9,9 +9,8 @@ Usage in a module service:
     await enforce_if_policy_exists(db, user, action="read", resource_type="patients",
                   attrs={"facility_id": row.facility_id})
 
-Default posture: deny-by-default. If at least one policy matches the
-(role, resource_type, action) triple and ANY condition is unevaluable, deny and
-explain why. If no policy exists the system falls back to RBAC's decision.
+If no policy exists the system falls back to RBAC's decision. Once a policy matches,
+explicit denies and unevaluable conditions deny.
 
 TODO(#issue-0003): log every policy evaluation to audit_logs once migration 0003 lands.
 """
@@ -48,10 +47,18 @@ async def evaluate(
         # FAIL-OPEN: no ABAC policy for this triple — defer to RBAC.
         # This does NOT mean ABAC approved. See docstring above.
         return True, None
+    user_facility_id = None
+    if any(condition for _, condition in matched):
+        user_row = await db.execute(
+            text("SELECT facility_id FROM users WHERE keycloak_sub = :sub"),
+            {"sub": user.sub},
+        )
+        user_facility_id = user_row.scalar_one_or_none()
+
     # explicit deny wins; unevaluable conditions deny (never fail open)
     allow = False
     for effect, condition in matched:
-        holds = _condition_holds(condition, user, attrs)
+        holds = _condition_holds(condition, user_facility_id, attrs)
         if holds is None:
             # Unevaluable condition — deny and say why
             return False, f"unevaluable condition: {condition}"
@@ -62,15 +69,19 @@ async def evaluate(
     return allow, (None if allow else "no matching allow policy")
 
 
-def _condition_holds(condition: dict | None, user: AuthUser, attrs: dict) -> bool | None:
+def _condition_holds(
+    condition: dict | None, user_facility_id: Any, attrs: dict,
+) -> bool | None:
     """Returns True (holds), False (doesn't hold), or None (unevaluable)."""
     if not condition:
         return True
-    # supported condition keys (extend in W7):
+    unknown = set(condition) - {"same_facility"}
+    if unknown:
+        return None
     if condition.get("same_facility"):
-        if attrs.get("facility_id") is None or attrs.get("user_facility_id") is None:
+        if attrs.get("facility_id") is None or user_facility_id is None:
             return None  # unevaluable — required attrs missing
-        if str(attrs.get("user_facility_id")) != str(attrs.get("facility_id")):
+        if str(user_facility_id) != str(attrs.get("facility_id")):
             return False
     return True
 
