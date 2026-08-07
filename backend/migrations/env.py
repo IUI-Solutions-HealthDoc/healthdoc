@@ -14,6 +14,7 @@ from app.common.db import Base  # noqa: E402
 from app.users import models as users_models  # noqa: E402, F401
 from app.allergies import models as allergies_models  # noqa: E402, F401
 from app.billing import models as billing_models  # noqa: E402, F401
+from app.outbox import models as outbox_models  # noqa: E402, F401
 
 target_metadata = Base.metadata
 
