@@ -213,9 +213,12 @@ def check_file(path: pathlib.Path) -> list[Finding]:
         # plaintext leak. That fired 4 times on #299 against a migration doing
         # exactly the right thing, and a false blocker on a PII rule is worse
         # than most: it's the one people are most likely to be told off over.
+        # An f-string is only a concern if it interpolates the AADHAAR VALUE.
+        # `f"{patient_id}:aadhaar"` builds an AAD label — the word appears, the
+        # secret doesn't. That fired on #299 against code doing the right thing.
         _sink = re.search(r"\bprint\s*\(|\blogger\b|\blogging\b", ln)
-        _fstring_interp = re.search(r"f\"[^\"]*\{|f'[^']*\{", ln)
-        if (re.search(r"aadhaar", ln, re.I) and (_sink or _fstring_interp)
+        _interpolates_aadhaar = re.search(r"\{[^}]*aadhaar[^}]*\}", ln, re.I)
+        if (re.search(r"aadhaar", ln, re.I) and (_sink or _interpolates_aadhaar)
                 and not re.search(r"blind_index|encrypted|hash|#", ln, re.I)):
             f.append(Finding(BLOCK, "PII-AADHAAR", rel, i,
                 "Possible Aadhaar in a log/plaintext path.",
