@@ -74,12 +74,14 @@ from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # _select_acting_role is underscore-prefixed (private) in its home module
-# — importing it across module boundaries is a smell worth raising with
-# the audit module owner (consider exporting it as a public helper, e.g.
-# app.audit.deps.select_acting_role, since two modules now depend on the
-# same "which role was this done under" logic and it needs one answer).
-# Doing so here per review: single-role selection must match audit_logs'
-# _select_acting_role() exactly, not diverge with a second implementation.
+# — importing it across module boundaries is a smell, confirmed on PR #266
+# review: two modules now depend on the same "which role was this done
+# under" logic and it needs one answer, not a private import or a second
+# implementation. Tech Lead's ask is to make it public as
+# app.audit.deps.select_acting_role — deferred to the audit module's own
+# branch (feat/b7-audit-append-only-triggers) rather than done here, since
+# that file is outside consent's scope for this PR; this import switches
+# to the public name in that follow-up.
 from app.audit.deps import _select_acting_role
 from app.auth.deps import CurrentUser
 from app.common.db import SessionLocal
@@ -157,7 +159,7 @@ def log_patient_data_access(
                 consent_required=consent_required,
                 consent_verified=None,
             )
-            write_fallback_row(
+            await write_fallback_row(
                 row,
                 failure_reason=(
                     f"missing_path_param:{patient_id_param} on {request.method} {request.url.path}"
@@ -187,7 +189,7 @@ def log_patient_data_access(
                         consent_required=consent_required,
                         consent_verified=None,
                     )
-                    write_fallback_row(row, failure_reason="unresolved_user_id")
+                    await write_fallback_row(row, failure_reason="unresolved_user_id")
                     logger.error(
                         "log_patient_data_access: could not resolve a users.id "
                         "for this request (%s %s) — wrote to fallback instead "
@@ -230,7 +232,7 @@ def log_patient_data_access(
                 consent_required=consent_required,
                 consent_verified=None,
             )
-            write_fallback_row(row, failure_reason=f"db_write_failed:{exc!r}")
+            await write_fallback_row(row, failure_reason=f"db_write_failed:{exc!r}")
             logger.warning(
                 "data_access_log DB write failed for %s %s (patient=%s, purpose=%s) — "
                 "wrote to durable fallback instead. See fallback file for recovery.",

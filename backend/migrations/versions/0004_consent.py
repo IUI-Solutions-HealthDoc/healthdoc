@@ -2,7 +2,7 @@
 break_glass_grants, data_access_log, consent_renewal_reminders
 
 Revision ID: 0004
-Revises: 0003
+Revises: 0003a
 
 Notes for reviewers:
 
@@ -47,7 +47,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision = "0004"
-down_revision = "0003"
+down_revision = "0003a"
 branch_labels = None
 depends_on = None
 
@@ -253,6 +253,16 @@ def upgrade() -> None:
     # (revoked/denied/expired) -- a withdrawal against a settled consent
     # is a duplicate insert or an upstream logic error and must fail
     # loudly rather than silently overwrite status_changed_at.
+    #
+    # PR #266 review: the terminal-status guard had a race -- two
+    # concurrent withdrawals against the same consent could both SELECT
+    # 'granted', both pass the guard, and both UPDATE, leaving two
+    # consent_withdrawals rows for one consent (the exact duplicate this
+    # guard exists to prevent). Postgres serialises the two UPDATEs but
+    # not the two SELECTs, so the guard alone doesn't close the window --
+    # FOR UPDATE locks the consent_records row on read, making the second
+    # concurrent transaction wait, then re-read the now-terminal status
+    # and raise as intended.
     op.execute(
         """
         CREATE OR REPLACE FUNCTION trg_consent_withdrawals_flip_status() RETURNS trigger AS $$
@@ -260,7 +270,10 @@ def upgrade() -> None:
             current_status text;
             new_status text;
         BEGIN
-            SELECT status INTO current_status FROM consent_records WHERE id = NEW.consent_id;
+            SELECT status INTO current_status
+              FROM consent_records
+             WHERE id = NEW.consent_id
+               FOR UPDATE;
 
             IF current_status IS NULL THEN
                 RAISE EXCEPTION 'consent_withdrawals: no consent_records row %', NEW.consent_id;

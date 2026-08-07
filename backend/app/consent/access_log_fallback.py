@@ -54,6 +54,7 @@ lands.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -63,6 +64,11 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
+# PR #266 review: pr_check flags this — settings should live in
+# app/common/config.py's Settings (data_access_log_fallback_path), not a
+# direct os.environ.get() here. Not applied in this PR: config.py is
+# outside the consent module, out of scope for this branch to edit.
+# Flagged back on the PR for whoever owns common/config.py.
 FALLBACK_LOG_PATH = os.environ.get(
     "DATA_ACCESS_LOG_FALLBACK_PATH", "/var/log/healthdoc/data_access_log_fallback.jsonl"
 )
@@ -87,16 +93,12 @@ def increment_fallback_counter(reason: str) -> None:
     )
 
 
-def write_fallback_row(row: dict, *, failure_reason: str) -> bool:
+def _write_fallback_row_sync(row: dict, *, failure_reason: str) -> bool:
     """
-    Best-effort durable write of a row that failed to reach
-    data_access_log. Returns True/False for whether the fallback write
-    itself succeeded — callers should NOT raise or block on False; if
-    even the fallback write fails, logger.exception() upstream is the
-    last resort, exactly as before this module existed.
-
-    `row` values must already be JSON-serialisable (str/bool/None) —
-    callers convert UUIDs/datetimes before calling this.
+    Synchronous body of write_fallback_row() — open()/write()/flush()/
+    fsync() all block, so this must only ever run off the event loop
+    (see write_fallback_row()). threading.Lock is correct here precisely
+    because this now runs in a worker thread, not on the loop.
     """
     payload = {
         **row,
@@ -127,6 +129,27 @@ def write_fallback_row(row: dict, *, failure_reason: str) -> bool:
             {k: v for k, v in row.items() if k not in ("justification",)},
         )
         return False
+
+
+async def write_fallback_row(row: dict, *, failure_reason: str) -> bool:
+    """
+    Best-effort durable write of a row that failed to reach
+    data_access_log. Returns True/False for whether the fallback write
+    itself succeeded — callers should NOT raise or block on False; if
+    even the fallback write fails, logger.exception() upstream is the
+    last resort, exactly as before this module existed.
+
+    `row` values must already be JSON-serialisable (str/bool/None) —
+    callers convert UUIDs/datetimes before calling this.
+
+    PR #266 review: the write itself (open/write/flush/fsync) used to
+    run inline on the caller's event loop. fsync can take tens of
+    milliseconds, and the usual reason this path fires at all is
+    Postgres being unreachable — meaning every request takes this path
+    at once, so the stall lands exactly when the system is already
+    degraded. asyncio.to_thread() moves the blocking work off the loop.
+    """
+    return await asyncio.to_thread(_write_fallback_row_sync, row, failure_reason=failure_reason)
 
 
 def serialise_row_for_fallback(

@@ -18,7 +18,7 @@ from app.consent.access_log_fallback import serialise_row_for_fallback, write_fa
 
 
 class TestWriteFallbackRow:
-    def test_creates_parent_directory_and_appends_a_json_line(self, tmp_path, monkeypatch):
+    async def test_creates_parent_directory_and_appends_a_json_line(self, tmp_path, monkeypatch):
         target = tmp_path / "nested" / "dir" / "fallback.jsonl"
         monkeypatch.setattr(fallback_module, "FALLBACK_LOG_PATH", str(target))
 
@@ -35,7 +35,7 @@ class TestWriteFallbackRow:
             consent_verified=None,
         )
 
-        ok = write_fallback_row(row, failure_reason="test_reason")
+        ok = await write_fallback_row(row, failure_reason="test_reason")
 
         assert ok is True
         assert target.exists()
@@ -44,7 +44,7 @@ class TestWriteFallbackRow:
         assert line["_failure_reason"] == "test_reason"
         assert "_fallback_written_at" in line
 
-    def test_appends_multiple_rows_without_clobbering(self, tmp_path, monkeypatch):
+    async def test_appends_multiple_rows_without_clobbering(self, tmp_path, monkeypatch):
         target = tmp_path / "fallback.jsonl"
         monkeypatch.setattr(fallback_module, "FALLBACK_LOG_PATH", str(target))
 
@@ -61,7 +61,7 @@ class TestWriteFallbackRow:
                 consent_required=None,
                 consent_verified=None,
             )
-            write_fallback_row(row, failure_reason=f"reason_{i}")
+            await write_fallback_row(row, failure_reason=f"reason_{i}")
 
         lines = target.read_text().strip().splitlines()
         assert len(lines) == 3
@@ -69,7 +69,7 @@ class TestWriteFallbackRow:
             "resource_0", "resource_1", "resource_2",
         ]
 
-    def test_returns_false_and_does_not_raise_when_path_is_unwritable(self, monkeypatch):
+    async def test_returns_false_and_does_not_raise_when_path_is_unwritable(self, monkeypatch):
         """Last-resort case: even the fallback can't be written (e.g.
         disk full, permissions). Must not raise — the caller (access_log.py)
         has nothing else to fall back to at that point."""
@@ -81,7 +81,7 @@ class TestWriteFallbackRow:
             patient_id=None, purpose_code="p", access_channel="api",
             emergency_access=False, consent_required=None, consent_verified=None,
         )
-        ok = write_fallback_row(row, failure_reason="test")
+        ok = await write_fallback_row(row, failure_reason="test")
         assert ok is False  # did not raise, reported failure instead
 
 
