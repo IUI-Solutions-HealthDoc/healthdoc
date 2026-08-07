@@ -56,19 +56,31 @@ async def break_glass(payload: BreakGlassRequest,
                       db: AsyncSession = Depends(get_db)) -> dict:
     now = datetime.now(timezone.utc)
     expires = now + GRANT_WINDOW
-
-    # Validate justification length again (belt-and-suspenders; DB CHECK will also catch)
-    if len(payload.justification) < 20:
-        raise HTTPException(422, {"code": "justification_too_short",
-                                  "detail": "Justification must be at least 20 characters"})
+    caller = (await db.execute(text("SELECT id, facility_id FROM users WHERE keycloak_sub = :sub"),
+                               {"sub": user.sub})).mappings().one_or_none()
+    if caller is None:
+        raise HTTPException(403, "Authenticated user has no HealthDoc profile")
+    exists = (await db.execute(text("SELECT 1 FROM patients WHERE id = :pid AND facility_id = :fid"),
+                               {"pid": payload.patient_id, "fid": caller["facility_id"]})).scalar_one_or_none()
+    if exists is None:
+        raise HTTPException(404, "Patient not found in caller facility")
+    active = (await db.execute(text("""
+        SELECT expires_at FROM break_glass_grants
+        WHERE patient_id = :pid AND granted_to_user_id = :uid
+          AND expires_at > now() AND revoked_at IS NULL
+        ORDER BY expires_at DESC LIMIT 1
+    """), {"pid": payload.patient_id, "uid": caller["id"]})).mappings().one_or_none()
+    if active is not None:
+        return {"granted": True, "patient_id": payload.patient_id,
+                "expires_at": active["expires_at"].isoformat(), "reused": True}
 
     # 1) Store the grant in break_glass_grants for compliance tracking
     #    A grant is active iff now() < expires_at AND revoked_at IS NULL
     await db.execute(text("""
         INSERT INTO break_glass_grants
-            (id, patient_id, granted_to, justification, expires_at, created_at)
-        VALUES (uuid_generate_v4(), :pid, :uid, :justification, :expires, :ts)
-    """), {"pid": payload.patient_id, "uid": user.sub,
+            (id, patient_id, granted_to_user_id, justification, granted_at, expires_at, created_at)
+        VALUES (uuid_generate_v4(), :pid, :uid, :justification, :ts, :expires, :ts)
+    """), {"pid": payload.patient_id, "uid": caller["id"],
            "justification": payload.justification,
            "expires": expires, "ts": now})
 
@@ -78,8 +90,8 @@ async def break_glass(payload: BreakGlassRequest,
             (id, user_id, role, resource_type, patient_id, purpose_code,
              access_channel, emergency_access, consent_required, consent_verified, accessed_at)
         VALUES (uuid_generate_v4(), :uid, :role, 'patient', :pid, 'break_glass',
-                'ui', true, true, false, :ts)
-    """), {"uid": user.sub, "role": (user.roles or [None])[0],
+                'api', true, true, false, :ts)
+    """), {"uid": caller["id"], "role": (user.roles or [None])[0],
            "pid": payload.patient_id, "ts": now})
 
     # 3) Dual notification (patient + compliance) — enqueued via notifications
@@ -99,14 +111,14 @@ async def break_glass(payload: BreakGlassRequest,
             "justification_logged": True}
 
 
-@router.get("/expired-unreviewed")
+@router.get("/expired-unreviewed", dependencies=[Depends(require_roles("auditor", "dpo", "admin"))])
 async def expired_unreviewed_grants(
     user: Annotated[AuthUser, Depends(get_current_user)],
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Compliance worklist: grants that expired without being reviewed."""
     rows = (await db.execute(text("""
-        SELECT id, patient_id, granted_to, justification, expires_at, created_at
+        SELECT id, patient_id, granted_to_user_id, justification, expires_at, created_at
         FROM break_glass_grants
         WHERE expires_at < now() AND revoked_at IS NULL AND reviewed_at IS NULL
         ORDER BY expires_at DESC
