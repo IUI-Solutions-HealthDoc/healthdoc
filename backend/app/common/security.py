@@ -49,15 +49,15 @@ def _validate_key(value: str, name: str) -> bytes:
             f"\"import os, base64; print(base64.b64encode(os.urandom(32)).decode())\""
         )
     try:
-        raw = base64.b64decode(value)
+        raw = base64.b64decode(value, validate=True)
     except Exception:
         raise CryptoConfigError(
             f"{name} is not valid base64. "
             f"Keys must be base64-encoded 32 random bytes."
         )
-    if len(raw) < 32:
+    if len(raw) != 32:
         raise CryptoConfigError(
-            f"{name} is only {len(raw)} bytes after decoding; minimum is 32. "
+            f"{name} decodes to {len(raw)} bytes; AES-256-GCM requires exactly 32. "
             f"Generate a real key: python3 -c "
             f"\"import os, base64; print(base64.b64encode(os.urandom(32)).decode())\""
         )
@@ -102,10 +102,15 @@ def encrypt_pii(value: str) -> tuple[bytes, int]:
 
 
 def decrypt_pii(blob: bytes, key_version: int = _CURRENT_KEY_VERSION) -> str:
-    """Decrypt AES-256-GCM blob. key_version allows old-key lookups on rotation."""
+    """Decrypt an AES-256-GCM blob using the currently loaded key version."""
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-    # In production, look up the key by version; for now all versions use the same key.
+    if key_version != _CURRENT_KEY_VERSION:
+        raise CryptoConfigError(
+            f"Ciphertext was written with key version {key_version}, but only "
+            f"{_CURRENT_KEY_VERSION} is loaded. Key rotation needs a version-to-key map "
+            "before any key is rotated."
+        )
     key = _get_encryption_key()
     nonce = blob[:12]
     ciphertext_and_tag = blob[12:]

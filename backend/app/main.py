@@ -1,6 +1,8 @@
 """HealthDoc API entrypoint — B1-W1-06 (skeleton, /health, envelope middleware)."""
 import importlib
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,11 +25,25 @@ MODULES = [
 ]
 
 settings = get_settings()
+
+
+@asynccontextmanager
+async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
+    """Validate cryptographic configuration before serving traffic."""
+    from app.common.security import _get_encryption_key, _get_hmac_key
+
+    _get_encryption_key()
+    _get_hmac_key()
+    log.info("Crypto keys validated")
+    yield
+
+
 app = FastAPI(
     title="HealthDoc HMIS API",
     version="0.1.0",
     docs_url=f"{settings.api_prefix}/docs",
     openapi_url=f"{settings.api_prefix}/openapi.json",
+    lifespan=_lifespan,
 )
 app.add_middleware(EnvelopeMiddleware)
 
@@ -44,15 +60,6 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
 )
-
-
-@app.on_event("startup")
-async def _validate_crypto_keys() -> None:
-    """Fail at boot if crypto keys are still placeholders — not on first patient."""
-    from app.common.security import _get_encryption_key, _get_hmac_key
-    _get_encryption_key()
-    _get_hmac_key()
-    log.info("Crypto keys validated")
 
 
 @app.get(f"{settings.api_prefix}/health")

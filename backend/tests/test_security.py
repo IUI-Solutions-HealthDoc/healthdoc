@@ -12,7 +12,9 @@ def _set_crypto_keys(monkeypatch):
     monkeypatch.setenv("PII_ENCRYPTION_KEY", key)
     monkeypatch.setenv("AADHAAR_HMAC_KEY", key)
     # Clear lru_cache between tests
+    from app.common.config import get_settings
     from app.common.security import _get_encryption_key, _get_hmac_key
+    get_settings.cache_clear()
     _get_encryption_key.cache_clear()
     _get_hmac_key.cache_clear()
 
@@ -60,7 +62,7 @@ def test_encrypt_no_plaintext_in_blob():
     assert plaintext.encode() not in blob
 
 
-def test_placeholder_key_rejected(monkeypatch):
+def test_placeholder_key_rejected():
     """The default 'change-me' key must be rejected."""
     from app.common.security import _validate_key, CryptoConfigError
     with pytest.raises(CryptoConfigError):
@@ -73,3 +75,11 @@ def test_short_key_rejected():
     short = base64.b64encode(os.urandom(16)).decode()  # only 16 bytes
     with pytest.raises(CryptoConfigError):
         _validate_key(short, "TEST_KEY")
+
+
+def test_non_aes_key_length_rejected():
+    """Keys that AES-GCM would reject must fail during validation."""
+    from app.common.security import _validate_key, CryptoConfigError
+    invalid = base64.b64encode(os.urandom(40)).decode()
+    with pytest.raises(CryptoConfigError):
+        _validate_key(invalid, "TEST_KEY")
