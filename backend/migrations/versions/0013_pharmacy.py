@@ -102,16 +102,21 @@ def upgrade() -> None:
         CREATE OR REPLACE FUNCTION reject_expired_batch_dispense()
         RETURNS TRIGGER AS $$
         DECLARE
-            batch_expiry DATE;
-        BEGIN
-            IF NEW.batch_id IS NULL THEN
-                RETURN NEW;
-            END IF;
+    batch_expiry DATE;
+    fac_tz       TEXT;
+BEGIN
+    IF NEW.batch_id IS NULL THEN
+        RETURN NEW;
+    END IF;
 
-            SELECT expiry_date INTO batch_expiry
-            FROM inventory_batches WHERE id = NEW.batch_id;
+    SELECT b.expiry_date, f.timezone
+      INTO batch_expiry, fac_tz
+      FROM inventory_batches b
+      JOIN stock_locations sl ON sl.id = b.stock_location_id
+      JOIN facilities      f  ON f.id  = sl.facility_id
+     WHERE b.id = NEW.batch_id;
 
-            IF batch_expiry < CURRENT_DATE THEN
+    IF batch_expiry < (now() AT TIME ZONE fac_tz)::date THEN
                 IF NEW.expiry_override_by IS NULL OR NEW.expiry_override_reason IS NULL THEN
                     RAISE EXCEPTION
                         'batch % expired % — dispensing requires expiry_override_by '
