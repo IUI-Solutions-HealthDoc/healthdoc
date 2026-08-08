@@ -57,7 +57,18 @@ class User(Base, UUIDPk, Timestamps):
 @event.listens_for(Facility, "after_insert")
 def _create_uhid_sequence_for_facility(mapper, connection, target: Facility) -> None:
     """Create the UHID sequence for this facility+year at insert time so the
-    registration endpoint never needs to run DDL inside a request path."""
+    registration endpoint never needs to run DDL inside a request path.
+
+    Postgres only. SEQUENCE is not SQL that SQLite understands, and this hook
+    fires on EVERY Facility insert — including the one in tests/conftest.py's
+    `seed` fixture, which runs against in-memory SQLite. Without this guard the
+    whole queue suite errors at setup with 'near "SEQUENCE": syntax error', in
+    tests that have nothing to do with patients or UHIDs. Skipping is correct
+    rather than merely convenient: those tests never call generate_uhid(), and
+    _next_sequence() creates the sequence on demand if one is ever missing.
+    """
+    if connection.dialect.name != "postgresql":
+        return
     try:
         tz = zoneinfo.ZoneInfo(target.timezone or "Asia/Kolkata")
     except Exception:
