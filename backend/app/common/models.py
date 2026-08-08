@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, func, text
+from sqlalchemy import DateTime, ForeignKey, Integer, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, declarative_mixin, mapped_column
 
@@ -35,3 +35,10 @@ class Blame:
     updated_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=True
     )
+
+
+class Versioned:
+    """Optimistic concurrency (schema §4A.2). row_version starts at 1 and is
+    bumped by the service on every update in the same transaction. GET returns
+    it as ETag; PATCH/PUT must send If-Match. Mismatch => 409 stale_write."""
+    row_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")

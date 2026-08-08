@@ -45,10 +45,21 @@ async def test_concurrent_token_allocation_never_collides():
     Session = async_sessionmaker(engine, expire_on_commit=False)
 
     # Real, committed rows -- both concurrent sessions below need to see them.
+    #
+    # Committed in TWO transactions, parent before child, deliberately. These
+    # used to share one flush and relied on SQLAlchemy ordering the facilities
+    # INSERT ahead of the departments one; on real Postgres that produced
+    # "Key (facility_id)=(...) is not present in table facilities". This test
+    # only started running once 0009 unparked and queue_counters existed, so
+    # the ordering had never actually been exercised. Two commits is also
+    # closer to what the comment above promises: a row a *separate* session
+    # can see has to be committed, not merely flushed.
     facility_id = uuid.uuid4()
     department_id = uuid.uuid4()
     async with Session() as setup:
         setup.add(Facility(id=facility_id, code=f"CONC{uuid.uuid4().hex[:4]}", name="Concurrency Test", state_code="TS"))
+        await setup.commit()
+    async with Session() as setup:
         setup.add(Department(id=department_id, code=f"C{uuid.uuid4().hex[:4]}", name="Concurrency Test", facility_id=facility_id))
         await setup.commit()
 

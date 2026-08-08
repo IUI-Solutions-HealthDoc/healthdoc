@@ -216,8 +216,15 @@ def check_file(path: pathlib.Path) -> list[Finding]:
         # An f-string is only a concern if it interpolates the AADHAAR VALUE.
         # `f"{patient_id}:aadhaar"` builds an AAD label — the word appears, the
         # secret doesn't. That fired on #299 against code doing the right thing.
+        # ...and `{...}` only counts as interpolation inside an ACTUAL f-string.
+        # Without the f-prefix check, a plain dict literal matches: line 116 of
+        # #299's security.py is `return {1: settings.aadhaar_hmac_key}` — a key
+        # lookup, no secret, no sink — and it was reported as a plaintext leak.
+        # Third false blocker this rule has produced on that one PR. A PII rule
+        # that cries wolf gets ignored exactly when it finally matters.
         _sink = re.search(r"\bprint\s*\(|\blogger\b|\blogging\b", ln)
-        _interpolates_aadhaar = re.search(r"\{[^}]*aadhaar[^}]*\}", ln, re.I)
+        _fstring = re.search(r"""\bf["']|\bf?["']{3}""", ln)
+        _interpolates_aadhaar = _fstring and re.search(r"\{[^}]*aadhaar[^}]*\}", ln, re.I)
         if (re.search(r"aadhaar", ln, re.I) and (_sink or _interpolates_aadhaar)
                 and not re.search(r"blind_index|encrypted|hash|#", ln, re.I)):
             f.append(Finding(BLOCK, "PII-AADHAAR", rel, i,
