@@ -17,11 +17,17 @@ from app.common.models import Timestamps, UUIDPk
 class IdempotencyKey(Base, UUIDPk, Timestamps):
     __tablename__ = "idempotency_keys"
     __table_args__ = (
-        UniqueConstraint("key", "endpoint", name="uq_idempotency_keys_key_endpoint"),
+        # Must match 0003a exactly. user_id is IN the key deliberately:
+        # idempotency keys are client-generated, so two users can emit the same
+        # one against the same endpoint. Scoping only by (key, endpoint) would
+        # hand the second caller the first caller's stored response — a
+        # cross-user data leak wearing a replay's clothes.
+        UniqueConstraint("key", "user_id", "endpoint",
+                         name="uq_idempotency_keys_key_user_endpoint"),
     )
 
-    key: Mapped[str] = mapped_column(String(64), nullable=False)
-    endpoint: Mapped[str] = mapped_column(String(120), nullable=False)
+    key: Mapped[str] = mapped_column(String(255), nullable=False)
+    endpoint: Mapped[str] = mapped_column(String(255), nullable=False)
     request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     # Null until the real request finishes -- see idempotency.py.
     response_status: Mapped[int | None] = mapped_column(Integer, nullable=True)

@@ -135,7 +135,16 @@ async def register_patient(
 
     # Store response so retries replay it without re-running registration
     response = PatientOut.model_validate(patient).model_dump(mode="json")
-    await record_idempotent_response(db, idempotency_key, _REGISTER_ENDPOINT, 201, response)
+    # user_id is REQUIRED here, not optional. check_idempotency() above reads
+    # with user_id=current_db_user.id, and the uniqueness key is
+    # (key, user_id, endpoint) per 0003a — so recording without it stores NULL,
+    # the replay lookup never matches, and idempotency silently does nothing:
+    # a retried registration creates a second patient. Failing open is worse
+    # than failing loud here.
+    await record_idempotent_response(
+        db, idempotency_key, _REGISTER_ENDPOINT, 201, response,
+        user_id=current_db_user.id,
+    )
 
     return patient
 
