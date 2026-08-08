@@ -21,9 +21,11 @@ billing module's tests. Once the chain is unbroken, this fixture can be
 simplified back down to match audit's.
 
 facilities/users are real via 0002/0003 (merged) — not stubbed here.
-patients/consent_records/order_external_results are NOT merged on this
-branch (0006/0004/0008), so those three get single-column stub tables,
-same as before.
+consent_records is ALSO real now, via 0004. patients (0006) and
+order_external_results (0008) are still unmerged and get single-column
+stub tables. Which of the three gets stubbed is decided at runtime by
+to_regclass rather than hardcoded — see STUB_DDL for why assuming a
+table is absent is actively dangerous once its migration lands.
 """
 from __future__ import annotations
 
@@ -96,38 +98,59 @@ migration_0019 = _load_migration_0019()
 # commands into a prepared statement") — psycopg2 silently allowed this,
 # asyncpg does not. Each CREATE/DROP must be its own execute() call, so
 # these are lists of individual statements, not one blob.
-STUB_DDL: list[str] = [
-    """
-    CREATE TABLE IF NOT EXISTS patients (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        photo_file_id UUID
-    );
+# Stub tables, in dependency order (drop happens in reverse).
+#
+# These exist ONLY for tables whose real migration hasn't merged yet. A stub
+# must never be created — or dropped — when the real table is present:
+# `DROP TABLE IF EXISTS consent_records` happily targets the REAL 0004 table,
+# fails with DependentObjectsStillExistError because consent_withdrawals /
+# data_access_log / consent_renewal_reminders reference it, and takes the whole
+# teardown transaction down with it — INCLUDING 0019's downgrade. `files` then
+# survives, and every later test in this file errors at setup with
+# DuplicateTableError. One stale stub, a whole suite red.
+#
+# So: create only what's missing, drop only what we created. As 0006 (patients)
+# and 0008 (order_external_results) merge, this needs no edit — those stubs
+# simply stop being created.
+STUB_DDL: dict[str, str] = {
+    "patients": """
+        CREATE TABLE patients (
+            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+            photo_file_id UUID
+        );
     """,
-    """
-    CREATE TABLE IF NOT EXISTS consent_records (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        guardian_id_proof_file_id UUID
-    );
+    "consent_records": """
+        CREATE TABLE consent_records (
+            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+            guardian_id_proof_file_id UUID
+        );
     """,
-    """
-    CREATE TABLE IF NOT EXISTS order_external_results (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        result_file_id UUID
-    );
+    "order_external_results": """
+        CREATE TABLE order_external_results (
+            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+            result_file_id UUID
+        );
     """,
-]
+}
 
-DROP_STUB_DDL: list[str] = [
-    "DROP TABLE IF EXISTS order_external_results;",
-    "DROP TABLE IF EXISTS consent_records;",
-    "DROP TABLE IF EXISTS patients;",
-]
+# Written by _upgrade_sync, read and cleared by _downgrade_sync. Safe as module
+# state because `engine` is function-scoped and these tests run serially — the
+# two always pair up within one fixture instance.
+_created_stubs: list[str] = []
 
 
 def _upgrade_sync(sync_conn) -> None:
     sync_conn.execute(sa.text('CREATE EXTENSION IF NOT EXISTS "uuid-ossp";'))
-    for stmt in STUB_DDL:
-        sync_conn.execute(sa.text(stmt))
+
+    _created_stubs.clear()
+    for table, ddl in STUB_DDL.items():
+        exists = sync_conn.execute(
+            sa.text("SELECT to_regclass(:t)"), {"t": f"public.{table}"}
+        ).scalar()
+        if exists is None:
+            sync_conn.execute(sa.text(ddl))
+            _created_stubs.append(table)
+
     ctx = MigrationContext.configure(sync_conn)
     # Operations.context() takes the MigrationContext itself, NOT an
     # Operations instance wrapping it — passing Operations(ctx) makes
@@ -141,8 +164,10 @@ def _downgrade_sync(sync_conn) -> None:
     ctx = MigrationContext.configure(sync_conn)
     with Operations.context(ctx):
         migration_0019.downgrade()
-    for stmt in DROP_STUB_DDL:
-        sync_conn.execute(sa.text(stmt))
+    # Reverse order: order_external_results -> consent_records -> patients.
+    for table in reversed(_created_stubs):
+        sync_conn.execute(sa.text(f"DROP TABLE IF EXISTS {table};"))
+    _created_stubs.clear()
 
 
 @pytest_asyncio.fixture
