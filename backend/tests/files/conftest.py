@@ -20,12 +20,16 @@ revision-chain resolution entirely — same isolation trick used for the
 billing module's tests. Once the chain is unbroken, this fixture can be
 simplified back down to match audit's.
 
-facilities/users are real via 0002/0003 (merged) — not stubbed here.
-consent_records is ALSO real now, via 0004. patients (0006) and
-order_external_results (0008) are still unmerged and get single-column
-stub tables. Which of the three gets stubbed is decided at runtime by
-to_regclass rather than hardcoded — see STUB_DDL for why assuming a
-table is absent is actively dangerous once its migration lands.
+facilities/users are real via 0002/0003. So, now, are all three tables this
+file used to stub: consent_records (0004), patients (0006) and
+order_external_results (0008) have all landed. STUB_DDL is therefore inert
+today — every entry is skipped by the to_regclass check — and it is kept
+only so this suite still runs on a branch where one of them is absent.
+
+That check is the point. Each of those three tables broke this file on the
+day its migration merged, because a stub-era CREATE or INSERT stopped
+matching reality. Deciding at runtime what exists, instead of hardcoding an
+assumption, is what stopped the fourth one from doing it again.
 """
 from __future__ import annotations
 

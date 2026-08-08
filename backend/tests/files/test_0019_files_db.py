@@ -220,12 +220,44 @@ async def test_dangling_fks_resolve_and_restrict_holds(engine: AsyncEngine, faci
                     "file_id": file_id,
                 },
             )
-            order_id = uuid.uuid4()
+            # order_external_results is real as of 0008 too, and its order_id
+            # is a NOT NULL FK — so the whole parent chain has to exist:
+            # visits -> encounters -> orders -> order_external_results.
+            # visit_type and order_type are CHECK-constrained.
+            visit_id, encounter_id, order_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
             await conn.execute(
                 sa.text(
-                    "INSERT INTO order_external_results (id, result_file_id) VALUES (:id, :file_id)"
+                    "INSERT INTO visits "
+                    "(id, visit_number, patient_id, facility_id, visit_type, visit_date, created_by) "
+                    "VALUES (:id, :num, :patient_id, :facility_id, 'opd', CURRENT_DATE, :created_by)"
                 ),
-                {"id": order_id, "file_id": file_id},
+                {"id": visit_id, "num": f"V{uuid.uuid4().hex[:10]}", "patient_id": patient_id,
+                 "facility_id": facility_id, "created_by": user_id},
+            )
+            await conn.execute(
+                sa.text(
+                    "INSERT INTO encounters (id, visit_id, provider_user_id, created_by) "
+                    "VALUES (:id, :visit_id, :provider, :created_by)"
+                ),
+                {"id": encounter_id, "visit_id": visit_id, "provider": user_id, "created_by": user_id},
+            )
+            await conn.execute(
+                sa.text(
+                    "INSERT INTO orders "
+                    "(id, order_number, encounter_id, patient_id, order_type, created_by) "
+                    "VALUES (:id, :num, :encounter_id, :patient_id, 'lab', :created_by)"
+                ),
+                {"id": order_id, "num": f"O{uuid.uuid4().hex[:10]}", "encounter_id": encounter_id,
+                 "patient_id": patient_id, "created_by": user_id},
+            )
+            result_id = uuid.uuid4()
+            await conn.execute(
+                sa.text(
+                    "INSERT INTO order_external_results "
+                    "(id, order_id, summary, recorded_by, result_file_id) "
+                    "VALUES (:id, :order_id, 'external report', :recorded_by, :file_id)"
+                ),
+                {"id": result_id, "order_id": order_id, "recorded_by": user_id, "file_id": file_id},
             )
 
             # ondelete=RESTRICT on all three retrofit FKs — deleting the
