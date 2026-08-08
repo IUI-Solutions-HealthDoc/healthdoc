@@ -2,10 +2,9 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CHAR, ForeignKey, String, UniqueConstraint, func, text
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import DateTime, ForeignKey, Integer, func, text
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, declarative_mixin, mapped_column
-from app.common.db import Base
 
 
 @declarative_mixin
@@ -19,9 +18,11 @@ class UUIDPk:
 
 @declarative_mixin
 class Timestamps:
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
-        server_default=func.now(), onupdate=func.now(), nullable=False
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
 
 
@@ -36,27 +37,8 @@ class Blame:
     )
 
 
-class IdempotencyKey(Base, UUIDPk):
-    """
-    Schema doc §4A.1. Write-once: created, then only ever read back
-    for replay, never mutated. Deliberately does NOT use the
-    Timestamps mixin -- that adds updated_at, which this table
-    doesn't have (see migrations/versions/0033_idempotency_keys.py).
-    """
-    __tablename__ = "idempotency_keys"
-    __table_args__ = (
-        UniqueConstraint("key", "endpoint", name="uq_idempotency_keys_key_endpoint"),
-    )
-
-    key: Mapped[str] = mapped_column(String(64), nullable=False)
-    endpoint: Mapped[str] = mapped_column(String(120), nullable=False)
-    request_hash: Mapped[str] = mapped_column(CHAR(64), nullable=False)
-
-    response_status: Mapped[int | None] = mapped_column(nullable=True)
-    response_body: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-
-    user_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
-    )
-
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
+class Versioned:
+    """Optimistic concurrency (schema §4A.2). row_version starts at 1 and is
+    bumped by the service on every update in the same transaction. GET returns
+    it as ETag; PATCH/PUT must send If-Match. Mismatch => 409 stale_write."""
+    row_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")

@@ -4,8 +4,15 @@ Revision ID: 0008
 Revises: 0007
 Create Date: 2026-07-23
 
-Builds: orders, prescriptions, prescription_items (schema.md §3, migration 0008)
+Builds: orders, prescriptions, prescription_items, procedure_records,
+        order_external_results (schema.md §3, migration 0008)
 Depends on: 0007 visits/encounters.
+
+Two deferred FKs, both following the prescription_items.medicine_item_id
+precedent — the column exists now, the constraint arrives with the migration
+that creates its target:
+  procedure_records.ot_schedule_id      -> ot_schedules (0017)
+  order_external_results.result_file_id -> files        (0019)
 """
 from alembic import op
 import sqlalchemy as sa
@@ -96,8 +103,77 @@ def upgrade() -> None:
     )
     op.create_index("ix_prescription_items_prescription_id", "prescription_items", ["prescription_id"])
 
+    # ------------------------------------------------ procedure_records
+    # Owned by orders/B3, NOT the OT module — a suture, dressing or
+    # catheterisation must be recordable at a facility with no theatre, and
+    # billing reads this table for the `procedure` charge category. So
+    # ot_schedule_id is nullable and its FK waits for 0017, the same way
+    # prescription_items.medicine_item_id waits for 0012.
+    op.create_table(
+        "procedure_records",
+        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True,
+                   server_default=sa.text("uuid_generate_v4()")),
+        sa.Column("order_id", postgresql.UUID(as_uuid=True), nullable=True),
+        sa.Column("encounter_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("patient_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("procedure_name", sa.Text, nullable=False),
+        sa.Column("procedure_code", sa.String(30), nullable=True),
+        sa.Column("code_system", sa.String(30), nullable=True),
+        sa.Column("setting", sa.String(50), nullable=False),
+        sa.Column("ot_schedule_id", postgresql.UUID(as_uuid=True), nullable=True),  # FK added in 0017
+        sa.Column("performed_by", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("assisted_by", postgresql.UUID(as_uuid=True), nullable=True),
+        sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("ended_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("outcome", sa.Text, nullable=True),
+        sa.Column("complications", sa.Text, nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+        sa.ForeignKeyConstraint(["order_id"], ["orders.id"], ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(["encounter_id"], ["encounters.id"], ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(["patient_id"], ["patients.id"], ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(["performed_by"], ["users.id"]),
+        sa.ForeignKeyConstraint(["assisted_by"], ["users.id"]),
+        sa.CheckConstraint(
+            "setting IN ('opd_minor','bedside','emergency','ot')",
+            name="ck_procedure_records_setting",
+        ),
+        sa.CheckConstraint(
+            "ot_schedule_id IS NULL OR setting = 'ot'",
+            name="ck_procedure_records_ot_schedule_only_when_ot",
+        ),
+    )
+    op.create_index("ix_procedure_records_encounter_id", "procedure_records", ["encounter_id"])
+    op.create_index("ix_procedure_records_patient_id", "procedure_records", ["patient_id"])
+
+    # ------------------------------------------- order_external_results
+    # Owned by orders/B3, deliberately not the lab module, so off-site
+    # fulfilment still works with lab and radiology switched off.
+    # Append-only by convention (§3): a corrected outside report is a NEW
+    # row, never an UPDATE — same versioning philosophy as lab_results.
+    # result_file_id's FK to files arrives with 0019.
+    op.create_table(
+        "order_external_results",
+        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True,
+                   server_default=sa.text("uuid_generate_v4()")),
+        sa.Column("order_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("provider_name", sa.Text, nullable=True),
+        sa.Column("summary", sa.Text, nullable=False),
+        sa.Column("result_file_id", postgresql.UUID(as_uuid=True), nullable=True),  # FK added in 0019
+        sa.Column("observed_on", sa.Date, nullable=True),
+        sa.Column("recorded_by", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("recorded_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+        sa.ForeignKeyConstraint(["order_id"], ["orders.id"], ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(["recorded_by"], ["users.id"]),
+    )
+    op.create_index("ix_order_external_results_order_id", "order_external_results", ["order_id"])
+
 
 def downgrade() -> None:
+    op.drop_table("order_external_results")
+    op.drop_table("procedure_records")
     op.drop_table("prescription_items")
     op.drop_table("prescriptions")
     op.drop_table("orders")

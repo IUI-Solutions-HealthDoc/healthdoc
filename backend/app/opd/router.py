@@ -18,13 +18,20 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status as http_status
+from fastapi import APIRouter, Depends, Header, HTTPException, status as http_status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.auth.deps import require_roles, get_current_user
+from app.auth.deps import CurrentDbUser, require_roles, get_current_user
 from app.common.db import get_db
-from app.common.idempotency import consume_idempotency_key, store_idempotency_response
+# check_idempotency / record_idempotent_response, NOT consume_/store_. This
+# branch carried its own app/common/idempotency.py with a different API;
+# staging's won the merge because it keys on (key, user_id, endpoint) per
+# 0003a, where this branch's keyed on (key, endpoint) — which would hand one
+# user another user's stored response.
+from app.common.idempotency import (
+    check_idempotency, hash_request_body, record_idempotent_response,
+)
 from app.opd import service
 from app.opd.schemas import VisitCreate, VisitOut, VisitStatusUpdate
 from app.users.models import Facility
@@ -32,12 +39,16 @@ from app.users.models import Facility
 router = APIRouter(prefix="/visits", tags=["visits"])
 
 
-@router.post("", response_model=VisitOut, status_code=http_status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=VisitOut,
+    status_code=http_status.HTTP_201_CREATED,
+    dependencies=[Depends(require_roles("receptionist", "admin"))],
+)
 async def create_visit(
     payload: VisitCreate,
-    request: Request,
+    current_db_user: CurrentDbUser,
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(require_roles("receptionist", "admin")),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
     if not idempotency_key:
@@ -47,13 +58,12 @@ async def create_visit(
         )
 
     endpoint = "POST /visits"
-    body_bytes = await request.body()
-    cached = await consume_idempotency_key(
+    cached = await check_idempotency(
         db,
-        key=idempotency_key,
-        endpoint=endpoint,
-        request_body=body_bytes,
-        user_id=current_user.id,
+        idempotency_key,
+        endpoint,
+        hash_request_body(payload),
+        user_id=current_db_user.id,
     )
     if cached is not None:
         return cached.response_body
@@ -65,19 +75,18 @@ async def create_visit(
         payload=payload,
         facility_code=facility_code,
         facility_timezone=facility_timezone,
-        created_by=current_user.id,
+        created_by=current_db_user.id,
     )
     await db.commit()
 
     visit_out = VisitOut.model_validate(visit)
-    await store_idempotency_response(
+    await record_idempotent_response(
         db,
-        key=idempotency_key,
-        endpoint=endpoint,
-        request_body=body_bytes,
-        response_status=http_status.HTTP_201_CREATED,
-        response_body=visit_out.model_dump(mode="json"),
-        user_id=current_user.id,
+        idempotency_key,
+        endpoint,
+        http_status.HTTP_201_CREATED,
+        visit_out.model_dump(mode="json"),
+        user_id=current_db_user.id,
     )
     await db.commit()
     return visit_out
@@ -95,12 +104,16 @@ async def get_visit(
     return visit
 
 
-@router.patch("/{visit_id}/status", response_model=VisitOut)
+@router.patch(
+    "/{visit_id}/status",
+    response_model=VisitOut,
+    dependencies=[Depends(require_roles("doctor", "receptionist", "admin"))],
+)
 async def update_visit_status(
     visit_id: UUID,
     payload: VisitStatusUpdate,
+    current_db_user: CurrentDbUser,
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(require_roles("doctor", "receptionist", "admin")),
     if_match: str | None = Header(default=None, alias="If-Match"),
 ):
     visit = await service.get_visit(db, visit_id)
@@ -135,7 +148,7 @@ async def update_visit_status(
             visit=visit,
             target_status=payload.status,
             reason=payload.reason,
-            updated_by=current_user.id,
+            updated_by=current_db_user.id,
         )
     except service.InvalidVisitTransition as exc:
         raise HTTPException(
