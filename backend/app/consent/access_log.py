@@ -73,16 +73,10 @@ import sqlalchemy as sa
 from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-# _select_acting_role is underscore-prefixed (private) in its home module
-# — importing it across module boundaries is a smell, confirmed on PR #266
-# review: two modules now depend on the same "which role was this done
-# under" logic and it needs one answer, not a private import or a second
-# implementation. Tech Lead's ask is to make it public as
-# app.audit.deps.select_acting_role — deferred to the audit module's own
-# branch (feat/b7-audit-append-only-triggers) rather than done here, since
-# that file is outside consent's scope for this PR; this import switches
-# to the public name in that follow-up.
-from app.audit.deps import _select_acting_role
+# Shared with audit_logs on purpose: "which role was this action taken under"
+# must have one answer, not two implementations that drift. Made public in
+# #329 for exactly this import.
+from app.audit.deps import select_acting_role
 from app.auth.deps import CurrentUser
 from app.common.db import SessionLocal
 from app.common.enums import AccessChannel
@@ -138,7 +132,7 @@ def log_patient_data_access(
         resource_id = (
             _extract_uuid(request, resource_id_param) if resource_id_param else patient_id
         )
-        role = _select_acting_role(user.roles)
+        role = select_acting_role(user.roles)
 
         if patient_id is None:
             # Wiring mistake (decorated route doesn't actually have this
