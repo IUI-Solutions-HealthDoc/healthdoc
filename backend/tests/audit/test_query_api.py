@@ -4,11 +4,20 @@ Tests for the audit query API's service layer (B7-W4-01).
 Repo path: backend/tests/audit/test_query_api.py
 
 Service-level, real Postgres — same convention as test_audit_logs_db.py
-in this package. No FastAPI/HTTP layer here: this repo has no established
-pattern yet for overriding auth dependencies in a router-level test (only
-tests/conftest.py's bare `client` fixture exists, unused by any module so
-far), so router.py's two endpoints stay thin wiring over service.py and
-the actual filtering/pagination/CSV logic is verified here instead.
+in this package. Mostly no FastAPI/HTTP layer: this repo has no
+established pattern yet for overriding auth dependencies in a router-
+level test (only tests/conftest.py's bare `client` fixture exists,
+unused by any module so far), so router.py's two endpoints stay thin
+wiring over service.py and the actual filtering/pagination/CSV logic is
+verified here instead. One exception —
+test_export_endpoint_writes_an_audit_row_for_the_export_itself calls
+router.export_audit_logs_csv() directly as a plain coroutine (not
+through FastAPI's routing/dependency-injection machinery, just a normal
+Python function call with hand-built arguments): the one thing service-
+layer tests structurally cannot see is router.py's own write_audit_log()
+call, and that write IS the actual compliance requirement this ticket
+exists for (actions.py: EXPORT is listed under "Data export/print",
+26.1) — worth the one router-level exception.
 """
 from __future__ import annotations
 
@@ -18,10 +27,13 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from fastapi import Request
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from app.audit import router as router_module
 from app.audit import service
+from app.auth.deps import DbUser
 
 pytestmark = pytest.mark.asyncio
 
@@ -205,3 +217,65 @@ async def test_csv_export_empty_result_is_header_only(
     rows = list(reader)
 
     assert rows == [list(service.CSV_COLUMNS)]
+
+
+def _fake_request() -> Request:
+    """No `client` in scope -> request.client is None -> _extract_ip()
+    returns None instead of raising (see its own fallback). No headers
+    -> device_id resolves to None too. Neither matters for this test,
+    which is checking THAT an export audit row gets written, not its
+    ip_address/device_id values."""
+    scope = {
+        "type": "http", "method": "GET", "path": "/audit/logs/export",
+        "path_params": {}, "query_string": b"", "headers": [],
+    }
+    return Request(scope)
+
+
+async def test_export_endpoint_writes_an_audit_row_for_the_export_itself(
+    engine: AsyncEngine, bind_export_to_test_engine, session_factory, facility_id, user_id
+):
+    """The compliance requirement this whole ticket exists for: exporting
+    is itself an auditable event, per app/audit/actions.py's "Data
+    export/print" entry. Calls router.export_audit_logs_csv() directly
+    (see module docstring for why) with a real test-bound session so the
+    write actually lands, then queries audit_logs independently to prove
+    it — asserting through the endpoint's return value wouldn't prove
+    the row survived a commit, since write_audit_log() only flushes."""
+    await _insert_audit_row(engine, facility_id, user_id=user_id)  # something to export
+
+    db_user = DbUser(
+        id=user_id, keycloak_sub=f"audit-test-{user_id}", username="tester",
+        facility_id=facility_id, roles=["auditor"],
+    )
+
+    async with session_factory() as db:
+        response = await router_module.export_audit_logs_csv(
+            request=_fake_request(), user=db_user, db=db,
+        )
+        # Drain the StreamingResponse so the CSV generator (its own,
+        # independent session — see service.py's docstring) actually
+        # runs, same as a real client downloading the file would.
+        async for _chunk in response.body_iterator:
+            pass
+        # get_db() would do this on a successful return; write_audit_log()
+        # itself only flushes, so without this the row never survives
+        # past this session closing.
+        await db.commit()
+
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text(
+                "SELECT action, resource_type, user_id, facility_id, reason "
+                "FROM audit_logs WHERE facility_id = :fid AND action = 'export' "
+                "ORDER BY created_at DESC LIMIT 1"
+            ),
+            {"fid": facility_id},
+        )
+        row = result.one()
+
+    assert row.action == "export"
+    assert row.resource_type == "audit_logs"
+    assert row.user_id == user_id
+    assert str(row.facility_id) == str(facility_id)
+    assert "CSV export of audit_logs" in row.reason
