@@ -164,10 +164,29 @@ async def test_dangling_fks_resolve_and_restrict_holds(engine: AsyncEngine, faci
         try:
             file_id = await seed_file(conn, facility_id, user_id)
 
+            # patients is the REAL 0006 table now, not a stub — same story as
+            # consent_records below, one migration later. full_name, sex,
+            # identity_path, facility_id and created_by are NOT NULL with no
+            # default; sex and identity_path are CHECK-constrained; and two
+            # either/or CHECKs apply — ck_patients_dob_or_age and
+            # ck_patients_has_identifier — so age_years and uhid are required
+            # even though each column is individually nullable.
             patient_id = uuid.uuid4()
             await conn.execute(
-                sa.text("INSERT INTO patients (id, photo_file_id) VALUES (:id, :file_id)"),
-                {"id": patient_id, "file_id": file_id},
+                sa.text(
+                    "INSERT INTO patients "
+                    "(id, full_name, sex, identity_path, facility_id, created_by, "
+                    " age_years, uhid, photo_file_id) "
+                    "VALUES (:id, 'Test Patient', 'other', 'demographics_only', "
+                    "        :facility_id, :created_by, 30, :uhid, :file_id)"
+                ),
+                {
+                    "id": patient_id,
+                    "facility_id": facility_id,
+                    "created_by": user_id,
+                    "uhid": f"IN-TS-TST001-2026-{uuid.uuid4().hex[:6]}-0",
+                    "file_id": file_id,
+                },
             )
             # consent_records is the REAL 0004 table now, not a stub. Five columns
             # are NOT NULL with no server_default: patient_id, purpose_id,
