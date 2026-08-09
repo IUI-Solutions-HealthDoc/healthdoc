@@ -25,11 +25,19 @@ async def db_session():
     await engine.dispose()
 
 
-async def _seed_minimal_batch(db_session) -> tuple[str, str]:
+async def _seed_minimal_batch(db_session) -> tuple[str, str, str]:
+    """Returns (batch_id, item_id, user_id).
+
+    user_id is a REAL users row, not a bare uuid4(). stock_ledger.performed_by
+    is an FK to users.id, so a generated UUID fails with
+    fk_stock_ledger_performed_by — which is the constraint doing its job:
+    a stock movement has to be attributable to somebody who exists.
+    """
     facility_id = str(uuid.uuid4())
     item_id = str(uuid.uuid4())
     location_id = str(uuid.uuid4())
     batch_id = str(uuid.uuid4())
+    user_id = str(uuid.uuid4())
 
     await db_session.execute(text(
         "INSERT INTO facilities (id, code, name, state_code) "
@@ -49,13 +57,17 @@ async def _seed_minimal_batch(db_session) -> tuple[str, str]:
         "VALUES (:id, :item_id, 'TESTBATCH', CURRENT_DATE + INTERVAL '1 year', "
         "100, :location_id)"
     ), {"id": batch_id, "item_id": item_id, "location_id": location_id})
+    await db_session.execute(text(
+        "INSERT INTO users (id, keycloak_sub, username, full_name, facility_id) "
+        "VALUES (:id, :sub, :username, 'Stock Test User', :facility_id)"
+    ), {"id": user_id, "sub": f"sub-{user_id}", "username": f"stocktest-{user_id[:8]}",
+        "facility_id": facility_id})
 
-    return batch_id, item_id
+    return batch_id, item_id, user_id
 
 
 async def test_ledger_insert_actually_updates_batch_quantity_via_trigger(db_session):
-    batch_id, item_id = await _seed_minimal_batch(db_session)
-    user_id = str(uuid.uuid4())
+    batch_id, item_id, user_id = await _seed_minimal_batch(db_session)
 
     await db_session.execute(text("""
         INSERT INTO stock_ledger
@@ -73,7 +85,7 @@ async def test_ledger_insert_actually_updates_batch_quantity_via_trigger(db_sess
 
 
 async def test_direct_quantity_update_is_rejected_by_guard_trigger(db_session):
-    batch_id, _ = await _seed_minimal_batch(db_session)
+    batch_id, _, _ = await _seed_minimal_batch(db_session)
 
     with pytest.raises(Exception) as exc_info:
         await db_session.execute(text(
@@ -85,7 +97,7 @@ async def test_direct_quantity_update_is_rejected_by_guard_trigger(db_session):
 
 
 async def test_row_version_increments_on_ledger_driven_update(db_session):
-    batch_id, item_id = await _seed_minimal_batch(db_session)
+    batch_id, item_id, user_id = await _seed_minimal_batch(db_session)
 
     before = (await db_session.execute(
         text("SELECT row_version FROM inventory_batches WHERE id = :id"), {"id": batch_id}
@@ -97,7 +109,7 @@ async def test_row_version_increments_on_ledger_driven_update(db_session):
         VALUES (:id, :item_id, :batch_id, 'issue', -1, :performed_by)
     """), {
         "id": str(uuid.uuid4()), "item_id": item_id, "batch_id": batch_id,
-        "performed_by": str(uuid.uuid4()),
+        "performed_by": user_id,
     })
 
     after = (await db_session.execute(
