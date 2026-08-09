@@ -1037,10 +1037,21 @@ async def check_idempotency(
 ) -> dict | None:
     """None = unseen, proceed normally. Returns the cached response body to
     replay if this exact key+endpoint+body was already handled. Raises 409
-    idempotency_key_reuse if the same key was used with a different body."""
+    idempotency_key_reuse if the same key was used with a different body.
+
+    Scoped by user_id as well as key and endpoint — that is the real unique
+    key (0003a: UNIQUE (key, user_id, endpoint)). Keys are client-generated,
+    so two users can legitimately emit the same one against the same
+    endpoint; matching on key+endpoint alone would replay the FIRST user's
+    stored response to the second. §4A.1 stated the wrong unique key until
+    today, which is where this came from."""
     result = await db.execute(
         sa.select(idempotency_keys_t.c.request_hash, idempotency_keys_t.c.response_body)
-        .where(idempotency_keys_t.c.key == key, idempotency_keys_t.c.endpoint == endpoint)
+        .where(
+            idempotency_keys_t.c.key == key,
+            idempotency_keys_t.c.user_id == user_id,
+            idempotency_keys_t.c.endpoint == endpoint,
+        )
     )
     row = result.first()
     if row is None:
@@ -1060,7 +1071,13 @@ async def store_idempotency(
             key=key, endpoint=endpoint, request_hash=_request_hash(request_body),
             response_status=response_status, response_body=response_body, user_id=user_id,
         )
-        .on_conflict_do_nothing(index_elements=["key", "endpoint"])
+        # Must match a real unique index or Postgres raises "no unique or
+        # exclusion constraint matching the ON CONFLICT specification" —
+        # a 500 on every stored payment, not a silent mismatch. 0003a's
+        # constraint is (key, user_id, endpoint).
+        .on_conflict_do_nothing(
+            index_elements=["key", "user_id", "endpoint"]
+        )
     )
 
 
