@@ -161,26 +161,53 @@ async def seed_user(db: AsyncSession, *, facility_id: uuid.UUID, keycloak_sub: s
     return user_id
 
 
-async def seed_patient(db: AsyncSession, *, facility_id: uuid.UUID) -> uuid.UUID:
+async def seed_patient(
+    db: AsyncSession, *, facility_id: uuid.UUID, created_by: uuid.UUID | None = None
+) -> uuid.UUID:
+    """patients is real as of 0006, not the stub this used to insert into.
+
+    full_name, sex, identity_path and created_by are NOT NULL with no
+    default; sex and identity_path are CHECK-constrained; and two either/or
+    CHECKs apply (ck_patients_dob_or_age, ck_patients_has_identifier), so
+    age_years and uhid are needed even though each is individually nullable.
+
+    created_by defaults to a freshly seeded user so the existing call sites
+    don't all have to thread one through.
+    """
+    created_by = created_by or await seed_user(db, facility_id=facility_id)
     patient_id = uuid.uuid4()
     await db.execute(
         sa.text(
-            "INSERT INTO patients (id, facility_id, status) "
-            "VALUES (:id, :facility_id, 'active')"
+            "INSERT INTO patients "
+            "(id, facility_id, status, full_name, sex, identity_path, "
+            " age_years, uhid, created_by) "
+            "VALUES (:id, :facility_id, 'active', 'Billing Test Patient', 'other', "
+            "        'demographics_only', 30, :uhid, :created_by)"
         ),
-        {"id": patient_id, "facility_id": facility_id},
+        {"id": patient_id, "facility_id": facility_id,
+         "uhid": f"IN-TS-BIL-2026-{uuid.uuid4().hex[:6]}",
+         "created_by": created_by},
     )
     return patient_id
 
 
-async def seed_visit(db: AsyncSession, *, facility_id: uuid.UUID, patient_id: uuid.UUID) -> uuid.UUID:
+async def seed_visit(
+    db: AsyncSession, *, facility_id: uuid.UUID, patient_id: uuid.UUID,
+    created_by: uuid.UUID | None = None,
+) -> uuid.UUID:
+    """visits is real as of 0007 — visit_number, visit_date and created_by
+    are all NOT NULL, and visit_type is CHECK-constrained."""
+    created_by = created_by or await seed_user(db, facility_id=facility_id)
     visit_id = uuid.uuid4()
     await db.execute(
         sa.text(
-            "INSERT INTO visits (id, facility_id, patient_id, visit_type, status) "
-            "VALUES (:id, :facility_id, :patient_id, 'opd', 'registered')"
+            "INSERT INTO visits (id, facility_id, patient_id, visit_type, status, "
+            " visit_number, visit_date, created_by) "
+            "VALUES (:id, :facility_id, :patient_id, 'opd', 'registered', "
+            "        :visit_number, CURRENT_DATE, :created_by)"
         ),
-        {"id": visit_id, "facility_id": facility_id, "patient_id": patient_id},
+        {"id": visit_id, "facility_id": facility_id, "patient_id": patient_id,
+         "visit_number": f"V{uuid.uuid4().hex[:10]}", "created_by": created_by},
     )
     return visit_id
 
