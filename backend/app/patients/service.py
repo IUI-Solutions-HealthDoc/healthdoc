@@ -484,7 +484,16 @@ AUDIT_TABLES_EXEMPT_FROM_REPOINTING: frozenset[str] = frozenset({"patient_merge_
 PENDING_REPOINT_OTHER_MODULES: frozenset[str] = frozenset({
     "allergies",  # allergies module — repointing owned by that module's dev
     "visits",     # B3/0007 — repointing owned by the visits module's dev
+    "invoices",   # B7/0014 — repointing owned by the billing module's dev
 })
+# THREE entries now, and that is a problem worth naming: approve_merge only
+# raises NotImplementedError for tables in NEITHER this set nor
+# REPOINTED_ON_MERGE. So a merge currently succeeds while leaving the
+# patient's allergies, visits AND invoices pointing at the merged-away
+# record. One pending table was a gap; three is a merge that looks like it
+# worked and quietly loses most of the clinical and financial history.
+# Before the next one is added, decide whether approve_merge should refuse
+# outright while this set is non-empty.
 
 
 async def approve_merge(
