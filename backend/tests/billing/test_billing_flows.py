@@ -59,9 +59,10 @@ async def _seed_billable_lab_charge(db, *, visit_id: uuid.UUID, test_code: str =
     await db.execute(
         sa.text(
             "INSERT INTO encounters (id, visit_id, provider_user_id, created_by) "
-            "VALUES (:id, :visit_id, :actor, :actor)"
+            "VALUES (:id, :visit_id, :provider, :created_by)"
         ),
-        {"id": encounter_id, "visit_id": visit_id, "actor": actor_id},
+        {"id": encounter_id, "visit_id": visit_id,
+         "provider": actor_id, "created_by": actor_id},
     )
     await db.execute(
         sa.text(
@@ -76,9 +77,14 @@ async def _seed_billable_lab_charge(db, *, visit_id: uuid.UUID, test_code: str =
         sa.text(
             "INSERT INTO lab_order_items "
             "(id, order_id, test_code, test_name, accession_number, sample_type, created_by) "
-            "VALUES (:id, :order_id, :code, :code, :accession, 'blood', :actor)"
+            "VALUES (:id, :order_id, :code, :name, :accession, 'blood', :actor)"
         ),
-        {"id": item_id, "order_id": order_id, "code": test_code,
+        # :code and :name are separate binds even though they carry the same
+        # value: test_code is varchar(30) and test_name is text, and asyncpg
+        # deduces a prepared-statement parameter's type from its use sites.
+        # One bind in two differently-typed columns is
+        # "AmbiguousParameterError: inconsistent types deduced for $3".
+        {"id": item_id, "order_id": order_id, "code": test_code, "name": test_code,
          "accession": f"LAB-{uuid.uuid4().hex[:12]}", "actor": actor_id},
     )
     await db.execute(
