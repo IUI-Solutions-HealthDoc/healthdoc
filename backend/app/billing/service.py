@@ -264,14 +264,17 @@ async def _insert_invoice_item(db: AsyncSession, line: "ChargeLine", invoice_id:
     line was actually added, False if it was skipped as a (likely
     concurrent) duplicate.
 
-    See module docstring re: blocker #2. Today (pre-migration-0033) this
-    except-block essentially never fires — there is no DB constraint
-    backing the dedupe yet, so a race can still slip both rows in. Once
-    0033's partial UNIQUE index on
-    invoice_items(invoice_id, reference_type, reference_id) lands, the
-    same code starts doing real work: the nested transaction (SAVEPOINT)
-    means one duplicate line rolls back on its own without aborting the
-    rest of this build_invoice() call's flush.
+    See module docstring re: blocker #2. The constraint backing this is
+    uq_invoice_items_invoice_reference — a partial UNIQUE index on
+    (invoice_id, reference_type, reference_id) WHERE reference_id IS NOT
+    NULL, added in 0014 alongside the table. It was originally deferred to
+    a later migration, which left this except-block unable to fire: two
+    concurrent build_invoice() calls would both insert the same charge and
+    bill the patient twice. test_two_concurrent_builds_bill_each_charge_at
+    _most_once is what catches that, and it was failing.
+
+    The SAVEPOINT matters: one duplicate line rolls back on its own
+    without aborting the rest of this build_invoice() call's flush.
     """
     try:
         async with db.begin_nested():

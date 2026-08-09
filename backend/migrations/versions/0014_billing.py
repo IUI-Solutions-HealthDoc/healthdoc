@@ -131,6 +131,26 @@ def upgrade() -> None:
         sa.CheckConstraint("amount >= 0", name="ck_invoice_items_amount_non_negative"),
     )
     op.create_index("ix_invoice_items_invoice_id", "invoice_items", ["invoice_id"])
+    # The constraint that makes _insert_invoice_item's dedupe real. Without
+    # it, two concurrent build_invoice() calls both find the same unbilled
+    # charge, both insert it, and the patient is billed twice for one lab
+    # test — the IntegrityError that function catches can never be raised,
+    # so its SAVEPOINT does nothing.
+    #
+    # PARTIAL, because reference_type/reference_id are nullable: manually
+    # added invoice lines have no source charge to deduplicate against, and
+    # NULLs must not collide with each other.
+    #
+    # This was originally deferred to a later migration. It belongs here —
+    # invoice_items is created by this migration, and "we'll enforce it
+    # later" for double-billing means shipping the double-billing.
+    op.create_index(
+        "uq_invoice_items_invoice_reference",
+        "invoice_items",
+        ["invoice_id", "reference_type", "reference_id"],
+        unique=True,
+        postgresql_where=sa.text("reference_id IS NOT NULL"),
+    )
 
     # ------------------------------------------------------------------
     # 3. payments
@@ -350,6 +370,7 @@ def downgrade() -> None:
     op.drop_index("ix_payments_invoice_id", table_name="payments")
     op.drop_table("payments")
 
+    op.drop_index("uq_invoice_items_invoice_reference", table_name="invoice_items")
     op.drop_index("ix_invoice_items_invoice_id", table_name="invoice_items")
     op.drop_table("invoice_items")
 
