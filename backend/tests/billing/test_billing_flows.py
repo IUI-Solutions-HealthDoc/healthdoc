@@ -43,27 +43,51 @@ async def _seed_billable_lab_charge(db, *, visit_id: uuid.UUID, test_code: str =
     order_id = uuid.uuid4()
     item_id = uuid.uuid4()
 
+    # encounters (0007), orders (0008) and lab_order_items/lab_results (0010)
+    # are all real tables now — they were unmerged when this helper was
+    # written, so these INSERTs were shaped for stubs. patient_id and
+    # created_by are read back off the visit rather than added as
+    # parameters, so none of the call sites below have to change.
+    visit_row = (
+        await db.execute(
+            sa.text("SELECT patient_id, created_by FROM visits WHERE id = :id"),
+            {"id": visit_id},
+        )
+    ).one()
+    patient_id, actor_id = visit_row.patient_id, visit_row.created_by
+
     await db.execute(
-        sa.text("INSERT INTO encounters (id, visit_id) VALUES (:id, :visit_id)"),
-        {"id": encounter_id, "visit_id": visit_id},
-    )
-    await db.execute(
-        sa.text("INSERT INTO orders (id, encounter_id) VALUES (:id, :encounter_id)"),
-        {"id": order_id, "encounter_id": encounter_id},
+        sa.text(
+            "INSERT INTO encounters (id, visit_id, provider_user_id, created_by) "
+            "VALUES (:id, :visit_id, :actor, :actor)"
+        ),
+        {"id": encounter_id, "visit_id": visit_id, "actor": actor_id},
     )
     await db.execute(
         sa.text(
-            "INSERT INTO lab_order_items (id, order_id, test_code, test_name) "
-            "VALUES (:id, :order_id, :code, :code)"
+            "INSERT INTO orders "
+            "(id, encounter_id, order_number, patient_id, order_type, created_by) "
+            "VALUES (:id, :encounter_id, :order_number, :patient_id, 'lab', :actor)"
         ),
-        {"id": item_id, "order_id": order_id, "code": test_code},
+        {"id": order_id, "encounter_id": encounter_id, "patient_id": patient_id,
+         "order_number": f"O{uuid.uuid4().hex[:10]}", "actor": actor_id},
     )
     await db.execute(
         sa.text(
-            "INSERT INTO lab_results (lab_order_item_id, is_current, status) "
-            "VALUES (:id, true, 'final')"
+            "INSERT INTO lab_order_items "
+            "(id, order_id, test_code, test_name, accession_number, sample_type, created_by) "
+            "VALUES (:id, :order_id, :code, :code, :accession, 'blood', :actor)"
         ),
-        {"id": item_id},
+        {"id": item_id, "order_id": order_id, "code": test_code,
+         "accession": f"LAB-{uuid.uuid4().hex[:12]}", "actor": actor_id},
+    )
+    await db.execute(
+        sa.text(
+            "INSERT INTO lab_results "
+            "(lab_order_item_id, is_current, status, version, result_data, created_by) "
+            "VALUES (:id, true, 'final', 1, '{}'::jsonb, :actor)"
+        ),
+        {"id": item_id, "actor": actor_id},
     )
     return item_id
 
