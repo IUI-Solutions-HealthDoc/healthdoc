@@ -14,7 +14,7 @@ import re
 from datetime import datetime, timezone
 
 import uuid
-from sqlalchemy import text, select, func
+from sqlalchemy import text, select, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.security import encrypt_pii, aadhaar_blind_index, aadhaar_blind_indexes_all_versions, current_hmac_key_version, current_aes_key_version
@@ -469,7 +469,7 @@ async def request_merge(
 # fails the build the day a new FK to patients.id appears without a
 # matching entry here. Do not add a table name here without also adding
 # the repointing code for it below.
-REPOINTED_ON_MERGE: frozenset[str] = frozenset({"patient_identifiers"})
+REPOINTED_ON_MERGE: frozenset[str] = frozenset({"patient_identifiers", "visits", "ot_schedules"})
 
 # patient_merge_log itself has FKs to patients.id (source_patient_id,
 # target_patient_id) — these must NEVER be repointed. It's the audit trail
@@ -483,17 +483,12 @@ AUDIT_TABLES_EXEMPT_FROM_REPOINTING: frozenset[str] = frozenset({"patient_merge_
 # enforces this — nothing can silently slip through.
 PENDING_REPOINT_OTHER_MODULES: frozenset[str] = frozenset({
     "allergies",  # allergies module — repointing owned by that module's dev
-    "visits",     # B3/0007 — repointing owned by the visits module's dev
     "invoices",   # B7/0014 — repointing owned by the billing module's dev
 })
-# THREE entries now, and that is a problem worth naming: approve_merge only
-# raises NotImplementedError for tables in NEITHER this set nor
-# REPOINTED_ON_MERGE. So a merge currently succeeds while leaving the
-# patient's allergies, visits AND invoices pointing at the merged-away
-# record. One pending table was a gap; three is a merge that looks like it
-# worked and quietly loses most of the clinical and financial history.
-# Before the next one is added, decide whether approve_merge should refuse
-# outright while this set is non-empty.
+# visits moved to REPOINTED_ON_MERGE (B3/0007, this commit) -- see
+# _repoint_visits below. TWO entries remain: a merge still succeeds
+# while leaving the patient's allergies and invoices pointing at the
+# merged-away record. Same risk as before, smaller surface.
 
 
 async def approve_merge(
@@ -548,6 +543,8 @@ async def approve_merge(
         )
 
     await _repoint_identifiers(db, source=source, target=target)
+    await _repoint_visits(db, source=source, target=target)
+    await _repoint_ot_schedules(db, source=source, target=target)
 
     source.status = "merged"
     source.merged_into_patient_id = target.id
@@ -602,6 +599,43 @@ async def _repoint_identifiers(db: AsyncSession, *, source: Patient, target: Pat
                 f"cannot auto-repoint, needs manual resolution before this "
                 f"merge can be approved"
             )
+    await db.flush()
+
+
+async def _repoint_visits(db: AsyncSession, *, source: Patient, target: Patient) -> None:
+    """Moves source's visits rows onto target (§3 0006 merge repointing
+    rule). Unlike patient_identifiers, visits has no per-patient
+    uniqueness constraint to collide with -- a visit is inherently a
+    record of one clinical encounter, so every source visit simply
+    moves to the target, no conflict case to detect. Without this,
+    /patients/{id}/history for the target patient silently omits every
+    visit (and everything hanging off it -- encounters, orders,
+    diagnoses) that happened before the merge, exactly the "looks like
+    it worked and quietly loses clinical history" failure mode this
+    module's guard test exists to catch.
+    """
+    from app.opd.models import Visit
+
+    await db.execute(
+        update(Visit).where(Visit.patient_id == source.id).values(patient_id=target.id)
+    )
+    await db.flush()
+
+
+async def _repoint_ot_schedules(db: AsyncSession, *, source: Patient, target: Patient) -> None:
+    """Moves source's ot_schedules rows onto target (§3 0006 merge
+    repointing rule). Same shape as _repoint_visits: ot_schedules.
+    patient_id has no per-patient uniqueness constraint, so every
+    source row simply moves. Also B3-owned (0017, same as visits) --
+    this branch's own migration introduced the FK, so it's this PR's
+    job to keep the guard test (test_patient_merge.py) covering it
+    rather than leaving a gap it just created.
+    """
+    from app.ot.models import OtSchedule
+
+    await db.execute(
+        update(OtSchedule).where(OtSchedule.patient_id == source.id).values(patient_id=target.id)
+    )
     await db.flush()
 
 
