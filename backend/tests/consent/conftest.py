@@ -113,6 +113,23 @@ async def facility_id(engine: AsyncEngine) -> AsyncGenerator[uuid.UUID, None]:
 
 
 @pytest_asyncio.fixture
+async def second_facility_id(engine: AsyncEngine) -> AsyncGenerator[uuid.UUID, None]:
+    """A second facility — for cross-facility scoping tests."""
+    fid = uuid.uuid4()
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                """
+                INSERT INTO facilities (id, code, name, state_code)
+                VALUES (:id, :code, 'Consent Test Facility 2', 'RJ')
+                """
+            ),
+            {"id": fid, "code": f"CNST{uuid.uuid4().hex[:6]}"},
+        )
+    yield fid
+
+
+@pytest_asyncio.fixture
 async def user_id(engine: AsyncEngine, facility_id: uuid.UUID) -> AsyncGenerator[uuid.UUID, None]:
     """One throwaway users row per test, tied to facility_id above."""
     uid = uuid.uuid4()

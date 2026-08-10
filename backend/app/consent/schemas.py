@@ -74,30 +74,21 @@ class ConsentRecordCreate(BaseModel):
     channel: ConsentChannel
     consent_artefact_id: str | None = None
     consent_artefact_signature: str | None = None
-    # Only these two make sense as a STARTING status — denied/revoked/
-    # expired are all reached later, via transition/withdrawal, never
-    # at creation. 'requested' is for the abdm_consent_manager channel's
-    # async grant flow; every other channel grants immediately.
+    # Only valid starting states -- 'requested' is for the abdm_consent_
+    # manager async flow, every other channel grants immediately.
     status: Literal[ConsentStatus.GRANTED, ConsentStatus.REQUESTED] = ConsentStatus.GRANTED
 
 
 class ConsentStatusTransitionIn(BaseModel):
-    """Only the requested -> granted/denied transition — see
-    app/consent/service.py's transition_consent_status() docstring for
-    why granted -> revoked/expired can't reach this endpoint at all."""
+    """requested -> granted/denied only; see service.py."""
 
     status: Literal[ConsentStatus.GRANTED, ConsentStatus.DENIED]
     reason: str | None = None
 
 
 class ConsentWithdrawalCreate(BaseModel):
-    # GrantedByType (patient|guardian|nominee), NOT the wider DB CHECK
-    # (which also allows 'system_expiry') -- deliberately. This is the
-    # staff-facing manual withdraw endpoint; 'system_expiry' is reserved
-    # for the automated consent-expiry sweep job (schema doc §3 0004:
-    # "Consent expiry is a job, not a column"), which doesn't exist yet
-    # and wouldn't go through this HTTP endpoint if it did. A caller here
-    # should never be able to claim a withdrawal was system-initiated.
+    # GrantedByType, not the wider DB CHECK -- 'system_expiry' is
+    # reserved for the automated expiry sweep, not this manual endpoint.
     withdrawn_by_type: GrantedByType
     withdrawn_by_user_id: uuid.UUID | None = None
     reason: str | None = None

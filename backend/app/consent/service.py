@@ -3,33 +3,19 @@ Service functions for the consent module.
 
 Repo path: backend/app/consent/service.py
 
-list_consent_records_for_patient predates this ticket (backs the
-/patients/{patient_id}/records route). Everything else is B7-W4-02:
-Consent CRUD — purpose/scope/channel, nullable expiry, status
-transitions.
+B7-W4-02: Consent CRUD — purpose/scope/channel, nullable expiry,
+status transitions.
 
-AUDIT: consent_records has no facility_id column of its own (see
-models.py) so listeners.py's automatic __audit_resource_type__ opt-in
-structurally cannot apply here — every mutation below goes through
-app.audit.service.audited_mutation() manually, same pattern
-app/billing/service.py already uses for its own facility-id-less
-tables. facility_id for the audit row is the ACTING USER's own
-facility (resolved in router.py from CurrentDbUser), not the patient's
-— patients isn't a real table yet (0006 unmerged), so there's no
-patient-facility to read regardless.
+consent_records has no facility_id column, so mutations audit
+manually via audited_mutation() rather than listeners.py's automatic
+path. get_consent_record() joins to patients.facility_id (no FK
+required for a join) when facility_id is passed.
 
-STATUS TRANSITIONS ARE ENFORCED HERE, NOT BY THE DATABASE:
 trg_consent_records_freeze (migration 0004) allows any UPDATE to
-`status`, it doesn't know which transitions are legal. Two paths exist
-on purpose, and each can only produce its own outcomes:
-  - requested -> granted/denied: transition_consent_status() below, a
-    direct UPDATE.
-  - granted -> revoked (or -> expired for a system sweep):
-    UNREACHABLE from transition_consent_status() — only
-    withdraw_consent() (a consent_withdrawals INSERT) can produce
-    those, because trg_consent_withdrawals_flip_status is the only
-    thing allowed to set them, and it already guards against a
-    terminal-status double-withdrawal via FOR UPDATE.
+`status` but doesn't validate the transition. requested->granted/denied
+goes through transition_consent_status() (direct UPDATE);
+granted->revoked/expired only via withdraw_consent() (consent_withdrawals
+insert, trigger-flipped, FOR UPDATE guarded against double-withdrawal).
 """
 
 from __future__ import annotations
@@ -46,6 +32,7 @@ from app.audit.actions import AuditAction
 from app.audit.service import audited_mutation
 from app.common.enums import ConsentStatus
 from app.consent.models import ConsentPurpose, ConsentRecord, ConsentWithdrawal
+from app.patients.models import Patient
 
 # requested -> {granted, denied} only. granted has no entry here at all
 # — see module docstring for why that transition can only happen
@@ -75,18 +62,15 @@ async def list_consent_purposes(
     return list((await db.execute(q)).scalars().all())
 
 
-async def get_consent_record(db: AsyncSession, consent_id: uuid.UUID) -> ConsentRecord:
-    """
-    KNOWN GAP, named explicitly rather than left implicit: this does NOT
-    scope by facility. consent_records has no facility_id column of its
-    own (see models.py) and no patients table to join through yet
-    (0006 unmerged), so there is currently no column to scope this
-    lookup by at all -- any role in _CONSENT_VIEW_ROLES can fetch any
-    facility's consent record by UUID. Structural, not fixable from
-    this module alone; revisit once patients (0006) lands and
-    consent_records can join to patients.facility_id.
-    """
-    record = await db.get(ConsentRecord, consent_id)
+async def get_consent_record(
+    db: AsyncSession, consent_id: uuid.UUID, *, facility_id: uuid.UUID | None = None
+) -> ConsentRecord:
+    q = sa.select(ConsentRecord).where(ConsentRecord.id == consent_id)
+    if facility_id is not None:
+        q = q.join(Patient, Patient.id == ConsentRecord.patient_id).where(
+            Patient.facility_id == facility_id
+        )
+    record = (await db.execute(q)).scalar_one_or_none()
     if record is None:
         raise HTTPException(404, "Consent record not found")
     return record
@@ -163,7 +147,7 @@ async def transition_consent_status(
     facility_id: uuid.UUID,
     updated_by: uuid.UUID,
 ) -> ConsentRecord:
-    record = await get_consent_record(db, consent_id)
+    record = await get_consent_record(db, consent_id, facility_id=facility_id)
     allowed = _LEGAL_DIRECT_TRANSITIONS.get(record.status, set())
     if new_status not in allowed:
         hint = (
@@ -206,19 +190,10 @@ async def withdraw_consent(
     reason: str | None,
     facility_id: uuid.UUID,
 ) -> ConsentWithdrawal:
-    """
-    KNOWN INCONSISTENCY, named rather than left implicit: the status
-    flip below happens inside trg_consent_withdrawals_flip_status
-    (migration 0004), a raw SQL `UPDATE consent_records SET status = ...,
-    status_changed_at = ...` issued by Postgres itself -- it never goes
-    through SQLAlchemy's ORM, so the Timestamps mixin's
-    `onupdate=func.now()` on `updated_at` never fires. Contrast with
-    transition_consent_status() below, an ORM-path UPDATE where
-    `updated_at` bumps automatically. Fixing this means changing the
-    trigger's own SQL (migration 0004, already merged) -- out of this
-    ticket's scope, not something this function can paper over.
-    """
-    record = await get_consent_record(db, consent_id)  # 404s if missing
+    # Note: the trigger-driven status flip below doesn't bump updated_at
+    # (raw SQL, not ORM) — inconsistent with transition_consent_status()'s
+    # ORM-path update. Fix belongs in migration 0004's trigger SQL.
+    record = await get_consent_record(db, consent_id, facility_id=facility_id)  # 404s if missing
 
     async with audited_mutation(
         db,
@@ -237,15 +212,9 @@ async def withdraw_consent(
         )
         db.add(withdrawal)
         try:
-            # trg_consent_withdrawals_flip_status runs as part of this
-            # INSERT and raises (DBAPIError) if `record`'s status is
-            # already terminal (revoked/denied/expired) -- migration
-            # 0004, message contains "already in terminal status".
-            # Match on that specifically before translating to 409 --
-            # a bare `except DBAPIError` would also catch an unrelated
-            # genuine failure (e.g. withdrawn_by_user_id FK violation)
-            # and mislabel it as "already withdrawn", hiding a real bug
-            # behind a misleading, business-logic-shaped error.
+            # Match the trigger's specific message -- a bare except
+            # would also catch an unrelated error (e.g. FK violation)
+            # and mislabel it as "already withdrawn".
             await db.flush()
         except DBAPIError as exc:
             if "terminal status" not in str(exc.orig):

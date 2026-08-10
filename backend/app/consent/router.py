@@ -1,36 +1,16 @@
 """consent module router — endpoints land here; see this module's GitHub issues.
 
-data_access_log logging dependency (ticket: decorator on patient-data
-GETs, with purpose_code) lives in app/consent/access_log.py — see that
-file's docstring for the design (dependency factory, own DB session so
-denials still get logged despite request-transaction rollback).
+data_access_log logging dependency lives in app/consent/access_log.py.
 
-The /patients/{patient_id}/records route below is a minimal real
-endpoint that uses it, so the decorator is proven against something
-that actually runs rather than shipped as unused utility code. Other
-modules' own patient-data GET routes (patients, visits, orders, lab,
-...) need their owners to import and apply log_patient_data_access on
-their own routers — not done here, not this module's files to touch.
+B7-W4-02 (Consent CRUD): get_current_actor_dependency populates the
+per-request audit actor context so service.py's audited_mutation()
+calls auto-fill user_id/role/ip_address/device_id. facility_id comes
+from CurrentDbUser, never a request param (consent_records has no
+facility_id column — see models.py).
 
-B7-W4-02 (Consent CRUD) endpoints below reuse
-app.audit.deps.get_current_actor_dependency exactly as its own
-docstring recommends ("add alongside require_roles() on any route that
-mutates data") — it populates the per-request actor context so
-service.py's audited_mutation() calls can auto-fill user_id/role/
-ip_address/device_id without this file duplicating that resolution
-logic. facility_id comes from CurrentDbUser, never a request param —
-consent_records has no facility_id column of its own (see models.py),
-so the audit row is scoped to the ACTING staff member's facility.
-
-KNOWN, DEFERRED COST: each mutating route below resolves keycloak_sub
--> users.id THREE times in one request — once via CurrentDbUser
-(get_current_db_user), once via get_current_actor_dependency's own
-raw-SQL lookup, and once more via require_roles's underlying
-get_current_user (JWT decode only, not a DB query, but still a
-redundant dependency resolution alongside the other two). Consolidate
-when convenient; not fixed here since it means changing shared
-app.audit.deps / app.auth.deps behavior other modules also depend on,
-not something to do as a side effect of this ticket.
+Known cost, not fixed here: mutating routes resolve keycloak_sub ->
+users.id more than once per request (CurrentDbUser +
+get_current_actor_dependency each do their own lookup).
 """
 
 import uuid
@@ -55,16 +35,8 @@ from app.common.enums import AccessChannel
 
 router = APIRouter(prefix="/consent", tags=["consent"])
 
-# No dedicated role list confirmed for "who can view a patient's
-# consent history" — auditor/DPO/admin is my best guess (schema doc §7
-# names auditor/DPO as the readers of data_access_log itself; extending
-# that to consent_records viewing). Confirm before merge.
+# Role lists unconfirmed — best guess, confirm before merge.
 _CONSENT_VIEW_ROLES = ("auditor", "admin", "doctor")
-
-# No dedicated role list confirmed for "who collects/updates a
-# patient's consent" either — reception/nursing/doctor/admin is the
-# best guess for staff present at the point consent is asked for.
-# Confirm before merge, same as _CONSENT_VIEW_ROLES above.
 _CONSENT_MUTATE_ROLES = ("receptionist", "nurse", "doctor", "admin")
 
 
@@ -116,26 +88,9 @@ async def list_patient_consent_records(
 @router.get(
     "/patients/{patient_id}/records/{consent_id}",
     response_model=ConsentRecordOut,
-    # Nested under patient_id (not a flat /records/{consent_id}) purely so
-    # log_patient_data_access can resolve a real patient_id from the path
-    # BEFORE the handler runs -- it can't know which patient a bare
-    # consent_id belongs to without querying first, and the whole point
-    # of listing it first is that the attempt is logged even on denial.
-    # Same resource_type/purpose_code/access_channel as the sibling list
-    # route above -- this is the same kind of read, just narrowed to one
-    # record. Compliance gap otherwise: this route returns patient_id
-    # (patient data) exactly like its sibling, which does log — schema
-    # doc §7 requires every access logged, not just the list form.
-    #
-    # ONLY log_patient_data_access goes in dependencies=[] -- require_roles
-    # is a handler-parameter default below instead, matching the sibling
-    # route exactly. This isn't stylistic: FastAPI resolves every entry in
-    # a route's dependencies=[] list BEFORE any Depends() declared as a
-    # handler parameter default, regardless of declared order between the
-    # two groups. Putting both here in one list with require_roles first
-    # (an earlier version of this route did exactly that) made the 403
-    # fire before log_patient_data_access ever ran -- silently reopening
-    # the exact compliance gap this route exists to close.
+    # log_patient_data_access MUST be first: dependencies=[] resolves
+    # before any handler-parameter Depends() (e.g. CurrentDbUser below),
+    # and within this list, in the order listed.
     dependencies=[
         Depends(
             log_patient_data_access(
@@ -145,20 +100,17 @@ async def list_patient_consent_records(
                 consent_required=False,
             )
         ),
+        Depends(require_roles(*_CONSENT_VIEW_ROLES)),
     ],
 )
 async def get_consent_record(
     patient_id: uuid.UUID,
     consent_id: uuid.UUID,
+    user: CurrentDbUser,
     db: AsyncSession = Depends(get_db),
-    _user: AuthUser = Depends(require_roles(*_CONSENT_VIEW_ROLES)),
 ) -> ConsentRecordOut:
-    record = await service.get_consent_record(db, consent_id)
+    record = await service.get_consent_record(db, consent_id, facility_id=user.facility_id)
     if record.patient_id != patient_id:
-        # Don't leak that a consent_id exists under a DIFFERENT patient —
-        # same "not found" either way a caller couldn't distinguish
-        # "wrong patient_id in the URL" from "no such consent_id" without
-        # this, which is the point (no enumeration signal).
         raise HTTPException(404, "Consent record not found")
     return ConsentRecordOut.model_validate(record)
 

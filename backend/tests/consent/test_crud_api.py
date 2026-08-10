@@ -17,6 +17,7 @@ import uuid
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.consent import service
@@ -40,6 +41,21 @@ async def _audit_row_for(engine: AsyncEngine, *, resource_type: str, resource_id
             {"rt": resource_type, "rid": resource_id},
         )
         return result.one_or_none()
+
+
+async def _seed_patient(engine: AsyncEngine, *, facility_id, created_by) -> uuid.UUID:
+    pid = uuid.uuid4()
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO patients (id, full_name, sex, identity_path, facility_id, "
+                "created_by, age_years, uhid) "
+                "VALUES (:id, 'Test Patient', 'other', 'demographics_only', :facility_id, "
+                ":created_by, 30, :uhid)"
+            ),
+            {"id": pid, "facility_id": facility_id, "created_by": created_by, "uhid": f"UHID{pid.hex[:8]}"},
+        )
+    return pid
 
 
 class TestCreateConsentRecord:
@@ -116,10 +132,11 @@ class TestTransitionConsentStatus:
     async def test_requested_to_granted_succeeds(
         self, session_factory, engine: AsyncEngine, facility_id, user_id, purpose_id
     ):
+        patient_id = await _seed_patient(engine, facility_id=facility_id, created_by=user_id)
         async with session_factory() as db:
             record = await service.create_consent_record(
                 db,
-                patient_id=uuid.uuid4(),
+                patient_id=patient_id,
                 facility_id=facility_id,
                 created_by=user_id,
                 purpose_id=purpose_id,
@@ -145,14 +162,15 @@ class TestTransitionConsentStatus:
         assert audit_row.reason == "patient approved in app"
 
     async def test_granted_to_revoked_directly_is_rejected(
-        self, session_factory, facility_id, user_id, purpose_id
+        self, session_factory, engine: AsyncEngine, facility_id, user_id, purpose_id
     ):
         """The transition this endpoint must NEVER be able to perform —
         see service.py's module docstring. Only withdraw_consent() may
         produce this outcome."""
+        patient_id = await _seed_patient(engine, facility_id=facility_id, created_by=user_id)
         async with session_factory() as db:
             record = await service.create_consent_record(
-                db, patient_id=uuid.uuid4(), facility_id=facility_id, created_by=user_id,
+                db, patient_id=patient_id, facility_id=facility_id, created_by=user_id,
                 purpose_id=purpose_id, granted_by_type="patient", channel="verbal",
             )
             await db.commit()
@@ -171,9 +189,10 @@ class TestWithdrawConsent:
     async def test_withdrawal_flips_status_to_revoked_and_writes_audit(
         self, session_factory, engine: AsyncEngine, facility_id, user_id, purpose_id
     ):
+        patient_id = await _seed_patient(engine, facility_id=facility_id, created_by=user_id)
         async with session_factory() as db:
             record = await service.create_consent_record(
-                db, patient_id=uuid.uuid4(), facility_id=facility_id, created_by=user_id,
+                db, patient_id=patient_id, facility_id=facility_id, created_by=user_id,
                 purpose_id=purpose_id, granted_by_type="patient", channel="verbal",
             )
             await db.commit()
@@ -203,14 +222,15 @@ class TestWithdrawConsent:
         assert audit_row.reason == "patient changed their mind"
 
     async def test_double_withdrawal_raises_409_not_500(
-        self, session_factory, facility_id, user_id, purpose_id
+        self, session_factory, engine: AsyncEngine, facility_id, user_id, purpose_id
     ):
         """trg_consent_withdrawals_flip_status rejects a withdrawal
         against an already-terminal consent (DBAPIError) — withdraw_consent()
         must translate that into a clean 409, not let a raw DB error surface."""
+        patient_id = await _seed_patient(engine, facility_id=facility_id, created_by=user_id)
         async with session_factory() as db:
             record = await service.create_consent_record(
-                db, patient_id=uuid.uuid4(), facility_id=facility_id, created_by=user_id,
+                db, patient_id=patient_id, facility_id=facility_id, created_by=user_id,
                 purpose_id=purpose_id, granted_by_type="patient", channel="verbal",
             )
             await db.commit()
@@ -232,32 +252,31 @@ class TestWithdrawConsent:
         assert exc_info.value.status_code == 409
 
     async def test_unrelated_db_error_is_not_swallowed_into_a_409(
-        self, session_factory, facility_id, user_id, purpose_id
+        self, session_factory, engine: AsyncEngine, facility_id, user_id, purpose_id
     ):
         """A genuine FK violation (withdrawn_by_user_id pointing at a
         user that doesn't exist) is a DBAPIError too, but has nothing to
         do with the terminal-status guard -- must NOT be mislabeled as
-        'already withdrawn'. Proves the `"terminal status" not in
-        str(exc.orig)` re-raise actually re-raises, not just that the
-        real double-withdrawal case still 409s."""
+        'already withdrawn'."""
+        patient_id = await _seed_patient(engine, facility_id=facility_id, created_by=user_id)
         async with session_factory() as db:
             record = await service.create_consent_record(
-                db, patient_id=uuid.uuid4(), facility_id=facility_id, created_by=user_id,
+                db, patient_id=patient_id, facility_id=facility_id, created_by=user_id,
                 purpose_id=purpose_id, granted_by_type="patient", channel="verbal",
             )
             await db.commit()
             consent_id = record.id
 
         async with session_factory() as db:
-            with pytest.raises(Exception) as exc_info:
+            # IntegrityError specifically, not just "any Exception" --
+            # a broad catch here would also pass for an unrelated bug
+            # (e.g. a missing table) for the wrong reason.
+            with pytest.raises(IntegrityError):
                 await service.withdraw_consent(
                     db, consent_id, withdrawn_by_type="patient",
                     withdrawn_by_user_id=uuid.uuid4(),  # no such user
                     reason="bogus withdrawer", facility_id=facility_id,
                 )
-        # Specifically NOT the 409 HTTPException withdraw_consent()
-        # raises for the real terminal-status case.
-        assert not isinstance(exc_info.value, HTTPException)
 
 
 class TestListConsentPurposes:
@@ -285,6 +304,27 @@ class TestGetConsentRecord:
         async with session_factory() as db:
             with pytest.raises(HTTPException) as exc_info:
                 await service.get_consent_record(db, uuid.uuid4())
+        assert exc_info.value.status_code == 404
+
+    async def test_facility_scoping_blocks_cross_facility_access(
+        self, session_factory, engine: AsyncEngine, facility_id, second_facility_id, user_id, purpose_id
+    ):
+        patient_id = await _seed_patient(engine, facility_id=facility_id, created_by=user_id)
+        async with session_factory() as db:
+            record = await service.create_consent_record(
+                db, patient_id=patient_id, facility_id=facility_id, created_by=user_id,
+                purpose_id=purpose_id, granted_by_type="patient", channel="verbal",
+            )
+            await db.commit()
+            consent_id = record.id
+
+        async with session_factory() as db:
+            found = await service.get_consent_record(db, consent_id, facility_id=facility_id)
+        assert found.id == consent_id
+
+        async with session_factory() as db:
+            with pytest.raises(HTTPException) as exc_info:
+                await service.get_consent_record(db, consent_id, facility_id=second_facility_id)
         assert exc_info.value.status_code == 404
 
 
