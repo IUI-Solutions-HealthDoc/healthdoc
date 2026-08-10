@@ -132,6 +132,7 @@ do not merge out of order.**
 | 0019 | files | files, file_access_log | B7 (B7-W1-03) — `down_revision = "0017"` |
 | 0020 | notifications | notification_history | B4 (B4-W1-01) |
 | 0020a | accession_counters | accession_counters | B5+B3 — allocator for lab/radiology accession numbers, `down_revision = "0020"` |
+| 0020c | radiology_status_check | ALTER radiology_order_items: status CHECK -> RadiologyOrderStatus | B5 — 0011 constrained it to OrderStatus, which no code path could satisfy, `down_revision = "0020b"` |
 | 0020b | lab_radiology_columns | ALTER lab_order_items: barcode, collected_at; ALTER lab_results: amendment_reason; ALTER radiology_order_items: scan_completed_at | B5+B3 — columns the ORM declared but 0010/0011 never created, `down_revision = "0020a"` |
 | 0021 | dpdp_compliance | data_protection_officers, patient_grievances, data_breach_notifications, consent_managers (+ FK consent_records.consent_manager_id) | B7 (W3) |
 | 0022 | guardian_verification | ALTER patients: is_minor, guardian_verified, guardian_verification_method | B2 (W3) |
@@ -797,7 +798,7 @@ machine_id varchar(50)
 pacs_study_uid varchar(100)                      -- Orthanc StudyInstanceUID
 scheduled_at timestamptz
 scan_completed_at timestamptz                    -- TAT baseline for reporting (0020b)
-status varchar(50) NOT NULL DEFAULT 'placed'
+status varchar(50) NOT NULL DEFAULT 'placed'     -- RadiologyOrderStatus: placed|scheduled|scanned|reporting|released|cancelled (0020c)
 ```
 
 **radiology_reports** — append-only, versioned; same shape as lab_results but

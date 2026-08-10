@@ -58,7 +58,10 @@ def test_duplicate_barcode_rejected(client_as, seeded_order_id):
     tech_client = client_as(LAB_TECH)
     barcode = f"BC-{uuid.uuid4().hex[:10]}"
 
-    order_id_1 = str(uuid.uuid4())
+    # Two items on the SAME order — one order routinely carries several
+    # tests, and the barcode uniqueness this asserts is per-sample, not
+    # per-order.
+    order_id_1 = seeded_order_id
     item1 = doc_client.post(
         f"/api/v1/pathology/order-items?order_id={order_id_1}",
         json={"test_name": "CBC", "sample_type": "blood"},
@@ -68,7 +71,7 @@ def test_duplicate_barcode_rejected(client_as, seeded_order_id):
         json={"barcode": barcode},
     )
 
-    order_id_2 = str(uuid.uuid4())
+    order_id_2 = seeded_order_id
     item2 = doc_client.post(
         f"/api/v1/pathology/order-items?order_id={order_id_2}",
         json={"test_name": "LFT", "sample_type": "blood"},
