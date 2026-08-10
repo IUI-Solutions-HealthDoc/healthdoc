@@ -482,13 +482,26 @@ AUDIT_TABLES_EXEMPT_FROM_REPOINTING: frozenset[str] = frozenset({"patient_merge_
 # from here into REPOINTED_ON_MERGE and add the code below. The test
 # enforces this — nothing can silently slip through.
 PENDING_REPOINT_OTHER_MODULES: frozenset[str] = frozenset({
-    "allergies",  # allergies module — repointing owned by that module's dev
-    "invoices",   # B7/0014 — repointing owned by the billing module's dev
+    "allergies",      # allergies module — repointing owned by that module's dev
+    "invoices",       # B7/0014 — repointing owned by the billing module's dev
+    "orders",         # B3/0008 — see below; surfaced when app/orders became importable
+    "prescriptions",  # B3/0008 — same
 })
-# visits moved to REPOINTED_ON_MERGE (B3/0007, this commit) -- see
-# _repoint_visits below. TWO entries remain: a merge still succeeds
-# while leaving the patient's allergies and invoices pointing at the
-# merged-away record. Same risk as before, smaller surface.
+# visits and ot_schedules moved to REPOINTED_ON_MERGE (B3, #284).
+#
+# orders and prescriptions appear here now not because anything changed in
+# 0008 but because app/orders/models.py finally imports — it referenced
+# app.common.database and app.common.mixins, neither of which exists, so its
+# models never registered on Base.metadata and this guard could not see their
+# FKs to patients.id. They have been unrepointed since 0008 merged; only the
+# detection is new.
+#
+# FOUR entries now. A merge currently succeeds while leaving the patient's
+# allergies, invoices, orders and prescriptions attached to the merged-away
+# record — orders and prescriptions being clinical history, not metadata.
+# This set was a reasonable escape hatch at one entry. At four it is a merge
+# that reports success and loses most of the record. Before adding a fifth,
+# approve_merge should refuse outright while this set is non-empty.
 
 
 async def approve_merge(
