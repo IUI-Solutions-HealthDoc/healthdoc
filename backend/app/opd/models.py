@@ -110,8 +110,12 @@ class Visit(Base, UUIDPk, Timestamps, Blame):
 
 class Encounter(Base, UUIDPk, Timestamps, Blame):
     __tablename__ = "encounters"
+    __audit_resource_type__ = "encounters"
+    __audit_facility_id_field__ = "facility_id"
+    __audit_visit_id_field__ = "visit_id"
 
     visit_id = Column(UUID(as_uuid=True), ForeignKey("visits.id"), nullable=False)
+    facility_id = Column(UUID(as_uuid=True), ForeignKey("facilities.id"), nullable=False)
     provider_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     encounter_type = Column(String(50), nullable=True)
     chief_complaint = Column(Text, nullable=True)
@@ -154,8 +158,11 @@ class IcdCode(Base, UUIDPk, Timestamps):
 
 class Diagnosis(Base, UUIDPk, Timestamps, Blame):
     __tablename__ = "diagnoses"
+    __audit_resource_type__ = "diagnoses"
+    __audit_facility_id_field__ = "facility_id"
 
     encounter_id = Column(UUID(as_uuid=True), ForeignKey("encounters.id"), nullable=False)
+    facility_id = Column(UUID(as_uuid=True), ForeignKey("facilities.id"), nullable=False)
     icd_code = Column(String(30), nullable=False)
     icd_version = Column(String(30), nullable=False)
     icd_code_id = Column(UUID(as_uuid=True), ForeignKey("icd_codes.id"), nullable=True)
