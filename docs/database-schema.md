@@ -132,6 +132,7 @@ do not merge out of order.**
 | 0019 | files | files, file_access_log | B7 (B7-W1-03) — `down_revision = "0017"` |
 | 0020 | notifications | notification_history | B4 (B4-W1-01) |
 | 0020a | accession_counters | accession_counters | B5+B3 — allocator for lab/radiology accession numbers, `down_revision = "0020"` |
+| 0020b | lab_radiology_columns | ALTER lab_order_items: barcode, collected_at; ALTER lab_results: amendment_reason; ALTER radiology_order_items: scan_completed_at | B5+B3 — columns the ORM declared but 0010/0011 never created, `down_revision = "0020a"` |
 | 0021 | dpdp_compliance | data_protection_officers, patient_grievances, data_breach_notifications, consent_managers (+ FK consent_records.consent_manager_id) | B7 (W3) |
 | 0022 | guardian_verification | ALTER patients: is_minor, guardian_verified, guardian_verification_method | B2 (W3) |
 | 0023 | vitals_nursing | vitals, nursing_handover_notes, intake_output_records, patient_movement_log | B3 (W5) |
@@ -768,6 +769,8 @@ sample_type varchar(50) NOT NULL
 department_id UUID NULL → departments
 status varchar(50) NOT NULL DEFAULT 'placed'     -- OrderStatus enum
 estimated_minutes int
+barcode varchar(50) UNIQUE NULL                  -- assigned at collection, not at ordering (0020b)
+collected_at timestamptz NULL                    -- sample collection time (0020b)
 ```
 
 **lab_results** — append-only, versioned (corrections = new row)
@@ -777,6 +780,7 @@ version     int NOT NULL                         -- 1, 2, 3...
 is_current  boolean NOT NULL
 result_data jsonb NOT NULL
 remarks     text
+amendment_reason text                            -- why a corrected result was issued (0020b)
 status      varchar(50) NOT NULL                 -- ResultStatus: pending|preliminary|final|corrected
 created_by  UUID NOT NULL → users
 UNIQUE (lab_order_item_id, version)
@@ -792,6 +796,7 @@ scan_type text NOT NULL
 machine_id varchar(50)
 pacs_study_uid varchar(100)                      -- Orthanc StudyInstanceUID
 scheduled_at timestamptz
+scan_completed_at timestamptz                    -- TAT baseline for reporting (0020b)
 status varchar(50) NOT NULL DEFAULT 'placed'
 ```
 
