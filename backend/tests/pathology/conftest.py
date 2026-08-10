@@ -63,3 +63,14 @@ def client_as():
 
     app.dependency_overrides.pop(get_current_user, None)
     app.dependency_overrides.pop(get_current_db_user, None)
+
+@pytest.fixture(scope="session")
+def seeded_order_id() -> str:
+    """A real orders.id, with its whole FK chain committed.
+
+    The handlers look the order up and 404 when it's absent — that check was
+    dead code until app/orders/models.py became importable, which is why the
+    tests could previously pass a random UUID.
+    """
+    from tests._lab_seed import seed_order_chain
+    return seed_order_chain([u.sub for u in (DOCTOR, LAB_TECH, RADIOLOGIST, RADIOLOGY_TECH)])

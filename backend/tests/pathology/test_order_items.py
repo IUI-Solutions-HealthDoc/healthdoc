@@ -6,9 +6,9 @@ from tests.pathology.conftest import DOCTOR, LAB_TECH
 from fastapi.testclient import TestClient
 
 
-def test_create_lab_order_item(client_as):
+def test_create_lab_order_item(client_as, seeded_order_id):
     client = client_as(DOCTOR)
-    order_id = str(uuid.uuid4())
+    order_id = seeded_order_id
     resp = client.post(
         f"/api/v1/pathology/order-items?order_id={order_id}",
         json={"test_name": "CBC", "sample_type": "blood"},
@@ -21,10 +21,10 @@ def test_create_lab_order_item(client_as):
     return body["id"]
 
 
-def test_wrong_role_cannot_create_order_item(client_as):
+def test_wrong_role_cannot_create_order_item(client_as, seeded_order_id):
     unauthorized = AuthUser(sub=str(uuid.uuid4()), username="recept1", roles=["receptionist"])
     client = client_as(unauthorized)
-    order_id = str(uuid.uuid4())
+    order_id = seeded_order_id
     resp = client.post(
         f"/api/v1/pathology/order-items?order_id={order_id}",
         json={"test_name": "CBC", "sample_type": "blood"},
@@ -32,9 +32,9 @@ def test_wrong_role_cannot_create_order_item(client_as):
     assert resp.status_code == 403
 
 
-def test_sample_collection_updates_status(client_as):
+def test_sample_collection_updates_status(client_as, seeded_order_id):
     doc_client = client_as(DOCTOR)
-    order_id = str(uuid.uuid4())
+    order_id = seeded_order_id
     created = doc_client.post(
         f"/api/v1/pathology/order-items?order_id={order_id}",
         json={"test_name": "LFT", "sample_type": "blood"},
@@ -53,7 +53,7 @@ def test_sample_collection_updates_status(client_as):
     assert body["collected_at"] is not None
 
 
-def test_duplicate_barcode_rejected(client_as):
+def test_duplicate_barcode_rejected(client_as, seeded_order_id):
     doc_client = client_as(DOCTOR)
     tech_client = client_as(LAB_TECH)
     barcode = f"BC-{uuid.uuid4().hex[:10]}"
@@ -80,10 +80,10 @@ def test_duplicate_barcode_rejected(client_as):
     assert resp.status_code == 409
 
 
-def test_cannot_collect_sample_twice(client_as):
+def test_cannot_collect_sample_twice(client_as, seeded_order_id):
     doc_client = client_as(DOCTOR)
     tech_client = client_as(LAB_TECH)
-    order_id = str(uuid.uuid4())
+    order_id = seeded_order_id
     item = doc_client.post(
         f"/api/v1/pathology/order-items?order_id={order_id}",
         json={"test_name": "CBC", "sample_type": "blood"},
@@ -103,7 +103,7 @@ def test_cannot_collect_sample_twice(client_as):
     assert second.status_code == 409
 
 
-def test_list_order_items(client_as):
+def test_list_order_items(client_as, seeded_order_id):
     client = client_as(DOCTOR)
     resp = client.get("/api/v1/pathology/order-items")
     assert resp.status_code == 200

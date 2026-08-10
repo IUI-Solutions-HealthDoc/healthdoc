@@ -8,9 +8,9 @@ from tests.radiology.conftest import RADIOLOGIST, RADIOLOGY_TECH, DOCTOR
 RAD_TECH = RADIOLOGY_TECH
 
 
-def test_create_radiology_order_item(client_as):
+def test_create_radiology_order_item(client_as, seeded_order_id):
     client = client_as(DOCTOR)
-    order_id = str(uuid.uuid4())
+    order_id = seeded_order_id
     resp = client.post(
         f"/api/v1/radiology/order-items?order_id={order_id}",
         json={"modality": "xray", "scan_type": "Chest X-Ray"},
@@ -21,9 +21,9 @@ def test_create_radiology_order_item(client_as):
     assert body["accession_number"].startswith("RAD-")
 
 
-def test_scan_complete_requires_scheduled_status(client_as):
+def test_scan_complete_requires_scheduled_status(client_as, seeded_order_id):
     doc_client = client_as(DOCTOR)
-    order_id = str(uuid.uuid4())
+    order_id = seeded_order_id
     item = doc_client.post(
         f"/api/v1/radiology/order-items?order_id={order_id}",
         json={"modality": "xray", "scan_type": "Chest X-Ray"},
@@ -37,9 +37,9 @@ def test_scan_complete_requires_scheduled_status(client_as):
     assert resp.status_code == 409
 
 
-def test_draft_and_sign_off_report(client_as):
+def test_draft_and_sign_off_report(client_as, seeded_order_id):
     doc_client = client_as(DOCTOR)
-    order_id = str(uuid.uuid4())
+    order_id = seeded_order_id
     item = doc_client.post(
         f"/api/v1/radiology/order-items?order_id={order_id}",
         json={"modality": "xray", "scan_type": "Chest X-Ray"},
@@ -64,7 +64,7 @@ def test_draft_and_sign_off_report(client_as):
     assert body["tat_minutes"] is not None
 
 
-def test_list_radiology_order_items(client_as):
+def test_list_radiology_order_items(client_as, seeded_order_id):
     client = client_as(DOCTOR)
     resp = client.get("/api/v1/radiology/order-items")
     assert resp.status_code == 200
