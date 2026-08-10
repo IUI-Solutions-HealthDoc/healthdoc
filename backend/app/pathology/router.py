@@ -9,15 +9,19 @@ Pydantic models; the envelope middleware wraps them.
 
 NOTE: project uses async SQLAlchemy (AsyncSession) - every DB call is awaited.
 
-STILL OPEN (flagged, not silently fixed - see TODOs inline):
-- _write_audit_log is a stub (pass). Audit logging is owned by a teammate's
-  module (app/audit/models.py + migration 0003). Swap the stub once that
-  lands - do not implement it here.
+STILL OPEN:
 - CRITICAL_THRESHOLDS only has a placeholder hemoglobin range. Needs real
-  values from the pathologist/lab director before this ships.
-- orders/departments/users FKs on LabOrderItem/LabResult are intentionally
-  omitted at the DB level too (see migration for #166) for the same reason -
-  those tables don't exist yet either.
+  values from the pathologist/lab director before this ships. This is the
+  one item here that no amount of merging fixes — it needs a clinician.
+
+RESOLVED since this module was written (all three were "blocked on someone
+else's work" and that work has landed):
+- _write_audit_log was a stub waiting on app/audit; 0003 merged, so it now
+  delegates to app.audit.service.write_audit_log.
+- Accession numbers used COUNT(*)+1, deferred because a counters table
+  needed a migration this branch couldn't chain. accession_counters (0020a)
+  exists; see app/common/accession.py.
+- orders/departments/users FKs are real in 0010 — those tables all exist.
 """
 import asyncio
 import json
@@ -32,6 +36,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
 
+from app.common.accession import LAB, allocate_accession_number
+from app.audit.service import write_audit_log
 from app.common.db import get_db
 from app.auth.deps import get_current_user, require_roles, get_current_db_user, CurrentDbUser
 from app.pathology.models import LabOrderItem, LabResult
@@ -41,8 +47,6 @@ from app.pathology.schemas import (
     LabResultAmend, LabResultHistoryOut,
     LabMISSummaryOut, TATByTestOut, StatusCountOut, PanicFrequencyOut,
 )
-_MAX_ACCESSION_RETRIES = 5
-
 router = APIRouter(prefix="/pathology", tags=["pathology"])
 
 @router.get("/ping")
@@ -75,44 +79,34 @@ async def create_lab_order_item(
         if order is None:
             raise HTTPException(status_code=404, detail="Order not found")
 
-    
-# NOTE (#9): a fully atomic counter (dedicated accession_counters
-    # table + migration) is the correct long-term fix, matching the
-    # billing_counters pattern the reviewer suggested — but that requires
-    # a new migration, and this branch's local migration chain is
-    # currently broken (missing revision 0009, blocked on syncing with
-    # staging/teammates' branches). Until that's unblocked, this uses a
-    # bounded retry on unique-constraint collision instead of a hard
-    # failure, plus a correct facility business date (IST, not raw UTC).
-    item = None
-    for attempt in range(_MAX_ACCESSION_RETRIES):
-        accession_number = await _generate_accession_number(db, prefix="LAB")
-        item = LabOrderItem(
-            order_id=order_id,
-            accession_number=accession_number,
-            test_code=payload.test_code,
-            test_name=payload.test_name,
-            sample_type=payload.sample_type,
-            department_id=payload.department_id,
-            estimated_minutes=payload.estimated_minutes,
-            status="placed",
-            created_by=current_db_user.id,
-        )
-        db.add(item)
-        try:
-            await db.flush()
-            break
-        except IntegrityError:
-            await db.rollback()
-            if attempt == _MAX_ACCESSION_RETRIES - 1:
-                raise HTTPException(
-                    status_code=409,
-                    detail="Could not generate a unique accession number, please retry",
-                )
-            continue
+    # One allocation, no retry loop. accession_counters (0020a) hands out the
+    # number atomically, so there is no collision to retry against — the loop
+    # that used to be here existed only because COUNT(*)+1 raced.
+    #
+    # The old `except IntegrityError: await db.rollback()` was worse than the
+    # race it guarded: db.rollback() discards the ENTIRE session, not the
+    # failed INSERT, so anything else already written in this request went
+    # with it.
+    accession_number = await allocate_accession_number(
+        db, prefix=LAB, facility_id=current_db_user.facility_id
+    )
+    item = LabOrderItem(
+        order_id=order_id,
+        accession_number=accession_number,
+        test_code=payload.test_code,
+        test_name=payload.test_name,
+        sample_type=payload.sample_type,
+        department_id=payload.department_id,
+        estimated_minutes=payload.estimated_minutes,
+        status="placed",
+        created_by=current_db_user.id,
+    )
+    db.add(item)
+    await db.flush()
 
     await _write_audit_log(db, table_name="lab_order_items", row_id=item.id,
-                            action="create", actor_id=current_db_user.id)
+                            action="create", actor_id=current_db_user.id,
+                            facility_id=current_db_user.facility_id)
     await db.refresh(item)
     return item
 @router.put(
@@ -146,7 +140,8 @@ async def collect_sample(
     item.collected_at = payload.collected_at or datetime.now(timezone.utc)
 
     await _write_audit_log(db, table_name="lab_order_items", row_id=item.id,
-                            action="update", actor_id=current_db_user.id)
+                            action="update", actor_id=current_db_user.id,
+                            facility_id=current_db_user.facility_id)
     await db.refresh(item)
     return item
 
@@ -177,45 +172,34 @@ async def list_lab_order_items(
     return LabOrderItemListOut(items=rows, page=page, page_size=page_size, total=total)
 
 
-_IST = ZoneInfo("Asia/Kolkata")
-
-
-def _facility_business_date() -> str:
-    """
-    Facility business date (IST), used for accession-number date stamps.
-    Previously used datetime.now(timezone.utc), which carries yesterday's
-    date between 00:00-05:30 IST. NOTE: this is a stand-in until a shared
-    facility_business_date() helper exists elsewhere in the codebase (none
-    found as of this fix) — switch to that if/when it lands.
-    """
-    return datetime.now(_IST).strftime("%Y%m%d")
-
-
-async def _generate_accession_number(db: AsyncSession, prefix: str) -> str:
-    date_str = _facility_business_date()
-    count_today = (await db.execute(
-        select(func.count()).select_from(LabOrderItem)
-        .where(LabOrderItem.accession_number.like(f"{prefix}-{date_str}-%"))
-    )).scalar()
-    seq = str(count_today + 1).zfill(5)
-    return f"{prefix}-{date_str}-{seq}"
-
-
 async def _write_audit_log(db: AsyncSession, *, table_name: str, row_id: uuid.UUID,
-                            action: str, actor_id: uuid.UUID) -> None:
+                            action: str, actor_id: uuid.UUID,
+                            facility_id: uuid.UUID) -> None:
+    """Manual audit write, delegating to app.audit.service.
+
+    Was a stub raising under AUDIT_LOG_ENFORCED, on the grounds that
+    "app/audit is owned by a teammate's module, not yet landed". It landed
+    in 0003 some time ago.
+
+    The MANUAL path rather than listeners.py's automatic one, deliberately:
+    auto-audit needs __audit_facility_id_field__ naming a column on the
+    model that supplies audit_logs.facility_id, which is NOT NULL. Neither
+    lab_order_items nor radiology_order_items has a facility_id column —
+    they reach a facility only through orders -> encounters -> visits. So
+    the caller passes it from the authenticated user instead.
+
+    Does not commit: get_db() commits once at the end of the request, which
+    is what keeps the audit row and the mutation it describes in the same
+    transaction.
     """
-    STUB (#10) — audit logging is owned by a teammate's module
-    (app/audit/models.py + migration 0003), not yet landed. Raises when
-    AUDIT_LOG_ENFORCED=true so CI/staging can catch anyone relying on this
-    silently working; stays a no-op otherwise so local dev isn't blocked.
-    Swap for the real call once app/audit lands — do not implement it here
-    (out of this module's scope).
-    """
-    if os.getenv("AUDIT_LOG_ENFORCED", "false").lower() == "true":
-        raise NotImplementedError(
-            f"_write_audit_log stub called for {table_name}/{row_id} "
-            f"(action={action}) — app/audit not yet implemented"
-        )
+    await write_audit_log(
+        db,
+        facility_id=facility_id,
+        action=action,
+        resource_type=table_name,
+        resource_id=row_id,
+        user_id=actor_id,
+    )
 
 # --- #184: result entry (technician) + dual-verify pathologist approval ---
 
@@ -271,7 +255,8 @@ async def enter_result(
         await _publish_critical_alert(db, item, flagged)
 
     await _write_audit_log(db, table_name="lab_results", row_id=result.id,
-                            action="create", actor_id=current_db_user.id)
+                            action="create", actor_id=current_db_user.id,
+                            facility_id=current_db_user.facility_id)
     await db.flush()
     await db.refresh(result)
     return result
@@ -318,7 +303,8 @@ async def verify_result(
     item.status = "released"
 
     await _write_audit_log(db, table_name="lab_results", row_id=current.id,
-                            action="verify", actor_id=current_db_user.id)
+                            action="verify", actor_id=current_db_user.id,
+                            facility_id=current_db_user.facility_id)
     await db.flush()
     await db.refresh(current)
 
@@ -368,7 +354,8 @@ async def amend_result(
     db.add(amended)
 
     await _write_audit_log(db, table_name="lab_results", row_id=amended.id,
-                            action="create", actor_id=current_db_user.id)
+                            action="create", actor_id=current_db_user.id,
+                            facility_id=current_db_user.facility_id)
     await db.flush()
     await db.refresh(amended)
     return amended

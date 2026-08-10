@@ -12,7 +12,7 @@ class LabOrderItem(Base, UUIDPk, Timestamps, Blame):
     accession_number = Column(String(30), unique=True, nullable=False)
     test_code = Column(String(30), nullable=True)
     test_name = Column(Text, nullable=False)
-    sample_type = Column(String(30), nullable=False)
+    sample_type = Column(String(50), nullable=False)  # enum-backed: §3 blanket rule
 
     # ADDED for #166 -- sample collection (barcode, timestamp) was previously
     # computed in the router but never persisted anywhere. See migration

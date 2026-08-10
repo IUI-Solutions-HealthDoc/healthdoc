@@ -10,10 +10,10 @@ class BloodDonor(Base, UUIDPk, Timestamps, Blame):
     patient_id = Column(UUID(as_uuid=True), ForeignKey("patients.id", ondelete="RESTRICT"),
                          nullable=True, index=True)
     full_name = Column(Text, nullable=False)
-    sex = Column(String(30), nullable=True)
+    sex = Column(String(50), nullable=True)  # enum-backed: §3 blanket rule
     dob = Column(Date, nullable=True)
     age_years = Column(Integer, nullable=True)
-    blood_group = Column(String(30), nullable=False)
+    blood_group = Column(String(50), nullable=False)  # enum-backed: §3 blanket rule
     mobile = Column(String(20), nullable=True)
     email = Column(String(255), nullable=True)
     address = Column(Text, nullable=True)
@@ -31,7 +31,7 @@ class BloodUnit(Base, UUIDPk, Timestamps):
     donor_id = Column(UUID(as_uuid=True), ForeignKey("blood_donors.id", ondelete="RESTRICT"),
                        nullable=False, index=True)
     bag_number = Column(String(30), unique=True, nullable=False)
-    blood_group = Column(String(30), nullable=False)
+    blood_group = Column(String(50), nullable=False)  # enum-backed: §3 blanket rule
     volume_ml = Column(Integer, nullable=False)
     collected_at = Column(DateTime(timezone=True), nullable=True)
     expiry_date = Column(Date, nullable=False)

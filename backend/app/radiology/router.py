@@ -11,6 +11,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
+from app.audit.service import write_audit_log
+from app.common.accession import RADIOLOGY, allocate_accession_number
 from app.common.db import get_db
 from app.auth.deps import get_current_user, require_roles, get_current_db_user, CurrentDbUser
 from app.radiology.fhir import build_diagnostic_report_bundle
@@ -21,8 +23,6 @@ from app.radiology.schemas import (
     RadiologyReportOut,
 )
 from app.radiology.models import RadiologyOrderItem, RadiologyReport
-
-_MAX_ACCESSION_RETRIES = 5
 
 router = APIRouter(prefix="/radiology", tags=["radiology"])
 
@@ -51,41 +51,27 @@ async def create_radiology_order_item(
         if order is None:
             raise HTTPException(status_code=404, detail="Order not found")
 
-   # NOTE (#9): a fully atomic counter (dedicated accession_counters
-    # table + migration) is the correct long-term fix, matching the
-    # billing_counters pattern the reviewer suggested — but that requires
-    # a new migration, and this branch's local migration chain is
-    # currently broken (missing revision 0009, blocked on syncing with
-    # staging/teammates' branches). Until that's unblocked, this uses a
-    # bounded retry on unique-constraint collision instead of a hard
-    # failure, plus a correct facility business date (IST, not raw UTC).
-    item = None
-    for attempt in range(_MAX_ACCESSION_RETRIES):
-        accession_number = await _generate_accession_number(db, prefix="RAD")
-        item = RadiologyOrderItem(
-            order_id=order_id,
-            accession_number=accession_number,
-            modality=payload.modality,
-            scan_type=payload.scan_type,
-            machine_id=payload.machine_id,
-            status="placed",
-            created_by=current_db_user.id,
-        )
-        db.add(item)
-        try:
-            await db.flush()
-            break
-        except IntegrityError:
-            await db.rollback()
-            if attempt == _MAX_ACCESSION_RETRIES - 1:
-                raise HTTPException(
-                    status_code=409,
-                    detail="Could not generate a unique accession number, please retry",
-                )
-            continue
+    # One allocation, no retry loop — accession_counters (0020a) is atomic.
+    # The old `except IntegrityError: await db.rollback()` rolled back the
+    # whole session, not just the failed INSERT.
+    accession_number = await allocate_accession_number(
+        db, prefix=RADIOLOGY, facility_id=current_db_user.facility_id
+    )
+    item = RadiologyOrderItem(
+        order_id=order_id,
+        accession_number=accession_number,
+        modality=payload.modality,
+        scan_type=payload.scan_type,
+        machine_id=payload.machine_id,
+        status="placed",
+        created_by=current_db_user.id,
+    )
+    db.add(item)
+    await db.flush()
 
     await _write_audit_log(db, table_name="radiology_order_items", row_id=item.id,
-                            action="create", actor_id=current_db_user.id)
+                            action="create", actor_id=current_db_user.id,
+                            facility_id=current_db_user.facility_id)
     await db.refresh(item)
     return item
 
@@ -109,7 +95,8 @@ async def mark_scan_complete(
     item.status = "scanned"
 
     await _write_audit_log(db, table_name="radiology_order_items", row_id=item.id,
-                            action="update", actor_id=current_db_user.id)
+                            action="update", actor_id=current_db_user.id,
+                            facility_id=current_db_user.facility_id)
     await db.refresh(item)
     return item
 
@@ -164,7 +151,8 @@ async def draft_radiology_report(
     item.status = "reporting"
 
     await _write_audit_log(db, table_name="radiology_reports", row_id=report.id,
-                            action="create", actor_id=current_db_user.id)
+                            action="create", actor_id=current_db_user.id,
+                            facility_id=current_db_user.facility_id)
     await db.flush()
     await db.refresh(report)
     return report
@@ -205,7 +193,8 @@ async def sign_off_radiology_report(
     item.status = "released"
 
     await _write_audit_log(db, table_name="radiology_reports", row_id=new_report.id,
-                            action="create", actor_id=current_db_user.id)
+                            action="create", actor_id=current_db_user.id,
+                            facility_id=current_db_user.facility_id)
     await db.flush()
     await db.refresh(new_report)
 
@@ -253,41 +242,31 @@ async def get_fhir_bundle(
     return bundle
 
 
-_IST = ZoneInfo("Asia/Kolkata")
-
-
-def _facility_business_date() -> str:
-    """
-    Facility business date (IST), used for accession-number date stamps.
-    Previously used datetime.now(timezone.utc), which carries yesterday's
-    date between 00:00-05:30 IST. NOTE: this is a stand-in until a shared
-    facility_business_date() helper exists elsewhere in the codebase (none
-    found as of this fix) — switch to that if/when it lands.
-    """
-    return datetime.now(_IST).strftime("%Y%m%d")
-
-
-async def _generate_accession_number(db: AsyncSession, prefix: str) -> str:
-    date_str = _facility_business_date()
-    count_today = (await db.execute(
-        select(func.count()).select_from(RadiologyOrderItem)
-        .where(RadiologyOrderItem.accession_number.like(f"{prefix}-{date_str}-%"))
-    )).scalar()
-    seq = str(count_today + 1).zfill(5)
-    return f"{prefix}-{date_str}-{seq}"
-
 async def _write_audit_log(db: AsyncSession, *, table_name: str, row_id: uuid.UUID,
-                            action: str, actor_id: uuid.UUID) -> None:
+                            action: str, actor_id: uuid.UUID,
+                            facility_id: uuid.UUID) -> None:
+    """Manual audit write, delegating to app.audit.service.
+
+    Was a stub raising under AUDIT_LOG_ENFORCED, on the grounds that
+    "app/audit is owned by a teammate's module, not yet landed". It landed
+    in 0003 some time ago.
+
+    The MANUAL path rather than listeners.py's automatic one, deliberately:
+    auto-audit needs __audit_facility_id_field__ naming a column on the
+    model that supplies audit_logs.facility_id, which is NOT NULL. Neither
+    lab_order_items nor radiology_order_items has a facility_id column —
+    they reach a facility only through orders -> encounters -> visits. So
+    the caller passes it from the authenticated user instead.
+
+    Does not commit: get_db() commits once at the end of the request, which
+    is what keeps the audit row and the mutation it describes in the same
+    transaction.
     """
-    STUB (#10) — audit logging is owned by a teammate's module
-    (app/audit/models.py + migration 0003), not yet landed. Raises when
-    AUDIT_LOG_ENFORCED=true so CI/staging can catch anyone relying on this
-    silently working; stays a no-op otherwise so local dev isn't blocked.
-    Swap for the real call once app/audit lands — do not implement it here
-    (out of this module's scope).
-    """
-    if os.getenv("AUDIT_LOG_ENFORCED", "false").lower() == "true":
-        raise NotImplementedError(
-            f"_write_audit_log stub called for {table_name}/{row_id} "
-            f"(action={action}) — app/audit not yet implemented"
-        )
+    await write_audit_log(
+        db,
+        facility_id=facility_id,
+        action=action,
+        resource_type=table_name,
+        resource_id=row_id,
+        user_id=actor_id,
+    )

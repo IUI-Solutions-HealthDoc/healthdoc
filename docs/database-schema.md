@@ -131,6 +131,7 @@ do not merge out of order.**
 | 0018 | — skipped, never create — | | |
 | 0019 | files | files, file_access_log | B7 (B7-W1-03) — `down_revision = "0017"` |
 | 0020 | notifications | notification_history | B4 (B4-W1-01) |
+| 0020a | accession_counters | accession_counters | B5+B3 — allocator for lab/radiology accession numbers, `down_revision = "0020"` |
 | 0021 | dpdp_compliance | data_protection_officers, patient_grievances, data_breach_notifications, consent_managers (+ FK consent_records.consent_manager_id) | B7 (W3) |
 | 0022 | guardian_verification | ALTER patients: is_minor, guardian_verified, guardian_verification_method | B2 (W3) |
 | 0023 | vitals_nursing | vitals, nursing_handover_notes, intake_output_records, patient_movement_log | B3 (W5) |
@@ -1053,6 +1054,22 @@ Append-only by convention (internal writes only; no update endpoint).
 **PII rule:** payloads are shown on public queue displays and kept long-term — they may
 contain `token_display`, department/room, and UUIDs, but **never** patient names, UHID,
 mobile numbers, or clinical facts.
+
+### 0020a — accession_counters (B5+B3, out-of-band)
+
+**accession_counters** — allocator for `LAB-<YYYYMMDD>-<SEQ5>` and `RAD-<YYYYMMDD>-<SEQ5>`:
+`prefix varchar(10) (LAB|RAD) · counter_date date · last_value int NOT NULL DEFAULT 0 ·
+UNIQUE (prefix, counter_date)`; allocate with
+`INSERT ... ON CONFLICT DO UPDATE ... RETURNING` in the same transaction.
+
+Not gapless and not required to be — unlike invoice/receipt/refund. It exists because
+§2.2 freezes a format that resets daily and a Postgres sequence cannot reset itself.
+The upsert is used rather than `SELECT ... FOR UPDATE` because the first allocation of
+each day has no row to lock yet.
+
+Global, not facility-scoped: `accession_number` is globally UNIQUE and its format
+carries no facility segment. Adding one would require `facility_id` here and a wider
+unique key.
 
 ---
 
