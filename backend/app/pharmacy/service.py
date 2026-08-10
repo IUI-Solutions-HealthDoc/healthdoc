@@ -1,5 +1,7 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
+import json
+import logging
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -38,11 +40,11 @@ async def get_prescription_queue(
     page_size = min(page_size, 100)  
     offset = (page - 1) * page_size
 
-    where = ["p.facility_id = :facility_id"]
+    where = ["pt.facility_id = :facility_id"]
     params: dict = {"facility_id": str(facility_id), "limit": page_size, "offset": offset}
 
     if department_id is not None:
-        where.append("e.department_id = :department_id")
+        where.append("v.department_id = :department_id")
         params["department_id"] = str(department_id)
 
     if status is not None:
@@ -58,6 +60,8 @@ async def get_prescription_queue(
         SELECT count(*)
         FROM prescriptions p
         JOIN encounters e ON e.id = p.encounter_id
+            JOIN visits v ON v.id = e.visit_id
+        JOIN patients pt ON pt.id = p.patient_id
         LEFT JOIN LATERAL (
             SELECT status FROM pharmacy_dispenses
             WHERE prescription_id = p.id AND is_current
@@ -81,6 +85,7 @@ async def get_prescription_queue(
             pd.status AS dispense_status
         FROM prescriptions p
         JOIN encounters e ON e.id = p.encounter_id
+            JOIN visits v ON v.id = e.visit_id
         JOIN patients pt ON pt.id = p.patient_id
         LEFT JOIN LATERAL (
             SELECT status FROM pharmacy_dispenses
@@ -129,9 +134,11 @@ async def search_medicines(
                ib.quantity, ib.stock_location_id, ib.issue_rate_mrp
         FROM inventory_batches ib
         JOIN stock_locations sl ON sl.id = ib.stock_location_id
+        JOIN facilities fac ON fac.id = sl.facility_id
         WHERE ib.item_id = ANY(:item_ids)
           AND ib.quantity > 0
           AND sl.facility_id = :facility_id
+          AND ib.expiry_date >= (now() AT TIME ZONE fac.timezone)::date
         ORDER BY ib.item_id, ib.expiry_date ASC
     """)
     batch_rows = (
@@ -194,9 +201,11 @@ async def _fefo_allocate(
         SELECT ib.id, ib.batch_number, ib.expiry_date, ib.quantity
         FROM inventory_batches ib
         JOIN stock_locations sl ON sl.id = ib.stock_location_id
+        JOIN facilities fac ON fac.id = sl.facility_id
         WHERE ib.item_id = :item_id
           AND ib.quantity > 0
           AND sl.facility_id = :facility_id
+          AND ib.expiry_date >= (now() AT TIME ZONE fac.timezone)::date
         ORDER BY ib.expiry_date ASC
         FOR UPDATE OF ib
     """)
@@ -243,26 +252,38 @@ async def _write_notification(
     db: AsyncSession, *, recipient_user_id: UUID, notification_type: str,
     title: str, body: str, reference_type: str, reference_id: str,
 ) -> None:
-    
+    """Log a notification-worthy event to notification_history.
+
+    notification_history has no per-recipient/title/body/status columns of
+    its own (event_type, payload JSONB, department_id, created_at) — those
+    fields are carried inside payload instead of being column-mapped 1:1.
+    """
     try:
         await db.execute(
             text("""
-                INSERT INTO notifications
-                    (id, recipient_user_id, notification_type, title, body,
-                     status, reference_type, reference_id)
+                INSERT INTO notification_history
+                    (id, event_type, payload)
                 VALUES
-                    (:id, :recipient_user_id, :notification_type, :title, :body,
-                     :status, :reference_type, :reference_id)
+                    (:id, :event_type, CAST(:payload AS jsonb))
             """),
             {
-                "id": str(uuid4()), "recipient_user_id": str(recipient_user_id),
-                "notification_type": notification_type, "title": title, "body": body,
-                "status": NotificationStatus.QUEUED, "reference_type": reference_type,
-                "reference_id": reference_id,
+                "id": str(uuid4()),
+                "event_type": notification_type,
+                "payload": json.dumps({
+                    "recipient_user_id": str(recipient_user_id),
+                    "title": title,
+                    "body": body,
+                    "status": NotificationStatus.QUEUED,
+                    "reference_type": reference_type,
+                    "reference_id": reference_id,
+                }),
             },
         )
-    except Exception:  
-        pass
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "Failed to write notification_history row for %s (recipient=%s, reference=%s/%s)",
+            notification_type, recipient_user_id, reference_type, reference_id,
+        )
 
 async def _notify_substitution_stakeholders(
     db: AsyncSession, *, prescription_id: UUID, title: str, body: str, reference_id: str,
@@ -271,7 +292,7 @@ async def _notify_substitution_stakeholders(
     row = (
     await db.execute(
         text("""
-            SELECT e.provider_id AS doctor_id
+            SELECT e.provider_user_id AS doctor_id
             FROM prescriptions p
             JOIN encounters e ON e.id = p.encounter_id
             WHERE p.id = :id
@@ -308,6 +329,14 @@ async def create_dispense(
         raise HTTPException(status_code=404, detail="Prescription not found")
 
     plan: list[dict] = []
+    # Track quantity already claimed against each explicitly-pinned batch_id
+    # within THIS request, before hitting the DB again. Two items pointing at
+    # the same batch_id would otherwise each check against the batch's raw
+    # DB quantity independently, both pass, and the combined UPDATE later
+    # drives quantity negative -- caught only by ck_inventory_batches_quantity
+    # as a raw constraint error instead of a clean 422.
+    reserved_by_batch: dict[str, Decimal] = {}
+
     for item in payload.items:
         if item.substitute_item_id is not None:
             plan.append({
@@ -325,32 +354,56 @@ async def create_dispense(
             
             batch = (
                 await db.execute(
-                    text("SELECT id, batch_number, expiry_date, quantity "
-                         "FROM inventory_batches WHERE id = :id FOR UPDATE"),
-                    {"id": str(item.batch_id)},
+                    text("""
+                        SELECT ib.id, ib.batch_number, ib.expiry_date, ib.quantity,
+                               ib.expiry_date >= (now() AT TIME ZONE fac.timezone)::date AS not_expired
+                        FROM inventory_batches ib
+                        JOIN stock_locations sl ON sl.id = ib.stock_location_id
+                        JOIN facilities fac ON fac.id = sl.facility_id
+                        WHERE ib.id = :id AND sl.facility_id = :facility_id
+                        FOR UPDATE OF ib
+                    """),
+                    {"id": str(item.batch_id), "facility_id": str(facility_id)},
                 )
             ).mappings().first()
             if batch is None:
                 raise HTTPException(status_code=404, detail=f"Batch {item.batch_id} not found")
-            if batch["quantity"] < item.quantity_dispensed:
+            if not batch["not_expired"]:
+                if not (item.expiry_override and item.expiry_override_reason):
+                    raise HTTPException(
+                        status_code=422,
+                        detail={
+                            "code": "batch_expired",
+                            "batch_id": str(item.batch_id),
+                            "expiry_date": batch["expiry_date"].isoformat(),
+                        },
+                    )
+            already_reserved = reserved_by_batch.get(str(item.batch_id), Decimal("0"))
+            available_now = batch["quantity"] - already_reserved
+
+            if available_now < item.quantity_dispensed:
                 if not payload.allow_partial:
                     raise HTTPException(
                         status_code=422,
                         detail={
                             "code": "insufficient_stock", "batch_id": str(item.batch_id),
-                            "available": str(batch["quantity"]),
+                            "available": str(available_now),
                             "requested": str(item.quantity_dispensed),
                         },
                     )
+                allocated_qty = max(available_now, Decimal("0"))
                 allocations = [BatchAllocationResult(
                     batch_id=batch["id"], batch_number=batch["batch_number"],
-                    expiry_date=batch["expiry_date"], quantity=batch["quantity"],
-                )] if batch["quantity"] > 0 else []
+                    expiry_date=batch["expiry_date"], quantity=allocated_qty,
+                )] if allocated_qty > 0 else []
             else:
+                allocated_qty = item.quantity_dispensed
                 allocations = [BatchAllocationResult(
                     batch_id=batch["id"], batch_number=batch["batch_number"],
-                    expiry_date=batch["expiry_date"], quantity=item.quantity_dispensed,
+                    expiry_date=batch["expiry_date"], quantity=allocated_qty,
                 )]
+
+            reserved_by_batch[str(item.batch_id)] = already_reserved + allocated_qty
         else:
             
             medicine_item_id = await _resolve_medicine_item_id(db, item.prescription_item_id)
@@ -377,9 +430,23 @@ async def create_dispense(
             "allocations": allocations,
             "substitute_item_id": None,
             "substitute_reason": None,
+            "expiry_override_by": (
+                current_user_id if item.batch_id is not None and item.expiry_override else None
+            ),
+            "expiry_override_reason": (
+                item.expiry_override_reason
+                if item.batch_id is not None and item.expiry_override else None
+            ),
         })
 
-   
+    # Lock the prescription row first so two concurrent dispenses for the same
+    # prescription can't both read the same MAX(version) and both try to
+    # insert it (uq_pharmacy_dispenses_prescription_id_version then rejects
+    # the second with a raw 500 instead of a clean, serialized version bump).
+    await db.execute(
+        text("SELECT id FROM prescriptions WHERE id = :id FOR UPDATE"),
+        {"id": str(payload.prescription_id)},
+    )
     next_version = (
         await db.execute(
             text("SELECT COALESCE(MAX(version), 0) + 1 FROM pharmacy_dispenses "
@@ -476,22 +543,25 @@ async def create_dispense(
                 text("""
                     INSERT INTO pharmacy_dispense_items
                         (id, dispense_id, prescription_item_id, batch_id,
-                         quantity_dispensed, is_substitute, substitute_reason,
-                         approval_status)
+                         quantity_prescribed, quantity_dispensed, is_substitute,
+                         substitute_reason, approval_status,
+                         expiry_override_by, expiry_override_reason)
                     VALUES
                         (:id, :dispense_id, :prescription_item_id, :batch_id,
-                         :quantity_dispensed, false, NULL, 'not_required')
+                         :quantity_prescribed, :quantity_dispensed, false, NULL,
+                         'not_required', :expiry_override_by, :expiry_override_reason)
                 """),
                 {
                     "id": item_row_id, "dispense_id": dispense_id,
                     "prescription_item_id": str(p["prescription_item_id"]),
-                    "batch_id": str(alloc.batch_id), "quantity_dispensed": alloc.quantity,
+                    "batch_id": str(alloc.batch_id),
+                    "quantity_prescribed": p["requested_qty"],
+                    "quantity_dispensed": alloc.quantity,
+                    "expiry_override_by": (
+                        str(p["expiry_override_by"]) if p["expiry_override_by"] else None
+                    ),
+                    "expiry_override_reason": p["expiry_override_reason"],
                 },
-            )
-            await db.execute(
-                text("UPDATE inventory_batches SET quantity = quantity - :qty, "
-                     "updated_at = now() WHERE id = :id"),
-                {"qty": alloc.quantity, "id": str(alloc.batch_id)},
             )
             await db.execute(
                 text("""
@@ -531,7 +601,7 @@ async def create_dispense(
 
     await write_audit_log(
         db, facility_id=facility_id, user_id=current_user_id, action="create",
-        resource_type="pharmacy_dispenses", resource_id=dispense_id,
+        resource_type="pharmacy_dispenses", resource_id=UUID(dispense_id),
         patient_id=presc_row["patient_id"],
         new_value={
             "prescription_id": str(payload.prescription_id), "version": next_version,
@@ -566,7 +636,7 @@ async def approve_substitution(
         await db.execute(
             text("""
                 SELECT pdi.id, pdi.dispense_id, pdi.prescription_item_id,
-                       pdi.quantity_prescribed, pdi.substitute_item_id,
+                       pdi.quantity_prescribed, pdi.substitute_item_id, pdi.substitute_reason,
                        pdi.approval_status, pd.prescription_id
                 FROM pharmacy_dispense_items pdi
                 JOIN pharmacy_dispenses pd ON pd.id = pdi.dispense_id
@@ -597,7 +667,7 @@ async def approve_substitution(
         await _recompute_dispense_status(db, item_row["dispense_id"])
         await write_audit_log(
             db, facility_id=facility_id, user_id=approving_user_id, action="reject",
-            resource_type="pharmacy_dispense_items", resource_id=str(item_row_id),
+            resource_type="pharmacy_dispense_items", resource_id=item_row_id,
             new_value={"rejection_reason": payload.rejection_reason},
         )
         await _notify_substitution_stakeholders(
@@ -618,98 +688,154 @@ async def approve_substitution(
         db, item_id=item_row["substitute_item_id"], facility_id=facility_id,
         quantity_needed=item_row["quantity_prescribed"],
     )
-    if len(allocations) != 1 or short > 0:
+    if short > 0:
         raise HTTPException(
             status_code=422,
             detail={
-                "code": "insufficient_stock_or_no_single_batch",
-                "message": "No single batch covers this quantity (or none in stock). "
-                "Reject this substitution and ask the pharmacist to retry as a "
-                "regular partial-allowed dispense instead.",
+                "code": "insufficient_stock",
+                "message": "Not enough stock across all batches to cover this substitution. "
+                "Reject and ask the pharmacist to retry as a regular partial-allowed "
+                "dispense instead.",
                 "short_by": str(short),
             },
         )
-    alloc = allocations[0]
 
-    await db.execute(
-        text("""
-            UPDATE pharmacy_dispense_items
-            SET batch_id = :batch_id, quantity_dispensed = :qty,
-                approval_status = 'approved', approved_by = :approved_by, approved_at = now()
-            WHERE id = :id
-        """),
-        {"batch_id": str(alloc.batch_id), "qty": alloc.quantity,
-         "approved_by": str(approving_user_id), "id": str(item_row_id)},
-    )
-    await db.execute(
-        text("UPDATE inventory_batches SET quantity = quantity - :qty, "
-             "updated_at = now() WHERE id = :id"),
-        {"qty": alloc.quantity, "id": str(alloc.batch_id)},
-    )
-    await db.execute(
-        text("""
-            INSERT INTO stock_ledger
-                (id, item_id, batch_id, transaction_type, quantity,
-                 reference_type, reference_id, performed_by)
-            SELECT :ledger_id, ib.item_id, ib.id, 'issue', :neg_qty,
-                   'pharmacy_dispense', :dispense_id, :performed_by
-            FROM inventory_batches ib WHERE ib.id = :batch_id
-        """),
-        {
-            "ledger_id": str(uuid4()), "neg_qty": -alloc.quantity,
-            "dispense_id": item_row["dispense_id"], "performed_by": str(approving_user_id),
-            "batch_id": str(alloc.batch_id),
-        },
-    )
+    # Split across as many batches as _fefo_allocate needed (previously this
+    # rejected anything requiring more than one batch, even though the
+    # underlying allocator has always supported splitting). The first
+    # allocation reuses the existing pending row; any further allocations
+    # get their own new pharmacy_dispense_items rows sharing the same
+    # dispense_id/prescription_item_id, matching the pattern already used
+    # for normal (non-substitution) FEFO-split items.
+    item_row_ids: list[UUID] = []
+    batches_out: list[BatchAllocation] = []
+    total_dispensed = Decimal("0")
 
-    await _recompute_dispense_status(db, item_row["dispense_id"])
-    await write_audit_log(
-        db, facility_id=facility_id, user_id=approving_user_id, action="approve",
-        resource_type="pharmacy_dispense_items", resource_id=str(item_row_id),
-        new_value={"batch_id": str(alloc.batch_id), "quantity_dispensed": str(alloc.quantity)},
-    )
-    await _notify_substitution_stakeholders(
-        db, prescription_id=item_row["prescription_id"], title="Substitution approved",
-        body=f"Dispensed {alloc.quantity} from batch {alloc.batch_number}",
-        reference_id=str(item_row_id),
-    )
+    for i, alloc in enumerate(allocations):
+        if i == 0:
+            row_id = item_row_id
+            await db.execute(
+                text("""
+                    UPDATE pharmacy_dispense_items
+                    SET batch_id = :batch_id, quantity_dispensed = :qty,
+                        approval_status = 'approved', approved_by = :approved_by, approved_at = now()
+                    WHERE id = :id
+                """),
+                {"batch_id": str(alloc.batch_id), "qty": alloc.quantity,
+                 "approved_by": str(approving_user_id), "id": str(row_id)},
+            )
+        else:
+            row_id = uuid4()
+            await db.execute(
+                text("""
+                    INSERT INTO pharmacy_dispense_items
+                        (id, dispense_id, prescription_item_id, batch_id,
+                         quantity_dispensed, is_substitute, substitute_item_id,
+                         substitute_reason, approval_status, approved_by, approved_at)
+                    VALUES
+                        (:id, :dispense_id, :prescription_item_id, :batch_id,
+                         :quantity_dispensed, true, :substitute_item_id,
+                         :substitute_reason, 'approved', :approved_by, now())
+                """),
+                {
+                    "id": str(row_id), "dispense_id": item_row["dispense_id"],
+                    "prescription_item_id": str(item_row["prescription_item_id"]),
+                    "batch_id": str(alloc.batch_id), "quantity_dispensed": alloc.quantity,
+                    "substitute_item_id": str(item_row["substitute_item_id"]),
+                    "substitute_reason": item_row["substitute_reason"],
+                    "approved_by": str(approving_user_id),
+                },
+            )
 
-    return DispenseItemOut(
-        item_row_ids=[item_row_id], prescription_item_id=item_row["prescription_item_id"],
-        quantity_prescribed=item_row["quantity_prescribed"], quantity_dispensed=alloc.quantity,
-        is_substitute=True, substitute_item_id=item_row["substitute_item_id"],
-        substitute_reason=None, is_partial=alloc.quantity < item_row["quantity_prescribed"],
-        approval_status="approved",
-        batches=[BatchAllocation(
+        await db.execute(
+            text("""
+                INSERT INTO stock_ledger
+                    (id, item_id, batch_id, transaction_type, quantity,
+                     reference_type, reference_id, performed_by)
+                SELECT :ledger_id, ib.item_id, ib.id, 'issue', :neg_qty,
+                       'pharmacy_dispense', :dispense_id, :performed_by
+                FROM inventory_batches ib WHERE ib.id = :batch_id
+            """),
+            {
+                "ledger_id": str(uuid4()), "neg_qty": -alloc.quantity,
+                "dispense_id": item_row["dispense_id"], "performed_by": str(approving_user_id),
+                "batch_id": str(alloc.batch_id),
+            },
+        )
+
+        item_row_ids.append(row_id)
+        total_dispensed += alloc.quantity
+        batches_out.append(BatchAllocation(
             batch_id=alloc.batch_id, batch_number=alloc.batch_number,
             quantity_from_batch=alloc.quantity,
             expiry_date=alloc.expiry_date.isoformat() if hasattr(alloc.expiry_date, "isoformat")
             else str(alloc.expiry_date),
-        )],
+        ))
+
+    await _recompute_dispense_status(db, item_row["dispense_id"])
+    await write_audit_log(
+        db, facility_id=facility_id, user_id=approving_user_id, action="approve",
+        resource_type="pharmacy_dispense_items", resource_id=item_row_id,
+        new_value={
+            "batches": [
+                {"batch_id": str(b.batch_id), "quantity": str(b.quantity_from_batch)}
+                for b in batches_out
+            ],
+            "total_dispensed": str(total_dispensed),
+        },
+    )
+    await _notify_substitution_stakeholders(
+        db, prescription_id=item_row["prescription_id"], title="Substitution approved",
+        body=f"Dispensed {total_dispensed} across {len(batches_out)} batch"
+             f"{'es' if len(batches_out) != 1 else ''}",
+        reference_id=str(item_row_id),
+    )
+
+    return DispenseItemOut(
+        item_row_ids=item_row_ids, prescription_item_id=item_row["prescription_item_id"],
+        quantity_prescribed=item_row["quantity_prescribed"], quantity_dispensed=total_dispensed,
+        is_substitute=True, substitute_item_id=item_row["substitute_item_id"],
+        substitute_reason=None, is_partial=total_dispensed < item_row["quantity_prescribed"],
+        approval_status="approved",
+        batches=batches_out,
     )
 
 
 async def _recompute_dispense_status(db: AsyncSession, dispense_id: str) -> None:
     """After a substitution is approved/rejected, re-derive the parent
-    pharmacy_dispenses.status from all its items' current state."""
+    pharmacy_dispenses.status from all its items' current state.
+
+    Aggregated per prescription_item_id, not per row: a FEFO split across
+    several batches produces multiple pharmacy_dispense_items rows for the
+    same prescription item, each carrying the item's full quantity_prescribed.
+    Comparing quantity_dispensed >= quantity_prescribed row-by-row would flag
+    a fully-fulfilled split item as partial (e.g. 6+4 dispensed against 10
+    prescribed reads as two rows of "6 >= 10" and "4 >= 10", both false).
+    """
     rows = (
         await db.execute(
             text("""
-                SELECT approval_status, quantity_prescribed, quantity_dispensed
+                SELECT approval_status, prescription_item_id,
+                       quantity_prescribed, quantity_dispensed
                 FROM pharmacy_dispense_items WHERE dispense_id = :id
             """),
             {"id": str(dispense_id)},
         )
     ).mappings().all()
 
+    by_item: dict = {}
+    for r in rows:
+        agg = by_item.setdefault(
+            r["prescription_item_id"], {"prescribed": Decimal("0"), "dispensed": Decimal("0")}
+        )
+        agg["prescribed"] = max(agg["prescribed"], r["quantity_prescribed"] or Decimal("0"))
+        agg["dispensed"] += r["quantity_dispensed"] or Decimal("0")
+
     if any(r["approval_status"] == "pending" for r in rows):
         new_status = DispenseStatus.DOCTOR_APPROVAL_REQUIRED
-    elif all(
-        (r["quantity_dispensed"] or Decimal("0")) >= (r["quantity_prescribed"] or Decimal("0"))
-        for r in rows
-    ):
+    elif all(agg["dispensed"] >= agg["prescribed"] for agg in by_item.values()):
         new_status = DispenseStatus.DISPENSED
-    elif any((r["quantity_dispensed"] or Decimal("0")) > 0 for r in rows):
+    elif any(agg["dispensed"] > 0 for agg in by_item.values()):
         new_status = DispenseStatus.PARTIALLY_DISPENSED
     else:
         new_status = DispenseStatus.OUT_OF_STOCK

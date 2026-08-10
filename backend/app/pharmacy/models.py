@@ -99,17 +99,6 @@ class PharmacyDispenseItem(Base, UUIDPk, Timestamps):
     )
     expiry_override_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # --- added in migration 0014 (B6-W3-01) --------------------------------
-    approval_status: Mapped[str] = mapped_column(nullable=False, default="not_required")
-    substitute_item_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("inventory_items.id", ondelete="RESTRICT"), nullable=True
-    )
-    approved_by: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=True
-    )
-    approved_at: Mapped[datetime | None] = mapped_column(nullable=True)
-    rejection_reason: Mapped[str | None] = mapped_column(nullable=True)
-
     dispense: Mapped["PharmacyDispense"] = relationship(back_populates="items")
 
     __table_args__ = (

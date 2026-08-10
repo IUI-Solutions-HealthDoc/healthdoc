@@ -77,6 +77,16 @@ class DispenseItemCreate(BaseModel):
         "Requires doctor approval (see POST .../approve) before stock is touched.",
     )
     substitute_reason: str | None = None
+    expiry_override: bool = Field(
+        default=False,
+        description="Required (with expiry_override_reason) to dispense an explicitly "
+        "pinned batch that has passed its expiry date. FEFO auto-selection never "
+        "picks an expired batch, so this only applies to manual batch_id pins.",
+    )
+    expiry_override_reason: str | None = Field(
+        default=None,
+        description="Required when expiry_override is true.",
+    )
 
 
 class DispenseCreate(BaseModel):

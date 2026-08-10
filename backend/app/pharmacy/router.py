@@ -1,11 +1,12 @@
 ﻿from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.deps import CurrentUser, require_roles
+from app.auth.deps import CurrentDbUser, require_roles
 from app.common.db import get_db
+from app.common.idempotency import check_idempotency, hash_request_body, record_idempotent_response
 from app.common.modules import require_module
 from app.pharmacy.schemas import (
     DispenseCreate,
@@ -22,6 +23,8 @@ from app.pharmacy.service import (
     search_medicines,
 )
 
+_CREATE_DISPENSE_ENDPOINT = "POST /pharmacy/dispenses"
+
 router = APIRouter(prefix="/pharmacy", tags=["pharmacy"])
 
 DbSession = Annotated[AsyncSession, Depends(get_db)]
@@ -35,10 +38,13 @@ async def ping() -> dict:
 @router.get(
     "/queue",
     response_model=PrescriptionQueueResponse,
-    dependencies=[Depends(require_module("pharmacy"))],
+    dependencies=[
+        Depends(require_module("pharmacy")),
+        Depends(require_roles("pharmacist", "admin")),
+    ],
 )
 async def prescription_queue(
-    current_user: Annotated[CurrentUser, Depends(require_roles("pharmacist", "admin"))],
+    current_user: CurrentDbUser,
     db: DbSession,
     department_id: UUID | None = None,
     status: str | None = None,
@@ -58,10 +64,13 @@ async def prescription_queue(
 @router.get(
     "/medicines/search",
     response_model=MedicineSearchResponse,
-    dependencies=[Depends(require_module("pharmacy"))],
+    dependencies=[
+        Depends(require_module("pharmacy")),
+        Depends(require_roles("pharmacist", "admin", "doctor")),
+    ],
 )
 async def medicine_search(
-    current_user: Annotated[CurrentUser, Depends(require_roles("pharmacist", "admin", "doctor"))],
+    current_user: CurrentDbUser,
     db: DbSession,
     q: str = Query(min_length=1),
 ) -> MedicineSearchResponse:
@@ -73,30 +82,51 @@ async def medicine_search(
     "/dispenses",
     response_model=DispenseOut,
     status_code=201,
-    dependencies=[Depends(require_module("pharmacy"))],
+    dependencies=[
+        Depends(require_module("pharmacy")),
+        Depends(require_roles("pharmacist")),
+    ],
 )
 async def create_dispense_endpoint(
     payload: DispenseCreate,
-    current_user: Annotated[CurrentUser, Depends(require_roles("pharmacist"))],
+    current_user: CurrentDbUser,
     db: DbSession,
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
 ) -> DispenseOut:
-    return await create_dispense(
+    if not idempotency_key:
+        raise HTTPException(400, "Idempotency-Key header is required")
+
+    request_hash = hash_request_body(payload)
+    existing = await check_idempotency(
+        db, idempotency_key, _CREATE_DISPENSE_ENDPOINT, request_hash, current_user.id
+    )
+    if existing is not None:
+        return existing.response_body
+
+    result = await create_dispense(
         db,
         payload,
         current_user_id=current_user.id,
         facility_id=current_user.facility_id,
     )
-
+    response_body = result.model_dump(mode="json")
+    await record_idempotent_response(
+        db, idempotency_key, _CREATE_DISPENSE_ENDPOINT, 201, response_body, current_user.id
+    )
+    return result
 
 @router.post(
     "/dispenses/items/{item_id}/approve",
     response_model=DispenseItemOut,
-    dependencies=[Depends(require_module("pharmacy"))],
+    dependencies=[
+        Depends(require_module("pharmacy")),
+        Depends(require_roles("doctor")),
+    ],
 )
 async def approve_substitution_endpoint(
     item_id: UUID,
     payload: SubstitutionApprovalRequest,
-    current_user: Annotated[CurrentUser, Depends(require_roles("doctor"))],
+    current_user: CurrentDbUser,
     db: DbSession,
 ) -> DispenseItemOut:
     return await approve_substitution(
@@ -106,3 +136,4 @@ async def approve_substitution_endpoint(
         approving_user_id=current_user.id,
         facility_id=current_user.facility_id,
     )
+
