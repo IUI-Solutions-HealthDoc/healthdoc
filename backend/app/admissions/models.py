@@ -33,7 +33,7 @@ class Bed(Base, UUIDPk, Timestamps):
 
     __table_args__ = (
         UniqueConstraint("ward_id", "bed_number", name="uq_beds_ward_id_bed_number"),
-        CheckConstraint(BedStatus.sql_check("status"), name="ck_beds_status"),
+        CheckConstraint(BedStatus.sql_check("status"), name="status"),
     )
 
 
@@ -51,7 +51,7 @@ class Admission(Base, UUIDPk, Timestamps, Blame):
     status = Column(String(50), nullable=False, server_default=AdmissionStatus.ADMITTED.value)
 
     __table_args__ = (
-        CheckConstraint(AdmissionStatus.sql_check("status"), name="ck_admissions_status"),
+        CheckConstraint(AdmissionStatus.sql_check("status"), name="status"),
         Index("ix_admissions_visit_id", "visit_id"),
         Index("ix_admissions_patient_id", "patient_id"),
         Index("ix_admissions_ward_id", "ward_id"),
@@ -76,7 +76,7 @@ class Discharge(Base, UUIDPk, Timestamps, Blame):
     follow_up_date = Column(Date, nullable=True)
 
     __table_args__ = (
-        CheckConstraint(DischargeType.sql_check("discharge_type"), name="ck_discharges_discharge_type"),
+        CheckConstraint(DischargeType.sql_check("discharge_type"), name="discharge_type"),
         # admission_id is already unique, so no separate index needed
         # per the §3 blanket FK-index rule.
     )

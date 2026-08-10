@@ -39,6 +39,8 @@ _bearer = HTTPBearer(auto_error=False)
 _jwks_cache: dict = {"keys": None, "fetched_at": 0.0}
 JWKS_TTL_SECONDS = 3600
 
+DbSession = Annotated[AsyncSession, Depends(get_db)]
+
 
 class AuthUser(BaseModel):
     sub: str
@@ -70,7 +72,7 @@ async def get_current_user(
             await _get_jwks(),
             algorithms=["RS256"],
             issuer=get_settings().jwt_issuer,
-            options={"verify_aud": False},  # tighten per-client in W2 hardening
+            options={"verify_aud": False}, # tighten per-client in W2 hardening
         )
     except JWTError as exc:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, f"Invalid token: {exc}") from exc

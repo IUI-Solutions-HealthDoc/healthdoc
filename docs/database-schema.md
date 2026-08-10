@@ -1702,9 +1702,22 @@ and duplicate identities are the two worst outcomes this system can produce.
 - Every `POST` that creates something (patients, visits, orders, payments, refunds,
   dispenses, tokens, procedures) **requires an `Idempotency-Key` header** (client-generated
   UUID, stable across retries of the same user action).
-- Table **`idempotency_keys`** (0002, B1): `key varchar(64) PK-unique · endpoint varchar(120)
-  · request_hash char(64) · response_status int · response_body jsonb · user_id UUID →
-  users · created_at timestamptz`. `UNIQUE (key, endpoint)`.
+- Table **`idempotency_keys`** (0003a, B1) — full column list in §3. The unique key is
+  **`UNIQUE (key, user_id, endpoint)`**, and `user_id` is in it deliberately: keys are
+  client-generated, so two users can emit the same key against the same endpoint.
+  Scoping by `(key, endpoint)` alone hands the second caller the **first caller's stored
+  response** — a cross-user data leak wearing a replay's clothes.
+  Do not re-implement this table or its helpers. Use
+  `app.common.idempotency`: `hash_request_body`, `check_idempotency`,
+  `record_idempotent_response`. All three take `user_id`; pass it on **both** the read
+  and the write, or the write stores NULL, the replay lookup never matches, and
+  idempotency silently does nothing while appearing to work.
+
+  > This bullet previously read `(0002, B1)`, `key varchar(64) PK-unique`,
+  > `endpoint varchar(120)`, `UNIQUE (key, endpoint)` — every one of those wrong, and
+  > contradicting §3 on the same page. Four separate modules implemented it from here
+  > rather than from §3 and each reproduced the leak. If you find yourself
+  > disagreeing with §3, §3 is the schema of record.
 - Behaviour: first call executes and stores the response; a repeat with the same key
   **replays the stored response** (never re-executes). Same key + different body ⇒ `409
   idempotency_key_reuse`. Keys expire after 24 h.

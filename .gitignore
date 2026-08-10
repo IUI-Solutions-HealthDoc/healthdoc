@@ -14,5 +14,6 @@ out/
 postgres-data/
 mongo-data/
 minio-data/
+.vscode/
 .reviews/
 .vscode/
