@@ -76,6 +76,16 @@ async def list_consent_purposes(
 
 
 async def get_consent_record(db: AsyncSession, consent_id: uuid.UUID) -> ConsentRecord:
+    """
+    KNOWN GAP, named explicitly rather than left implicit: this does NOT
+    scope by facility. consent_records has no facility_id column of its
+    own (see models.py) and no patients table to join through yet
+    (0006 unmerged), so there is currently no column to scope this
+    lookup by at all -- any role in _CONSENT_VIEW_ROLES can fetch any
+    facility's consent record by UUID. Structural, not fixable from
+    this module alone; revisit once patients (0006) lands and
+    consent_records can join to patients.facility_id.
+    """
     record = await db.get(ConsentRecord, consent_id)
     if record is None:
         raise HTTPException(404, "Consent record not found")
@@ -196,6 +206,18 @@ async def withdraw_consent(
     reason: str | None,
     facility_id: uuid.UUID,
 ) -> ConsentWithdrawal:
+    """
+    KNOWN INCONSISTENCY, named rather than left implicit: the status
+    flip below happens inside trg_consent_withdrawals_flip_status
+    (migration 0004), a raw SQL `UPDATE consent_records SET status = ...,
+    status_changed_at = ...` issued by Postgres itself -- it never goes
+    through SQLAlchemy's ORM, so the Timestamps mixin's
+    `onupdate=func.now()` on `updated_at` never fires. Contrast with
+    transition_consent_status() below, an ORM-path UPDATE where
+    `updated_at` bumps automatically. Fixing this means changing the
+    trigger's own SQL (migration 0004, already merged) -- out of this
+    ticket's scope, not something this function can paper over.
+    """
     record = await get_consent_record(db, consent_id)  # 404s if missing
 
     async with audited_mutation(
@@ -218,9 +240,16 @@ async def withdraw_consent(
             # trg_consent_withdrawals_flip_status runs as part of this
             # INSERT and raises (DBAPIError) if `record`'s status is
             # already terminal (revoked/denied/expired) -- migration
-            # 0004. Translate that into a clean 409 instead of a 500.
+            # 0004, message contains "already in terminal status".
+            # Match on that specifically before translating to 409 --
+            # a bare `except DBAPIError` would also catch an unrelated
+            # genuine failure (e.g. withdrawn_by_user_id FK violation)
+            # and mislabel it as "already withdrawn", hiding a real bug
+            # behind a misleading, business-logic-shaped error.
             await db.flush()
         except DBAPIError as exc:
+            if "terminal status" not in str(exc.orig):
+                raise
             await db.rollback()
             raise HTTPException(409, f"Cannot withdraw consent {consent_id}: {exc.orig}") from exc
         await db.refresh(withdrawal)

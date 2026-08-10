@@ -35,12 +35,18 @@ class ConsentRecordOut(BaseModel):
     purpose_id: uuid.UUID
     granted_by_type: str
     granted_by_user_id: uuid.UUID | None
+    guardian_name: str | None
+    guardian_relationship: str | None
     granted_at: datetime
     expires_at: datetime | None
     scope: list[str] | None
     channel: str
+    consent_artefact_id: str | None
+    consent_artefact_signature: str | None
     status: str
     status_changed_at: datetime
+    created_by: uuid.UUID
+    updated_by: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
 
