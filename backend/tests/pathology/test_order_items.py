@@ -1,22 +1,9 @@
 import uuid
 import pytest
+
+from app.auth.deps import AuthUser
+from tests.pathology.conftest import DOCTOR, LAB_TECH
 from fastapi.testclient import TestClient
-
-from app.main import app
-from app.auth.deps import get_current_user, AuthUser
-
-LAB_TECH = AuthUser(sub=str(uuid.uuid4()), username="tech1", roles=["lab_tech"])
-DOCTOR = AuthUser(sub=str(uuid.uuid4()), username="doc1", roles=["doctor"])
-
-
-@pytest.fixture
-def client_as(request):
-    """Returns a TestClient with get_current_user overridden to the given AuthUser."""
-    def _make(user: AuthUser) -> TestClient:
-        app.dependency_overrides[get_current_user] = lambda: user
-        return TestClient(app)
-    yield _make
-    app.dependency_overrides.pop(get_current_user, None)
 
 
 def test_create_lab_order_item(client_as):

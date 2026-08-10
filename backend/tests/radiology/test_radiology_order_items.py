@@ -1,22 +1,11 @@
 import uuid
 import pytest
-from fastapi.testclient import TestClient
 
-from app.main import app
-from app.auth.deps import get_current_user, AuthUser
-
-RAD_TECH = AuthUser(sub=str(uuid.uuid4()), username="radtech1", roles=["radiology_tech"])
-DOCTOR = AuthUser(sub=str(uuid.uuid4()), username="doc1", roles=["doctor"])
-RADIOLOGIST = AuthUser(sub=str(uuid.uuid4()), username="rad1", roles=["radiologist"])
+from tests.radiology.conftest import RADIOLOGIST, RADIOLOGY_TECH, DOCTOR
 
 
-@pytest.fixture
-def client_as():
-    def _make(user: AuthUser) -> TestClient:
-        app.dependency_overrides[get_current_user] = lambda: user
-        return TestClient(app)
-    yield _make
-    app.dependency_overrides.pop(get_current_user, None)
+# RAD_TECH kept as an alias so the test bodies below read unchanged.
+RAD_TECH = RADIOLOGY_TECH
 
 
 def test_create_radiology_order_item(client_as):
