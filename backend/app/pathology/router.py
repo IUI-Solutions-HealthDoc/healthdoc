@@ -58,11 +58,12 @@ async def ping() -> dict:
     status_code=201,
 )
 async def create_lab_order_item(
+    current_db_user: CurrentDbUser,
     payload: LabOrderItemCreate,
     order_id: uuid.UUID = Query(..., description="Existing order id (order_type=lab)"),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(require_roles("doctor", "lab_tech")),
-    current_db_user: CurrentDbUser = Depends(get_current_db_user),
+
 ):
     try:
         from app.orders.models import Order
@@ -119,11 +120,12 @@ async def create_lab_order_item(
     response_model=LabOrderItemOut,
 )
 async def collect_sample(
+    current_db_user: CurrentDbUser,
     item_id: uuid.UUID,
     payload: SampleCollectionRequest,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(require_roles("lab_tech")),
-    current_db_user: CurrentDbUser = Depends(get_current_db_user),
+
 ):
     item = await db.get(LabOrderItem, item_id)
     if item is None:
@@ -239,11 +241,12 @@ def _check_critical(result_data: dict) -> list[str]:
     status_code=201,
 )
 async def enter_result(
+    current_db_user: CurrentDbUser,
     item_id: uuid.UUID,
     payload: LabResultCreate,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(require_roles("lab_tech")),
-    current_db_user: CurrentDbUser = Depends(get_current_db_user),
+
 ):
     item = await db.get(LabOrderItem, item_id)
     if item is None:
@@ -279,11 +282,12 @@ async def enter_result(
     response_model=LabResultOut,
 )
 async def verify_result(
+    current_db_user: CurrentDbUser,
     item_id: uuid.UUID,
     payload: LabResultVerify,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(require_roles("pathologist")),
-    current_db_user: CurrentDbUser = Depends(get_current_db_user),
+
 ):
     current = (await db.execute(
         select(LabResult)
@@ -331,11 +335,12 @@ async def verify_result(
     response_model=LabResultOut,
 )
 async def amend_result(
+    current_db_user: CurrentDbUser,
     item_id: uuid.UUID,
     payload: LabResultAmend,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(require_roles("pathologist")),
-    current_db_user: CurrentDbUser = Depends(get_current_db_user),
+
 ):
     current = (await db.execute(
         select(LabResult)
@@ -531,8 +536,9 @@ async def _publish_critical_alert(db: AsyncSession, item: LabOrderItem,
 
 @router.get("/critical-alerts/stream")
 async def critical_alerts_stream(
+    current_db_user: CurrentDbUser,
     current_user=Depends(get_current_user),
-    current_db_user: CurrentDbUser = Depends(get_current_db_user),
+
 ):
     # NOTE: key must be str(users.id) to match _publish_critical_alert's
     # str(doctor_id) lookup - doctor_id there comes from

@@ -96,7 +96,8 @@ fi
 
 step "API contract sanity"
 # every api() path should start with a documented endpoint group
-UNKNOWN=$(grep -rhoE 'api<[^>]*>\(\s*[`"'"'"']/[a-z0-9-]+' frontend/app frontend/lib frontend/components 2>/dev/null \
+FE_DIRS=$(ls -d frontend/src/app frontend/src/lib frontend/src/components frontend/app frontend/lib frontend/components 2>/dev/null | tr '\n' ' ')
+UNKNOWN=$(grep -rhoE 'api<[^>]*>\(\s*[`"'"'"']/[a-z0-9-]+' $FE_DIRS 2>/dev/null \
   | grep -oE '/[a-z0-9-]+$' | sort -u \
   | while read -r p; do grep -q "\`$p" docs/database-schema.md || echo "$p"; done)
 if [ -n "$UNKNOWN" ]; then

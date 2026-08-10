@@ -151,7 +151,15 @@ function changedFiles() {
 
 const args = process.argv.slice(2);
 let files;
-if (args[0] === "--all") files = [...walk("app"), ...walk("lib"), ...walk("components")];
+if (args[0] === "--all") {
+  // The app lives at src/app (Next.js src layout, adopted from main in v3.14).
+  // `app/` is still walked so the checker keeps working on branches cut before
+  // the move, and during the transition itself.
+  files = [
+    ...walk("src/app"), ...walk("src/lib"), ...walk("src/components"),
+    ...walk("app"), ...walk("lib"), ...walk("components"),
+  ];
+}
 else if (args.length) files = args;
 else files = changedFiles();
 

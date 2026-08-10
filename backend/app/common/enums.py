@@ -1,4 +1,4 @@
-"""Canonical enumerated values â€” single source of truth (docs/schema-conventions.md Â§7).
+"""Canonical enumerated values — single source of truth (docs/schema-conventions.md §7).
 
 Adding a value: PR touching this file + the doc, Tech Lead review. Never inline strings.
 Stored as varchar + CHECK constraint; use .sql_check() in __table_args__.
@@ -11,6 +11,15 @@ class CheckedEnum(str, Enum):
     def sql_check(cls, column: str) -> str:
         vals = ", ".join(f"'{v.value}'" for v in cls)
         return f"{column} IN ({vals})"
+
+    @classmethod
+    def values(cls) -> set[str]:
+        """The raw values, for validation and tests.
+
+        Use this instead of hardcoding a list anywhere — a literal list is how the
+        doc and the code drift apart, which is what spec_check.py exists to catch.
+        """
+        return {v.value for v in cls}
 
 
 class Sex(CheckedEnum):
@@ -300,3 +309,205 @@ class ScreeningStatus(CheckedEnum):
     PASSED = "passed"
     FAILED = "failed"
 
+
+class OtStatus(CheckedEnum):
+    SCHEDULED = "scheduled"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+
+
+class GrantedByType(CheckedEnum):
+    PATIENT = "patient"
+    GUARDIAN = "guardian"
+    NOMINEE = "nominee"
+
+
+class ConsentChannel(CheckedEnum):
+    VERBAL = "verbal"
+    WRITTEN = "written"
+    DIGITAL_OTP = "digital_otp"
+    ABDM_CONSENT_MANAGER = "abdm_consent_manager"
+
+
+class AccessChannel(CheckedEnum):
+    UI = "ui"
+    API = "api"
+    ABDM_HIU = "abdm_hiu"
+    EXPORT = "export"
+
+
+class FileAction(CheckedEnum):
+    VIEW = "view"
+    DOWNLOAD = "download"
+    UPLOAD = "upload"
+    DELETE_ATTEMPT = "delete_attempt"
+
+
+class ScanStatus(CheckedEnum):
+    """Malware-scan state of an uploaded file (§4A.4).
+
+    `skipped` is the MVP default and is deliberately NOT a synonym for
+    `clean`: no ClamAV sidecar is wired up yet, so every row says plainly
+    that no scan happened rather than implying one did. When scanning
+    lands, the serving endpoint gates on `clean` — at which point every
+    existing `skipped` row needs a backfill decision, not a silent pass.
+
+    `failed` (the scanner errored) is separate from `infected` (the
+    scanner ran and found something) because the responses differ: one is
+    an operational problem, the other is an incident.
+    """
+
+    SKIPPED = "skipped"
+    PENDING = "pending"
+    CLEAN = "clean"
+    INFECTED = "infected"
+    FAILED = "failed"
+
+
+# --- v3 compliance wave (DPDP Rules 2025 + NABH DHS 2nd Ed) ---
+
+class GrievanceType(CheckedEnum):
+    ACCESS = "access"
+    CORRECTION = "correction"
+    ERASURE = "erasure"
+    CONSENT = "consent"
+    BREACH = "breach"
+    OTHER = "other"
+
+
+class GrievanceStatus(CheckedEnum):
+    PENDING = "pending"
+    UNDER_REVIEW = "under_review"
+    RESOLVED = "resolved"
+    ESCALATED_DPB = "escalated_dpb"
+    CLOSED = "closed"
+
+
+class BreachStatus(CheckedEnum):
+    OPEN = "open"
+    CONTAINED = "contained"
+    REPORTED = "reported"
+    CLOSED = "closed"
+
+
+class GuardianVerificationMethod(CheckedEnum):
+    AADHAAR = "aadhaar"
+    DIGILOCKER = "digilocker"
+    MANUAL_DOCUMENT = "manual_document"
+
+
+class IntakeOutputType(CheckedEnum):
+    INTAKE_ORAL = "intake_oral"
+    INTAKE_IV = "intake_iv"
+    OUTPUT_URINE = "output_urine"
+    OUTPUT_DRAIN = "output_drain"
+    OUTPUT_OTHER = "output_other"
+
+
+class PurchaseOrderStatus(CheckedEnum):
+    DRAFT = "draft"
+    APPROVED = "approved"
+    SENT = "sent"
+    PARTIALLY_RECEIVED = "partially_received"
+    RECEIVED = "received"
+    CANCELLED = "cancelled"
+
+
+class StockTransferStatus(CheckedEnum):
+    REQUESTED = "requested"
+    IN_TRANSIT = "in_transit"
+    RECEIVED = "received"
+    CANCELLED = "cancelled"
+
+
+class AdjustmentType(CheckedEnum):
+    DAMAGE = "damage"
+    EXPIRY = "expiry"
+    COUNT_ERROR = "count_error"
+    OTHER = "other"
+
+
+class MaintenanceType(CheckedEnum):
+    PREVENTIVE = "preventive"
+    BREAKDOWN = "breakdown"
+    CALIBRATION = "calibration"
+    QA_CHECK = "qa_check"
+
+
+class TrainingType(CheckedEnum):
+    INDUCTION = "induction"
+    CLINICAL = "clinical"
+    DIGITAL_HEALTH = "digital_health"
+    SAFETY = "safety"
+    OTHER = "other"
+
+
+class FhirDirection(CheckedEnum):
+    HIP_PUSH = "hip_push"
+    HIU_PULL = "hiu_pull"
+
+
+class DischargeNotificationTarget(CheckedEnum):
+    PHARMACY = "pharmacy"
+    BILLING = "billing"
+    NURSING = "nursing"
+    LAB = "lab"
+    RADIOLOGY = "radiology"
+    PATIENT = "patient"
+
+
+class ModuleCode(CheckedEnum):
+    """The ONLY per-facility toggleable modules (facility_modules).
+
+    Exactly five. Everything else — patients, registration, opd/encounters, queue,
+    departments, billing, consent, audit, files, users, notifications, inventory,
+    ipd, emergency, patient_portal, abdm, refunds — is CORE and can never be
+    disabled (see common/modules.CORE_MODULES).
+
+    Inventory is deliberately core *because* pharmacy is optional: consumables,
+    reagents and ward stock exist even with no dispensary.
+    """
+    PHARMACY = "pharmacy"
+    LAB = "lab"                 # pathology
+    RADIOLOGY = "radiology"
+    OT = "ot"
+    BLOOD_BANK = "blood_bank"
+
+
+class ProcedureSetting(CheckedEnum):
+    """Where a procedure happened — decoupled from the OT module so minor
+    procedures are recordable and billable at a facility with no theatre."""
+    OPD_MINOR = "opd_minor"
+    BEDSIDE = "bedside"
+    EMERGENCY = "emergency"
+    OT = "ot"
+
+
+class FulfilmentMode(CheckedEnum):
+    INTERNAL = "internal"
+    EXTERNAL_REFERRAL = "external_referral"
+
+class AllergenType(CheckedEnum):
+    DRUG = "drug"
+    FOOD = "food"
+    ENVIRONMENTAL = "environmental"
+    OTHER = "other"
+
+
+class AllergySeverity(CheckedEnum):
+    """Reaction severity as observed. `anaphylaxis` is deliberately separate from
+    `severe` — it drives a hard block at prescribing, not a warning."""
+    MILD = "mild"
+    MODERATE = "moderate"
+    SEVERE = "severe"
+    ANAPHYLAXIS = "anaphylaxis"
+
+
+class AllergyStatus(CheckedEnum):
+    """Allergy records are corrected, never deleted — a removed allergy that was
+    real is the failure mode this enum exists to prevent. `refuted` = clinically
+    ruled out; `entered_in_error` = wrong patient/typo."""
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+    REFUTED = "refuted"
+    ENTERED_IN_ERROR = "entered_in_error"

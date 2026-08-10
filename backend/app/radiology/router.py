@@ -34,11 +34,12 @@ async def ping() -> dict:
 
 @router.post("/order-items", response_model=RadiologyOrderItemOut, status_code=201)
 async def create_radiology_order_item(
+    current_db_user: CurrentDbUser,
     payload: RadiologyOrderItemCreate,
     order_id: uuid.UUID = Query(...),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(require_roles("doctor", "radiology_tech")),
-    current_db_user: CurrentDbUser = Depends(get_current_db_user),
+
 ):
     try:
         from app.orders.models import Order
@@ -91,11 +92,12 @@ async def create_radiology_order_item(
 
 @router.put("/order-items/{item_id}/scan-complete", response_model=RadiologyOrderItemOut)
 async def mark_scan_complete(
+    current_db_user: CurrentDbUser,
     item_id: uuid.UUID,
     payload: ScanCompletionRequest,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(require_roles("radiology_tech")),
-    current_db_user: CurrentDbUser = Depends(get_current_db_user),
+
 ):
     item = await db.get(RadiologyOrderItem, item_id)
     if item is None:
@@ -135,11 +137,12 @@ async def list_radiology_order_items(
 
 @router.post("/order-items/{item_id}/reports", response_model=RadiologyReportOut, status_code=201)
 async def draft_radiology_report(
+    current_db_user: CurrentDbUser,
     item_id: uuid.UUID,
     payload: RadiologyReportCreate,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(require_roles("radiologist")),
-    current_db_user: CurrentDbUser = Depends(get_current_db_user),
+
 ):
     item = await db.get(RadiologyOrderItem, item_id)
     if item is None:
@@ -169,11 +172,12 @@ async def draft_radiology_report(
 
 @router.put("/order-items/{item_id}/reports/sign-off", response_model=RadiologyReportOut)
 async def sign_off_radiology_report(
+    current_db_user: CurrentDbUser,
     item_id: uuid.UUID,
     payload: RadiologyReportSignOff,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(require_roles("radiologist")),
-    current_db_user: CurrentDbUser = Depends(get_current_db_user),
+
 ):
     current = (await db.execute(
         select(RadiologyReport)
@@ -247,7 +251,6 @@ async def get_fhir_bundle(
         patient_id=patient_id,
     )
     return bundle
-python -c "import ast; ast.parse(open('app/blood_bank/models.py', encoding='utf-8').read()); print('blood_bank OK')"
 
 
 _IST = ZoneInfo("Asia/Kolkata")

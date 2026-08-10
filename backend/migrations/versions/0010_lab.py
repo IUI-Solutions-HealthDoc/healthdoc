@@ -24,7 +24,10 @@ def upgrade() -> None:
         sa.Column("accession_number", sa.String(30), nullable=False, unique=True),
         sa.Column("test_code", sa.String(30), nullable=True),
         sa.Column("test_name", sa.Text(), nullable=False),
-        sa.Column("sample_type", sa.String(30), nullable=False),
+        # varchar(50), not 30: sample_type is enum-backed, and §3's blanket
+        # rule (v3.4.1) puts every enum-backed column at 50 so a later value
+        # like 'cerebrospinal_fluid' doesn't need a migration to fit.
+        sa.Column("sample_type", sa.String(50), nullable=False),
         sa.Column("department_id", postgresql.UUID(as_uuid=True),
                   sa.ForeignKey("departments.id", ondelete="RESTRICT"), nullable=True),
         sa.Column(
