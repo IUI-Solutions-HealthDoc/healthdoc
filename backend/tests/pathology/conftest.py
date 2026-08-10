@@ -53,28 +53,29 @@ def _db_user_for(user: AuthUser) -> DbUser:
 
 @pytest.fixture
 def client_as():
-    """One TestClient per test, re-pointed at different users as needed.
+    """One TestClient, entered as a context manager, per test.
 
-    Deliberately NOT a new TestClient per role. Each TestClient runs the app
-    on its own event loop, while app.common.db's engine is module-level and
-    its pool outlives them — so a test that did client_as(DOCTOR) then
-    client_as(LAB_TECH) handed the second loop connections created in the
-    first, which is "RuntimeError: Event loop is closed" and a pile of
-    pending-task noise that buries the real assertion.
+    The `with` matters more than it looks. Outside a context manager,
+    starlette's TestClient spins up a fresh portal — and therefore a fresh
+    event loop — for EVERY request. app.common.db's engine is module-level
+    with a QueuePool, so connections opened during request 1 get handed back
+    out during request 2, whose loop is different: "RuntimeError: Event loop
+    is closed", plus enough pending-task noise to bury the real assertion.
+
+    Entering the client once pins a single loop for the whole test, and also
+    runs the app's lifespan events, which is closer to production anyway.
 
     Switching identity is just swapping the dependency override; it needs no
-    new client.
+    second client.
     """
-    client = TestClient(app)
+    with TestClient(app) as client:
+        def _make(user: AuthUser) -> TestClient:
+            app.dependency_overrides[get_current_user] = lambda: user
+            app.dependency_overrides[get_current_db_user] = lambda: _db_user_for(user)
+            return client
 
-    def _make(user: AuthUser) -> TestClient:
-        app.dependency_overrides[get_current_user] = lambda: user
-        app.dependency_overrides[get_current_db_user] = lambda: _db_user_for(user)
-        return client
+        yield _make
 
-    yield _make
-
-    client.close()
     app.dependency_overrides.pop(get_current_user, None)
     app.dependency_overrides.pop(get_current_db_user, None)
 
