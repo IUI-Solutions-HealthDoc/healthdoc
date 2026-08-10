@@ -45,13 +45,12 @@ _NOT_FOUND = HTTPException(404, "Queue not found")
 
 
 # ---------------- CALLER CONTEXT RESOLUTION ----------------
-async def resolve_caller_facility_id(db: AsyncSession, keycloak_sub: str) -> uuid.UUID:
-    row = await db.execute(select(User.facility_id).where(User.keycloak_sub == keycloak_sub))
-    facility_id = row.scalar_one_or_none()
-    if facility_id is None:
-        raise HTTPException(403, "No matching user profile for this account")
-    return facility_id
-
+# resolve_caller_facility_id() lived here and did exactly what CurrentDbUser
+# now does — one extra users lookup per request to get facility_id from a
+# keycloak_sub. The routers take CurrentDbUser directly instead.
+#
+# resolve_caller_full_context stays only because DbUser doesn't carry
+# department_id. Add it there and this can go too.
 async def resolve_caller_full_context(
     db: AsyncSession, keycloak_sub: str
 ) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID | None]:

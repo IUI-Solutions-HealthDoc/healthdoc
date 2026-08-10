@@ -1,9 +1,9 @@
 from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, Index, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 
-from app.common.database import Base
+from app.common.db import Base
 from app.common.enums import OrderPriority, OrderStatus, OrderType
-from app.common.mixins import Blame, Timestamps, UUIDPk
+from app.common.models import Blame, Timestamps, UUIDPk
 
 
 class Order(Base, UUIDPk, Timestamps, Blame):
@@ -29,9 +29,9 @@ class Order(Base, UUIDPk, Timestamps, Blame):
     ordered_at = Column(DateTime(timezone=True), nullable=False)
 
     __table_args__ = (
-        CheckConstraint(OrderType.sql_check("order_type"), name="ck_orders_order_type"),
-        CheckConstraint(OrderPriority.sql_check("priority"), name="ck_orders_priority"),
-        CheckConstraint(OrderStatus.sql_check("status"), name="ck_orders_status"),
+        CheckConstraint(OrderType.sql_check("order_type"), name="order_type"),
+        CheckConstraint(OrderPriority.sql_check("priority"), name="priority"),
+        CheckConstraint(OrderStatus.sql_check("status"), name="status"),
         Index("ix_orders_order_type_status", "order_type", "status"),
         Index("ix_orders_patient_id", "patient_id"),
         Index("ix_orders_encounter_id", "encounter_id"),

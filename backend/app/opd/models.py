@@ -95,12 +95,12 @@ class Visit(Base, UUIDPk, Timestamps, Blame):
     __table_args__ = (
         CheckConstraint(
             "visit_type IN ('opd', 'ipd', 'emergency', 'teleconsult')",
-            name="ck_visits_visit_type",
+            name="visit_type",
         ),
         CheckConstraint(
             "status IN ('registered', 'in_consultation', 'completed', "
             "'lwbs', 'cancelled', 'closed')",
-            name="ck_visits_status",
+            name="status",
         ),
         Index("ix_visits_patient_id_visit_date", "patient_id", "visit_date"),
         Index("ix_visits_facility_id", "facility_id"),
@@ -129,7 +129,7 @@ class Encounter(Base, UUIDPk, Timestamps, Blame):
     __table_args__ = (
         CheckConstraint(
             "note_status IN ('pending', 'stored', 'failed')",
-            name="ck_encounters_note_status",
+            name="note_status",
         ),
         Index("ix_encounters_visit_id", "visit_id"),
         Index("ix_encounters_provider_user_id", "provider_user_id"),
@@ -168,7 +168,7 @@ class Diagnosis(Base, UUIDPk, Timestamps, Blame):
     __table_args__ = (
         CheckConstraint(
             "diagnosis_type IN ('provisional', 'final', 'differential')",
-            name="ck_diagnoses_diagnosis_type",
+            name="diagnosis_type",
         ),
         Index("ix_diagnoses_icd_code_icd_version", "icd_code", "icd_version"),
     )

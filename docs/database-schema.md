@@ -1945,7 +1945,6 @@ Not blockers for W1–W3 development; each becomes its own migration/PR when sch
 |---|---|
 | Postgres RLS policies (needs `app.current_facility` session var wiring) | v3.5, after 0002–0020 are stable |
 | `deleted_at` soft-delete on visits/orders (non-patient entities hard-delete-free today via status) | v3.5 |
-| `facilities.timezone varchar(50)` (IST assumed today) | v3.5 |
 | `kpi_definitions` catalog + admin UI | v3.5 |
 | `notification_delivery_attempts` tracking | v3.5 |
 | Blood component manufacturing tables (0016 stub is intentional) | v3.5 |
