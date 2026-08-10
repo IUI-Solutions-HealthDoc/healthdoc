@@ -20,9 +20,13 @@ import uuid
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from app.auth.deps import AuthUser, DbUser, get_current_db_user, get_current_user
+from app.common.db import get_db
 from app.main import app
+from tests._lab_seed import TEST_DATABASE_URL
 
 # One facility for the whole suite — the accession counter is keyed on
 # (prefix, business date), and business date is read from this facility's
@@ -51,6 +55,33 @@ def _db_user_for(user: AuthUser) -> DbUser:
     )
 
 
+# A NullPool engine for the API tests, and get_db overridden to use it.
+#
+# app.common.db's engine is created at import time with a QueuePool, and each
+# test gets its own TestClient and therefore its own event loop. A pooled
+# connection opened in one test's loop then gets handed to the next test,
+# whose loop is different — "RuntimeError: Event loop is closed", and enough
+# pending-task noise to bury the real assertion.
+#
+# NullPool opens and closes a connection per checkout, so nothing survives a
+# loop boundary. Slower, irrelevant at this scale, and the alternative is
+# disposing a global engine from a foreign loop, which is worse.
+_test_engine = create_async_engine(TEST_DATABASE_URL, poolclass=NullPool)
+_TestSession = async_sessionmaker(_test_engine, expire_on_commit=False)
+
+
+async def _test_get_db():
+    """Mirrors app.common.db.get_db exactly — commit on success, roll back on
+    error — so the handlers behave identically to production."""
+    async with _TestSession() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+
+
 @pytest.fixture
 def client_as():
     """One TestClient, entered as a context manager, per test.
@@ -72,12 +103,14 @@ def client_as():
         def _make(user: AuthUser) -> TestClient:
             app.dependency_overrides[get_current_user] = lambda: user
             app.dependency_overrides[get_current_db_user] = lambda: _db_user_for(user)
+            app.dependency_overrides[get_db] = _test_get_db
             return client
 
         yield _make
 
     app.dependency_overrides.pop(get_current_user, None)
     app.dependency_overrides.pop(get_current_db_user, None)
+    app.dependency_overrides.pop(get_db, None)
 
 @pytest.fixture(scope="session")
 def seeded_order_id() -> str:
