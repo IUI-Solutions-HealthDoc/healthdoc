@@ -130,3 +130,24 @@ async def user_id(engine: AsyncEngine, facility_id: uuid.UUID) -> AsyncGenerator
     yield uid
     # No delete — consent_records.created_by and friends may RESTRICT it
     # by the time a test finishes. See module docstring.
+
+
+@pytest_asyncio.fixture
+async def purpose_id(engine: AsyncEngine) -> AsyncGenerator[uuid.UUID, None]:
+    """One throwaway consent_purposes row per test — needed by
+    B7-W4-02's CRUD tests (consent_records.purpose_id FK). Not needed
+    by the trigger/append-only tests that already existed in this
+    package, which is why it wasn't here before."""
+    pid = uuid.uuid4()
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                """
+                INSERT INTO consent_purposes (id, purpose_code, description)
+                VALUES (:id, :code, 'Test purpose')
+                """
+            ),
+            {"id": pid, "code": f"test_purpose_{uuid.uuid4().hex[:8]}"},
+        )
+    yield pid
+    # No delete — consent_records.purpose_id FK is ON DELETE RESTRICT.

@@ -3,20 +3,27 @@ Pydantic schemas for the consent module.
 
 Repo path: backend/app/consent/schemas.py
 
-Only what's needed to back the /patients/{patient_id}/records demo
-route (proves out log_patient_data_access against a real endpoint).
-Add ConsentPurpose/ConsentWithdrawal/etc. schemas here as those CRUD
-endpoints get built — not scope-creeping into them from this ticket.
+ConsentRecordOut backed the /patients/{patient_id}/records demo route
+from the previous ticket. Everything else here is B7-W4-02 (Consent
+CRUD: purpose/scope/channel, nullable expiry, status transitions).
 
 Field names mirror DB columns (snake_case) per schema doc §4.2.
+Enum-shaped fields (granted_by_type, channel, status,
+withdrawn_by_type) are typed with the real CheckedEnum classes from
+app.common.enums, not plain str — FastAPI/Pydantic then reject an
+invalid value with a clean 422 at the boundary instead of relying
+solely on the DB CHECK constraint to catch it after the fact.
 """
 
 from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
+
+from app.common.enums import ConsentChannel, ConsentStatus, GrantedByType
 
 
 class ConsentRecordOut(BaseModel):
@@ -36,3 +43,66 @@ class ConsentRecordOut(BaseModel):
     status_changed_at: datetime
     created_at: datetime
     updated_at: datetime
+
+
+class ConsentPurposeOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    purpose_code: str
+    description: str | None
+    default_expiry_days: int | None
+    requires_explicit_consent: bool
+    is_active: bool
+
+
+class ConsentRecordCreate(BaseModel):
+    purpose_id: uuid.UUID
+    visit_id: uuid.UUID | None = None
+    granted_by_type: GrantedByType
+    granted_by_user_id: uuid.UUID | None = None
+    guardian_name: str | None = None
+    guardian_relationship: str | None = None
+    expires_at: datetime | None = None  # nullable per issue spec
+    scope: list[str] | None = None
+    channel: ConsentChannel
+    consent_artefact_id: str | None = None
+    consent_artefact_signature: str | None = None
+    # Only these two make sense as a STARTING status — denied/revoked/
+    # expired are all reached later, via transition/withdrawal, never
+    # at creation. 'requested' is for the abdm_consent_manager channel's
+    # async grant flow; every other channel grants immediately.
+    status: Literal[ConsentStatus.GRANTED, ConsentStatus.REQUESTED] = ConsentStatus.GRANTED
+
+
+class ConsentStatusTransitionIn(BaseModel):
+    """Only the requested -> granted/denied transition — see
+    app/consent/service.py's transition_consent_status() docstring for
+    why granted -> revoked/expired can't reach this endpoint at all."""
+
+    status: Literal[ConsentStatus.GRANTED, ConsentStatus.DENIED]
+    reason: str | None = None
+
+
+class ConsentWithdrawalCreate(BaseModel):
+    # GrantedByType (patient|guardian|nominee), NOT the wider DB CHECK
+    # (which also allows 'system_expiry') -- deliberately. This is the
+    # staff-facing manual withdraw endpoint; 'system_expiry' is reserved
+    # for the automated consent-expiry sweep job (schema doc §3 0004:
+    # "Consent expiry is a job, not a column"), which doesn't exist yet
+    # and wouldn't go through this HTTP endpoint if it did. A caller here
+    # should never be able to claim a withdrawal was system-initiated.
+    withdrawn_by_type: GrantedByType
+    withdrawn_by_user_id: uuid.UUID | None = None
+    reason: str | None = None
+
+
+class ConsentWithdrawalOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    consent_id: uuid.UUID
+    withdrawn_by_type: str
+    withdrawn_by_user_id: uuid.UUID | None
+    withdrawn_at: datetime
+    reason: str | None
