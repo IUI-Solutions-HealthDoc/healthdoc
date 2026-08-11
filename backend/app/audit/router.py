@@ -39,7 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import service
 from app.audit.actions import AuditAction
-from app.audit.deps import _extract_ip, _select_acting_role
+from app.audit.deps import _extract_ip, select_acting_role
 from app.audit.schemas import AuditLogListOut, AuditLogOut
 from app.audit.service import write_audit_log
 from app.auth.deps import CurrentDbUser, require_roles
@@ -123,7 +123,7 @@ async def export_audit_logs_csv(
         action=AuditAction.EXPORT,
         resource_type="audit_logs",
         user_id=user.id,
-        role=_select_acting_role(user.roles),
+        role=select_acting_role(user.roles),
         ip_address=_extract_ip(request),
         device_id=request.headers.get("x-device-id"),
         reason=(
