@@ -51,6 +51,7 @@ class PharmacyDispense(Base, UUIDPk, Timestamps):
             DispenseStatus.sql_check("status"),
             name="status",
         ),
+       
         UniqueConstraint(
             "prescription_id", "version",
         ),
@@ -62,6 +63,7 @@ class PharmacyDispense(Base, UUIDPk, Timestamps):
         ),
         Index("ix_pharmacy_dispenses_visit_id", "visit_id"),
         Index("ix_pharmacy_dispenses_dispensed_by", "dispensed_by"),
+        
     )
 
 

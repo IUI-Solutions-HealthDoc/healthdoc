@@ -55,6 +55,18 @@ jobs:
       DATABASE_URL: postgresql+asyncpg://healthdoc:healthdoc@localhost:5432/healthdoc_test
       REDIS_URL: redis://localhost:6379/0
 
+      # The app's lifespan validates these before serving traffic (B1 crypto
+      # fix): base64 of exactly 32 bytes, and not one of the known
+      # placeholders. Without them the app cannot start, so any test that
+      # enters TestClient as a context manager — i.e. runs lifespan — errors
+      # at setup. CI could not boot the application at all until this was set.
+      #
+      # These are deterministic test values, generated from a fixed seed and
+      # committed on purpose. They are not secrets and must never be used
+      # anywhere but CI; real deployments get real keys from the environment.
+      PII_ENCRYPTION_KEY: dkWUFyQpoVWEpmm4NovS1ketf25uP0WKr6z/sNC1ADk=
+      AADHAAR_HMAC_KEY: MYXTZ1OUDwLh3yYU63CgWnvqVib9FJHqEdLoi4IUrAA=
+
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
