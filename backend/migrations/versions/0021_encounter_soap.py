@@ -1,14 +1,14 @@
 """encounter SOAP fields + note_status/row_version + facility_id (encounters, diagnoses)
 
 Revision ID: 0021
-Revises: 0020
+Revises: 0020c
 Create Date: 2026-08-10
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-revision = "0032"
+revision = "0021"
 down_revision = "0020c"
 branch_labels = None
 depends_on = None
