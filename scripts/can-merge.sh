@@ -40,11 +40,19 @@ git fetch -q origin "refs/pull/${PR}/head:refs/remotes/pr/${PR}" 2>/dev/null || 
 VERSIONS="backend/migrations/versions"
 
 # The post-merge set is the union of what's on staging and what the PR adds.
-# Anything in migrations/pending/ is deliberately parked and stays out.
+# Anything in migrations/pending/ is deliberately parked and stays out of the
+# CHAIN — but its revision ids are still TAKEN, checked separately below.
+# Excluding pending/ entirely is how three PRs in one day picked a revision id
+# a parked migration already owned: the author greps versions/, sees the
+# number free, and nothing tells them otherwise.
 {
   git ls-tree -r --name-only origin/staging -- "$VERSIONS" 2>/dev/null
   git ls-tree -r --name-only "pr/${PR}"     -- "$VERSIONS" 2>/dev/null
 } | grep -E '/[0-9]{4}[a-z]?_.*\.py$' | sort -u > /tmp/canmerge_files.txt
+
+# Revision ids owned by parked migrations.
+git ls-tree -r --name-only origin/staging -- backend/migrations/pending 2>/dev/null \
+  | grep -E '/[0-9]{4}[a-z]?_.*\.py$' > /tmp/canmerge_parked.txt || true
 
 if [ ! -s /tmp/canmerge_files.txt ]; then
   echo "MERGE CHECK: no migrations involved — nothing to verify."
@@ -76,6 +84,15 @@ staging_files = set(subprocess.run(
      "--", "backend/migrations/versions"],
     capture_output=True, text=True).stdout.split())
 
+parked = {}
+for pp in open("/tmp/canmerge_parked.txt").read().split():
+    r = subprocess.run(["git", "show", f"origin/staging:{pp}"],
+                       capture_output=True, text=True)
+    if r.returncode == 0:
+        m = re.search(r'^revision\s*=\s*["\']([^"\']+)', r.stdout, re.M)
+        if m:
+            parked[m.group(1)] = pp.rsplit("/", 1)[-1]
+
 revs, downs, added = {}, {}, []
 for p in paths:
     src, _ref = read(p)
@@ -93,6 +110,7 @@ for p in paths:
 
 added = sorted(added)
 dangling = {r: d for r, d in downs.items() if d and d not in revs}
+collisions = {r: parked[r] for r in added if r in parked}
 
 print("=" * 66)
 print(f" Can PR #{pr} merge into staging right now?")
@@ -100,6 +118,17 @@ print("=" * 66)
 print(f"\n  revisions after merge: {len(revs)}")
 if added:
     print(f"  this PR adds:          {', '.join(added)}")
+
+if collisions:
+    print("\n  \033[31m✗ revision id already owned by a PARKED migration\033[0m\n")
+    for rev in sorted(collisions):
+        print(f"    {revs[rev]}  wants revision '{rev}'")
+        print(f"      backend/migrations/pending/{collisions[rev]} already owns it")
+    print("\n  Merges cleanly today; breaks the day that migration unparks. Two")
+    print("  revisions with one id stops EVERY alembic command, for everyone.\n")
+    print("  Pick a free id — `ls backend/migrations/pending/` is the list that")
+    print("  grepping versions/ does not show you.")
+    sys.exit(1)
 
 if not dangling:
     print("\n  \033[32m✓ chain resolves — safe to merge\033[0m")

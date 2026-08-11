@@ -120,7 +120,7 @@ class FileRecord(UUIDPk, Timestamps, Base):
         # Generated from the enum, same as action's CHECK below — without it
         # the column accepts any string, so a future scanner integration could
         # write 'clean' from a path that never actually scanned.
-        CheckConstraint(ScanStatus.sql_check("scan_status"), name="ck_files_scan_status"),
+        CheckConstraint(ScanStatus.sql_check("scan_status"), name="scan_status"),
     )
 
     def __repr__(self) -> str:  # pragma: no cover
@@ -168,7 +168,7 @@ class FileAccessLog(UUIDPk, Base):
         # not a hardcoded list. Kept as-is.
         CheckConstraint(
             FileAction.sql_check("action"),
-            name="ck_file_access_log_action",
+            name="action",
         ),
     )
 

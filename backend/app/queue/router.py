@@ -11,7 +11,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.deps import AuditActor, get_current_actor_dependency
-from app.auth.deps import CurrentUser, require_roles
+from app.auth.deps import CurrentDbUser, CurrentUser, require_roles
 from app.common.db import get_db
 from app.common.idempotency import check_idempotency, hash_request_body, record_idempotent_response
 from app.common.redis import publish_event
@@ -38,11 +38,11 @@ router = APIRouter(prefix="/queue", tags=["queue"])
 )
 async def create_queue(
     payload: QueueCreate,
-    user: CurrentUser,
+    current_db_user: CurrentDbUser,
     db: AsyncSession = Depends(get_db),
     actor: AuditActor = Depends(get_current_actor_dependency),
 ) -> dict:
-    caller_facility_id = await service.resolve_caller_facility_id(db, user.sub)
+    caller_facility_id = current_db_user.facility_id
     queue = await service.create_queue(
         db,
         department_id=payload.department_id,
@@ -108,12 +108,12 @@ async def create_token(
 
 async def call_next(
     queue_id: uuid.UUID,
-    user: CurrentUser,
+    current_db_user: CurrentDbUser,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     actor: AuditActor = Depends(get_current_actor_dependency),
 ) -> dict:
-    caller_facility_id = await service.resolve_caller_facility_id(db, user.sub)
+    caller_facility_id = current_db_user.facility_id
     token, pending_event = await service.call_next_token(db, queue_id, caller_facility_id)
     if pending_event is not None:
         background_tasks.add_task(
@@ -128,12 +128,12 @@ async def call_next(
 )
 async def force_complete_token(
     token_id: uuid.UUID,
-    user: CurrentUser,
+    current_db_user: CurrentDbUser,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     actor: AuditActor = Depends(get_current_actor_dependency),
 ) -> dict:
-    caller_facility_id = await service.resolve_caller_facility_id(db, user.sub)
+    caller_facility_id = current_db_user.facility_id
     completed_token, next_token, pending_event = await service.admin_force_complete(
         db, token_id, caller_facility_id
     )
@@ -155,10 +155,11 @@ async def elevate_priority(
     token_id: uuid.UUID,
     payload: TokenPriorityElevate,
     user: CurrentUser,
+    current_db_user: CurrentDbUser,
     db: AsyncSession = Depends(get_db),
     actor: AuditActor = Depends(get_current_actor_dependency),
 ) -> dict:
-    caller_facility_id = await service.resolve_caller_facility_id(db, user.sub)
+    caller_facility_id = current_db_user.facility_id
     token = await service.elevate_priority(
         db,
         token_id,
@@ -179,10 +180,10 @@ async def elevate_priority(
 )
 async def list_queue_tokens(
     queue_id: uuid.UUID,
-    user: CurrentUser,
+    current_db_user: CurrentDbUser,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    caller_facility_id = await service.resolve_caller_facility_id(db, user.sub)
+    caller_facility_id = current_db_user.facility_id
     result = await service.list_queue_tokens(db, queue_id, caller_facility_id)
     return QueueTokenListOut(
         waiting_count=result["waiting_count"],

@@ -154,9 +154,9 @@ class Invoice(UUIDPk, Blame, Timestamps, Base):
         Index("ix_invoices_facility_id", "facility_id"),
         CheckConstraint(
             "status IN ('draft', 'issued', 'partially_paid', 'paid', 'waived', 'cancelled')",
-            name="ck_invoices_status",
+            name="status",
         ),
-        CheckConstraint("net_amount >= 0", name="ck_invoices_net_amount_non_negative"),
+        CheckConstraint("net_amount >= 0", name="net_amount_non_negative"),
     )
 
     def __repr__(self) -> str:  # pragma: no cover
@@ -205,10 +205,10 @@ class InvoiceItem(UUIDPk, Base):
 
     __table_args__ = (
         Index("ix_invoice_items_invoice_id", "invoice_id"),
-        CheckConstraint(ChargeCategory.sql_check("charge_category"), name="ck_invoice_items_charge_category"),
-        CheckConstraint("quantity > 0", name="ck_invoice_items_quantity_positive"),
-        CheckConstraint("unit_price >= 0", name="ck_invoice_items_unit_price_non_negative"),
-        CheckConstraint("amount >= 0", name="ck_invoice_items_amount_non_negative"),
+        CheckConstraint(ChargeCategory.sql_check("charge_category"), name="charge_category"),
+        CheckConstraint("quantity > 0", name="quantity_positive"),
+        CheckConstraint("unit_price >= 0", name="unit_price_non_negative"),
+        CheckConstraint("amount >= 0", name="amount_non_negative"),
     )
 
     def __repr__(self) -> str:  # pragma: no cover
@@ -249,9 +249,9 @@ class Payment(UUIDPk, Blame, Timestamps, Base):
     __table_args__ = (
         Index("ix_payments_invoice_id", "invoice_id"),
         Index("ix_payments_collected_by", "collected_by"),
-        CheckConstraint(PaymentMode.sql_check("mode"), name="ck_payments_mode"),
-        CheckConstraint(PaymentStatus.sql_check("status"), name="ck_payments_status"),
-        CheckConstraint("amount > 0", name="ck_payments_amount_positive"),
+        CheckConstraint(PaymentMode.sql_check("mode"), name="mode"),
+        CheckConstraint(PaymentStatus.sql_check("status"), name="status"),
+        CheckConstraint("amount > 0", name="amount_positive"),
     )
 
     def __repr__(self) -> str:  # pragma: no cover
@@ -287,7 +287,7 @@ class Refund(UUIDPk, Blame, Timestamps, Base):
     __table_args__ = (
         Index("ix_refunds_payment_id", "payment_id"),
         Index("ix_refunds_approved_by", "approved_by"),
-        CheckConstraint("amount > 0", name="ck_refunds_amount_positive"),
+        CheckConstraint("amount > 0", name="amount_positive"),
     )
 
     def __repr__(self) -> str:  # pragma: no cover
@@ -323,7 +323,7 @@ class BillingCounter(UUIDPk, Timestamps, Base):
             "facility_id", "counter_type", "counter_date",
             name="uq_billing_counters_facility_type_date",
         ),
-        CheckConstraint("counter_type IN ('invoice','receipt','refund')", name="ck_billing_counters_counter_type"),
+        CheckConstraint("counter_type IN ('invoice','receipt','refund')", name="counter_type"),
     )
 
     def __repr__(self) -> str:  # pragma: no cover
