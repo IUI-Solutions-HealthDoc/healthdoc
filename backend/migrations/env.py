@@ -10,10 +10,17 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # Import all module models here so autogenerate sees them:
+from app.patients import models  # noqa: F401
 from app.common.db import Base  # noqa: E402
+
 from app.users import models as users_models  # noqa: E402, F401
 from app.allergies import models as allergies_models  # noqa: E402, F401
 from app.billing import models as billing_models  # noqa: E402, F401
+
+from app.inventory import models as inventory_models  # noqa: F401, E402
+from app.pharmacy import models as pharmacy_models  # noqa: F401, E402
+
+from app.ot import models as ot_models  # noqa: E402, F401
 
 target_metadata = Base.metadata
 

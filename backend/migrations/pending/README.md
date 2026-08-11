@@ -40,6 +40,31 @@ pytest tests/test_v314_invariants.py      # constraints must still hold
 constraint tests keep running while a migration is parked and need no edit when it
 returns. A parked migration whose tests are skipped is a migration that quietly rots.
 
+## Check what imports it before you park it
+
+```bash
+grep -rn "0019_files" backend/tests backend/scripts
+```
+
+This directory is deliberately **not** a package — no `__init__.py`, so alembic
+never sees these files. That also means any test doing
+`importlib.import_module("migrations.versions.0019_files")` raises
+`ModuleNotFoundError` the moment the file moves here, and pytest fails at
+**collection**, which takes down the whole backend suite — on staging and on
+every open PR at once, with an error naming a file most authors have never
+touched.
+
+That happened when 0019 was parked. The fix in `tests/files/conftest.py` is to
+load by file path and look in `versions/` first, then `pending/`:
+
+```python
+spec = importlib.util.spec_from_file_location("migration_0019", path)
+```
+
+Tests that apply a migration through an isolated `MigrationContext` don't need
+it to be in the chain at all — only the module object. Write them that way and
+parking costs nothing.
+
 ## Before parking anything else
 
 Parking is for a revision that cannot resolve. It is not a way to defer a migration
