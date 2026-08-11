@@ -94,10 +94,11 @@ async def _seed(subs: list[str]) -> None:
 
             await conn.execute(sa.text(
                 "INSERT INTO orders (id, order_number, encounter_id, patient_id, order_type, "
-                " created_by) "
-                "VALUES (:id, 'ORD-LABTEST-0001', :eid, :pid, 'lab', :by) "
+                " facility_id, created_by) "
+                "VALUES (:id, 'ORD-LABTEST-0001', :eid, :pid, 'lab', :fac, :by) "
                 "ON CONFLICT (id) DO NOTHING"),
-                {"id": ORDER_ID, "eid": ENCOUNTER_ID, "pid": PATIENT_ID, "by": creator})
+                {"id": ORDER_ID, "eid": ENCOUNTER_ID, "pid": PATIENT_ID,
+                 "fac": FACILITY_ID, "by": creator})
     finally:
         await engine.dispose()
 

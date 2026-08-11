@@ -69,11 +69,14 @@ async def _seed_billable_lab_charge(db, *, visit_id: uuid.UUID, test_code: str =
     await db.execute(
         sa.text(
             "INSERT INTO orders "
-            "(id, encounter_id, order_number, patient_id, order_type, created_by) "
-            "VALUES (:id, :encounter_id, :order_number, :patient_id, 'lab', :actor)"
+            "(id, encounter_id, order_number, patient_id, order_type, "
+            "facility_id, created_by) "
+            "VALUES (:id, :encounter_id, :order_number, :patient_id, 'lab', "
+            ":facility_id, :actor)"
         ),
         {"id": order_id, "encounter_id": encounter_id, "patient_id": patient_id,
-         "order_number": f"O{uuid.uuid4().hex[:10]}", "actor": actor_id},
+         "order_number": f"O{uuid.uuid4().hex[:10]}", "facility_id": facility_id,
+         "actor": actor_id},
     )
     await db.execute(
         sa.text(
