@@ -1,7 +1,7 @@
 """
-DB-level tests for migration 0021 (dpdp_compliance).
+DB-level tests for migration 0022a (dpdp_compliance).
 
-Repo path: backend/tests/dpdp/test_0021_dpdp_compliance_db.py
+Repo path: backend/tests/dpdp/test_0022a_dpdp_compliance_db.py
 
 Real Postgres only -- the behavior under test (partial unique index,
 CHECK constraints, the conditional freeze-when-closed trigger, and the

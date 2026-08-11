@@ -1,8 +1,17 @@
-"""0021 dpdp_compliance
+"""0022a dpdp_compliance
 
-Revision ID: 0021
-Revises: 0020c
+Revision ID: 0022a
+Revises: 0022
 Create Date: 2026-08-11
+
+Originally 0021/down_revision=0020c. Renumbered per Tech Lead (PR #359):
+0021/0022 went to Aditya's encounter_soap/order_number_counters (written,
+tested, ready to merge -- "ready work takes the slots"), this moves to
+0022a as an out-of-band insert, same convention as 0003a and 0020a-c.
+0022 (order_number_counters) is itself not merged yet at the time of this
+rename -- expected mid-flight per §2's own "set down_revision to its
+number anyway and coordinate merge order" rule, same situation this
+migration's own dependents will eventually be in.
 
 Builds: data_protection_officers, patient_grievances, data_breach_notifications,
 consent_managers (schema doc §3, "0021-0026 -- Compliance & operations wave").
@@ -52,8 +61,8 @@ from sqlalchemy.dialects import postgresql
 
 from app.common.enums import BreachStatus, GrievanceStatus, GrievanceType
 
-revision = "0021"
-down_revision = "0020c"
+revision = "0022a"
+down_revision = "0022"
 branch_labels = None
 depends_on = None
 

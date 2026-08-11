@@ -5,11 +5,13 @@ Repo path: backend/tests/dpdp/conftest.py
 
 Mirrors backend/tests/consent/conftest.py's conventions (TEST_DATABASE_URL,
 function-scoped `engine`, WindowsSelectorEventLoopPolicy, no-teardown-delete
-for FK-RESTRICT rows) -- migration 0021's chain is fully resolvable
-(down_revision = "0020c", already merged), so unlike tests/files' conftest
-this doesn't need the isolated-MigrationContext bypass trick: `alembic
-upgrade head` (or the equivalent bootstrap) is assumed already run against
-TEST_DATABASE_URL, same assumption tests/audit and tests/consent make.
+for FK-RESTRICT rows). Migration 0022a's own dependencies (facilities,
+users, patients, consent_records) are all merged; `alembic upgrade head`
+(or the equivalent bootstrap) is assumed already run against
+TEST_DATABASE_URL for those, same assumption tests/audit and tests/consent
+make. down_revision = "0022" (order_number_counters) may itself still be
+mid-flight -- that's a chain-position concern for the real alembic CLI,
+not for these tests, which apply 0022a's upgrade()/downgrade() directly.
 """
 from __future__ import annotations
 
