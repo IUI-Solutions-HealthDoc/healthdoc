@@ -236,10 +236,12 @@ async def test_dangling_fks_resolve_and_restrict_holds(engine: AsyncEngine, faci
             )
             await conn.execute(
                 sa.text(
-                    "INSERT INTO encounters (id, visit_id, provider_user_id, created_by) "
-                    "VALUES (:id, :visit_id, :provider, :created_by)"
+                    "INSERT INTO encounters "
+                    "(id, visit_id, facility_id, provider_user_id, created_by) "
+                    "VALUES (:id, :visit_id, :facility_id, :provider, :created_by)"
                 ),
-                {"id": encounter_id, "visit_id": visit_id, "provider": user_id, "created_by": user_id},
+                {"id": encounter_id, "visit_id": visit_id, "facility_id": facility_id,
+                 "provider": user_id, "created_by": user_id},
             )
             await conn.execute(
                 sa.text(

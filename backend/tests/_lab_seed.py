@@ -87,9 +87,10 @@ async def _seed(subs: list[str]) -> None:
                 {"id": VISIT_ID, "pid": PATIENT_ID, "fac": FACILITY_ID, "by": creator})
 
             await conn.execute(sa.text(
-                "INSERT INTO encounters (id, visit_id, provider_user_id, created_by) "
-                "VALUES (:id, :vid, :prov, :by) ON CONFLICT (id) DO NOTHING"),
-                {"id": ENCOUNTER_ID, "vid": VISIT_ID, "prov": creator, "by": creator})
+                "INSERT INTO encounters (id, visit_id, facility_id, provider_user_id, created_by) "
+                "VALUES (:id, :vid, :fac, :prov, :by) ON CONFLICT (id) DO NOTHING"),
+                {"id": ENCOUNTER_ID, "vid": VISIT_ID, "fac": FACILITY_ID,
+                 "prov": creator, "by": creator})
 
             await conn.execute(sa.text(
                 "INSERT INTO orders (id, order_number, encounter_id, patient_id, order_type, "
