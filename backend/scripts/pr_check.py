@@ -183,7 +183,13 @@ def check_file(path: pathlib.Path) -> list[Finding]:
                     "conventions §2.2: use a counters row with UPDATE … RETURNING"))
 
         # --- timezone / business date ----------------------------------------
-        if re.search(r"CURRENT_DATE|now\(\)::date|utcnow\(\)\.date\(\)|datetime\.now\(\)\.date\(\)", ln):
+        # .year and .month matter as much as .date(): a UHID embeds the year, so
+        # a UTC read gives last year's identifier — permanently — between 00:00
+        # and 05:30 IST on 1 January. Missed on #299 because the rule only knew
+        # about .date().
+        if re.search(r"CURRENT_DATE|now\(\)::date|utcnow\(\)\.(date\(\)|year|month)"
+                     r"|datetime\.now\(\s*(timezone\.utc|tz=timezone\.utc)?\s*\)\.(date\(\)|year|month)",
+                     ln):
             f.append(Finding(BLOCK, "TZ-DATE", rel, i,
                 "Business date computed in UTC/naive — 00:00–05:30 IST resolves to YESTERDAY.",
                 "schema §3: (now() AT TIME ZONE facilities.timezone)::date"))
@@ -207,9 +213,19 @@ def check_file(path: pathlib.Path) -> list[Finding]:
         # plaintext leak. That fired 4 times on #299 against a migration doing
         # exactly the right thing, and a false blocker on a PII rule is worse
         # than most: it's the one people are most likely to be told off over.
+        # An f-string is only a concern if it interpolates the AADHAAR VALUE.
+        # `f"{patient_id}:aadhaar"` builds an AAD label — the word appears, the
+        # secret doesn't. That fired on #299 against code doing the right thing.
+        # ...and `{...}` only counts as interpolation inside an ACTUAL f-string.
+        # Without the f-prefix check, a plain dict literal matches: line 116 of
+        # #299's security.py is `return {1: settings.aadhaar_hmac_key}` — a key
+        # lookup, no secret, no sink — and it was reported as a plaintext leak.
+        # Third false blocker this rule has produced on that one PR. A PII rule
+        # that cries wolf gets ignored exactly when it finally matters.
         _sink = re.search(r"\bprint\s*\(|\blogger\b|\blogging\b", ln)
-        _fstring_interp = re.search(r"f\"[^\"]*\{|f'[^']*\{", ln)
-        if (re.search(r"aadhaar", ln, re.I) and (_sink or _fstring_interp)
+        _fstring = re.search(r"""\bf["']|\bf?["']{3}""", ln)
+        _interpolates_aadhaar = _fstring and re.search(r"\{[^}]*aadhaar[^}]*\}", ln, re.I)
+        if (re.search(r"aadhaar", ln, re.I) and (_sink or _interpolates_aadhaar)
                 and not re.search(r"blind_index|encrypted|hash|#", ln, re.I)):
             f.append(Finding(BLOCK, "PII-AADHAAR", rel, i,
                 "Possible Aadhaar in a log/plaintext path.",

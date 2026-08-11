@@ -39,9 +39,33 @@ jobs:
           --health-cmd "pg_isready -U healthdoc -d healthdoc_test"
           --health-interval 5s --health-timeout 5s --health-retries 10
 
+      # tests/test_redis.py exercises the real pub/sub path that the queue
+      # display board depends on. Same reasoning as Postgres above: skipping
+      # these when Redis is unreachable would leave the one test that proves
+      # events actually reach subscribers permanently unrun.
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+
     env:
       TEST_DATABASE_URL: postgresql+asyncpg://healthdoc:healthdoc@localhost:5432/healthdoc_test
       DATABASE_URL: postgresql+asyncpg://healthdoc:healthdoc@localhost:5432/healthdoc_test
+      REDIS_URL: redis://localhost:6379/0
+
+      # The app's lifespan validates these before serving traffic (B1 crypto
+      # fix): base64 of exactly 32 bytes, and not one of the known
+      # placeholders. Without them the app cannot start, so any test that
+      # enters TestClient as a context manager — i.e. runs lifespan — errors
+      # at setup. CI could not boot the application at all until this was set.
+      #
+      # These are deterministic test values, generated from a fixed seed and
+      # committed on purpose. They are not secrets and must never be used
+      # anywhere but CI; real deployments get real keys from the environment.
+      PII_ENCRYPTION_KEY: dkWUFyQpoVWEpmm4NovS1ketf25uP0WKr6z/sNC1ADk=
+      AADHAAR_HMAC_KEY: MYXTZ1OUDwLh3yYU63CgWnvqVib9FJHqEdLoi4IUrAA=
 
     steps:
       - uses: actions/checkout@v4
@@ -49,10 +73,17 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
 
+      # requirements-dev.txt already -r's requirements.txt and pins the test
+      # toolchain. The old form hand-listed `ruff pytest pytest-asyncio`
+      # UNPINNED and never installed requirements-dev.txt at all, so CI ran a
+      # different toolchain from every developer's machine:
+      #   - aiosqlite was simply absent -> every tests/conftest.py test errored
+      #     with ModuleNotFoundError
+      #   - pytest-asyncio resolved to 1.x while the suite is written against
+      #     0.23, whose async-fixture teardown semantics differ
+      # Add test dependencies to requirements-dev.txt, not to this file.
       - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
-          pip install ruff pytest pytest-asyncio
+        run: pip install -r requirements-dev.txt
 
       - name: Lint (style only — does not block)
         run: ruff check . || true

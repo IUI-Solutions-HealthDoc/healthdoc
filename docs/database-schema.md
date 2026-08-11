@@ -131,8 +131,12 @@ do not merge out of order.**
 | 0018 | — skipped, never create — | | |
 | 0019 | files | files, file_access_log | B7 (B7-W1-03) — `down_revision = "0017"` |
 | 0020 | notifications | notification_history | B4 (B4-W1-01) |
-| 0021 | dpdp_compliance | data_protection_officers, patient_grievances, data_breach_notifications, consent_managers (+ FK consent_records.consent_manager_id) | B7 (W3) |
-| 0022 | guardian_verification | ALTER patients: is_minor, guardian_verified, guardian_verification_method | B2 (W3) |
+| 0020a | accession_counters | accession_counters | B5+B3 — allocator for lab/radiology accession numbers, `down_revision = "0020"` |
+| 0020c | radiology_status_check | ALTER radiology_order_items: status CHECK -> RadiologyOrderStatus | B5 — 0011 constrained it to OrderStatus, which no code path could satisfy, `down_revision = "0020b"` |
+| 0020b | lab_radiology_columns | ALTER lab_order_items: barcode, collected_at; ALTER lab_results: amendment_reason; ALTER radiology_order_items: scan_completed_at | B5+B3 — columns the ORM declared but 0010/0011 never created, `down_revision = "0020a"` |
+| 0021 | encounter_soap | ALTER encounters: subjective, objective, assessment, plan, note_status, row_version, facility_id; ALTER diagnoses: facility_id | B3 (W3) |
+| 0022 | order_number_counters | order_number_counters (+ orders.facility_id) | B6+B3 (W3) |
+| 0022a | dpdp_compliance | data_protection_officers, patient_grievances, data_breach_notifications, consent_managers (+ FK consent_records.consent_manager_id) | B7 (W3) — out-of-band insert, `down_revision = "0022"` |
 | 0023 | vitals_nursing | vitals, nursing_handover_notes, intake_output_records, patient_movement_log | B3 (W5) |
 | 0024 | procurement | purchase_orders, purchase_order_items, stock_transfers, stock_transfer_items, machine_maintenance_logs (+ adjustments.adjustment_type) | B6 (W4) |
 | 0025 | hr_kpi | staff_certifications, staff_training_records, kpi_snapshots | B1 (W5) |
@@ -145,6 +149,10 @@ do not merge out of order.**
 | 0032 | allergies | allergies, ALTER inventory_items | B3 (B3-W?-01) |
 | 0033 | charge_master | charge_master, ALTER invoice_items | B7 (B7-W?-01) |
 | 0034 | ipd_bed_integrity | ALTER admissions, ALTER discharges | B4 (B4-W?-01) |
+| 0035 | patients_row_version | ALTER patients: row_version | B2 (#353) |
+| 0036 | patient_merge_log_decision_reason | ALTER patient_merge_log: decision_reason | B2 (#353) |
+| 0037 | patients_constraint_naming | ALTER patients: constraint names -> NAMING_CONVENTION | B2 (#353) |
+| 0038 | guardian_verification | ALTER patients: is_minor, guardian_verified, guardian_verification_method | B2 (W3) — 0035/0036/0037 are taken by #353, which was already written against them |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -470,6 +478,11 @@ mobile          varchar(20)                      -- contact only, NEVER identity
 address_line    text · village_town text · district text · state_code varchar(5) · pincode varchar(6)
 photo_file_id   UUID NULL                        -- MinIO ref via files (FK added 0019); photo mandatory per ADR 0001
 abha_number     varchar(17) UNIQUE NULL
+abha_linking_token_encrypted bytea NULL          -- AES-256-GCM, added by 0030. NEVER plaintext
+abha_linking_key_version smallint NULL           -- added by 0030; which key encrypted the token
+abha_linked_at  timestamptz NULL                 -- added by 0030; when ABHA was linked to a care context
+                                                 -- CHECK: token and key_version are both-or-neither —
+                                                 -- a blob with no key version cannot be decrypted.
 identity_path   varchar(50) NOT NULL             -- IdentityPath enum (ADR 0001)
 identity_status varchar(50) NOT NULL DEFAULT 'verified'  -- IdentityStatus enum
 status          varchar(50) NOT NULL DEFAULT 'active'    -- PatientStatus: active|merged|deceased
@@ -762,6 +775,8 @@ sample_type varchar(50) NOT NULL
 department_id UUID NULL → departments
 status varchar(50) NOT NULL DEFAULT 'placed'     -- OrderStatus enum
 estimated_minutes int
+barcode varchar(50) UNIQUE NULL                  -- assigned at collection, not at ordering (0020b)
+collected_at timestamptz NULL                    -- sample collection time (0020b)
 ```
 
 **lab_results** — append-only, versioned (corrections = new row)
@@ -771,6 +786,7 @@ version     int NOT NULL                         -- 1, 2, 3...
 is_current  boolean NOT NULL
 result_data jsonb NOT NULL
 remarks     text
+amendment_reason text                            -- why a corrected result was issued (0020b)
 status      varchar(50) NOT NULL                 -- ResultStatus: pending|preliminary|final|corrected
 created_by  UUID NOT NULL → users
 UNIQUE (lab_order_item_id, version)
@@ -786,7 +802,8 @@ scan_type text NOT NULL
 machine_id varchar(50)
 pacs_study_uid varchar(100)                      -- Orthanc StudyInstanceUID
 scheduled_at timestamptz
-status varchar(50) NOT NULL DEFAULT 'placed'
+scan_completed_at timestamptz                    -- TAT baseline for reporting (0020b)
+status varchar(50) NOT NULL DEFAULT 'placed'     -- RadiologyOrderStatus: placed|scheduled|scanned|reporting|released|cancelled (0020c)
 ```
 
 **radiology_reports** — append-only, versioned; same shape as lab_results but
@@ -1013,17 +1030,28 @@ issued_to_patient_id UUID NULL → patients
 ```
 bucket varchar(63) NOT NULL · object_key text NOT NULL   -- MinIO location
 original_name text · content_type varchar(100) · size_bytes bigint
-sha256 char(64)
-owner_module varchar(30)                         -- 'patients', 'lab', ...
+sha256 char(64) NOT NULL                         -- without it the row can't prove the
+                                                 -- MinIO object still matches what was
+                                                 -- uploaded; compute at upload time
+owner_module varchar(50)                         -- 'patients', 'lab', ...
+facility_id UUID NOT NULL → facilities           -- patient photos and guardian ID proofs
+                                                 -- are among the most sensitive rows here
 patient_id UUID NULL → patients
 uploaded_by UUID NOT NULL → users
-sensitivity varchar(30) NOT NULL DEFAULT 'normal'
+sensitivity varchar(50) NOT NULL DEFAULT 'normal'
+scan_status varchar(50) NOT NULL DEFAULT 'skipped'  -- ScanStatus enum, §4A.4. 'skipped' is
+                                                 -- NOT 'clean' — no scanner is wired up yet
 UNIQUE (bucket, object_key)
+INDEX ix_files_facility_id (facility_id)
 ```
 Also in 0019: add the deferred FKs — `patients.photo_file_id`,
 `consent_records.guardian_id_proof_file_id` → `files.id`.
 
-**file_access_log** — append-only: `file_id → files · user_id → users · action varchar(30) (view|download|upload|delete_attempt) · ip_address inet · accessed_at timestamptz NOT NULL`
+**file_access_log** — append-only: `file_id → files · user_id → users · action varchar(50) (FileAction: view|download|upload|delete_attempt) · ip_address inet · accessed_at timestamptz NOT NULL`
+
+Not partitioned, unlike `audit_logs` and `data_access_log`: its volume is bounded by file
+operations rather than by every clinical read, so a plain table with the append-only
+trigger is enough. Revisit if a facility's row count makes the index unwieldy.
 
 ### 0020 — notification_history (B4)
 
@@ -1038,6 +1066,52 @@ Append-only by convention (internal writes only; no update endpoint).
 contain `token_display`, department/room, and UUIDs, but **never** patient names, UHID,
 mobile numbers, or clinical facts.
 
+### 0020a — accession_counters (B5+B3, out-of-band)
+
+**accession_counters** — allocator for `LAB-<YYYYMMDD>-<SEQ5>` and `RAD-<YYYYMMDD>-<SEQ5>`:
+`prefix varchar(10) (LAB|RAD) · counter_date date · last_value int NOT NULL DEFAULT 0 ·
+UNIQUE (prefix, counter_date)`; allocate with
+`INSERT ... ON CONFLICT DO UPDATE ... RETURNING` in the same transaction.
+
+Not gapless and not required to be — unlike invoice/receipt/refund. It exists because
+§2.2 freezes a format that resets daily and a Postgres sequence cannot reset itself.
+The upsert is used rather than `SELECT ... FOR UPDATE` because the first allocation of
+each day has no row to lock yet.
+
+Global, not facility-scoped: `accession_number` is globally UNIQUE and its format
+carries no facility segment. Adding one would require `facility_id` here and a wider
+unique key.
+
+---
+
+
+### 0022 — order_number_counters (B6+B3)
+
+**order_number_counters** (0022, B6+B3) — per-facility, per-day order number allocator
+```
+facility_id UUID NOT NULL → facilities · counter_date date NOT NULL
+seq int NOT NULL DEFAULT 0
+UNIQUE (facility_id, counter_date)
+```
+Keyed on `(facility_id, counter_date)`, unlike `accession_counters`, which is global.
+Accession numbers are globally unique and carry no facility segment; order numbers are
+scoped to the facility that raised them, so two facilities allocating on the same day
+must not contend on one row.
+
+`counter_date` is the **business date** — `(now() AT TIME ZONE facilities.timezone)::date`,
+never UTC. An order raised at 00:30 IST belongs to that day's sequence, not the previous
+one's.
+
+Not gapless, and not required to be — only invoice, receipt and refund numbers carry that
+obligation. Allocate with `INSERT ... ON CONFLICT DO UPDATE ... RETURNING` in the same
+transaction, for the same reason as `accession_counters`: the first allocation of each day
+has no row to lock, so `SELECT ... FOR UPDATE` cannot be used.
+
+Also in 0022: `ALTER orders ADD facility_id UUID NOT NULL → facilities`, backfilled from
+`encounters.facility_id`. Denormalized deliberately — the audit layer opts a model in via
+`__audit_facility_id_field__`, and reaching through `encounter_id` to find the facility
+would make every audited write a join.
+
 ---
 
 
@@ -1049,7 +1123,7 @@ delay; DPO mandatory once designated a Significant Data Fiduciary. CERT-In separ
 requires **6-hour** incident reporting — both timestamps are tracked. NABH DHS 2nd Ed
 (Sept 2025) drives vitals capture, discharge notifications, and staff training records.
 
-**data_protection_officers** (0021, B7) `[Blame]`
+**data_protection_officers** (0022a, B7) `[Blame]`
 ```
 facility_id UUID NOT NULL → facilities · user_id UUID NOT NULL → users
 appointed_at timestamptz NOT NULL · contact_published boolean NOT NULL DEFAULT false
@@ -1058,7 +1132,7 @@ is_active boolean NOT NULL DEFAULT true
 UNIQUE INDEX uq_dpo_active_facility ON (facility_id) WHERE is_active
 ```
 
-**patient_grievances** (0021, B7) `[Blame]` — DPDP grievance redressal; clock starts at created_at
+**patient_grievances** (0022a, B7) `[Blame]` — DPDP grievance redressal; clock starts at created_at
 ```
 grievance_number varchar(30) UNIQUE NOT NULL      -- GRV-<FACILITY>-<YYYYMMDD>-<SEQ4>
 patient_id UUID NOT NULL → patients · facility_id UUID NOT NULL → facilities
@@ -1070,7 +1144,7 @@ resolution text · resolved_at timestamptz · escalation_reason text
 INDEX ix_patient_grievances_status_due_at (status, due_at)
 ```
 
-**data_breach_notifications** (0021, B7) — append-only after status closes
+**data_breach_notifications** (0022a, B7) — append-only after status closes
 ```
 breach_number varchar(30) UNIQUE NOT NULL
 detected_at timestamptz NOT NULL
@@ -1084,14 +1158,14 @@ status varchar(50) NOT NULL DEFAULT 'open'        -- open|contained|reported|clo
 facility_id UUID NOT NULL → facilities
 ```
 
-**consent_managers** (0021, B7) — DPDP-registered intermediaries / ABDM CMs
+**consent_managers** (0022a, B7) — DPDP-registered intermediaries / ABDM CMs
 ```
 cm_registration_id varchar(100) UNIQUE NOT NULL · name text NOT NULL
 endpoint_url text · is_active boolean NOT NULL DEFAULT true
 ```
-Also in 0021: `ALTER consent_records ADD consent_manager_id UUID NULL → consent_managers`.
+Also in 0022a: `ALTER consent_records ADD consent_manager_id UUID NULL → consent_managers`.
 
-**patients additions** (0022, B2)
+**patients additions** (0038, B2)
 ```
 is_minor boolean NOT NULL DEFAULT false           -- set at registration from dob/age_years
 guardian_verified boolean NOT NULL DEFAULT false
@@ -1686,9 +1760,22 @@ and duplicate identities are the two worst outcomes this system can produce.
 - Every `POST` that creates something (patients, visits, orders, payments, refunds,
   dispenses, tokens, procedures) **requires an `Idempotency-Key` header** (client-generated
   UUID, stable across retries of the same user action).
-- Table **`idempotency_keys`** (0002, B1): `key varchar(64) PK-unique · endpoint varchar(120)
-  · request_hash char(64) · response_status int · response_body jsonb · user_id UUID →
-  users · created_at timestamptz`. `UNIQUE (key, endpoint)`.
+- Table **`idempotency_keys`** (0003a, B1) — full column list in §3. The unique key is
+  **`UNIQUE (key, user_id, endpoint)`**, and `user_id` is in it deliberately: keys are
+  client-generated, so two users can emit the same key against the same endpoint.
+  Scoping by `(key, endpoint)` alone hands the second caller the **first caller's stored
+  response** — a cross-user data leak wearing a replay's clothes.
+  Do not re-implement this table or its helpers. Use
+  `app.common.idempotency`: `hash_request_body`, `check_idempotency`,
+  `record_idempotent_response`. All three take `user_id`; pass it on **both** the read
+  and the write, or the write stores NULL, the replay lookup never matches, and
+  idempotency silently does nothing while appearing to work.
+
+  > This bullet previously read `(0002, B1)`, `key varchar(64) PK-unique`,
+  > `endpoint varchar(120)`, `UNIQUE (key, endpoint)` — every one of those wrong, and
+  > contradicting §3 on the same page. Four separate modules implemented it from here
+  > rather than from §3 and each reproduced the leak. If you find yourself
+  > disagreeing with §3, §3 is the schema of record.
 - Behaviour: first call executes and stores the response; a repeat with the same key
   **replays the stored response** (never re-executes). Same key + different body ⇒ `409
   idempotency_key_reuse`. Keys expire after 24 h.
@@ -1916,7 +2003,6 @@ Not blockers for W1–W3 development; each becomes its own migration/PR when sch
 |---|---|
 | Postgres RLS policies (needs `app.current_facility` session var wiring) | v3.5, after 0002–0020 are stable |
 | `deleted_at` soft-delete on visits/orders (non-patient entities hard-delete-free today via status) | v3.5 |
-| `facilities.timezone varchar(50)` (IST assumed today) | v3.5 |
 | `kpi_definitions` catalog + admin UI | v3.5 |
 | `notification_delivery_attempts` tracking | v3.5 |
 | Blood component manufacturing tables (0016 stub is intentional) | v3.5 |
