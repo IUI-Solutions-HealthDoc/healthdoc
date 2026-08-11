@@ -236,19 +236,24 @@ async def test_dangling_fks_resolve_and_restrict_holds(engine: AsyncEngine, faci
             )
             await conn.execute(
                 sa.text(
-                    "INSERT INTO encounters (id, visit_id, provider_user_id, created_by) "
-                    "VALUES (:id, :visit_id, :provider, :created_by)"
+                    "INSERT INTO encounters "
+                    "(id, visit_id, facility_id, provider_user_id, created_by) "
+                    "VALUES (:id, :visit_id, :facility_id, :provider, :created_by)"
                 ),
-                {"id": encounter_id, "visit_id": visit_id, "provider": user_id, "created_by": user_id},
+                {"id": encounter_id, "visit_id": visit_id, "facility_id": facility_id,
+                 "provider": user_id, "created_by": user_id},
             )
             await conn.execute(
                 sa.text(
                     "INSERT INTO orders "
-                    "(id, order_number, encounter_id, patient_id, order_type, created_by) "
-                    "VALUES (:id, :num, :encounter_id, :patient_id, 'lab', :created_by)"
+                    "(id, order_number, encounter_id, patient_id, order_type, "
+                    "facility_id, created_by) "
+                    "VALUES (:id, :num, :encounter_id, :patient_id, 'lab', "
+                    ":facility_id, :created_by)"
                 ),
                 {"id": order_id, "num": f"O{uuid.uuid4().hex[:10]}", "encounter_id": encounter_id,
-                 "patient_id": patient_id, "created_by": user_id},
+                 "patient_id": patient_id, "facility_id": facility_id,
+                 "created_by": user_id},
             )
             result_id = uuid.uuid4()
             await conn.execute(
