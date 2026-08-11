@@ -31,7 +31,17 @@ class Settings(BaseSettings):
     abdm_client_id: str = "change-me"
     abdm_client_secret: str = "change-me"
     abdm_hfr_facility_id: str = "change-me"
-
+    
+    aadhaar_hmac_key: str = "change-me-in-env"
+    aadhaar_encryption_key: str = "change-me-in-env"
+    aadhaar_hmac_keys_json: str = ""
+    aadhaar_encryption_keys_json: str = ""
+    
+    aadhaar_hmac_current_key_version: int = 1
+    # Drives encrypt_pii's default key version going forward.
+    # decrypt_pii reads its version from the ciphertext blob itself,
+    # so this setting only affects new encryptions, not decryption.
+    aadhaar_encryption_current_key_version: int = 1
     icd11_base_url: str = "http://icd11:80"
     icd11_release: str = "2025-01"
     icd11_linearization: str = "mms"

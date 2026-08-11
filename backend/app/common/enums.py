@@ -98,6 +98,29 @@ class ResultStatus(CheckedEnum):
     CORRECTED = "corrected"
 
 
+class RadiologyOrderStatus(CheckedEnum):
+    """The radiology ITEM's lifecycle, which is not the order's.
+
+    OrderStatus (placed|accepted|in_progress|completed|cancelled) describes
+    what happened to a request. This describes where a study physically is,
+    and a modality worklist is built on the difference: 'scanned' means the
+    images exist and a radiologist is owed a report; 'reporting' means one is
+    being written; 'released' means the referring clinician can act on it.
+    Collapsing those into in_progress makes the worklist unable to answer the
+    only question it exists to answer.
+
+    0011 originally constrained radiology_order_items.status to OrderStatus,
+    which no code path could satisfy — the router has always set scheduled,
+    scanned, reporting and released. Corrected in 0020c.
+    """
+    PLACED = "placed"
+    SCHEDULED = "scheduled"
+    SCANNED = "scanned"
+    REPORTING = "reporting"
+    RELEASED = "released"
+    CANCELLED = "cancelled"
+
+
 class PrescriptionItemStatus(CheckedEnum):
     PRESCRIBED = "prescribed"
     PARTIALLY_DISPENSED = "partially_dispensed"

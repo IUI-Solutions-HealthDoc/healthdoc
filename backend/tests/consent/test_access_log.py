@@ -164,7 +164,7 @@ class TestDbWriteFailureFallback:
 class TestRoleSelection:
     async def test_uses_shared_select_acting_role(self, monkeypatch, tmp_path):
         """Confirms access_log.py defers to app.audit.deps'
-        _select_acting_role rather than a second, divergent
+        select_acting_role rather than a second, divergent
         implementation."""
         import app.consent.access_log as access_log_module
         import app.consent.access_log_fallback as fallback_module
@@ -180,7 +180,7 @@ class TestRoleSelection:
             called_with["roles"] = roles
             return "the-selected-role"
 
-        monkeypatch.setattr(access_log_module, "_select_acting_role", _fake_select)
+        monkeypatch.setattr(access_log_module, "select_acting_role", _fake_select)
 
         class _ExplodingSessionCtx:
             async def __aenter__(self):

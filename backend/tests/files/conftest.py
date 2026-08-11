@@ -9,27 +9,25 @@ naming/shape) so both suites point at the same real test database and
 look the same to anyone reading both. See that file's docstring for the
 reasoning behind each of these choices — not re-litigated here.
 
-One deliberate divergence from audit's conftest: audit's `engine`
-fixture assumes migrations are already applied externally (`alembic
-upgrade head`) before tests run, because 0003 is a real, merged
-migration sitting in a runnable chain. 0019 is NOT in a runnable chain
-yet (0002-0017 aren't all merged on this branch), so `engine` here
-additionally runs 0019's upgrade()/downgrade() through an isolated
-MigrationContext bound to a raw connection, bypassing alembic's
-revision-chain resolution entirely — same isolation trick used for the
-billing module's tests. Once the chain is unbroken, this fixture can be
-simplified back down to match audit's.
+No divergence from audit's conftest any more: `engine` assumes migrations
+are already applied externally (`alembic upgrade head`), same as audit's,
+because 0019 is now a merged migration in a runnable chain.
 
-facilities/users are real via 0002/0003 (merged) — not stubbed here.
-patients/consent_records/order_external_results are NOT merged on this
-branch (0006/0004/0008), so those three get single-column stub tables,
-same as before.
+It used to do more. While 0019 was parked, this fixture applied and reverted
+it per test through an isolated MigrationContext, and stubbed the tables it
+references that hadn't merged yet. All of that is gone — consent_records
+(0004), patients (0006) and order_external_results (0008) are real, 0019
+itself is real, and re-applying a migration alembic has already run raises
+DuplicateTableError.
+
+Worth remembering why the scaffolding existed, though: each of those three
+tables broke this file on the day its migration merged, because a stub-era
+CREATE or INSERT stopped matching reality. If you ever stub a table here
+again, decide at runtime whether it exists rather than assuming.
 """
 from __future__ import annotations
 
 import asyncio
-import importlib
-import importlib.util
 import os
 import sys
 import uuid
@@ -38,8 +36,6 @@ from datetime import date, datetime, timezone
 
 import pytest_asyncio
 import sqlalchemy as sa
-from alembic.migration import MigrationContext
-from alembic.operations import Operations
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
@@ -59,91 +55,6 @@ TEST_DATABASE_URL = os.environ.get(
     "postgresql+asyncpg://healthdoc:change-me@localhost:5432/healthdoc_test",
 )
 
-# Migration filenames start with a digit, so they can't be `import`-ed as
-# a plain statement. Load by FILE PATH rather than dotted module path:
-# 0019 lives in versions/ when its predecessors are merged and in
-# pending/ when they aren't, and pending/ is deliberately not a package
-# (no __init__.py — alembic must not see those files), so
-# import_module("migrations.versions.0019_files") raises ModuleNotFoundError
-# the moment 0019 is parked. That is what happened: parking 0019 turned
-# every backend CI run red at COLLECTION time, on every open PR, with an
-# error naming a file most authors had never touched.
-#
-# Nothing below needs 0019 to be in the alembic chain — `engine` runs its
-# upgrade() through an isolated MigrationContext (see module docstring).
-# Only the module object is needed, so look in both homes.
-def _load_migration_0019():
-    here = os.path.dirname(os.path.abspath(__file__))
-    migrations_dir = os.path.join(here, "..", "..", "migrations")
-    for home in ("versions", "pending"):
-        path = os.path.normpath(os.path.join(migrations_dir, home, "0019_files.py"))
-        if os.path.exists(path):
-            spec = importlib.util.spec_from_file_location("migration_0019", path)
-            assert spec and spec.loader
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            return module
-    raise RuntimeError(
-        "0019_files.py not found in migrations/versions/ or migrations/pending/ "
-        "— if it was renamed, update tests/files/conftest.py."
-    )
-
-
-migration_0019 = _load_migration_0019()
-
-# asyncpg prepares each statement individually and rejects a
-# semicolon-joined multi-statement string ("cannot insert multiple
-# commands into a prepared statement") — psycopg2 silently allowed this,
-# asyncpg does not. Each CREATE/DROP must be its own execute() call, so
-# these are lists of individual statements, not one blob.
-STUB_DDL: list[str] = [
-    """
-    CREATE TABLE IF NOT EXISTS patients (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        photo_file_id UUID
-    );
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS consent_records (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        guardian_id_proof_file_id UUID
-    );
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS order_external_results (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        result_file_id UUID
-    );
-    """,
-]
-
-DROP_STUB_DDL: list[str] = [
-    "DROP TABLE IF EXISTS order_external_results;",
-    "DROP TABLE IF EXISTS consent_records;",
-    "DROP TABLE IF EXISTS patients;",
-]
-
-
-def _upgrade_sync(sync_conn) -> None:
-    sync_conn.execute(sa.text('CREATE EXTENSION IF NOT EXISTS "uuid-ossp";'))
-    for stmt in STUB_DDL:
-        sync_conn.execute(sa.text(stmt))
-    ctx = MigrationContext.configure(sync_conn)
-    # Operations.context() takes the MigrationContext itself, NOT an
-    # Operations instance wrapping it — passing Operations(ctx) makes
-    # operations.migration_context resolve to the wrong type inside the
-    # migration and breaks alembic's internal SchemaObjects.metadata().
-    with Operations.context(ctx):
-        migration_0019.upgrade()
-
-
-def _downgrade_sync(sync_conn) -> None:
-    ctx = MigrationContext.configure(sync_conn)
-    with Operations.context(ctx):
-        migration_0019.downgrade()
-    for stmt in DROP_STUB_DDL:
-        sync_conn.execute(sa.text(stmt))
-
 
 @pytest_asyncio.fixture
 async def engine() -> AsyncGenerator[AsyncEngine, None]:
@@ -151,17 +62,16 @@ async def engine() -> AsyncGenerator[AsyncEngine, None]:
     fixture name and pool_pre_ping=True — see that file's docstring for
     why session-scoped breaks under pytest-asyncio's per-test event loop.
 
-    Additionally applies/reverts 0019 per test — see this file's module
-    docstring for why that's needed here but not in audit's version.
+    This used to apply and revert 0019 per test through an isolated
+    MigrationContext, because 0019 was parked and `alembic upgrade head`
+    could not reach it. 0019 is in the chain now, so the migration runs
+    once as part of the normal upgrade and applying it again here raised
+    DuplicateTableError on every test. Simplified to match audit's, which
+    is what the old docstring said should happen "once the chain is
+    unbroken".
     """
     eng = create_async_engine(TEST_DATABASE_URL, pool_pre_ping=True)
-    async with eng.begin() as conn:
-        await conn.run_sync(_upgrade_sync)
-
     yield eng
-
-    async with eng.begin() as conn:
-        await conn.run_sync(_downgrade_sync)
     await eng.dispose()
 
 

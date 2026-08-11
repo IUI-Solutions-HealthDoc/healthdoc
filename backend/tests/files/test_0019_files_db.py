@@ -152,30 +152,123 @@ async def test_files_widened_columns_accept_long_values(engine: AsyncEngine, fac
 
 
 async def test_dangling_fks_resolve_and_restrict_holds(engine: AsyncEngine, facility_id, user_id):
-    async with engine.begin() as conn:
-        file_id = await seed_file(conn, facility_id, user_id)
+    # Everything here is rolled back rather than committed, on purpose.
+    # consent_records and consent_purposes are REAL tables (0004) that the
+    # teardown does not drop — only the stubs get dropped. A committed
+    # consent_records row would outlive `files`, and the next test's 0019
+    # upgrade re-adds fk_consent_records_guardian_id_proof_file_id, which
+    # Postgres validates against existing rows: the orphaned row would fail
+    # that ADD CONSTRAINT and take the whole file down again.
+    async with engine.connect() as conn:
+        outer = await conn.begin()
+        try:
+            file_id = await seed_file(conn, facility_id, user_id)
 
-        patient_id = uuid.uuid4()
-        await conn.execute(
-            sa.text("INSERT INTO patients (id, photo_file_id) VALUES (:id, :file_id)"),
-            {"id": patient_id, "file_id": file_id},
-        )
-        consent_id = uuid.uuid4()
-        await conn.execute(
-            sa.text(
-                "INSERT INTO consent_records (id, guardian_id_proof_file_id) VALUES (:id, :file_id)"
-            ),
-            {"id": consent_id, "file_id": file_id},
-        )
-        order_id = uuid.uuid4()
-        await conn.execute(
-            sa.text(
-                "INSERT INTO order_external_results (id, result_file_id) VALUES (:id, :file_id)"
-            ),
-            {"id": order_id, "file_id": file_id},
-        )
+            # patients is the REAL 0006 table now, not a stub — same story as
+            # consent_records below, one migration later. full_name, sex,
+            # identity_path, facility_id and created_by are NOT NULL with no
+            # default; sex and identity_path are CHECK-constrained; and two
+            # either/or CHECKs apply — ck_patients_dob_or_age and
+            # ck_patients_has_identifier — so age_years and uhid are required
+            # even though each column is individually nullable.
+            patient_id = uuid.uuid4()
+            await conn.execute(
+                sa.text(
+                    "INSERT INTO patients "
+                    "(id, full_name, sex, identity_path, facility_id, created_by, "
+                    " age_years, uhid, photo_file_id) "
+                    "VALUES (:id, 'Test Patient', 'other', 'demographics_only', "
+                    "        :facility_id, :created_by, 30, :uhid, :file_id)"
+                ),
+                {
+                    "id": patient_id,
+                    "facility_id": facility_id,
+                    "created_by": user_id,
+                    "uhid": f"IN-TS-TST001-2026-{uuid.uuid4().hex[:6]}-0",
+                    "file_id": file_id,
+                },
+            )
+            # consent_records is the REAL 0004 table now, not a stub. Five columns
+            # are NOT NULL with no server_default: patient_id, purpose_id,
+            # granted_by_type, channel, created_by.
+            #   - granted_by_type and channel are CHECK-constrained
+            #     (ck_consent_records_granted_by_type, ck_consent_records_channel),
+            #     so they need real member values, not placeholders.
+            #   - purpose_id is an ondelete=RESTRICT FK to consent_purposes, which
+            #     0004 creates but does not seed — so seed one here.
+            #   - created_by FKs users; the user_id fixture already provides one.
+            #   - patient_id has no FK until 0006, so a bare UUID is fine for now.
+            purpose_id = uuid.uuid4()
+            await conn.execute(
+                sa.text("INSERT INTO consent_purposes (id, purpose_code) VALUES (:id, :code)"),
+                {"id": purpose_id, "code": f"test_{uuid.uuid4().hex[:8]}"},
+            )
+            consent_id = uuid.uuid4()
+            await conn.execute(
+                sa.text(
+                    "INSERT INTO consent_records "
+                    "(id, patient_id, purpose_id, granted_by_type, channel, "
+                    " created_by, guardian_id_proof_file_id) "
+                    "VALUES (:id, :patient_id, :purpose_id, 'patient', 'written', "
+                    "        :created_by, :file_id)"
+                ),
+                {
+                    "id": consent_id,
+                    "patient_id": uuid.uuid4(),
+                    "purpose_id": purpose_id,
+                    "created_by": user_id,
+                    "file_id": file_id,
+                },
+            )
+            # order_external_results is real as of 0008 too, and its order_id
+            # is a NOT NULL FK — so the whole parent chain has to exist:
+            # visits -> encounters -> orders -> order_external_results.
+            # visit_type and order_type are CHECK-constrained.
+            visit_id, encounter_id, order_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+            await conn.execute(
+                sa.text(
+                    "INSERT INTO visits "
+                    "(id, visit_number, patient_id, facility_id, visit_type, visit_date, created_by) "
+                    "VALUES (:id, :num, :patient_id, :facility_id, 'opd', CURRENT_DATE, :created_by)"
+                ),
+                {"id": visit_id, "num": f"V{uuid.uuid4().hex[:10]}", "patient_id": patient_id,
+                 "facility_id": facility_id, "created_by": user_id},
+            )
+            await conn.execute(
+                sa.text(
+                    "INSERT INTO encounters (id, visit_id, provider_user_id, created_by) "
+                    "VALUES (:id, :visit_id, :provider, :created_by)"
+                ),
+                {"id": encounter_id, "visit_id": visit_id, "provider": user_id, "created_by": user_id},
+            )
+            await conn.execute(
+                sa.text(
+                    "INSERT INTO orders "
+                    "(id, order_number, encounter_id, patient_id, order_type, created_by) "
+                    "VALUES (:id, :num, :encounter_id, :patient_id, 'lab', :created_by)"
+                ),
+                {"id": order_id, "num": f"O{uuid.uuid4().hex[:10]}", "encounter_id": encounter_id,
+                 "patient_id": patient_id, "created_by": user_id},
+            )
+            result_id = uuid.uuid4()
+            await conn.execute(
+                sa.text(
+                    "INSERT INTO order_external_results "
+                    "(id, order_id, summary, recorded_by, result_file_id) "
+                    "VALUES (:id, :order_id, 'external report', :recorded_by, :file_id)"
+                ),
+                {"id": result_id, "order_id": order_id, "recorded_by": user_id, "file_id": file_id},
+            )
 
-        # ondelete=RESTRICT on all three retrofit FKs — deleting the
-        # referenced file while these rows exist must fail.
-        with pytest.raises(IntegrityError):
-            await conn.execute(sa.text("DELETE FROM files WHERE id = :id"), {"id": file_id})
+            # ondelete=RESTRICT on all three retrofit FKs — deleting the
+            # referenced file while these rows exist must fail. The failure is
+            # scoped to a SAVEPOINT: in Postgres an error aborts the whole
+            # transaction, so without begin_nested() the expected IntegrityError
+            # would poison `outer` and the rollback below could not run cleanly.
+            with pytest.raises(IntegrityError):
+                async with conn.begin_nested():
+                    await conn.execute(
+                        sa.text("DELETE FROM files WHERE id = :id"), {"id": file_id}
+                    )
+        finally:
+            await outer.rollback()

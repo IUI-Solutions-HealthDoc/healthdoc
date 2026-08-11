@@ -102,15 +102,15 @@ class ConsentRecord(UUIDPk, Blame, Timestamps, Base):
         Index("ix_consent_records_updated_by", "updated_by"),
         CheckConstraint(
             "granted_by_type IN ('patient', 'guardian', 'nominee')",
-            name="ck_consent_records_granted_by_type",
+            name="granted_by_type",
         ),
         CheckConstraint(
             "channel IN ('verbal', 'written', 'digital_otp', 'abdm_consent_manager')",
-            name="ck_consent_records_channel",
+            name="channel",
         ),
         CheckConstraint(
             "status IN ('requested', 'granted', 'denied', 'revoked', 'expired')",
-            name="ck_consent_records_status",
+            name="status",
         ),
     )
 
@@ -153,7 +153,7 @@ class ConsentWithdrawal(UUIDPk, Base):
         Index("ix_consent_withdrawals_withdrawn_by_user_id", "withdrawn_by_user_id"),
         CheckConstraint(
             "withdrawn_by_type IN ('patient', 'guardian', 'nominee', 'system_expiry')",
-            name="ck_consent_withdrawals_withdrawn_by_type",
+            name="withdrawn_by_type",
         ),
     )
 
@@ -207,7 +207,7 @@ class DataAccessLog(UUIDPk, Base):
         Index("ix_data_access_log_consent_id", "consent_id"),
         CheckConstraint(
             "access_channel IN ('ui', 'api', 'abdm_hiu', 'export')",
-            name="ck_data_access_log_access_channel",
+            name="access_channel",
         ),
         {"postgresql_partition_by": "RANGE (accessed_at)"},
     )
@@ -274,7 +274,7 @@ class BreakGlassGrant(UUIDPk, Timestamps, Base):
         Index("ix_break_glass_grants_reviewed_by", "reviewed_by"),
         CheckConstraint(
             "char_length(justification) >= 20",
-            name="ck_break_glass_grants_justification_length",
+            name="justification_length",
         ),
     )
 
