@@ -50,18 +50,20 @@ async def _seed_billable_lab_charge(db, *, visit_id: uuid.UUID, test_code: str =
     # parameters, so none of the call sites below have to change.
     visit_row = (
         await db.execute(
-            sa.text("SELECT patient_id, created_by FROM visits WHERE id = :id"),
+            sa.text("SELECT patient_id, facility_id, created_by FROM visits WHERE id = :id"),
             {"id": visit_id},
         )
     ).one()
     patient_id, actor_id = visit_row.patient_id, visit_row.created_by
+    facility_id = visit_row.facility_id
 
     await db.execute(
         sa.text(
-            "INSERT INTO encounters (id, visit_id, provider_user_id, created_by) "
-            "VALUES (:id, :visit_id, :provider, :created_by)"
+            "INSERT INTO encounters "
+            "(id, visit_id, facility_id, provider_user_id, created_by) "
+            "VALUES (:id, :visit_id, :facility_id, :provider, :created_by)"
         ),
-        {"id": encounter_id, "visit_id": visit_id,
+        {"id": encounter_id, "visit_id": visit_id, "facility_id": facility_id,
          "provider": actor_id, "created_by": actor_id},
     )
     await db.execute(
