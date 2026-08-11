@@ -134,8 +134,9 @@ do not merge out of order.**
 | 0020a | accession_counters | accession_counters | B5+B3 — allocator for lab/radiology accession numbers, `down_revision = "0020"` |
 | 0020c | radiology_status_check | ALTER radiology_order_items: status CHECK -> RadiologyOrderStatus | B5 — 0011 constrained it to OrderStatus, which no code path could satisfy, `down_revision = "0020b"` |
 | 0020b | lab_radiology_columns | ALTER lab_order_items: barcode, collected_at; ALTER lab_results: amendment_reason; ALTER radiology_order_items: scan_completed_at | B5+B3 — columns the ORM declared but 0010/0011 never created, `down_revision = "0020a"` |
-| 0021 | dpdp_compliance | data_protection_officers, patient_grievances, data_breach_notifications, consent_managers (+ FK consent_records.consent_manager_id) | B7 (W3) |
-| 0022 | guardian_verification | ALTER patients: is_minor, guardian_verified, guardian_verification_method | B2 (W3) |
+| 0021 | encounter_soap | ALTER encounters: subjective, objective, assessment, plan, note_status, row_version, facility_id; ALTER diagnoses: facility_id | B3 (W3) |
+| 0022 | order_number_counters | order_number_counters (+ orders.facility_id) | B6+B3 (W3) |
+| 0022a | dpdp_compliance | data_protection_officers, patient_grievances, data_breach_notifications, consent_managers (+ FK consent_records.consent_manager_id) | B7 (W3) — out-of-band insert, `down_revision = "0022"` |
 | 0023 | vitals_nursing | vitals, nursing_handover_notes, intake_output_records, patient_movement_log | B3 (W5) |
 | 0024 | procurement | purchase_orders, purchase_order_items, stock_transfers, stock_transfer_items, machine_maintenance_logs (+ adjustments.adjustment_type) | B6 (W4) |
 | 0025 | hr_kpi | staff_certifications, staff_training_records, kpi_snapshots | B1 (W5) |
@@ -148,6 +149,10 @@ do not merge out of order.**
 | 0032 | allergies | allergies, ALTER inventory_items | B3 (B3-W?-01) |
 | 0033 | charge_master | charge_master, ALTER invoice_items | B7 (B7-W?-01) |
 | 0034 | ipd_bed_integrity | ALTER admissions, ALTER discharges | B4 (B4-W?-01) |
+| 0035 | patients_row_version | ALTER patients: row_version | B2 (#353) |
+| 0036 | patient_merge_log_decision_reason | ALTER patient_merge_log: decision_reason | B2 (#353) |
+| 0037 | patients_constraint_naming | ALTER patients: constraint names -> NAMING_CONVENTION | B2 (#353) |
+| 0038 | guardian_verification | ALTER patients: is_minor, guardian_verified, guardian_verification_method | B2 (W3) — 0035/0036/0037 are taken by #353, which was already written against them |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -1080,6 +1085,36 @@ unique key.
 ---
 
 
+### 0022 — order_number_counters (B6+B3)
+
+**order_number_counters** (0022, B6+B3) — per-facility, per-day order number allocator
+```
+facility_id UUID NOT NULL → facilities · counter_date date NOT NULL
+seq int NOT NULL DEFAULT 0
+UNIQUE (facility_id, counter_date)
+```
+Keyed on `(facility_id, counter_date)`, unlike `accession_counters`, which is global.
+Accession numbers are globally unique and carry no facility segment; order numbers are
+scoped to the facility that raised them, so two facilities allocating on the same day
+must not contend on one row.
+
+`counter_date` is the **business date** — `(now() AT TIME ZONE facilities.timezone)::date`,
+never UTC. An order raised at 00:30 IST belongs to that day's sequence, not the previous
+one's.
+
+Not gapless, and not required to be — only invoice, receipt and refund numbers carry that
+obligation. Allocate with `INSERT ... ON CONFLICT DO UPDATE ... RETURNING` in the same
+transaction, for the same reason as `accession_counters`: the first allocation of each day
+has no row to lock, so `SELECT ... FOR UPDATE` cannot be used.
+
+Also in 0022: `ALTER orders ADD facility_id UUID NOT NULL → facilities`, backfilled from
+`encounters.facility_id`. Denormalized deliberately — the audit layer opts a model in via
+`__audit_facility_id_field__`, and reaching through `encounter_id` to find the facility
+would make every audited write a join.
+
+---
+
+
 ### 0021–0026 — Compliance & operations wave (v3: DPDP Rules 2025 + NABH DHS 2nd Ed)
 
 Verified drivers: DPDP Rules 2025 (notified) — breach intimation to the DPB *without
@@ -1088,7 +1123,7 @@ delay; DPO mandatory once designated a Significant Data Fiduciary. CERT-In separ
 requires **6-hour** incident reporting — both timestamps are tracked. NABH DHS 2nd Ed
 (Sept 2025) drives vitals capture, discharge notifications, and staff training records.
 
-**data_protection_officers** (0021, B7) `[Blame]`
+**data_protection_officers** (0022a, B7) `[Blame]`
 ```
 facility_id UUID NOT NULL → facilities · user_id UUID NOT NULL → users
 appointed_at timestamptz NOT NULL · contact_published boolean NOT NULL DEFAULT false
@@ -1097,7 +1132,7 @@ is_active boolean NOT NULL DEFAULT true
 UNIQUE INDEX uq_dpo_active_facility ON (facility_id) WHERE is_active
 ```
 
-**patient_grievances** (0021, B7) `[Blame]` — DPDP grievance redressal; clock starts at created_at
+**patient_grievances** (0022a, B7) `[Blame]` — DPDP grievance redressal; clock starts at created_at
 ```
 grievance_number varchar(30) UNIQUE NOT NULL      -- GRV-<FACILITY>-<YYYYMMDD>-<SEQ4>
 patient_id UUID NOT NULL → patients · facility_id UUID NOT NULL → facilities
@@ -1109,7 +1144,7 @@ resolution text · resolved_at timestamptz · escalation_reason text
 INDEX ix_patient_grievances_status_due_at (status, due_at)
 ```
 
-**data_breach_notifications** (0021, B7) — append-only after status closes
+**data_breach_notifications** (0022a, B7) — append-only after status closes
 ```
 breach_number varchar(30) UNIQUE NOT NULL
 detected_at timestamptz NOT NULL
@@ -1123,14 +1158,14 @@ status varchar(50) NOT NULL DEFAULT 'open'        -- open|contained|reported|clo
 facility_id UUID NOT NULL → facilities
 ```
 
-**consent_managers** (0021, B7) — DPDP-registered intermediaries / ABDM CMs
+**consent_managers** (0022a, B7) — DPDP-registered intermediaries / ABDM CMs
 ```
 cm_registration_id varchar(100) UNIQUE NOT NULL · name text NOT NULL
 endpoint_url text · is_active boolean NOT NULL DEFAULT true
 ```
-Also in 0021: `ALTER consent_records ADD consent_manager_id UUID NULL → consent_managers`.
+Also in 0022a: `ALTER consent_records ADD consent_manager_id UUID NULL → consent_managers`.
 
-**patients additions** (0022, B2)
+**patients additions** (0038, B2)
 ```
 is_minor boolean NOT NULL DEFAULT false           -- set at registration from dob/age_years
 guardian_verified boolean NOT NULL DEFAULT false
