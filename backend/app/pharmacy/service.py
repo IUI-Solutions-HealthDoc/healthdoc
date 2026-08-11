@@ -447,9 +447,17 @@ async def create_dispense(
         text("SELECT id FROM prescriptions WHERE id = :id FOR UPDATE"),
         {"id": str(payload.prescription_id)},
     )
+    # pr-check: ignore — MAX()+1 is safe HERE and only here, because the
+    # SELECT ... FOR UPDATE above already serialises every concurrent dispense
+    # for this prescription. Two callers cannot both read the same MAX.
+    #
+    # Same exception as queue/service.py:202, and the same caveat: do NOT copy
+    # this pattern anywhere the parent row isn't already locked. Where no
+    # single row lock covers the scope — accession numbers, receipt numbers —
+    # use a counters row instead (app/common/accession.py, billing_counters).
     next_version = (
         await db.execute(
-            text("SELECT COALESCE(MAX(version), 0) + 1 FROM pharmacy_dispenses "
+            text("SELECT COALESCE(MAX(version), 0) + 1 FROM pharmacy_dispenses "  # pr-check: ignore
                  "WHERE prescription_id = :id"),
             {"id": str(payload.prescription_id)},
         )
