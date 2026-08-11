@@ -13,6 +13,7 @@ thin wiring and the actual behavior is verified here.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi import HTTPException
@@ -54,6 +55,16 @@ async def _seed_patient(engine: AsyncEngine, *, facility_id, created_by) -> uuid
                 ":created_by, 30, :uhid)"
             ),
             {"id": pid, "facility_id": facility_id, "created_by": created_by, "uhid": f"UHID{pid.hex[:8]}"},
+        )
+    return pid
+
+
+async def _seed_purpose(engine: AsyncEngine, *, code: str) -> uuid.UUID:
+    pid = uuid.uuid4()
+    async with engine.begin() as conn:
+        await conn.execute(
+            text("INSERT INTO consent_purposes (id, purpose_code) VALUES (:id, :code)"),
+            {"id": pid, "code": code},
         )
     return pid
 
@@ -221,6 +232,99 @@ class TestWithdrawConsent:
         assert audit_row is not None
         assert audit_row.reason == "patient changed their mind"
 
+    async def test_withdrawal_with_scope_populates_cascade_fields(
+        self, session_factory, engine: AsyncEngine, facility_id, user_id, purpose_id
+    ):
+        patient_id = await _seed_patient(engine, facility_id=facility_id, created_by=user_id)
+        async with session_factory() as db:
+            record = await service.create_consent_record(
+                db, patient_id=patient_id, facility_id=facility_id, created_by=user_id,
+                purpose_id=purpose_id, granted_by_type="patient", channel="verbal",
+                scope=["lab_results", "abdm_sharing"],
+            )
+            await db.commit()
+            consent_id = record.id
+
+        async with session_factory() as db:
+            withdrawal = await service.withdraw_consent(
+                db, consent_id, withdrawn_by_type="patient", withdrawn_by_user_id=user_id,
+                reason=None, facility_id=facility_id,
+            )
+            await db.commit()
+
+        assert withdrawal.cascaded_actions == {"lab_results": "pending", "abdm_sharing": "pending"}
+        assert withdrawal.cascade_deadline is not None
+        assert withdrawal.cascade_deadline > withdrawal.withdrawn_at
+        assert withdrawal.cascade_completed_at is None
+
+    async def test_withdrawal_without_scope_leaves_cascade_fields_null(
+        self, session_factory, engine: AsyncEngine, facility_id, user_id, purpose_id
+    ):
+        patient_id = await _seed_patient(engine, facility_id=facility_id, created_by=user_id)
+        async with session_factory() as db:
+            record = await service.create_consent_record(
+                db, patient_id=patient_id, facility_id=facility_id, created_by=user_id,
+                purpose_id=purpose_id, granted_by_type="patient", channel="verbal",
+            )  # no scope
+            await db.commit()
+            consent_id = record.id
+
+        async with session_factory() as db:
+            withdrawal = await service.withdraw_consent(
+                db, consent_id, withdrawn_by_type="patient", withdrawn_by_user_id=user_id,
+                reason=None, facility_id=facility_id,
+            )
+            await db.commit()
+
+        assert withdrawal.cascaded_actions is None
+        assert withdrawal.cascade_deadline is None
+
+    async def test_withdrawal_cancels_unsent_renewal_reminders(
+        self, session_factory, engine: AsyncEngine, facility_id, user_id, purpose_id
+    ):
+        patient_id = await _seed_patient(engine, facility_id=facility_id, created_by=user_id)
+        async with session_factory() as db:
+            record = await service.create_consent_record(
+                db, patient_id=patient_id, facility_id=facility_id, created_by=user_id,
+                purpose_id=purpose_id, granted_by_type="patient", channel="verbal",
+            )
+            await db.commit()
+            consent_id = record.id
+
+        unsent_id, sent_id = uuid.uuid4(), uuid.uuid4()
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO consent_renewal_reminders (id, consent_id, remind_at) "
+                    "VALUES (:id, :consent_id, now() + interval '5 days')"
+                ),
+                {"id": unsent_id, "consent_id": consent_id},
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO consent_renewal_reminders (id, consent_id, remind_at, sent_at) "
+                    "VALUES (:id, :consent_id, now() - interval '1 day', now())"
+                ),
+                {"id": sent_id, "consent_id": consent_id},
+            )
+
+        async with session_factory() as db:
+            await service.withdraw_consent(
+                db, consent_id, withdrawn_by_type="patient", withdrawn_by_user_id=user_id,
+                reason=None, facility_id=facility_id,
+            )
+            await db.commit()
+
+        async with engine.begin() as conn:
+            remaining = set(
+                (await conn.execute(
+                    text("SELECT id FROM consent_renewal_reminders WHERE consent_id = :id"),
+                    {"id": consent_id},
+                )).scalars().all()
+            )
+        assert unsent_id not in remaining, "unsent reminder must be cancelled on withdrawal"
+        assert sent_id in remaining, "already-sent reminders are history, not cancelled"
+
     async def test_double_withdrawal_raises_409_not_500(
         self, session_factory, engine: AsyncEngine, facility_id, user_id, purpose_id
     ):
@@ -279,6 +383,31 @@ class TestWithdrawConsent:
                 )
 
 
+class TestListConsentRecordsForPatient:
+    async def test_facility_scoping_excludes_cross_facility_records(
+        self, session_factory, engine: AsyncEngine, facility_id, second_facility_id, user_id, purpose_id
+    ):
+        patient_id = await _seed_patient(engine, facility_id=facility_id, created_by=user_id)
+        async with session_factory() as db:
+            record = await service.create_consent_record(
+                db, patient_id=patient_id, facility_id=facility_id, created_by=user_id,
+                purpose_id=purpose_id, granted_by_type="patient", channel="verbal",
+            )
+            await db.commit()
+
+        async with session_factory() as db:
+            same_facility = await service.list_consent_records_for_patient(
+                db, patient_id, facility_id=facility_id
+            )
+        assert {r.id for r in same_facility} == {record.id}
+
+        async with session_factory() as db:
+            cross_facility = await service.list_consent_records_for_patient(
+                db, patient_id, facility_id=second_facility_id
+            )
+        assert cross_facility == []
+
+
 class TestListConsentPurposes:
     async def test_defaults_to_active_only(self, session_factory, engine: AsyncEngine, purpose_id):
         inactive_id = uuid.uuid4()
@@ -297,6 +426,75 @@ class TestListConsentPurposes:
         ids = {p.id for p in purposes}
         assert purpose_id in ids
         assert inactive_id not in ids
+
+
+class TestFindActiveConsent:
+    async def test_finds_matching_granted_consent(
+        self, session_factory, engine: AsyncEngine, facility_id, user_id
+    ):
+        purpose_code = f"direct_treatment_{uuid.uuid4().hex[:8]}"
+        purpose = await _seed_purpose(engine, code=purpose_code)
+        patient_id = await _seed_patient(engine, facility_id=facility_id, created_by=user_id)
+        async with session_factory() as db:
+            record = await service.create_consent_record(
+                db, patient_id=patient_id, facility_id=facility_id, created_by=user_id,
+                purpose_id=purpose, granted_by_type="patient", channel="verbal",
+            )
+            await db.commit()
+
+        async with session_factory() as db:
+            found = await service.find_active_consent(
+                db, patient_id=patient_id, purpose_code=purpose_code
+            )
+        assert found is not None
+        assert found.id == record.id
+
+    async def test_no_match_returns_none(self, session_factory, facility_id):
+        async with session_factory() as db:
+            found = await service.find_active_consent(
+                db, patient_id=uuid.uuid4(), purpose_code="no-such-purpose"
+            )
+        assert found is None
+
+    async def test_ignores_non_granted_status(
+        self, session_factory, engine: AsyncEngine, facility_id, user_id
+    ):
+        purpose_code = f"direct_treatment_{uuid.uuid4().hex[:8]}"
+        purpose = await _seed_purpose(engine, code=purpose_code)
+        patient_id = await _seed_patient(engine, facility_id=facility_id, created_by=user_id)
+        async with session_factory() as db:
+            await service.create_consent_record(
+                db, patient_id=patient_id, facility_id=facility_id, created_by=user_id,
+                purpose_id=purpose, granted_by_type="patient", channel="abdm_consent_manager",
+                status="requested",
+            )
+            await db.commit()
+
+        async with session_factory() as db:
+            found = await service.find_active_consent(
+                db, patient_id=patient_id, purpose_code=purpose_code
+            )
+        assert found is None
+
+    async def test_ignores_expired_consent(
+        self, session_factory, engine: AsyncEngine, facility_id, user_id
+    ):
+        purpose_code = f"direct_treatment_{uuid.uuid4().hex[:8]}"
+        purpose = await _seed_purpose(engine, code=purpose_code)
+        patient_id = await _seed_patient(engine, facility_id=facility_id, created_by=user_id)
+        async with session_factory() as db:
+            await service.create_consent_record(
+                db, patient_id=patient_id, facility_id=facility_id, created_by=user_id,
+                purpose_id=purpose, granted_by_type="patient", channel="verbal",
+                expires_at=datetime.now(timezone.utc) - timedelta(days=1),
+            )
+            await db.commit()
+
+        async with session_factory() as db:
+            found = await service.find_active_consent(
+                db, patient_id=patient_id, purpose_code=purpose_code
+            )
+        assert found is None
 
 
 class TestGetConsentRecord:

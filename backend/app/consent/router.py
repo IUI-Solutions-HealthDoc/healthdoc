@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.deps import get_current_actor_dependency
-from app.auth.deps import AuthUser, CurrentDbUser, CurrentUser, require_roles
+from app.auth.deps import CurrentDbUser, CurrentUser, require_roles
 from app.consent import service
 from app.consent.access_log import log_patient_data_access
 from app.consent.schemas import (
@@ -61,9 +61,8 @@ async def list_consent_purposes(
 @router.get(
     "/patients/{patient_id}/records",
     response_model=list[ConsentRecordOut],
-    # log_patient_data_access listed FIRST so the access attempt is
-    # recorded even if a later dependency in this list (none yet, but
-    # e.g. a future patient-existence check) rejects the request.
+    # log_patient_data_access must be first: dependencies=[] resolves
+    # before any handler-parameter Depends() (e.g. CurrentDbUser below).
     dependencies=[
         Depends(
             log_patient_data_access(
@@ -72,16 +71,19 @@ async def list_consent_purposes(
                 access_channel=AccessChannel.API.value,
                 consent_required=False,  # viewing someone's OWN consent log isn't itself consent-gated
             )
-        )
+        ),
+        Depends(require_roles(*_CONSENT_VIEW_ROLES)),
     ],
     summary="List a patient's consent records (logs to data_access_log)",
 )
 async def list_patient_consent_records(
     patient_id: uuid.UUID,
+    user: CurrentDbUser,
     db: AsyncSession = Depends(get_db),
-    _user: AuthUser = Depends(require_roles(*_CONSENT_VIEW_ROLES)),
 ) -> list[ConsentRecordOut]:
-    records = await service.list_consent_records_for_patient(db, patient_id)
+    records = await service.list_consent_records_for_patient(
+        db, patient_id, facility_id=user.facility_id
+    )
     return [ConsentRecordOut.model_validate(r) for r in records]
 
 

@@ -21,7 +21,7 @@ insert, trigger-flipped, FOR UPDATE guarded against double-withdrawal).
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import sqlalchemy as sa
 from fastapi import HTTPException
@@ -31,7 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit.actions import AuditAction
 from app.audit.service import audited_mutation
 from app.common.enums import ConsentStatus
-from app.consent.models import ConsentPurpose, ConsentRecord, ConsentWithdrawal
+from app.consent.models import ConsentPurpose, ConsentRecord, ConsentRenewalReminder, ConsentWithdrawal
 from app.patients.models import Patient
 
 # requested -> {granted, denied} only. granted has no entry here at all
@@ -41,15 +41,31 @@ _LEGAL_DIRECT_TRANSITIONS: dict[str, set[str]] = {
     ConsentStatus.REQUESTED.value: {ConsentStatus.GRANTED.value, ConsentStatus.DENIED.value},
 }
 
+# Not specified anywhere in the schema doc -- best guess, confirm before
+# merge. Only used when a withdrawn consent actually had a scope to act on.
+CASCADE_DEADLINE_HOURS = 72
+
+
+def _build_cascade_plan(scope: list[str] | None) -> dict[str, str] | None:
+    """cascaded_actions logs INTENT (what needs downstream cleanup and
+    by when), not execution -- same "job, not a column" split as
+    consent expiry. No mark-complete workflow here on purpose; that's
+    a scheduled job's job, not this ticket's."""
+    if not scope:
+        return None
+    return {s: "pending" for s in scope}
+
 
 async def list_consent_records_for_patient(
-    db: AsyncSession, patient_id: uuid.UUID
+    db: AsyncSession, patient_id: uuid.UUID, *, facility_id: uuid.UUID | None = None
 ) -> list[ConsentRecord]:
-    result = await db.execute(
-        sa.select(ConsentRecord)
-        .where(ConsentRecord.patient_id == patient_id)
-        .order_by(ConsentRecord.granted_at.desc())
-    )
+    q = sa.select(ConsentRecord).where(ConsentRecord.patient_id == patient_id)
+    if facility_id is not None:
+        q = q.join(Patient, Patient.id == ConsentRecord.patient_id).where(
+            Patient.facility_id == facility_id
+        )
+    q = q.order_by(ConsentRecord.granted_at.desc())
+    result = await db.execute(q)
     return list(result.scalars().all())
 
 
@@ -60,6 +76,27 @@ async def list_consent_purposes(
     if is_active is not None:
         q = q.where(ConsentPurpose.is_active == is_active)
     return list((await db.execute(q)).scalars().all())
+
+
+async def find_active_consent(
+    db: AsyncSession, *, patient_id: uuid.UUID, purpose_code: str
+) -> ConsentRecord | None:
+    """Most recent granted, non-expired consent for (patient_id,
+    purpose_code) -- used by access_log.py to populate
+    data_access_log.consent_id/consent_verified on every logged read."""
+    q = (
+        sa.select(ConsentRecord)
+        .join(ConsentPurpose, ConsentPurpose.id == ConsentRecord.purpose_id)
+        .where(
+            ConsentRecord.patient_id == patient_id,
+            ConsentPurpose.purpose_code == purpose_code,
+            ConsentRecord.status == ConsentStatus.GRANTED.value,
+            sa.or_(ConsentRecord.expires_at.is_(None), ConsentRecord.expires_at > sa.func.now()),
+        )
+        .order_by(ConsentRecord.granted_at.desc())
+        .limit(1)
+    )
+    return (await db.execute(q)).scalar_one_or_none()
 
 
 async def get_consent_record(
@@ -203,12 +240,19 @@ async def withdraw_consent(
         patient_id=record.patient_id,
         visit_id=record.visit_id,
     ) as audit:
+        withdrawn_at = datetime.now(timezone.utc)
+        cascaded_actions = _build_cascade_plan(record.scope)
         withdrawal = ConsentWithdrawal(
             id=uuid.uuid4(),
             consent_id=consent_id,
             withdrawn_by_type=withdrawn_by_type,
             withdrawn_by_user_id=withdrawn_by_user_id,
+            withdrawn_at=withdrawn_at,
             reason=reason,
+            cascaded_actions=cascaded_actions,
+            cascade_deadline=(
+                withdrawn_at + timedelta(hours=CASCADE_DEADLINE_HOURS) if cascaded_actions else None
+            ),
         )
         db.add(withdrawal)
         try:
@@ -223,8 +267,18 @@ async def withdraw_consent(
             raise HTTPException(409, f"Cannot withdraw consent {consent_id}: {exc.orig}") from exc
         await db.refresh(withdrawal)
 
+        # Cascade: an unsent "renew your consent" reminder for a consent
+        # that's now revoked is exactly the kind of thing that undermines
+        # a DPDP-compliance story. Same transaction as the withdrawal.
+        await db.execute(
+            sa.delete(ConsentRenewalReminder).where(
+                ConsentRenewalReminder.consent_id == consent_id,
+                ConsentRenewalReminder.sent_at.is_(None),
+            )
+        )
+
         audit.resource_id = withdrawal.id
-        audit.new_value = {"withdrawn_by_type": withdrawn_by_type}
+        audit.new_value = {"withdrawn_by_type": withdrawn_by_type, "cascaded_actions": cascaded_actions}
         audit.reason = reason
 
     return withdrawal

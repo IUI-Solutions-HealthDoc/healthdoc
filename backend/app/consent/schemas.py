@@ -58,6 +58,9 @@ class ConsentPurposeOut(BaseModel):
     purpose_code: str
     description: str | None
     default_expiry_days: int | None
+    # Exposed but not yet READ by any service logic -- access_log.py's
+    # consent_required is caller-supplied per route, not derived from
+    # this. Works today; flagged so the two don't quietly drift apart.
     requires_explicit_consent: bool
     is_active: bool
 
@@ -103,3 +106,6 @@ class ConsentWithdrawalOut(BaseModel):
     withdrawn_by_user_id: uuid.UUID | None
     withdrawn_at: datetime
     reason: str | None
+    cascaded_actions: dict[str, str] | None
+    cascade_deadline: datetime | None
+    cascade_completed_at: datetime | None
