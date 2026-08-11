@@ -25,6 +25,40 @@ import re
 import sys
 from pathlib import Path
 
+# Branches where a dangling down_revision is an outage rather than a note.
+_INTEGRATION_BRANCHES = {"staging", "main"}
+
+
+def _on_integration_branch() -> bool:
+    """True only when we ARE staging/main — not when we're a PR targeting it.
+
+    The distinction matters. A PR whose migration names an unmerged predecessor
+    is the normal working state: the §2 map assigns the number, and the PR ahead
+    simply hasn't landed. Failing those would fail nearly every migration PR on
+    the project and the check would be ignored within a day.
+
+    What must never happen is that migration being MERGED while its predecessor
+    is missing, because from that moment `alembic upgrade` is broken for
+    everyone. So this is strict on a push to staging/main and quiet everywhere
+    else — the PR reports it as a note for the reviewer to weigh, and staging
+    goes red the instant it actually lands.
+    """
+    import os
+    import subprocess
+
+    if os.environ.get("GITHUB_EVENT_NAME") == "pull_request":
+        return False  # a PR is allowed to be ahead of the chain
+    ref = os.environ.get("GITHUB_REF_NAME")
+    if ref:
+        return ref in _INTEGRATION_BRANCHES
+    try:
+        out = subprocess.run(["git", "branch", "--show-current"],
+                             capture_output=True, text=True, timeout=5)
+        return out.stdout.strip() in _INTEGRATION_BRANCHES
+    except Exception:
+        return False
+
+
 def _locate() -> tuple[Path, Path]:
     """Find migrations/ and the schema doc.
 
@@ -158,12 +192,36 @@ def main() -> int:
             problems.append(
                 f"revision '{rev}' exists on disk but is not in the §2 migration map")
 
+    # A dangling down_revision means something different depending on WHERE we are.
+    #
+    # On a feature branch it's expected and harmless: your migration names the
+    # predecessor the §2 map assigns it, and that PR simply hasn't merged yet.
+    # CI failing every such branch would be useless.
+    #
+    # On staging it is an outage. Alembic resolves the entire revision map before
+    # executing anything, so one unreachable down_revision breaks `upgrade 0003`
+    # for everyone, with an error naming a file the reader has never touched.
+    # That has now happened twice — #297 (0032→0031) and #327 (0019→0017).
+    #
+    # So: same condition, different severity, decided by the branch we're on.
+    if pending and _on_integration_branch():
+        problems.extend(
+            f"{p} — this is staging: an unresolvable down_revision breaks EVERY "
+            f"alembic command here, not just this migration"
+            for p in pending
+        )
+        pending = []
+
     if problems:
         print(f"MIGRATION CHECK: FAIL — {len(problems)} problem(s)\n")
         for p in problems:
             print(f"  ✗ {p}")
         for p in pending:
             print(f"  · {p}")
+        if _on_integration_branch():
+            print("\n  A migration whose predecessor isn't merged must not land on "
+                  "staging.\n  Park it in migrations/pending/ until the chain reaches it "
+                  "— see that\n  directory's README.")
         return 1
 
     if pending:

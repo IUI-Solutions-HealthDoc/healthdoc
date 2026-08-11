@@ -41,6 +41,25 @@ anywhere:
     implements rollback logic itself — nothing commits early, so
     Postgres's own transaction rollback does the work.
 
+QUERY PATH (B7-W4-01, added below): list_audit_logs() / count_audit_logs()
+/ stream_audit_logs_csv() are read-only with respect to audit_logs itself
+— "read-only" in the ticket title means the business data, not this
+module's own compliance obligations. The CSV export is the one exception:
+per the compliance list (app/audit/actions.py: "Data export/print" is
+itself an auditable event, 26.1), app/audit/router.py's export endpoint
+calls write_audit_log() above to record that the export happened, same
+as any other manual-path audit write — no third insert mechanism.
+
+stream_audit_logs_csv() deliberately does NOT take the caller's request-
+scoped `db` session. A FastAPI dependency declared with `yield` (get_db()
+here) tears down as soon as the route handler function RETURNS — for a
+StreamingResponse that happens before the generator body has produced a
+single byte, so a session captured from Depends(get_db) would already be
+closed by the time this generator actually runs. Same problem, same fix
+as app/consent/access_log.py: open an independent SessionLocal() inside
+the generator itself so its lifetime is the generator's lifetime, not the
+route handler's.
+
 Post-review update (schema doc §3 0003, v3.9+): `entry_hash`, `prev_hash`,
 `signature`, and `signer_key_id` are no longer written here at all. The
 inline stub that used to fake a signature on every insert made the table
@@ -53,18 +72,27 @@ signature was not. `_build_audit_log()` below sets none of these five
 columns — that's intentional, not an oversight.
 """
 
+import csv
+import io
+import json
 import logging
 import uuid
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
+from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.context import get_current_actor
 from app.audit.models import AuditLog
+from app.common.db import SessionLocal
 
 logger = logging.getLogger(__name__)
+
+MAX_PAGE_SIZE = 100  # §4.3: page_size capped server-side; large exports go through /logs/export instead.
 
 
 def _build_audit_log(
@@ -286,3 +314,172 @@ async def audited_mutation(
         ip_address=ip_address,
         device_id=device_id,
     )
+
+
+# ---------------------------------------------------------------------
+# QUERY PATH — B7-W4-01: Audit query API (filters, read-only, CSV export)
+# ---------------------------------------------------------------------
+
+# CSV and the /audit/logs JSON list share this exact column set (schema
+# doc §4.4) — one shape, so a reviewer diffing an exported CSV against
+# the API response never has to reconcile two different field lists for
+# "the same data".
+CSV_COLUMNS: tuple[str, ...] = (
+    "id", "user_id", "role", "action", "resource_type", "resource_id",
+    "patient_id", "old_value", "new_value", "created_at", "entry_hash",
+)
+
+
+def _clamp_page_size(page_size: int) -> int:
+    return min(max(page_size, 1), MAX_PAGE_SIZE)
+
+
+def _audit_log_filters(
+    *,
+    facility_id: uuid.UUID,
+    user_id: uuid.UUID | None,
+    patient_id: uuid.UUID | None,
+    resource_type: str | None,
+    date_from: datetime | None,
+    date_to: datetime | None,
+) -> list[ColumnElement[bool]]:
+    """
+    Shared WHERE-clause builder for the paginated list, its count, and
+    the CSV export — one place that defines what "matching rows" means,
+    so the three can't silently drift apart.
+
+    facility_id is ALWAYS applied and is never sourced from caller input
+    here — app/audit/router.py resolves it server-side from CurrentDbUser,
+    never a query param, per this repo's facility-scoping rule (does the
+    value come from the token, or the request?).
+    """
+    conditions: list[ColumnElement[bool]] = [AuditLog.facility_id == facility_id]
+    if user_id is not None:
+        conditions.append(AuditLog.user_id == user_id)
+    if patient_id is not None:
+        conditions.append(AuditLog.patient_id == patient_id)
+    if resource_type is not None:
+        conditions.append(AuditLog.resource_type == resource_type)
+    if date_from is not None:
+        conditions.append(AuditLog.created_at >= date_from)
+    if date_to is not None:
+        conditions.append(AuditLog.created_at <= date_to)
+    return conditions
+
+
+async def count_audit_logs(
+    db: AsyncSession,
+    *,
+    facility_id: uuid.UUID,
+    user_id: uuid.UUID | None = None,
+    patient_id: uuid.UUID | None = None,
+    resource_type: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+) -> int:
+    conditions = _audit_log_filters(
+        facility_id=facility_id, user_id=user_id, patient_id=patient_id,
+        resource_type=resource_type, date_from=date_from, date_to=date_to,
+    )
+    q = select(func.count()).select_from(AuditLog).where(*conditions)
+    return (await db.execute(q)).scalar_one()
+
+
+async def list_audit_logs(
+    db: AsyncSession,
+    *,
+    facility_id: uuid.UUID,
+    user_id: uuid.UUID | None = None,
+    patient_id: uuid.UUID | None = None,
+    resource_type: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    page: int = 1,
+    page_size: int = 20,
+) -> tuple[list[AuditLog], int]:
+    """Paginated, most-recent-first (matches the BRIN/partition ordering
+    on created_at). Returns (items, total) — same shape as
+    app/departments/service.py's list_departments()/list_rooms()."""
+    page = max(page, 1)
+    page_size = _clamp_page_size(page_size)
+    conditions = _audit_log_filters(
+        facility_id=facility_id, user_id=user_id, patient_id=patient_id,
+        resource_type=resource_type, date_from=date_from, date_to=date_to,
+    )
+
+    total = await count_audit_logs(
+        db, facility_id=facility_id, user_id=user_id, patient_id=patient_id,
+        resource_type=resource_type, date_from=date_from, date_to=date_to,
+    )
+
+    q = (
+        select(AuditLog)
+        .where(*conditions)
+        .order_by(AuditLog.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    items = (await db.execute(q)).scalars().all()
+    return list(items), total
+
+
+def _csv_row(row: AuditLog) -> list[str]:
+    return [
+        str(row.id),
+        str(row.user_id) if row.user_id else "",
+        row.role or "",
+        row.action,
+        row.resource_type,
+        str(row.resource_id) if row.resource_id else "",
+        str(row.patient_id) if row.patient_id else "",
+        json.dumps(row.old_value) if row.old_value is not None else "",
+        json.dumps(row.new_value) if row.new_value is not None else "",
+        row.created_at.isoformat(),
+        row.entry_hash or "",
+    ]
+
+
+async def stream_audit_logs_csv(
+    *,
+    facility_id: uuid.UUID,
+    user_id: uuid.UUID | None = None,
+    patient_id: uuid.UUID | None = None,
+    resource_type: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+) -> AsyncIterator[str]:
+    """
+    Streams matching audit_logs rows as CSV text, header first, one row
+    at a time via a server-side cursor (AsyncSession.stream()) — no
+    row-count cap, unlike the paginated list endpoint. Per §4.3: "large
+    exports are explicit, audited endpoints" — this IS that endpoint,
+    so it doesn't apply the page_size ceiling the JSON list does.
+
+    Opens its OWN session (see module docstring for why this can't reuse
+    the route handler's Depends(get_db) session) and closes it when the
+    generator is exhausted or garbage-collected (the `async with` covers
+    both — an early-abandoned generator still closes the session on GC/
+    aclose(), so a client disconnecting mid-download doesn't leak a
+    connection).
+    """
+    conditions = _audit_log_filters(
+        facility_id=facility_id, user_id=user_id, patient_id=patient_id,
+        resource_type=resource_type, date_from=date_from, date_to=date_to,
+    )
+    q = select(AuditLog).where(*conditions).order_by(AuditLog.created_at.desc())
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+
+    writer.writerow(CSV_COLUMNS)
+    yield buf.getvalue()
+    buf.seek(0)
+    buf.truncate(0)
+
+    async with SessionLocal() as session:
+        result = await session.stream(q)
+        async for row in result.scalars():
+            writer.writerow(_csv_row(row))
+            yield buf.getvalue()
+            buf.seek(0)
+            buf.truncate(0)

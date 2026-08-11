@@ -19,11 +19,11 @@ class Allergy(Base, UUIDPk, Timestamps, Blame):
     __tablename__ = "allergies"
     __table_args__ = (
         CheckConstraint(AllergenType.sql_check("allergen_type"),
-                        name="ck_allergies_allergen_type"),
-        CheckConstraint(AllergySeverity.sql_check("severity"), name="ck_allergies_severity"),
-        CheckConstraint(AllergyStatus.sql_check("status"), name="ck_allergies_status"),
+                        name="allergen_type"),
+        CheckConstraint(AllergySeverity.sql_check("severity"), name="severity"),
+        CheckConstraint(AllergyStatus.sql_check("status"), name="status"),
         CheckConstraint("(verified_by IS NULL) = (verified_at IS NULL)",
-                        name="ck_allergies_verification_complete"),
+                        name="verification_complete"),
     )
 
     patient_id: Mapped[uuid.UUID] = mapped_column(

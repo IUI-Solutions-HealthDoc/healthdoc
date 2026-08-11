@@ -198,7 +198,7 @@ class AuditLogArchive(UUIDPk, Timestamps, Base):
     __table_args__ = (
         CheckConstraint(
             "verification_status IN ('pending', 'verified', 'failed')",
-            name="ck_audit_log_archive_verification_status",
+            name="verification_status",
         ),
     )
 
