@@ -32,6 +32,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.auth.deps import AuthUser
+from app.consent import service
 from app.consent.access_log import log_patient_data_access
 
 pytestmark = pytest.mark.asyncio
@@ -98,6 +99,114 @@ class TestHappyPath:
         assert row["role"] == "doctor"
         assert row["resource_type"] == "patients"
         assert row["purpose_code"] == "direct_treatment"
+
+
+class TestConsentLinking:
+    """B7-W5-01: data_access_log.consent_id / consent_verified are now
+    resolved against a real consent_records row, not always NULL."""
+
+    async def test_active_consent_populates_consent_id_and_verified_true(
+        self, engine: AsyncEngine, bind_access_log_to_test_engine, session_factory,
+        user_id, facility_id, purpose_id,
+    ):
+        patient_id = uuid.uuid4()
+        async with engine.begin() as conn:
+            purpose_code = (
+                await conn.execute(
+                    text("SELECT purpose_code FROM consent_purposes WHERE id = :id"), {"id": purpose_id}
+                )
+            ).scalar_one()
+
+        async with session_factory() as db:
+            record = await service.create_consent_record(
+                db, patient_id=patient_id, facility_id=facility_id, created_by=user_id,
+                purpose_id=purpose_id, granted_by_type="patient", channel="verbal",
+            )
+            await db.commit()
+
+        async with engine.begin() as conn:
+            sub = (
+                await conn.execute(
+                    text("SELECT keycloak_sub FROM users WHERE id = :id"), {"id": user_id}
+                )
+            ).scalar_one()
+
+        user = AuthUser(sub=sub, username="doc", roles=["doctor"])
+        dependency = log_patient_data_access(resource_type="patients", purpose_code=purpose_code)
+        request = _fake_request(path_params={"patient_id": str(patient_id)})
+
+        await dependency(request, user)
+
+        async with engine.begin() as conn:
+            row = (
+                await conn.execute(
+                    text("SELECT consent_id, consent_verified FROM data_access_log WHERE patient_id = :pid"),
+                    {"pid": patient_id},
+                )
+            ).mappings().one()
+
+        assert row["consent_id"] == record.id
+        assert row["consent_verified"] is True
+
+    async def test_no_consent_and_required_sets_verified_false(
+        self, engine: AsyncEngine, bind_access_log_to_test_engine, user_id
+    ):
+        patient_id = uuid.uuid4()
+        async with engine.begin() as conn:
+            sub = (
+                await conn.execute(
+                    text("SELECT keycloak_sub FROM users WHERE id = :id"), {"id": user_id}
+                )
+            ).scalar_one()
+
+        user = AuthUser(sub=sub, username="doc", roles=["doctor"])
+        dependency = log_patient_data_access(
+            resource_type="patients", purpose_code="no_matching_consent", consent_required=True,
+        )
+        request = _fake_request(path_params={"patient_id": str(patient_id)})
+
+        await dependency(request, user)
+
+        async with engine.begin() as conn:
+            row = (
+                await conn.execute(
+                    text("SELECT consent_id, consent_verified FROM data_access_log WHERE patient_id = :pid"),
+                    {"pid": patient_id},
+                )
+            ).mappings().one()
+
+        assert row["consent_id"] is None
+        assert row["consent_verified"] is False
+
+    async def test_no_consent_and_not_required_sets_verified_none(
+        self, engine: AsyncEngine, bind_access_log_to_test_engine, user_id
+    ):
+        patient_id = uuid.uuid4()
+        async with engine.begin() as conn:
+            sub = (
+                await conn.execute(
+                    text("SELECT keycloak_sub FROM users WHERE id = :id"), {"id": user_id}
+                )
+            ).scalar_one()
+
+        user = AuthUser(sub=sub, username="doc", roles=["doctor"])
+        dependency = log_patient_data_access(
+            resource_type="patients", purpose_code="no_matching_consent", consent_required=False,
+        )
+        request = _fake_request(path_params={"patient_id": str(patient_id)})
+
+        await dependency(request, user)
+
+        async with engine.begin() as conn:
+            row = (
+                await conn.execute(
+                    text("SELECT consent_id, consent_verified FROM data_access_log WHERE patient_id = :pid"),
+                    {"pid": patient_id},
+                )
+            ).mappings().one()
+
+        assert row["consent_id"] is None
+        assert row["consent_verified"] is None
 
 
 class TestMissingPatientIdParam:

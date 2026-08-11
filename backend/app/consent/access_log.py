@@ -45,11 +45,11 @@ This only WRITES the log row. It does not:
   - enforce consent (block the request if consent isn't granted).
     consent_required is whatever the caller passes at decoration time
     (site knowledge — e.g. False for a treating doctor's own patient,
-    True for research/export access); consent_verified is always None
-    here. Actually checking consent_records for an active grant is a
-    separate, larger piece of work (implicit vs explicit consent rules,
-    purpose-specific grants) this ticket doesn't cover — flagged, not
-    silently faked as True.
+    True for research/export access). consent_id/consent_verified ARE
+    now resolved (B7-W5-01, service.find_active_consent) against a real
+    granted, non-expired consent_records row for (patient_id,
+    purpose_code) — but this is a read-only lookup, not an enforcement
+    gate; the request proceeds either way.
   - detect break-glass automatically. emergency_access defaults False;
     a route with a genuine emergency-override path should pass
     emergency_access=True explicitly.
@@ -82,6 +82,7 @@ from app.common.db import SessionLocal
 from app.common.enums import AccessChannel
 from app.consent.access_log_fallback import serialise_row_for_fallback, write_fallback_row
 from app.consent.models import DataAccessLog
+from app.consent.service import find_active_consent
 
 logger = logging.getLogger(__name__)
 
@@ -192,6 +193,16 @@ def log_patient_data_access(
                     )
                     return
 
+                # B7-W5-01: resolve the patient's active granted consent
+                # for this purpose_code, if any. consent_verified is True
+                # only when a real matching grant was found -- False when
+                # one was required but missing, None when not required
+                # and none found (not "no", just "not applicable").
+                consent = await find_active_consent(
+                    log_session, patient_id=patient_id, purpose_code=purpose_code
+                )
+                consent_verified = True if consent else (False if consent_required else None)
+
                 log_session.add(
                     DataAccessLog(
                         user_id=user_id,
@@ -202,8 +213,9 @@ def log_patient_data_access(
                         purpose_code=purpose_code,
                         access_channel=access_channel,
                         emergency_access=emergency_access,
+                        consent_id=consent.id if consent else None,
                         consent_required=consent_required,
-                        consent_verified=None,  # TODO: wire real consent verification
+                        consent_verified=consent_verified,
                     )
                 )
                 await log_session.commit()
