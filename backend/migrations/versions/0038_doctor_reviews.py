@@ -1,7 +1,7 @@
 """doctor_reviews — review/sign-off on encounters and lab/radiology results
 
 Revision ID: 0038
-Revises: 0020c
+Revises: 0021
 Create Date: 2026-08-11
 
 PROVISIONAL NUMBER: staging head is 0020c at time of writing. #351 (0021)
@@ -16,7 +16,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision = "0038"
-down_revision = "0020c"
+down_revision = "0021"
 branch_labels = None
 depends_on = None
 
