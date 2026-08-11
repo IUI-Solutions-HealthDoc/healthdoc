@@ -71,6 +71,16 @@ async def test_dispense_uses_ledger_trigger_and_writes_audit(db_session, pharmac
 
 @pytest.mark.asyncio
 async def test_insufficient_stock_is_atomic(db_session, pharmacy_seed):
+    # Counts BEFORE, not absolute zeros. audit_logs is written by most of the
+    # suite, so "the table is empty" only held when pharmacy ran alone — it
+    # started failing at 'assert 25 == 0' once the suite grew, which says
+    # nothing about this rollback. What atomicity actually claims is that
+    # nothing NEW was written, and that is what this now asserts.
+    before = {
+        t: (await db_session.execute(text(f"SELECT count(*) FROM {t}"))).scalar_one()
+        for t in ("pharmacy_dispenses", "stock_ledger", "audit_logs")
+    }
+
     with pytest.raises(HTTPException) as exc_info:
         await create_dispense(
             db_session,
@@ -85,15 +95,14 @@ async def test_insufficient_stock_is_atomic(db_session, pharmacy_seed):
             facility_id=pharmacy_seed["facility_id"],
         )
     assert exc_info.value.status_code == 422
-    assert (await db_session.execute(text(
-        "SELECT count(*) FROM pharmacy_dispenses"
-    ))).scalar_one() == 0
-    assert (await db_session.execute(text(
-        "SELECT count(*) FROM stock_ledger"
-    ))).scalar_one() == 0
-    assert (await db_session.execute(text(
-        "SELECT count(*) FROM audit_logs"
-    ))).scalar_one() == 0
+    for table, count_before in before.items():
+        count_after = (
+            await db_session.execute(text(f"SELECT count(*) FROM {table}"))
+        ).scalar_one()
+        assert count_after == count_before, (
+            f"{table} gained {count_after - count_before} row(s) despite the "
+            f"dispense failing — the rollback is not atomic"
+        )
 
 
 @pytest.mark.asyncio
