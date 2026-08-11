@@ -31,7 +31,7 @@ Tech Lead review answered both open questions from the previous PR:
     it happens before any business mutation runs.
   - role -> the role the action was taken UNDER, not every role the
     user holds. A comma-joined list makes "who was acting as what"
-    unanswerable in an audit trail. _select_acting_role() below picks
+    unanswerable in an audit trail. select_acting_role() below picks
     the highest-privilege match from a fixed priority order; this is a
     placeholder ordering (see its docstring) until an endpoint-scoped
     "acting role" concept exists.
@@ -58,7 +58,7 @@ logger = logging.getLogger(__name__)
 
 # Highest-to-lowest privilege, used only to pick which single role an
 # action was taken "under" when a user's token carries several realm
-# roles (see _select_acting_role()). Order matches the authority roles
+# roles (see select_acting_role()). Order matches the authority roles
 # in schema doc §Account governance plus the remaining realm roles;
 # unrecognised roles sort after all of these.
 _ROLE_PRIORITY: tuple[str, ...] = (
@@ -78,10 +78,16 @@ _ROLE_PRIORITY: tuple[str, ...] = (
 )
 
 
-def _select_acting_role(roles: list[str]) -> str | None:
+def select_acting_role(roles: list[str]) -> str | None:
     """
     Picks ONE role to record as "acting under" for this request, instead
     of joining all of a user's roles with commas — see module docstring.
+
+    Public per PR #266 review: app/consent/access_log.py needs the same
+    "which role was this done under" answer, and importing a private
+    (underscore-prefixed) name across module boundaries invites a second,
+    divergent implementation instead. This is the one source of truth for
+    both modules.
 
     This is a stand-in for a real "acting role" concept: today it just
     takes the highest-privilege role the token carries, which is right
@@ -157,8 +163,8 @@ async def get_current_actor_dependency(
     user_id = row.id
 
     # audit_logs.role records the role the action was taken UNDER, not
-    # every role the user holds (see _select_acting_role() docstring).
-    role = _select_acting_role(user.roles)
+    # every role the user holds (see select_acting_role() docstring).
+    role = select_acting_role(user.roles)
 
     actor = AuditActor(
         user_id=user_id,

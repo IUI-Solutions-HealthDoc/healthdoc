@@ -116,6 +116,29 @@ async def facility_id(engine: AsyncEngine) -> AsyncGenerator[uuid.UUID, None]:
 
 
 @pytest_asyncio.fixture
+async def user_id(engine: AsyncEngine, facility_id: uuid.UUID) -> AsyncGenerator[uuid.UUID, None]:
+    """One throwaway users row, scoped to facility_id — needed for the
+    query-API tests (audit_logs.user_id FK, CurrentDbUser-shaped facility
+    scoping). Not needed by the existing trigger/partition tests in this
+    package, which is why it wasn't here before. Same no-DELETE reasoning
+    as facility_id above — users is also referenced by ON DELETE RESTRICT
+    from audit_logs.user_id."""
+    uid = uuid.uuid4()
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                """
+                INSERT INTO users (id, keycloak_sub, username, full_name, facility_id)
+                VALUES (:id, :sub, :sub, 'Audit Test User', :facility_id)
+                """
+            ),
+            {"id": uid, "sub": f"audit-test-{uid}", "facility_id": facility_id},
+        )
+    yield uid
+    # No delete — see facility_id's docstring.
+
+
+@pytest_asyncio.fixture
 async def second_facility_id(engine: AsyncEngine) -> AsyncGenerator[uuid.UUID, None]:
     """A second facility, for the offline-sync independence test. See facility_id's docstring re: timezone and teardown."""
     fid = uuid.uuid4()
