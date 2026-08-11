@@ -252,6 +252,39 @@ def _column_name(node: ast.AST) -> str | None:
     return None
 
 
+def parse_doc_column_origins(doc_text: str) -> dict[tuple[str, str], str]:
+    """{(table, column): revision} for columns §3 says a later migration adds.
+
+    §3 already records this in the trailing comment — "added by 0030",
+    "FK added in 0019", "added in 0022". Reading it means a branch that creates
+    a table isn't blamed for columns a downstream migration owns.
+    """
+    sec = doc_text.split("## 3. Canonical table definitions")
+    if len(sec) < 2:
+        return {}
+    sec3 = re.split(r"\n## 4\.", sec[1])[0]
+
+    out: dict[tuple[str, str], str] = {}
+    current: str | None = None
+    header_re = re.compile(r"^\*\*([a-z][a-z0-9_]*)\*\*")
+    # "added by 0030" / "added in 0022" / "FK added in 0019" — but NOT
+    # "FK constraint added in 0005", which is about a constraint, not the column.
+    added_re = re.compile(r"\badded\s+(?:by|in)\s+(\d{4}[a-z]?)\b", re.I)
+
+    for line in sec3.splitlines():
+        h = header_re.match(line)
+        if h:
+            current = h.group(1)
+            continue
+        if current is None or "--" not in line:
+            continue
+        col = _column_token(line)
+        m = added_re.search(line.split("--", 1)[1])
+        if col and m:
+            out[(current, col)] = m.group(1)
+    return out
+
+
 def parse_map(doc_text: str) -> dict[str, set[str]]:
     """{revision: {table, ...}} from the §2 migration map."""
     if "## 2. Migration map" not in doc_text:
@@ -330,11 +363,21 @@ def main() -> int:
                     f"but no migration creates it.")
 
     # 2. MISSING-COLUMN — table exists in a migration, doc column created nowhere.
+    #
+    # A column added by a LATER migration than the CREATE TABLE is not missing,
+    # it's just not merged yet. §3 says which revision adds it ("added by 0030",
+    # "FK added in 0019"), so honour that: if the named revision isn't on disk,
+    # the column isn't expected to be either. Without this, every branch that
+    # creates `patients` reports the three ABHA columns from 0030 as missing.
+    origins = parse_doc_column_origins(doc_text)
     for table, doc_cols in sorted(doc_tables.items()):
         if table not in created:
             continue                      # not built yet; doc is still a spec
         have = mig_tables.get(table, set())
         for col in sorted(doc_cols - have - MIXIN_COLUMNS):
+            added_by = origins.get((table, col))
+            if added_by and added_by not in on_disk:
+                continue                  # a later migration owns it, and it isn't here
             blockers.append(
                 f"[MISSING-COLUMN] §3 documents {table}.{col}, and {table} is created by "
                 f"a migration, but no migration adds that column.")
