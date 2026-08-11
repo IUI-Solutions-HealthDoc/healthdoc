@@ -10,7 +10,7 @@ from datetime import date, datetime, timezone
 
 from fastapi import HTTPException
 from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.common.business_date import get_business_date
 from app.common.enums import QueuePriority, QueueTokenStatus
@@ -137,34 +137,30 @@ async def create_queue(
 
 
 async def _allocate_token_number(db: AsyncSession, department_id: uuid.UUID, business_date: date) -> int:
-    counter = (
-        await db.execute(
-            select(QueueCounter)
-            .where(QueueCounter.department_id == department_id, QueueCounter.counter_date == business_date)
-            .with_for_update()
+    """Allocate the next token number for a department on a business date.
+
+    One statement, no read-then-write. SELECT ... FOR UPDATE cannot lock a row
+    that does not exist, so the first allocation of each day was a genuine race
+    — and the IntegrityError fallback called db.rollback(), which ends the
+    *caller's* transaction, not just the failed INSERT. create_token() calls
+    this holding a lock on the queue row, so the observable failure was: two
+    patients take the first token of the day at the same moment, one request
+    500s, and that request's earlier work is discarded.
+
+    Same pattern as app/common/accession.py and billing's
+    _allocate_billing_number. Not gapless, and not required to be — a token
+    number is a display label, not a financial document.
+    """
+    upsert = (
+        pg_insert(QueueCounter.__table__)
+        .values(department_id=department_id, counter_date=business_date, last_value=1)
+        .on_conflict_do_update(
+            constraint="uq_queue_counter_department_date",
+            set_={"last_value": QueueCounter.__table__.c.last_value + 1},
         )
-    ).scalar_one_or_none()
- 
-    if counter is None:
-        counter = QueueCounter(
-            id=uuid.uuid4(), department_id=department_id, counter_date=business_date, last_value=0
-        )
-        db.add(counter)
-        try:
-            await db.flush()
-        except IntegrityError:
-            await db.rollback()
-            counter = (
-                await db.execute(
-                    select(QueueCounter)
-                    .where(QueueCounter.department_id == department_id, QueueCounter.counter_date == business_date)
-                    .with_for_update()
-                )
-            ).scalar_one()
- 
-    counter.last_value += 1
-    await db.flush()
-    return counter.last_value
+        .returning(QueueCounter.__table__.c.last_value)
+    )
+    return (await db.execute(upsert)).scalar_one()
 
 
 # ---------------- CREATE TOKEN ----------------
