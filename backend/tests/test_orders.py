@@ -1,0 +1,73 @@
+"""backend/tests/test_orders.py -- #181: order creation, gapless sequence, encounter-not-found."""
+from __future__ import annotations
+
+import uuid
+from datetime import datetime, timezone
+
+import pytest
+
+from app.opd.models import Visit, Encounter
+from app.patients.models import Patient
+from app.orders import service
+from app.orders.schemas import OrderCreate
+
+
+@pytest.fixture
+async def encounter(db, seed):
+    dept, room, doctor = seed
+    patient = Patient(id=uuid.uuid4(), uhid=f"UH{uuid.uuid4().hex[:8]}", facility_id=dept.facility_id,
+                       full_name="Test Patient", sex="female", age_years=30,
+                       identity_path="demographics_only", created_by=doctor.id)
+    db.add(patient)
+    await db.flush()
+    v = Visit(id=uuid.uuid4(), visit_number=f"V{uuid.uuid4().hex[:8]}", patient_id=patient.id,
+              facility_id=dept.facility_id, department_id=dept.id, visit_type="opd",
+              visit_date=datetime.now(timezone.utc), created_by=doctor.id)
+    db.add(v)
+    await db.flush()
+    e = Encounter(id=uuid.uuid4(), visit_id=v.id, facility_id=dept.facility_id,
+                  provider_user_id=doctor.id, created_by=doctor.id, note_status="pending", row_version=1)
+    db.add(e)
+    await db.flush()
+    return e, patient, doctor
+
+
+async def test_create_order(db, encounter):
+    e, patient, doctor = encounter
+    order = await service.create_order(
+        db, OrderCreate(encounter_id=e.id, patient_id=patient.id, created_by=doctor.id, order_type="lab"),
+        facility_timezone="Asia/Kolkata",
+    )
+
+    assert order.order_number.startswith("ORD-")
+    assert order.order_number.split("-")[2].isdigit() and len(order.order_number.split("-")[2]) == 6
+    assert order.status == "placed"
+    assert order.priority == "routine"
+    assert order.facility_id == e.facility_id
+
+
+async def test_order_sequence_is_gapless_per_day(db, encounter):
+    e, patient, doctor = encounter
+    o1 = await service.create_order(
+        db, OrderCreate(encounter_id=e.id, patient_id=patient.id, created_by=doctor.id, order_type="lab"),
+        facility_timezone="Asia/Kolkata",
+    )
+    o2 = await service.create_order(
+        db, OrderCreate(encounter_id=e.id, patient_id=patient.id, created_by=doctor.id, order_type="radiology"),
+        facility_timezone="Asia/Kolkata",
+    )
+
+    seq1 = int(o1.order_number.split("-")[2])
+    seq2 = int(o2.order_number.split("-")[2])
+    assert seq2 == seq1 + 1
+    assert o1.order_number != o2.order_number
+
+
+async def test_create_order_encounter_not_found(db, seed):
+    dept, room, doctor = seed
+    with pytest.raises(service.EncounterNotFound):
+        await service.create_order(
+            db, OrderCreate(encounter_id=uuid.uuid4(), patient_id=uuid.uuid4(),
+                             created_by=doctor.id, order_type="pharmacy"),
+            facility_timezone="Asia/Kolkata",
+        )
