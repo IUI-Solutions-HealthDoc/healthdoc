@@ -87,6 +87,14 @@ class DispenseItemCreate(BaseModel):
         default=None,
         description="Required when expiry_override is true.",
     )
+    allergy_override_reason: str | None = Field(
+        default=None,
+        description="Required (min 20 chars) to dispense an item matching an active patient allergy. Anaphylaxis-severity matches can never be overridden.",
+    )
+    interaction_override_reason: str | None = Field(
+        default=None,
+        description="Required (min 20 chars) to dispense an item with a known interaction against another item in the same request. Contraindicated-severity pairs can never be overridden.",
+    )
 
 
 class DispenseCreate(BaseModel):
@@ -151,3 +159,20 @@ class SubstitutionApprovalRequest(BaseModel):
     rejection_reason: str | None = Field(
         default=None, description="Required if approved=false"
     )
+
+
+class ExpiringBatch(BaseModel):
+    batch_id: UUID
+    item_id: UUID
+    item_name: str
+    batch_number: str
+    expiry_date: str
+    days_to_expiry: int
+    quantity: Decimal
+    stock_location_id: UUID
+    stock_location_name: str
+
+
+class ExpiryTrackerResponse(BaseModel):
+    items: list[ExpiringBatch]
+    threshold_days: int

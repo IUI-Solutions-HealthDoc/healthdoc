@@ -9,14 +9,18 @@ from fastapi import HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.allergies.service import AllergyConflict, check_prescription_item
 from app.audit.service import write_audit_log
 from app.common.enums import DispenseStatus, NotificationStatus
+from app.pharmacy.interactions import DrugInteractionConflict, check_against_existing
 from app.pharmacy.schemas import (
     BatchAllocation,
     BatchAvailability,
     DispenseCreate,
     DispenseItemOut,
     DispenseOut,
+    ExpiringBatch,
+    ExpiryTrackerResponse,
     MedicineSearchResult,
     PrescriptionQueueItem,
     PrescriptionQueueResponse,
@@ -327,6 +331,74 @@ async def create_dispense(
     ).mappings().first()
     if presc_row is None:
         raise HTTPException(status_code=404, detail="Prescription not found")
+
+    _checked_ingredient_codes: list[str] = []
+    for item in payload.items:
+        target_item_id = item.substitute_item_id
+        if target_item_id is None:
+            row = (
+                await db.execute(
+                    text("""
+                        SELECT ii.ingredient_code
+                        FROM prescription_items pi
+                        JOIN inventory_items ii ON ii.id = pi.medicine_item_id
+                        WHERE pi.id = :id
+                    """),
+                    {"id": str(item.prescription_item_id)},
+                )
+            ).mappings().first()
+        else:
+            row = (
+                await db.execute(
+                    text("SELECT ingredient_code FROM inventory_items WHERE id = :id"),
+                    {"id": str(target_item_id)},
+                )
+            ).mappings().first()
+        ingredient_code = row["ingredient_code"] if row else None
+
+        try:
+            await check_prescription_item(
+                db,
+                patient_id=presc_row["patient_id"],
+                ingredient_code=ingredient_code,
+                override_reason=item.allergy_override_reason,
+            )
+        except AllergyConflict as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "allergy_conflict",
+                    "prescription_item_id": str(item.prescription_item_id),
+                    "substance": exc.allergy.substance_text,
+                    "severity": exc.allergy.severity,
+                    "absolute": exc.absolute,
+                    "reaction": exc.allergy.reaction,
+                },
+            ) from exc
+
+        try:
+            await check_against_existing(
+                db,
+                new_ingredient_code=ingredient_code,
+                existing_ingredient_codes=_checked_ingredient_codes,
+                override_reason=item.interaction_override_reason,
+            )
+        except DrugInteractionConflict as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "drug_interaction_conflict",
+                    "prescription_item_id": str(item.prescription_item_id),
+                    "ingredient_a": exc.interaction.ingredient_code_a,
+                    "ingredient_b": exc.interaction.ingredient_code_b,
+                    "severity": exc.interaction.severity,
+                    "absolute": exc.absolute,
+                    "description": exc.interaction.description,
+                },
+            ) from exc
+
+        if ingredient_code is not None:
+            _checked_ingredient_codes.append(ingredient_code)
 
     plan: list[dict] = []
     # Track quantity already claimed against each explicitly-pinned batch_id
@@ -843,4 +915,57 @@ async def _recompute_dispense_status(db: AsyncSession, dispense_id: str) -> None
     await db.execute(
         text("UPDATE pharmacy_dispenses SET status = :status, updated_at = now() WHERE id = :id"),
         {"status": new_status, "id": str(dispense_id)},
+    )
+
+
+async def get_expiry_tracker(
+    db: AsyncSession,
+    *,
+    facility_id: UUID,
+    stock_location_id: UUID | None,
+    threshold_days: int,
+) -> ExpiryTrackerResponse:
+    where = ["sl.facility_id = :facility_id", "ib.quantity > 0"]
+    params: dict = {
+        "facility_id": str(facility_id),
+        "threshold_days": threshold_days,
+    }
+    if stock_location_id is not None:
+        where.append("ib.stock_location_id = :stock_location_id")
+        params["stock_location_id"] = str(stock_location_id)
+
+    where_clause = " AND ".join(where)
+
+    rows = (
+        await db.execute(
+            text(f"""
+                SELECT
+                    ib.id AS batch_id, ib.item_id, ii.name AS item_name,
+                    ib.batch_number, ib.expiry_date, ib.quantity,
+                    ib.stock_location_id, sl.name AS stock_location_name,
+                    (ib.expiry_date - (now() AT TIME ZONE fac.timezone)::date) AS days_to_expiry
+                FROM inventory_batches ib
+                JOIN stock_locations sl ON sl.id = ib.stock_location_id
+                JOIN facilities fac ON fac.id = sl.facility_id
+                JOIN inventory_items ii ON ii.id = ib.item_id
+                WHERE {where_clause}
+                    AND (ib.expiry_date - (now() AT TIME ZONE fac.timezone)::date) <= :threshold_days
+                ORDER BY ib.expiry_date ASC
+            """),
+            params,
+        )
+    ).mappings().all()
+
+    return ExpiryTrackerResponse(
+        threshold_days=threshold_days,
+        items=[
+            ExpiringBatch(
+                batch_id=r["batch_id"], item_id=r["item_id"], item_name=r["item_name"],
+                batch_number=r["batch_number"], expiry_date=r["expiry_date"].isoformat(),
+                days_to_expiry=r["days_to_expiry"], quantity=r["quantity"],
+                stock_location_id=r["stock_location_id"],
+                stock_location_name=r["stock_location_name"],
+            )
+            for r in rows
+        ],
     )
