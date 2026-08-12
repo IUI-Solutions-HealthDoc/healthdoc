@@ -26,6 +26,7 @@ def upgrade() -> None:
         "doctor_reviews",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True, server_default=sa.text("uuid_generate_v4()")),
         sa.Column("encounter_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("encounters.id", ondelete="RESTRICT"), nullable=False),
+        sa.Column("facility_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False),
         sa.Column("reviewed_by", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False),
         sa.Column("lab_order_item_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("lab_order_items.id", ondelete="RESTRICT"), nullable=True),
         sa.Column("radiology_order_item_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("radiology_order_items.id", ondelete="RESTRICT"), nullable=True),
@@ -45,6 +46,7 @@ def upgrade() -> None:
     )
 
     op.create_index("ix_doctor_reviews_encounter_id", "doctor_reviews", ["encounter_id"])
+    op.create_index("ix_doctor_reviews_facility_id", "doctor_reviews", ["facility_id"])
     op.create_index("ix_doctor_reviews_reviewed_by", "doctor_reviews", ["reviewed_by"])
     op.create_index("ix_doctor_reviews_lab_order_item_id", "doctor_reviews", ["lab_order_item_id"])
     op.create_index("ix_doctor_reviews_radiology_order_item_id", "doctor_reviews", ["radiology_order_item_id"])
@@ -58,6 +60,7 @@ def downgrade() -> None:
     op.drop_index("ix_doctor_reviews_radiology_order_item_id", table_name="doctor_reviews")
     op.drop_index("ix_doctor_reviews_lab_order_item_id", table_name="doctor_reviews")
     op.drop_index("ix_doctor_reviews_reviewed_by", table_name="doctor_reviews")
+    op.drop_index("ix_doctor_reviews_facility_id", table_name="doctor_reviews")
     op.drop_index("ix_doctor_reviews_encounter_id", table_name="doctor_reviews")
     op.drop_constraint("ck_doctor_reviews_status", "doctor_reviews", type_="check")
     op.drop_table("doctor_reviews")

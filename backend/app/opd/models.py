@@ -193,8 +193,13 @@ class DoctorReview(Base, UUIDPk, Timestamps, Blame):
     """
     __tablename__ = "doctor_reviews"
 
+    __audit_resource_type__ = "doctor_reviews"
+    __audit_facility_id_field__ = "facility_id"
+
     encounter_id = Column(UUID(as_uuid=True), ForeignKey("encounters.id", ondelete="RESTRICT"),
                            nullable=False)
+    facility_id = Column(UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="RESTRICT"),
+                          nullable=False)
     reviewed_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"),
                           nullable=False)
     lab_order_item_id = Column(UUID(as_uuid=True), ForeignKey("lab_order_items.id", ondelete="RESTRICT"),
@@ -211,6 +216,7 @@ class DoctorReview(Base, UUIDPk, Timestamps, Blame):
             name="status",
         ),
         Index("ix_doctor_reviews_encounter_id", "encounter_id"),
+        Index("ix_doctor_reviews_facility_id", "facility_id"),
         Index("ix_doctor_reviews_reviewed_by", "reviewed_by"),
         Index("ix_doctor_reviews_lab_order_item_id", "lab_order_item_id"),
         Index("ix_doctor_reviews_radiology_order_item_id", "radiology_order_item_id"),
