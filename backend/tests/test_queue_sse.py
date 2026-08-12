@@ -1,25 +1,39 @@
 ﻿"""Tests for the public queue display SSE stream (queue/router.py's
 queue_display_stream).
 
-Connects to the REAL running server (localhost:8000, same process this
-runs alongside in the container) rather than using an in-process
-ASGITransport -- ASGITransport + EnvelopeMiddleware (BaseHTTPMiddleware)
-deadlocks on any streaming response: call_next() partially drains the
-response's internal message pipe to inspect headers, then a second read
-of that same pipe (for pass-through) has nothing left until real content
-arrives, which for this endpoint depends on Redis, which depends on the
-test publishing, which depends on the stream already being open. A real
-running server doesn't have this problem -- confirmed manually with curl
-before this test existed.
+Connects to the REAL running server, not an in-process ASGITransport --
+ASGITransport + EnvelopeMiddleware deadlocks on any streaming response
+(confirmed via manual curl testing).
+
+Skipped when a live server/Redis aren't reachable (e.g. CI) -- same
+pattern as test_queue_counters_concurrency.py's _real_database_is_ready().
 """
 import asyncio
 import json
+import socket
 
 import httpx
 import pytest
 import redis.asyncio as redis_async
 
 from app.common.redis import queue_channel
+
+
+def _server_and_redis_are_reachable() -> bool:
+    try:
+        with socket.create_connection(("localhost", 8000), timeout=1):
+            pass
+        with socket.create_connection(("redis", 6379), timeout=1):
+            pass
+        return True
+    except OSError:
+        return False
+
+
+pytestmark = pytest.mark.skipif(
+    not _server_and_redis_are_reachable(),
+    reason="Needs a live uvicorn server on localhost:8000 and Redis on 'redis' -- local dev only.",
+)
 
 
 def _redis_client() -> redis_async.Redis:
@@ -42,7 +56,7 @@ async def test_sse_stream_forwards_published_event():
         async with httpx.AsyncClient(base_url="http://localhost:8000", timeout=10) as ac:
             async with ac.stream("GET", path) as response:
                 assert response.status_code == 200
-                await asyncio.sleep(0.3)  # let the subscribe register first
+                await asyncio.sleep(0.3)
 
                 payload = {
                     "department_id": department_id,
@@ -81,12 +95,10 @@ async def test_sse_stream_unsubscribes_on_disconnect():
                 await asyncio.sleep(0.3)
                 assert channel in await r.pubsub_channels()
 
-        # Exiting the outer `async with` closes the connection -- a real disconnect.
         await asyncio.sleep(1.5)
         assert channel not in await r.pubsub_channels(), (
             "Redis subscription was not cleaned up after client disconnect -- "
-            "known blocker: EnvelopeMiddleware/BaseHTTPMiddleware incompatible "
-            "with streaming responses, confirmed but not yet fixed."
+            "known blocker: EnvelopeMiddleware/BaseHTTPMiddleware."
         )
     finally:
         await r.aclose()
