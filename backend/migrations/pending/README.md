@@ -22,11 +22,17 @@ cost lands on whoever pulls rather than on whoever parked. Hence: out of the pat
 
 ## Current contents
 
-| file | chains off | unblocked when |
-|---|---|---|
-| `0032_allergies.py` | 0031 | 0031 merges |
-| `0033_charge_master.py` | 0032 | with 0032 |
-| `0034_ipd_bed_integrity.py` | 0033 | with 0033 |
+**Empty.** First time since 4 August.
+
+The pile peaked at six: 0009, 0019, 0020, and 0032–0034. It drained as the chain
+below it merged, and none of the three that came out last needed a single edit —
+they were written against the numbers §2 assigned them, those numbers became
+real, and the files resolved untouched.
+
+That is the argument for pointing `down_revision` at the number the map gives you
+even when that revision doesn't exist yet. The alternative — chaining off whatever
+happens to be in your `versions/` folder today — is what produced the 0002 fork in
+#264 and the collision in #297, and those cost days each.
 
 ## Moving one back
 
@@ -39,6 +45,31 @@ pytest tests/test_v314_invariants.py      # constraints must still hold
 `tests/test_v314_invariants.py` searches `versions/` and `pending/` both, so the
 constraint tests keep running while a migration is parked and need no edit when it
 returns. A parked migration whose tests are skipped is a migration that quietly rots.
+
+## Check what imports it before you park it
+
+```bash
+grep -rn "0019_files" backend/tests backend/scripts
+```
+
+This directory is deliberately **not** a package — no `__init__.py`, so alembic
+never sees these files. That also means any test doing
+`importlib.import_module("migrations.versions.0019_files")` raises
+`ModuleNotFoundError` the moment the file moves here, and pytest fails at
+**collection**, which takes down the whole backend suite — on staging and on
+every open PR at once, with an error naming a file most authors have never
+touched.
+
+That happened when 0019 was parked. The fix in `tests/files/conftest.py` is to
+load by file path and look in `versions/` first, then `pending/`:
+
+```python
+spec = importlib.util.spec_from_file_location("migration_0019", path)
+```
+
+Tests that apply a migration through an isolated `MigrationContext` don't need
+it to be in the chain at all — only the module object. Write them that way and
+parking costs nothing.
 
 ## Before parking anything else
 
