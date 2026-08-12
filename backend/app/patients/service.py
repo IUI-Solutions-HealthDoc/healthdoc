@@ -469,7 +469,7 @@ async def request_merge(
 # fails the build the day a new FK to patients.id appears without a
 # matching entry here. Do not add a table name here without also adding
 # the repointing code for it below.
-REPOINTED_ON_MERGE: frozenset[str] = frozenset({"patient_identifiers", "visits", "ot_schedules"})
+REPOINTED_ON_MERGE: frozenset[str] = frozenset({"patient_identifiers", "visits", "ot_schedules", "fhir_bundle_transactions"})
 
 # patient_merge_log itself has FKs to patients.id (source_patient_id,
 # target_patient_id) — these must NEVER be repointed. It's the audit trail
@@ -558,6 +558,7 @@ async def approve_merge(
     await _repoint_identifiers(db, source=source, target=target)
     await _repoint_visits(db, source=source, target=target)
     await _repoint_ot_schedules(db, source=source, target=target)
+    await _repoint_fhir_bundle_transactions(db, source=source, target=target)
 
     source.status = "merged"
     source.merged_into_patient_id = target.id
@@ -648,6 +649,26 @@ async def _repoint_ot_schedules(db: AsyncSession, *, source: Patient, target: Pa
 
     await db.execute(
         update(OtSchedule).where(OtSchedule.patient_id == source.id).values(patient_id=target.id)
+    )
+    await db.flush()
+
+
+async def _repoint_fhir_bundle_transactions(db: AsyncSession, *, source: Patient, target: Patient) -> None:
+    """Moves source's fhir_bundle_transactions rows onto target (§3 0006
+    merge repointing rule). Same shape as _repoint_visits/_repoint_ot_schedules:
+    fhir_bundle_transactions.patient_id has no per-patient uniqueness
+    constraint, so every source row simply moves. This branch's own migration
+    (0038-adjacent FHIR module) introduced the FK, so it's this PR's job to
+    keep the guard test (test_patient_merge.py) covering it rather than
+    leaving a gap it just created -- same precedent as ot_schedules above.
+    Without this, /patients/{id}/history for the target silently omits the
+    record that a FHIR bundle was ever built/transmitted for visits that
+    happened before the merge.
+    """
+    from app.integrations.abdm.fhir.models import FhirBundleTransaction
+
+    await db.execute(
+        update(FhirBundleTransaction).where(FhirBundleTransaction.patient_id == source.id).values(patient_id=target.id)
     )
     await db.flush()
 
