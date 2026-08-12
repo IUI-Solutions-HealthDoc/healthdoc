@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.allergies.service import AllergyConflict, check_prescription_item
 from app.audit.service import write_audit_log
 from app.common.enums import DispenseStatus, NotificationStatus
+from app.common.redis import publish_event, stock_alert_channel
 from app.pharmacy.interactions import DrugInteractionConflict, check_against_existing
 from app.pharmacy.schemas import (
     BatchAllocation,
@@ -313,6 +314,53 @@ async def _notify_substitution_stakeholders(
             title=title, body=body, reference_type="pharmacy_dispense_items",
             reference_id=reference_id,
         )
+
+
+async def _publish_low_stock_alerts(
+    db: AsyncSession, *, facility_id: UUID, plan: list[dict]
+) -> None:
+    batch_ids: set[str] = set()
+    for p in plan:
+        for alloc in p.get("allocations", []):
+            batch_ids.add(str(alloc.batch_id))
+    if not batch_ids:
+        return
+
+    rows = (
+        await db.execute(
+            text("""
+                SELECT DISTINCT ii.id AS item_id, ii.name, ii.reorder_level,
+                       COALESCE(SUM(ib2.quantity), 0) AS total_remaining
+                FROM inventory_batches ib
+                JOIN inventory_items ii ON ii.id = ib.item_id
+                JOIN inventory_batches ib2 ON ib2.item_id = ii.id
+                JOIN stock_locations sl2 ON sl2.id = ib2.stock_location_id
+                WHERE ib.id = ANY(:batch_ids) AND sl2.facility_id = :facility_id
+                GROUP BY ii.id, ii.name, ii.reorder_level
+            """),
+            {"batch_ids": list(batch_ids), "facility_id": str(facility_id)},
+        )
+    ).mappings().all()
+
+    for r in rows:
+        if r["total_remaining"] > r["reorder_level"]:
+            continue
+        event_type = "low_stock" if r["total_remaining"] > 0 else "out_of_stock"
+        payload = {
+            "item_id": str(r["item_id"]),
+            "item_name": r["name"],
+            "total_remaining": str(r["total_remaining"]),
+            "reorder_level": str(r["reorder_level"]),
+        }
+        await db.execute(
+            text("""
+                INSERT INTO notification_history (id, event_type, payload, department_id, created_at)
+                SELECT uuid_generate_v4(), :event_type, CAST(:payload AS jsonb), ii.owning_department_id, now()
+                FROM inventory_items ii WHERE ii.id = :item_id
+            """),
+            {"event_type": event_type, "payload": json.dumps(payload), "item_id": str(r["item_id"])},
+        )
+        await publish_event(stock_alert_channel(facility_id), event_type, payload)
 
 
 async def create_dispense(
@@ -671,6 +719,16 @@ async def create_dispense(
             batches=batch_allocations_out,
         ))
 
+    overrides = [
+        {
+            "prescription_item_id": str(i.prescription_item_id),
+            "allergy_override_reason": i.allergy_override_reason,
+            "interaction_override_reason": i.interaction_override_reason,
+        }
+        for i in payload.items
+        if i.allergy_override_reason or i.interaction_override_reason
+    ]
+
     await write_audit_log(
         db, facility_id=facility_id, user_id=current_user_id, action="create",
         resource_type="pharmacy_dispenses", resource_id=UUID(dispense_id),
@@ -678,8 +736,11 @@ async def create_dispense(
         new_value={
             "prescription_id": str(payload.prescription_id), "version": next_version,
             "status": overall_status,
+            "overrides": overrides if overrides else None,
         },
     )
+
+    await _publish_low_stock_alerts(db, facility_id=facility_id, plan=plan)
 
     return DispenseOut(
         id=dispense_id, prescription_id=payload.prescription_id, visit_id=None,

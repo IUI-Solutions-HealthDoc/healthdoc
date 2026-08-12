@@ -2,16 +2,19 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import CurrentDbUser, require_roles
 from app.common.db import get_db
 from app.common.idempotency import check_idempotency, hash_request_body, record_idempotent_response
 from app.common.modules import require_module
+from app.common.redis import stock_alert_channel, subscribe
 from app.pharmacy.schemas import (
     DispenseCreate,
     DispenseItemOut,
     DispenseOut,
+    ExpiryTrackerResponse,
     MedicineSearchResponse,
     PrescriptionQueueResponse,
     SubstitutionApprovalRequest,
@@ -19,6 +22,7 @@ from app.pharmacy.schemas import (
 from app.pharmacy.service import (
     approve_substitution,
     create_dispense,
+    get_expiry_tracker,
     get_prescription_queue,
     search_medicines,
 )
@@ -76,6 +80,48 @@ async def medicine_search(
 ) -> MedicineSearchResponse:
     results = await search_medicines(db, q=q, facility_id=current_user.facility_id)
     return MedicineSearchResponse(items=results)
+
+
+@router.get(
+    "/expiry-tracker",
+    response_model=ExpiryTrackerResponse,
+    dependencies=[
+        Depends(require_module("pharmacy")),
+        Depends(require_roles("pharmacist", "admin")),
+    ],
+)
+async def expiry_tracker_endpoint(
+    current_user: CurrentDbUser,
+    db: DbSession,
+    stock_location_id: UUID | None = None,
+    threshold_days: int = Query(default=30, ge=1),
+) -> ExpiryTrackerResponse:
+    return await get_expiry_tracker(
+        db,
+        facility_id=current_user.facility_id,
+        stock_location_id=stock_location_id,
+        threshold_days=threshold_days,
+    )
+
+
+@router.get(
+    "/stock-alerts",
+    dependencies=[
+        Depends(require_module("pharmacy")),
+        Depends(require_roles("pharmacist", "admin")),
+    ],
+)
+async def stock_alerts_sse(
+    current_user: CurrentDbUser,
+):
+    async def event_generator():
+        async with subscribe(stock_alert_channel(current_user.facility_id)) as pubsub:
+            async for message in pubsub.listen():
+                if message and message.get("type") == "message":
+                    data = message.get("data")
+                    yield f"data: {data}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @router.post(
@@ -136,4 +182,5 @@ async def approve_substitution_endpoint(
         approving_user_id=current_user.id,
         facility_id=current_user.facility_id,
     )
+
 

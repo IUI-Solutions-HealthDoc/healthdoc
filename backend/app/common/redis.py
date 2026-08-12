@@ -6,7 +6,6 @@ import json
 import logging
 import uuid
 from contextlib import asynccontextmanager
-from typing import Union
 
 import redis.asyncio as aioredis
 from redis.exceptions import RedisError
@@ -33,9 +32,14 @@ async def close_redis() -> None:
         _pool = None
 
 
-def queue_channel(department_id: Union[str, uuid.UUID]) -> str:
+def queue_channel(department_id: str | uuid.UUID) -> str:
     """Channel name for a department's queue display board."""
     return f"queue:{department_id}"
+
+
+def stock_alert_channel(facility_id: str | uuid.UUID) -> str:
+    """Channel name for a facility's stock alert SSE stream."""
+    return f"stock_alerts:{facility_id}"
 
 
 async def publish(channel: str, message: str) -> None:
