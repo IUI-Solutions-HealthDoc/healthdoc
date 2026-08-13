@@ -285,6 +285,7 @@ async def _advance_queue(db: AsyncSession, queue: Queue) -> tuple[QueueToken | N
         event_type="token_called",
         payload=payload,
         department_id=queue.department_id,
+        facility_id=queue.facility_id,
     ))
     await db.flush()
 
