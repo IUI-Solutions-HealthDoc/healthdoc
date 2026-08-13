@@ -3,7 +3,7 @@ import json
 import uuid
 from datetime import datetime, timezone
  
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +13,8 @@ from app.common.db import get_db
 from app.common.redis import department_channel, facility_channel, subscribe
 from app.departments.models import Department
 from app.notifications.models import NotificationHistory
+from app.notifications import service
+from app.notifications.schemas import NotificationHistoryListOut, NotificationHistoryOut
 from app.users.models import User
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
@@ -140,3 +142,39 @@ async def facility_notification_stream(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+_HISTORY_ROLES = ("hod", "admin")
+ 
+ 
+# ---------------- NOTIFICATION HISTORY: LIST (hod/admin only) ----------------
+@router.get(
+    "/history",
+    dependencies=[Depends(require_roles(*_HISTORY_ROLES))],
+)
+async def list_notification_history(
+    user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+    department_id: uuid.UUID | None = None,
+    event_type: str | None = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    sort: str = Query("-created_at"),
+) -> dict:
+    caller_facility_id = await _resolve_caller_facility_id(db, user.sub)
+    result = await service.list_notification_history(
+        db,
+        caller_facility_id=caller_facility_id,
+        department_id=department_id,
+        event_type=event_type,
+        page=page,
+        page_size=page_size,
+        sort=sort,
+    )
+    return NotificationHistoryListOut(
+        items=[NotificationHistoryOut.model_validate(item) for item in result["items"]],
+        page=result["page"],
+        page_size=result["page_size"],
+        total=result["total"],
+    ).model_dump(mode="json")
+ 

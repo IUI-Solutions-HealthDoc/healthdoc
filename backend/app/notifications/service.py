@@ -7,11 +7,13 @@
     )
 """
 import uuid
- 
+
+from fastapi import HTTPException 
 from sqlalchemy.ext.asyncio import AsyncSession
  
 from app.common.redis import department_channel, facility_channel
 from app.notifications.models import NotificationHistory
+from sqlalchemy import desc, select, func
  
  
 async def prepare_lab_report_ready_event(
@@ -110,3 +112,54 @@ async def prepare_low_stock_alert_event(
         "event_type": "low_stock_alert",
         "payload": payload,
     }
+
+
+_MAX_PAGE_SIZE = 100
+_SORTABLE_FIELDS = {"created_at": NotificationHistory.created_at}
+ 
+ 
+# ---------------- NOTIFICATION HISTORY: LIST (hod/admin only) ----------------
+async def list_notification_history(
+    db: AsyncSession,
+    caller_facility_id: uuid.UUID,
+    department_id: uuid.UUID | None,
+    event_type: str | None,
+    page: int,
+    page_size: int,
+    sort: str,
+) -> dict:
+    if page_size > _MAX_PAGE_SIZE:
+        raise HTTPException(422, f"page_size cannot exceed {_MAX_PAGE_SIZE}")
+ 
+    descending = sort.startswith("-")
+    field_name = sort[1:] if descending else sort
+    if field_name not in _SORTABLE_FIELDS:
+        raise HTTPException(422, f"Cannot sort by '{field_name}' -- allowed: {sorted(_SORTABLE_FIELDS)}")
+    sort_column = _SORTABLE_FIELDS[field_name]
+    sort_column = desc(sort_column) if descending else sort_column
+ 
+    query = select(NotificationHistory).where(NotificationHistory.facility_id == caller_facility_id)
+    count_query = select(func.count(NotificationHistory.id)).where(
+        NotificationHistory.facility_id == caller_facility_id
+    )
+ 
+    if department_id is not None:
+        query = query.where(NotificationHistory.department_id == department_id)
+        count_query = count_query.where(NotificationHistory.department_id == department_id)
+ 
+    if event_type is not None:
+        query = query.where(NotificationHistory.event_type == event_type)
+        count_query = count_query.where(NotificationHistory.event_type == event_type)
+ 
+    total = (await db.execute(count_query)).scalar_one()
+ 
+    query = query.order_by(sort_column).offset((page - 1) * page_size).limit(page_size)
+    items = (await db.execute(query)).scalars().all()
+ 
+    return {
+        "items": items,
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+    }
+ 
