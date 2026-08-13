@@ -12,6 +12,10 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.allergies.interactions import check_interactions
+from app.allergies.service import AllergyConflict, check_prescription_item
+from app.audit.service import write_audit_log
+from app.inventory.models import InventoryItem
 from app.opd.models import Encounter, Visit
 from app.opd.service import _business_date
 from app.orders import order_number
@@ -55,12 +59,29 @@ async def get_order(db: AsyncSession, order_id: UUID) -> Order | None:
     return result.scalar_one_or_none()
 
 
-async def create_prescription(db: AsyncSession, payload: PrescriptionCreate, created_by: UUID) -> Prescription:
-    """Plain prescription save -- no CDS check yet (allergy/interaction
-    wiring lands in a follow-up PR stacked on this one). Encounter has
-    no patient_id of its own (only visit_id), so patient_id is resolved
-    via encounter -> visit, same two-hop pattern the schema doc's ER
-    diagram implies for every other encounter-scoped write."""
+async def create_prescription(
+    db: AsyncSession, payload: PrescriptionCreate, created_by: UUID,
+) -> tuple[Prescription, list[str]]:
+    """Prescription save with CDS checks wired in.
+
+    Per item: resolve ingredient_code via medicine_item_id -> InventoryItem
+    (no code if medicine_item_id is unset, e.g. a free-text drug not in
+    the inventory catalog -- check_prescription_item() treats that as
+    "unknown, cannot check", not "clear"). Then run the allergy check;
+    AllergyConflict propagates to the caller (router maps it to a 409)
+    UNLESS the item carries a valid override_reason, in which case the
+    override is recorded on the row and a manual audit log is written
+    for it -- PrescriptionItem has no facility_id of its own, so it
+    can't use the __audit_resource_type__ auto-audit path (that
+    requires the field directly on the model), same reason
+    app.admissions.service writes admit/transfer audit logs by hand.
+
+    Interaction checking runs once, across all items' resolved
+    ingredient codes together, after every item has cleared (or been
+    overridden past) its own allergy check. Returns the warning strings
+    alongside the prescription rather than raising -- interactions never
+    block a save (see app.allergies.interactions module docstring).
+    """
     result = await db.execute(select(Encounter).where(Encounter.id == payload.encounter_id))
     encounter = result.scalar_one_or_none()
     if encounter is None:
@@ -81,8 +102,34 @@ async def create_prescription(db: AsyncSession, payload: PrescriptionCreate, cre
     db.add(prescription)
     await db.flush()
 
+    resolved_ingredient_codes: list[str | None] = []
+
     for item in payload.items:
-        db.add(PrescriptionItem(
+        ingredient_code: str | None = None
+        if item.medicine_item_id is not None:
+            inventory_item = await db.get(InventoryItem, item.medicine_item_id)
+            if inventory_item is not None:
+                ingredient_code = inventory_item.ingredient_code
+        resolved_ingredient_codes.append(ingredient_code)
+
+        allergy_override_reason: str | None = None
+        allergy_override_by: UUID | None = None
+
+        try:
+            matched = await check_prescription_item(
+                db, patient_id=visit.patient_id, ingredient_code=ingredient_code,
+                override_reason=item.override_reason,
+            )
+        except AllergyConflict:
+            raise
+
+        if matched is not None:
+            # check_prescription_item only returns non-None when an
+            # override was accepted (see its own docstring) -- record it.
+            allergy_override_reason = item.override_reason
+            allergy_override_by = created_by
+
+        prescription_item = PrescriptionItem(
             id=uuid.uuid4(),
             prescription_id=prescription.id,
             medicine_item_id=item.medicine_item_id,
@@ -93,9 +140,27 @@ async def create_prescription(db: AsyncSession, payload: PrescriptionCreate, cre
             route=item.route,
             instructions=item.instructions,
             status="prescribed",
-        ))
-    await db.flush()
-    return prescription
+            allergy_override_reason=allergy_override_reason,
+            allergy_override_by=allergy_override_by,
+        )
+        db.add(prescription_item)
+        await db.flush()
+
+        if matched is not None:
+            await write_audit_log(
+                db, facility_id=encounter.facility_id, action="allergy_override",
+                resource_type="prescription_items", resource_id=prescription_item.id,
+                user_id=created_by, patient_id=visit.patient_id, visit_id=visit.id,
+                new_value={
+                    "allergy_id": str(matched.id),
+                    "substance": matched.substance_text,
+                    "severity": matched.severity,
+                    "override_reason": allergy_override_reason,
+                },
+            )
+
+    interaction_warnings = check_interactions(resolved_ingredient_codes)
+    return prescription, interaction_warnings
 
 
 async def get_prescription(db: AsyncSession, prescription_id: UUID) -> Prescription | None:

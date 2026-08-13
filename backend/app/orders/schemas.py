@@ -39,6 +39,11 @@ class PrescriptionItemCreate(BaseModel):
     duration_days: int | None = None
     route: str | None = None
     instructions: str | None = None
+    #: Required when a retry is needed after the first save came back
+    #: with an allergy conflict (app.allergies.service.AllergyConflict).
+    #: Ignored if there was no conflict. Anaphylaxis can never be
+    #: overridden regardless of what's passed here.
+    override_reason: str | None = None
 
 
 class PrescriptionCreate(BaseModel):
@@ -72,4 +77,8 @@ class PrescriptionOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     items: list[PrescriptionItemOut]
+    #: Non-blocking. A rule-based interaction match among the ingredients
+    #: on this prescription -- unlike an allergy conflict, this never
+    #: prevents the save; it's surfaced so the clinician can review.
+    interaction_warnings: list[str] = []
     model_config = {"from_attributes": True}

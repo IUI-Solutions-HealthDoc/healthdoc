@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.deps import CurrentDbUser, require_roles
 from app.common.db import get_db
 from app.orders import service
+from app.allergies.service import AllergyConflict
 from app.orders.schemas import (
     OrderCreate, OrderOut, PrescriptionCreate, PrescriptionItemOut, PrescriptionOut,
 )
@@ -41,20 +42,36 @@ async def get_order(order_id: UUID, current_db_user: CurrentDbUser,
              dependencies=[Depends(require_roles("doctor", "admin"))])
 async def create_prescription(payload: PrescriptionCreate, current_db_user: CurrentDbUser,
                                db: AsyncSession = Depends(get_db)) -> PrescriptionOut:
-    """No CDS check yet -- allergy/interaction wiring lands in a
-    follow-up PR stacked on this one. created_by is taken from
-    current_db_user, never the request body (PrescriptionCreate
-    deliberately has no created_by field, unlike OrderCreate)."""
+    """created_by is taken from current_db_user, never the request body
+    (PrescriptionCreate deliberately has no created_by field, unlike
+    OrderCreate). AllergyConflict -> 409: retry the same request with
+    override_reason set on the conflicting item (>=20 chars) unless the
+    allergy is anaphylaxis, which can never be overridden by any role.
+    Interaction warnings never block -- they come back on a 201 inside
+    the response body, not as an error."""
     try:
-        prescription = await service.create_prescription(db, payload, current_db_user.id)
+        prescription, interaction_warnings = await service.create_prescription(
+            db, payload, current_db_user.id,
+        )
     except service.EncounterNotFound:
         raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="encounter_not_found")
+    except AllergyConflict as e:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail={
+                "code": "allergy_conflict",
+                "message": str(e),
+                "absolute": e.absolute,
+                "allergy_id": str(e.allergy.id),
+            },
+        )
     items = await service.get_prescription_items(db, prescription.id)
     return PrescriptionOut(
         id=prescription.id, encounter_id=prescription.encounter_id, facility_id=prescription.facility_id,
         patient_id=prescription.patient_id, notes=prescription.notes,
         created_at=prescription.created_at, updated_at=prescription.updated_at,
         items=[PrescriptionItemOut.model_validate(i) for i in items],
+        interaction_warnings=interaction_warnings,
     )
 
 
