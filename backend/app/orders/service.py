@@ -12,11 +12,11 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.opd.models import Encounter
+from app.opd.models import Encounter, Visit
 from app.opd.service import _business_date
 from app.orders import order_number
-from app.orders.models import Order
-from app.orders.schemas import OrderCreate
+from app.orders.models import Order, Prescription, PrescriptionItem
+from app.orders.schemas import OrderCreate, PrescriptionCreate
 
 
 class EncounterNotFound(Exception):
@@ -53,3 +53,65 @@ async def create_order(db: AsyncSession, payload: OrderCreate, facility_timezone
 async def get_order(db: AsyncSession, order_id: UUID) -> Order | None:
     result = await db.execute(select(Order).where(Order.id == order_id))
     return result.scalar_one_or_none()
+
+
+async def create_prescription(db: AsyncSession, payload: PrescriptionCreate, created_by: UUID) -> Prescription:
+    """Plain prescription save -- no CDS check yet (allergy/interaction
+    wiring lands in a follow-up PR stacked on this one). Encounter has
+    no patient_id of its own (only visit_id), so patient_id is resolved
+    via encounter -> visit, same two-hop pattern the schema doc's ER
+    diagram implies for every other encounter-scoped write."""
+    result = await db.execute(select(Encounter).where(Encounter.id == payload.encounter_id))
+    encounter = result.scalar_one_or_none()
+    if encounter is None:
+        raise EncounterNotFound(payload.encounter_id)
+
+    visit = await db.get(Visit, encounter.visit_id)
+    if visit is None:
+        raise EncounterNotFound(payload.encounter_id)
+
+    prescription = Prescription(
+        id=uuid.uuid4(),
+        encounter_id=payload.encounter_id,
+        facility_id=encounter.facility_id,
+        patient_id=visit.patient_id,
+        notes=payload.notes,
+        created_by=created_by,
+    )
+    db.add(prescription)
+    await db.flush()
+
+    for item in payload.items:
+        db.add(PrescriptionItem(
+            id=uuid.uuid4(),
+            prescription_id=prescription.id,
+            medicine_item_id=item.medicine_item_id,
+            medicine_name=item.medicine_name,
+            dosage=item.dosage,
+            frequency=item.frequency,
+            duration_days=item.duration_days,
+            route=item.route,
+            instructions=item.instructions,
+            status="prescribed",
+        ))
+    await db.flush()
+    return prescription
+
+
+async def get_prescription(db: AsyncSession, prescription_id: UUID) -> Prescription | None:
+    result = await db.execute(select(Prescription).where(Prescription.id == prescription_id))
+    return result.scalar_one_or_none()
+
+
+async def get_prescription_items(db: AsyncSession, prescription_id: UUID) -> list[PrescriptionItem]:
+    """No relationship() is declared on Prescription/PrescriptionItem in
+    this module (both are plain Column-only models), so items are
+    fetched as a separate query rather than via ORM-relationship
+    loading -- callers that need a full PrescriptionOut (header +
+    items) must call this alongside get_prescription()/create_prescription()."""
+    result = await db.execute(
+        select(PrescriptionItem)
+        .where(PrescriptionItem.prescription_id == prescription_id)
+        .order_by(PrescriptionItem.created_at.asc())
+    )
+    return list(result.scalars().all())
