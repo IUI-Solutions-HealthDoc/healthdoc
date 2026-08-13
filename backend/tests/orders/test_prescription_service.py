@@ -32,7 +32,7 @@ class TestCreatePrescription:
                 PrescriptionItemCreate(medicine_name="Paracetamol", dosage="650mg", frequency="qid"),
             ],
         )
-        prescription = await service.create_prescription(db, payload, created_by=doctor.id)
+        prescription, _warnings = await service.create_prescription(db, payload, created_by=doctor.id)
 
         assert prescription.encounter_id == encounter.id
         assert prescription.facility_id == encounter.facility_id
@@ -54,7 +54,7 @@ class TestCreatePrescription:
         payload = PrescriptionCreate(encounter_id=encounter.id, items=[
             PrescriptionItemCreate(medicine_name="Ibuprofen"),
         ])
-        prescription = await service.create_prescription(db, payload, created_by=doctor.id)
+        prescription, _warnings = await service.create_prescription(db, payload, created_by=doctor.id)
         assert prescription.patient_id == visit.patient_id
 
     async def test_create_with_nonexistent_encounter_raises(self, db, seed):
@@ -74,7 +74,7 @@ class TestCreatePrescription:
         payload = PrescriptionCreate(encounter_id=encounter.id, items=[
             PrescriptionItemCreate(medicine_name="Azithromycin", duration_days=3),
         ])
-        prescription = await service.create_prescription(db, payload, created_by=doctor.id)
+        prescription, _warnings = await service.create_prescription(db, payload, created_by=doctor.id)
         items = await service.get_prescription_items(db, prescription.id)
         assert items[0].duration_days == 3
         assert isinstance(items[0].duration_days, int)
@@ -90,7 +90,7 @@ class TestGetPrescription:
         payload = PrescriptionCreate(encounter_id=encounter.id, items=[
             PrescriptionItemCreate(medicine_name="Cetirizine"),
         ])
-        created = await service.create_prescription(db, payload, created_by=doctor.id)
+        created, _warnings = await service.create_prescription(db, payload, created_by=doctor.id)
         fetched = await service.get_prescription(db, created.id)
         assert fetched is not None
         assert fetched.id == created.id
@@ -107,7 +107,7 @@ class TestAllergyOverrideColumns:
         payload = PrescriptionCreate(encounter_id=encounter.id, items=[
             PrescriptionItemCreate(medicine_name="Metformin"),
         ])
-        prescription = await service.create_prescription(db, payload, created_by=doctor.id)
+        prescription, _warnings = await service.create_prescription(db, payload, created_by=doctor.id)
         items = await service.get_prescription_items(db, prescription.id)
         assert items[0].allergy_override_reason is None
         assert items[0].allergy_override_by is None
@@ -117,7 +117,7 @@ class TestAllergyOverrideColumns:
         payload = PrescriptionCreate(encounter_id=encounter.id, items=[
             PrescriptionItemCreate(medicine_name="Metformin"),
         ])
-        prescription = await service.create_prescription(db, payload, created_by=doctor.id)
+        prescription, _warnings = await service.create_prescription(db, payload, created_by=doctor.id)
         items = await service.get_prescription_items(db, prescription.id)
         items[0].allergy_override_reason = "Clinician judged risk acceptable given severity"
         # allergy_override_by deliberately left NULL -- CHECK requires both or neither
@@ -129,7 +129,7 @@ class TestAllergyOverrideColumns:
         payload = PrescriptionCreate(encounter_id=encounter.id, items=[
             PrescriptionItemCreate(medicine_name="Metformin"),
         ])
-        prescription = await service.create_prescription(db, payload, created_by=doctor.id)
+        prescription, _warnings = await service.create_prescription(db, payload, created_by=doctor.id)
         items = await service.get_prescription_items(db, prescription.id)
         items[0].allergy_override_reason = "too short"  # < 20 chars
         items[0].allergy_override_by = doctor.id
@@ -141,7 +141,7 @@ class TestAllergyOverrideColumns:
         payload = PrescriptionCreate(encounter_id=encounter.id, items=[
             PrescriptionItemCreate(medicine_name="Metformin"),
         ])
-        prescription = await service.create_prescription(db, payload, created_by=doctor.id)
+        prescription, _warnings = await service.create_prescription(db, payload, created_by=doctor.id)
         items = await service.get_prescription_items(db, prescription.id)
         items[0].allergy_override_reason = "Clinician judged risk acceptable given severity"
         items[0].allergy_override_by = doctor.id

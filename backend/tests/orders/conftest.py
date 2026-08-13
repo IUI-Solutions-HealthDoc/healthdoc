@@ -80,3 +80,26 @@ async def encounter(db, seed, visit):
     return await seed_encounter(
         db, visit_id=visit.id, facility_id=dept.facility_id, provider_user_id=doctor.id, created_by=doctor.id,
     )
+
+
+async def seed_inventory_item(db, *, name: str, ingredient_code: str | None = None):
+    from app.inventory.models import InventoryItem
+    item = InventoryItem(id=uuid.uuid4(), name=name, ingredient_code=ingredient_code)
+    db.add(item)
+    await db.flush()
+    return item
+
+
+async def seed_allergy(
+    db, *, patient_id: uuid.UUID, recorded_by: uuid.UUID, ingredient_code: str,
+    severity: str = "moderate", substance_text: str = "Test allergen",
+):
+    from app.allergies.models import Allergy
+    allergy = Allergy(
+        id=uuid.uuid4(), patient_id=patient_id, allergen_type="drug",
+        substance_text=substance_text, ingredient_code=ingredient_code,
+        severity=severity, status="active", recorded_by=recorded_by, created_by=recorded_by,
+    )
+    db.add(allergy)
+    await db.flush()
+    return allergy
