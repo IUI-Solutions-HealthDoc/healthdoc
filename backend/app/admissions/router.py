@@ -1,7 +1,6 @@
 """admissions module router — #216 (B3-W5-01): IPD admission and
-transfers. Discharge + discharge-summary endpoints land in a follow-up
-PR stacked on this one (kept out here to stay under the team's
-PR-size guideline).
+transfers, discharge summary API + FHIR stub. Stacked on
+b3-w5-01-pr2-admit-transfer, which covers admit/transfer only.
 
 Mounted into the app under the "ipd" module name (see app/ipd/router.py) —
 app.main's MODULES list gates on "ipd", not "admissions", so this router
@@ -112,3 +111,55 @@ async def transfer_admission(
     except service.AdmissionNotActive as e:
         raise HTTPException(status.HTTP_409_CONFLICT, f"Admission is not active (status={e.current_status})")
     return schemas.AdmissionOut.model_validate(admission)
+
+
+@router.post("/{admission_id}/discharge", response_model=schemas.DischargeOut)
+async def discharge_admission(
+    admission_id: uuid.UUID,
+    body: schemas.DischargeRequest,
+    db: AsyncSession = Depends(get_db),
+    user: AuthUser = Depends(require_roles(*_IPD_ROLES)),
+    _actor: AuditActor = Depends(get_current_actor_dependency),
+) -> schemas.DischargeOut:
+    actor_id = await service.resolve_actor_user_id(
+        db, keycloak_sub=getattr(user, "sub", None), fallback_id=getattr(user, "id", None)
+    )
+    admission = await service.get_admission(db, admission_id)
+    if admission is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Admission not found")
+    try:
+        discharge = await service.discharge_patient(
+            db, admission,
+            discharge_type=body.discharge_type,
+            created_by=actor_id,
+            discharge_summary=body.discharge_summary,
+            follow_up_date=body.follow_up_date,
+            destination_facility_id=body.destination_facility_id,
+            destination_facility_name=body.destination_facility_name,
+            discharged_at=body.discharged_at,
+        )
+    except service.AdmissionNotActive as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, f"Admission is not active (status={e.current_status})")
+    except service.TransferDestinationRequired:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                             "destination_facility_id or destination_facility_name is required "
+                             "when discharge_type is 'transferred'")
+    return schemas.DischargeOut.model_validate(discharge)
+
+
+@router.get("/{admission_id}/discharge-summary", response_model=schemas.DischargeSummaryOut)
+async def discharge_summary(
+    admission_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _user: AuthUser = Depends(require_roles(*_IPD_ROLES)),
+) -> schemas.DischargeSummaryOut:
+    admission = await service.get_admission(db, admission_id)
+    if admission is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Admission not found")
+    discharge = await service.get_discharge(db, admission_id)
+    movements = await service.get_movements(db, admission_id)
+    return schemas.DischargeSummaryOut(
+        admission=schemas.AdmissionOut.model_validate(admission),
+        discharge=schemas.DischargeOut.model_validate(discharge) if discharge else None,
+        movements=[schemas.MovementOut.model_validate(m) for m in movements],
+    )

@@ -11,7 +11,9 @@ import pytest
 from sqlalchemy import select
 
 from app.admissions import service
-from app.admissions.models import PatientMovementLog
+from app.admissions.models import DischargeNotification, PatientMovementLog
+from app.integrations.abdm.fhir.models import FhirBundleTransaction
+from app.outbox.models import OutboxEvent
 from app.audit.models import AuditLog
 from tests.admissions.conftest import seed_bed, seed_patient, seed_visit, seed_ward
 
@@ -153,4 +155,76 @@ class TestTransferPatient:
         with pytest.raises(service.AdmissionNotActive):
             await service.transfer_patient(
                 db, admission=admission, to_ward_id=to_ward.id, to_bed_id=to_bed.id, moved_by=doctor.id,
+            )
+
+
+class TestDischargePatient:
+    async def test_discharge_frees_bed_and_fires_notifications_and_fhir_stub(
+        self, db, seed, visit, ward, bed,
+    ):
+        _dept, _room, doctor = seed
+        admission = await service.admit_patient(
+            db, visit_id=visit.id, ward_id=ward.id, bed_id=bed.id, created_by=doctor.id,
+        )
+        discharge = await service.discharge_patient(
+            db, admission=admission, discharge_type="discharged", created_by=doctor.id,
+            discharge_summary="Recovered well.",
+        )
+        assert discharge.discharge_type == "discharged"
+
+        await db.refresh(admission)
+        assert admission.status == "discharged"
+
+        await db.refresh(bed)
+        assert bed.status == "vacant"
+
+        notif_result = await db.execute(
+            select(DischargeNotification).where(DischargeNotification.discharge_id == discharge.id)
+        )
+        targets = {n.target_module for n in notif_result.scalars().all()}
+        assert targets == {"pharmacy", "billing", "nursing", "lab", "radiology", "patient"}
+
+        outbox_result = await db.execute(
+            select(OutboxEvent).where(OutboxEvent.event_type == "discharge_summary_bundle_built")
+        )
+        assert outbox_result.scalars().first() is not None
+
+        fhir_result = await db.execute(
+            select(FhirBundleTransaction).where(FhirBundleTransaction.patient_id == admission.patient_id)
+        )
+        txn = fhir_result.scalars().first()
+        assert txn is not None
+        assert txn.gateway_response_status == "stub_not_sent"
+
+        log = await _last_audit_log(db, discharge.id)
+        assert log.action == "discharge"
+        assert log.resource_type == "discharges"
+
+    async def test_discharge_transferred_without_destination_raises_before_db_constraint(
+        self, db, seed, visit, ward, bed,
+    ):
+        """Mirrors ck_discharges_transfer_destination (0034), but must be
+        caught in the service so the API returns a clean 422 instead of a
+        raw IntegrityError -- see service.py's TransferDestinationRequired
+        docstring."""
+        _dept, _room, doctor = seed
+        admission = await service.admit_patient(
+            db, visit_id=visit.id, ward_id=ward.id, bed_id=bed.id, created_by=doctor.id,
+        )
+        with pytest.raises(service.TransferDestinationRequired):
+            await service.discharge_patient(
+                db, admission=admission, discharge_type="transferred", created_by=doctor.id,
+            )
+
+    async def test_discharge_of_non_admitted_admission_raises(self, db, seed, visit, ward, bed):
+        _dept, _room, doctor = seed
+        admission = await service.admit_patient(
+            db, visit_id=visit.id, ward_id=ward.id, bed_id=bed.id, created_by=doctor.id,
+        )
+        await service.discharge_patient(
+            db, admission=admission, discharge_type="discharged", created_by=doctor.id,
+        )
+        with pytest.raises(service.AdmissionNotActive):
+            await service.discharge_patient(
+                db, admission=admission, discharge_type="discharged", created_by=doctor.id,
             )

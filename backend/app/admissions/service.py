@@ -17,12 +17,13 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.admissions.models import Admission, Bed, PatientMovementLog
+from app.admissions.models import Admission, Bed, Discharge, DischargeNotification, PatientMovementLog
 from app.audit.service import write_audit_log
 # Reused from billing.service rather than duplicated -- pure auth/identity
 # helper (keycloak_sub -> users.id), not billing-specific. Candidate for
 # a shared module (app/common/ or app/auth/) in a future cleanup PR.
 from app.billing.service import resolve_actor_user_id
+from app.integrations.abdm.fhir import service as fhir_service
 from app.opd.models import Visit
 
 
@@ -54,6 +55,16 @@ class AdmissionNotActive(Exception):
     def __init__(self, admission_id: UUID, current_status: str):
         self.admission_id = admission_id
         self.current_status = current_status
+
+
+class TransferDestinationRequired(Exception):
+    """Mirrors ck_discharges_transfer_destination (0034): discharge_type
+    'transferred' needs a destination_facility_id or _name. Checked here
+    too so the API returns a clean 422/409 instead of surfacing a raw
+    Postgres CHECK-constraint error."""
+
+
+_DISCHARGE_NOTIFICATION_TARGETS = ("pharmacy", "billing", "nursing", "lab", "radiology", "patient")
 
 
 async def _active_admission_on_bed(db: AsyncSession, bed_id: UUID) -> Admission | None:
@@ -146,3 +157,64 @@ async def transfer_patient(
 
 async def get_admission(db: AsyncSession, admission_id: UUID) -> Admission | None:
     return await db.get(Admission, admission_id)
+
+
+async def discharge_patient(
+    db: AsyncSession,
+    admission: Admission,
+    discharge_type: str,
+    created_by: UUID,
+    discharge_summary: str | None = None,
+    follow_up_date=None,
+    destination_facility_id: UUID | None = None,
+    destination_facility_name: str | None = None,
+    discharged_at: datetime | None = None,
+) -> Discharge:
+    if admission.status != "admitted":
+        raise AdmissionNotActive(admission.id, admission.status)
+    if discharge_type == "transferred" and not (destination_facility_id or destination_facility_name):
+        raise TransferDestinationRequired()
+
+    discharge = Discharge(
+        id=uuid.uuid4(), admission_id=admission.id, discharged_at=discharged_at or datetime.now(timezone.utc),
+        discharge_type=discharge_type, discharge_summary=discharge_summary, follow_up_date=follow_up_date,
+        destination_facility_id=destination_facility_id, destination_facility_name=destination_facility_name,
+        created_by=created_by,
+    )
+    db.add(discharge)
+
+    admission.status = discharge_type
+    admission.updated_by = created_by
+
+    bed = await db.get(Bed, admission.bed_id)
+    if bed is not None:
+        bed.status = "vacant"
+
+    for target in _DISCHARGE_NOTIFICATION_TARGETS:
+        db.add(DischargeNotification(id=uuid.uuid4(), discharge_id=discharge.id, target_module=target))
+
+    await db.flush()
+
+    visit = await db.get(Visit, admission.visit_id)
+    await fhir_service.record_discharge_bundle(db, discharge, admission, visit.facility_id)
+
+    await write_audit_log(
+        db, facility_id=visit.facility_id, action="discharge", resource_type="discharges",
+        resource_id=discharge.id, user_id=created_by, patient_id=admission.patient_id, visit_id=admission.visit_id,
+        new_value={"discharge_type": discharge_type},
+    )
+    return discharge
+
+
+async def get_movements(db: AsyncSession, admission_id: UUID) -> list[PatientMovementLog]:
+    result = await db.execute(
+        select(PatientMovementLog)
+        .where(PatientMovementLog.admission_id == admission_id)
+        .order_by(PatientMovementLog.moved_at.asc())
+    )
+    return list(result.scalars().all())
+
+
+async def get_discharge(db: AsyncSession, admission_id: UUID) -> Discharge | None:
+    result = await db.execute(select(Discharge).where(Discharge.admission_id == admission_id))
+    return result.scalar_one_or_none()
