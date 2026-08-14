@@ -1,28 +1,33 @@
 """doctor_reviews — review/sign-off on encounters and lab/radiology results
 
 Revision ID: 0038
-Revises: 0037
+Revises: 0036
 Create Date: 2026-08-11
 
-PARKED (see migrations/pending/README.md): 0035-0037 are Priyanshu's
-prescriptions.facility_id work (#353), not yet merged into staging.
-down_revision is correctly 0037 -- the number the team's sequence
-assigns this file's true parent -- even though 0037 doesn't exist in
-versions/ yet. Move this file back to versions/ once 0037 lands there
-(see pending/README.md "Moving one back").
+down_revision corrected twice during review on #361:
+  1. Originally chained off 0031 (a real, already-merged migration) as a
+     placeholder while its true parent was still unmerged; that
+     placeholder forked the chain the moment 0032-0034 also merged onto
+     0031 via staging (alembic heads showed both 0034 and 0038 as heads).
+  2. Fixed to 0037 (Priyanshu's prescriptions.facility_id work, #353) and
+     parked in pending/ since 0037 didn't exist in versions/ yet. 0037
+     turned out to be broken (renamed constraints to names 0006 had
+     already given them, failing on a fresh database) and was dropped;
+     the surviving, merged migrations from that work are 0035
+     (patients_row_version) and 0036 (patient_merge_log_decision_reason).
+     down_revision corrected to 0036, the new real chain tip -- reviewer's
+     note: "revision ids are opaque labels, so 0038 chaining off 0036 is
+     fine and nobody has to renumber."
 
-Previously chained off 0031 (a real, already-merged migration) as a
-placeholder while the real parent was still unmerged; that placeholder
-forked the chain the moment 0032-0034 also merged onto 0031 via
-staging (alembic heads showed both 0034 and 0038 as heads). Fixed per
-review on #361.
+Moved back from pending/ to versions/ now that 0036 exists there --
+see pending/README.md "Moving one back".
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision = "0038"
-down_revision = "0037"
+down_revision = "0036"
 branch_labels = None
 depends_on = None
 
