@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     abdm_client_id: str = "change-me"
     abdm_client_secret: str = "change-me"
     abdm_hfr_facility_id: str = "change-me"
+    # Consent-manager id sent as X-CM-ID on every gateway call. 'sbx' is the
+    # sandbox; production is 'abdm'. Wrong value returns a 400 the gateway
+    # does not explain, so it is configuration rather than a constant.
+    abdm_x_cm_id: str = "sbx"
     
     aadhaar_hmac_key: str = "change-me-in-env"
     aadhaar_encryption_key: str = "change-me-in-env"
