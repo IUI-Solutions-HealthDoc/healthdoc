@@ -28,10 +28,14 @@ MAX_ATTEMPTS = 5
 async def enqueue(db: AsyncSession, *, aggregate_type: str, aggregate_id: str,
                   event_type: str, payload: dict[str, Any], sensitivity: str = "normal") -> None:
     """Call inside the SAME transaction as the business write."""
-    await db.execute(text("""
+    # CAST(... AS jsonb) is Postgres-only. Under SQLite it silently
+    # coerces the JSON text to 0 (no numeric prefix -> NUMERIC affinity
+    # -> 0), so this is dialect-gated rather than a bare literal.
+    payload_expr = "CAST(:pl AS jsonb)" if db.bind.dialect.name == "postgresql" else ":pl"
+    await db.execute(text(f"""
         INSERT INTO outbox_events
             (id, aggregate_type, aggregate_id, event_type, payload, sensitivity, status, attempts)
-        VALUES (uuid_generate_v4(), :at, :aid, :et, CAST(:pl AS jsonb), :sev, 'pending', 0)
+        VALUES (uuid_generate_v4(), :at, :aid, :et, {payload_expr}, :sev, 'pending', 0)
     """), {"at": aggregate_type, "aid": aggregate_id, "et": event_type,
            "pl": json.dumps(payload), "sev": sensitivity})
 
