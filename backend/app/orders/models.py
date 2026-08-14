@@ -61,7 +61,7 @@ class Prescription(Base, UUIDPk, Timestamps, Blame):
 
     __tablename__ = "prescriptions"
 
-    __audit_resource_type__ = "orders"
+    __audit_resource_type__ = "prescriptions"
     __audit_facility_id_field__ = "facility_id"
     __audit_encounter_id_field__ = "encounter_id"
 
