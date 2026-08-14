@@ -22,11 +22,17 @@ cost lands on whoever pulls rather than on whoever parked. Hence: out of the pat
 
 ## Current contents
 
-| file | chains off | unblocked when |
-|---|---|---|
-| `0032_allergies.py` | 0031 | 0031 merges |
-| `0033_charge_master.py` | 0032 | with 0032 |
-| `0034_ipd_bed_integrity.py` | 0033 | with 0033 |
+**Empty.** First time since 4 August.
+
+The pile peaked at six: 0009, 0019, 0020, and 0032–0034. It drained as the chain
+below it merged, and none of the three that came out last needed a single edit —
+they were written against the numbers §2 assigned them, those numbers became
+real, and the files resolved untouched.
+
+That is the argument for pointing `down_revision` at the number the map gives you
+even when that revision doesn't exist yet. The alternative — chaining off whatever
+happens to be in your `versions/` folder today — is what produced the 0002 fork in
+#264 and the collision in #297, and those cost days each.
 
 ## Moving one back
 
