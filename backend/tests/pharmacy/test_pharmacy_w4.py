@@ -32,14 +32,13 @@ async def test_pre_dispense_allergy_check_blocks_and_overrides(db_session, pharm
     await db_session.execute(
         text("""
             INSERT INTO allergies
-                (id, patient_id, facility_id, substance_text, ingredient_code, severity, status, created_by)
+                (id, patient_id, allergen_type, substance_text, ingredient_code, severity, status, recorded_by, created_by)
             VALUES
-                (:id, :patient_id, :facility_id, 'Paracetamol Allergy', :code, 'moderate', 'active', :user)
+                (:id, :patient_id, 'drug', 'Paracetamol Allergy', :code, 'moderate', 'active', :user, :user)
         """),
         {
             "id": allergy_id,
             "patient_id": patient_id,
-            "facility_id": facility_id,
             "code": ingredient_code,
             "user": pharmacist_id,
         },
@@ -118,14 +117,13 @@ async def test_pre_dispense_anaphylaxis_allergy_cannot_be_overridden(db_session,
     await db_session.execute(
         text("""
             INSERT INTO allergies
-                (id, patient_id, facility_id, substance_text, ingredient_code, severity, status, created_by)
+                (id, patient_id, allergen_type, substance_text, ingredient_code, severity, status, recorded_by, created_by)
             VALUES
-                (:id, :patient_id, :facility_id, 'Severe Paracetamol Reaction', :code, 'anaphylaxis', 'active', :user)
+                (:id, :patient_id, 'drug', 'Severe Paracetamol Reaction', :code, 'anaphylaxis', 'active', :user, :user)
         """),
         {
             "id": allergy_id,
             "patient_id": patient_id,
-            "facility_id": facility_id,
             "code": ingredient_code,
             "user": pharmacist_id,
         },
@@ -296,6 +294,13 @@ async def test_low_stock_notification_and_audit_log(db_session, pharmacy_seed):
     )
     assert result.status == DispenseStatus.DISPENSED
 
+    debug_row = (await db_session.execute(text(
+        "SELECT COALESCE(SUM(quantity),0) AS total, reorder_level FROM inventory_batches ib "
+        "JOIN inventory_items ii ON ii.id = ib.item_id "
+        "WHERE ib.item_id = :item_id GROUP BY reorder_level"
+    ), {"item_id": medicine_id})).mappings().first()
+    
+
     # Verify notification_history row inserted
     notif_count = (await db_session.execute(text(
         "SELECT count(*) FROM notification_history WHERE event_type IN ('low_stock', 'out_of_stock')"
@@ -307,3 +312,5 @@ async def test_low_stock_notification_and_audit_log(db_session, pharmacy_seed):
         "SELECT count(*) FROM audit_logs WHERE resource_id = :id AND action = 'create'"
     ), {"id": result.id})).scalar_one()
     assert audit_count == 1
+
+

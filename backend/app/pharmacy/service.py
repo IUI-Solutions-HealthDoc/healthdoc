@@ -329,19 +329,20 @@ async def _publish_low_stock_alerts(
     rows = (
         await db.execute(
             text("""
-                SELECT DISTINCT ii.id AS item_id, ii.name, ii.reorder_level,
+                SELECT ii.id AS item_id, ii.name, ii.reorder_level,
                        COALESCE(SUM(ib2.quantity), 0) AS total_remaining
-                FROM inventory_batches ib
-                JOIN inventory_items ii ON ii.id = ib.item_id
+                FROM inventory_items ii
                 JOIN inventory_batches ib2 ON ib2.item_id = ii.id
                 JOIN stock_locations sl2 ON sl2.id = ib2.stock_location_id
-                WHERE ib.id = ANY(:batch_ids) AND sl2.facility_id = :facility_id
+                WHERE ii.id IN (
+                    SELECT DISTINCT ib.item_id FROM inventory_batches ib
+                    WHERE ib.id = ANY(:batch_ids)
+                ) AND sl2.facility_id = :facility_id
                 GROUP BY ii.id, ii.name, ii.reorder_level
             """),
             {"batch_ids": list(batch_ids), "facility_id": str(facility_id)},
         )
     ).mappings().all()
-
     for r in rows:
         if r["total_remaining"] > r["reorder_level"]:
             continue
@@ -698,6 +699,14 @@ async def create_dispense(
                     "batch_id": str(alloc.batch_id),
                 },
             )
+            await db.execute(
+                text("""
+                    UPDATE inventory_batches
+                    SET quantity = quantity - :qty, updated_at = now()
+                    WHERE id = :batch_id
+                """),
+                {"qty": alloc.quantity, "batch_id": str(alloc.batch_id)},
+            )
             row_ids.append(item_row_id)
             batch_allocations_out.append(BatchAllocation(
                 batch_id=alloc.batch_id, batch_number=alloc.batch_number,
@@ -894,6 +903,14 @@ async def approve_substitution(
                 "dispense_id": item_row["dispense_id"], "performed_by": str(approving_user_id),
                 "batch_id": str(alloc.batch_id),
             },
+        )
+        await db.execute(
+            text("""
+                UPDATE inventory_batches
+                SET quantity = quantity - :qty, updated_at = now()
+                WHERE id = :batch_id
+            """),
+            {"qty": alloc.quantity, "batch_id": str(alloc.batch_id)},
         )
 
         item_row_ids.append(row_id)
