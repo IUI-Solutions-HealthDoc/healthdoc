@@ -22,7 +22,11 @@ cost lands on whoever pulls rather than on whoever parked. Hence: out of the pat
 
 ## Current contents
 
-**Empty.** First time since 4 August.
+**0038** (`doctor_reviews`) — chains off 0037, Priyanshu's prescriptions.facility_id
+work (#353), not yet merged. Previously chained off 0031 as a placeholder while
+0037 was unmerged; that placeholder forked `alembic heads` (0034 and 0038 both
+showed as heads) the moment 0032-0034 also landed on 0031 via staging. Fixed and
+parked per review on #361 — see the file's own docstring.
 
 The pile peaked at six: 0009, 0019, 0020, and 0032–0034. It drained as the chain
 below it merged, and none of the three that came out last needed a single edit —

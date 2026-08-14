@@ -1,22 +1,28 @@
 """doctor_reviews — review/sign-off on encounters and lab/radiology results
 
 Revision ID: 0038
-Revises: 0021
+Revises: 0037
 Create Date: 2026-08-11
 
-PROVISIONAL NUMBER: staging head is 0020c at time of writing. #351 (0021)
-and #352 (0022) are pending merge; multiple other branches claim
-0023-0037 (unmerged). 0038 chosen as the first number not claimed by any
-open branch as of this scan — see PR description for the branch scan
-this was based on. May need renumbering before merge; ping before
-merging if staging has moved.
+PARKED (see migrations/pending/README.md): 0035-0037 are Priyanshu's
+prescriptions.facility_id work (#353), not yet merged into staging.
+down_revision is correctly 0037 -- the number the team's sequence
+assigns this file's true parent -- even though 0037 doesn't exist in
+versions/ yet. Move this file back to versions/ once 0037 lands there
+(see pending/README.md "Moving one back").
+
+Previously chained off 0031 (a real, already-merged migration) as a
+placeholder while the real parent was still unmerged; that placeholder
+forked the chain the moment 0032-0034 also merged onto 0031 via
+staging (alembic heads showed both 0034 and 0038 as heads). Fixed per
+review on #361.
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision = "0038"
-down_revision = "0031"
+down_revision = "0037"
 branch_labels = None
 depends_on = None
 
