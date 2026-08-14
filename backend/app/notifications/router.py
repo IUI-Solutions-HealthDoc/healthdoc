@@ -8,34 +8,24 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
  
-from app.auth.deps import CurrentUser, require_roles
+from app.auth.deps import CurrentDbUser, require_roles
 from app.common.db import get_db
 from app.common.redis import department_channel, facility_channel, subscribe
 from app.departments.models import Department
 from app.notifications.models import NotificationHistory
 from app.notifications import service
 from app.notifications.schemas import NotificationHistoryListOut, NotificationHistoryOut
-from app.users.models import User
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
 
 
 _STAFF_ROLES = ("doctor", "nurse", "lab_tech", "pharmacist", "radiology_tech", "hod", "admin")
- 
+_HISTORY_ROLES = ("hod", "admin")
+
  
 @router.get("/ping")
 async def ping() -> dict:
     return {"module": "notifications", "status": "stub"}
- 
- 
-async def _resolve_caller_facility_id(db: AsyncSession, keycloak_sub: str) -> uuid.UUID:
-    # Duplicated from queue/service.py -- once CurrentDbUser
-    # lands, replace both with current_db_user.facility_id.
-    row = await db.execute(select(User.facility_id).where(User.keycloak_sub == keycloak_sub))
-    facility_id = row.scalar_one_or_none()
-    if facility_id is None:
-        raise HTTPException(403, "No matching user profile for this account")
-    return facility_id
 
 
 def _format_sse(event_id: str, event_type: str, payload: dict) -> str:
@@ -65,7 +55,7 @@ async def _catch_up_department_events(
 )
 async def department_notification_stream(
     department_id: uuid.UUID,
-    user: CurrentUser,
+    current_db_user: CurrentDbUser,
     request: Request,
     db: AsyncSession = Depends(get_db),
     last_event_id: str | None = Header(None, alias="Last-Event-ID"),
@@ -76,9 +66,8 @@ async def department_notification_stream(
     any disconnect -- we use that to replay anything missed from
     notification_history before switching to live Redis delivery.
     """
-    caller_facility_id = await _resolve_caller_facility_id(db, user.sub)
     department = await db.get(Department, department_id)
-    if department is None or department.facility_id != caller_facility_id:
+    if department is None or department.facility_id != current_db_user.facility_id:
         raise HTTPException(404, "Department not found")
 
     missed = await _catch_up_department_events(db, department_id, last_event_id)
@@ -107,22 +96,18 @@ async def department_notification_stream(
  
  
 # ---------------- STAFF ALERTS: FACILITY-WIDE SSE STREAM ----------------
-# No reconnect catch-up here yet -- notification_history.facility_id was
-# only just added (0020, still pending) and nothing populates it in a
-# real flow yet. Live-only until that's confirmed working end to end.
 @router.get(
     "/stream/facility/{facility_id}",
     dependencies=[Depends(require_roles(*_STAFF_ROLES))],
 )
 async def facility_notification_stream(
     facility_id: uuid.UUID,
-    user: CurrentUser,
+    current_db_user: CurrentDbUser, 
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> StreamingResponse:
     """Live facility-wide staff alerts (e.g. blood bank supply issues)."""
-    caller_facility_id = await _resolve_caller_facility_id(db, user.sub)
-    if facility_id != caller_facility_id:
+    if facility_id != current_db_user.facility_id:
         raise HTTPException(404, "Facility not found")
  
     channel = facility_channel(facility_id)
@@ -142,9 +127,6 @@ async def facility_notification_stream(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
-
-
-_HISTORY_ROLES = ("hod", "admin")
  
  
 # ---------------- NOTIFICATION HISTORY: LIST (hod/admin only) ----------------
@@ -153,7 +135,7 @@ _HISTORY_ROLES = ("hod", "admin")
     dependencies=[Depends(require_roles(*_HISTORY_ROLES))],
 )
 async def list_notification_history(
-    user: CurrentUser,
+    current_db_user: CurrentDbUser,
     db: AsyncSession = Depends(get_db),
     department_id: uuid.UUID | None = None,
     event_type: str | None = None,
@@ -161,10 +143,9 @@ async def list_notification_history(
     page_size: int = Query(20, ge=1, le=100),
     sort: str = Query("-created_at"),
 ) -> dict:
-    caller_facility_id = await _resolve_caller_facility_id(db, user.sub)
     result = await service.list_notification_history(
         db,
-        caller_facility_id=caller_facility_id,
+        caller_facility_id=current_db_user.facility_id,
         department_id=department_id,
         event_type=event_type,
         page=page,
