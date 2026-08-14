@@ -40,8 +40,11 @@ def queue_channel(department_id: str | uuid.UUID) -> str:
 def stock_alert_channel(facility_id: str | uuid.UUID) -> str:
     """Channel name for a facility's stock alert SSE stream."""
     return f"stock_alerts:{facility_id}"
-
-
+  
+def department_channel(department_id: str | uuid.UUID) -> str:
+    """Generic department-scoped channel for staff alerts."""
+    return f"dept:{department_id}"
+  
 async def publish(channel: str, message: str) -> None:
     """Publish a raw string message to a channel."""
     try:
