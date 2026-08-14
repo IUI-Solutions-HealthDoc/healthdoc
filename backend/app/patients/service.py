@@ -636,6 +636,40 @@ async def _repoint_visits(db: AsyncSession, *, source: Patient, target: Patient)
     await db.flush()
 
 
+async def _repoint_fhir_bundle_transactions(
+    db: AsyncSession, *, source: Patient, target: Patient
+) -> None:
+    """Moves source's ABDM transmission records onto target.
+
+    0026 created fhir_bundle_transactions with a patient_id FK and no
+    repointing logic; the guard test only saw it once #367 registered the
+    ORM model. Repointed rather than exempted: unlike patient_merge_log,
+    which must never be rewritten because it is the evidence of the merge,
+    this table records what was transmitted *about a person*, and after a
+    merge that person is the target.
+
+    0026's index is (patient_id, transmitted_at) and exists to answer "what
+    was transmitted about this patient, and when" — the question a DPDP
+    access request asks. Rows left on the dead source id make that answer
+    incomplete for the surviving patient.
+
+    Raw SQL rather than the ORM model on purpose: FhirBundleTransaction
+    arrives with #367, and this module has to keep importing on branches
+    without it. The table exists from 0026 either way.
+
+    No uniqueness to collide with — a transmission is a point-in-time fact,
+    so every source row simply moves.
+    """
+    await db.execute(
+        text(
+            "UPDATE fhir_bundle_transactions SET patient_id = :target_id "
+            "WHERE patient_id = :source_id"
+        ),
+        {"target_id": target.id, "source_id": source.id},
+    )
+    await db.flush()
+
+
 async def _repoint_ot_schedules(db: AsyncSession, *, source: Patient, target: Patient) -> None:
     """Moves source's ot_schedules rows onto target (§3 0006 merge
     repointing rule). Same shape as _repoint_visits: ot_schedules.

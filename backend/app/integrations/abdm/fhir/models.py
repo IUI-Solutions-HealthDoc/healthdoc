@@ -27,7 +27,7 @@ class FhirBundleTransaction(Base, UUIDPk, Timestamps):
     facility_id = Column(UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False)
 
     __table_args__ = (
-        CheckConstraint("direction IN ('hip_push','hiu_pull')", name="ck_fhir_bundle_transactions_direction"),
+        CheckConstraint("direction IN ('hip_push','hiu_pull')", name="direction"),
         Index("ix_fhir_bundle_transactions_patient_id", "patient_id", "transmitted_at"),
         Index("ix_fhir_bundle_transactions_facility_id", "facility_id"),
     )
