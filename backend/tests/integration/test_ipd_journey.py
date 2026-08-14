@@ -77,15 +77,20 @@ def seeded_wards_and_beds() -> None:
 
 
 class TestIPDCoreJourney:
-    @pytest.mark.xfail(
-        reason="Blocked on missing visit_number_counters table — used by "
-               "app/opd/visit_number.py but never created by any migration "
-               "(0001-0034 all checked via git grep, zero matches). "
-               "IPD visits go through the same opd/router.py create_visit "
-               "flow as OPD, so this blocks IPD too, not just OPD.",
+     @pytest.mark.xfail(
+        reason="visit_number_counters bug is now fixed (migration 0035), so "
+               "Step 1 (visit creation) now passes. Blocked at Step 2: "
+               "POST /api/v1/admissions has no registered route at all — "
+               "confirmed via full route dump "
+               "(python -c \"from app.main import app; "
+               "[print(r.path) for r in app.routes]\" | grep admission "
+               "returns nothing). app/admissions/ only has models.py, no "
+               "router.py exists. This is a missing feature, not a schema "
+               "bug — someone needs to build the admissions router before "
+               "this journey can progress further.",
         strict=False,
     )
-    def test_full_ipd_journey_admission_to_discharge(
+  def test_full_ipd_journey_admission_to_discharge(
         self, client_as, seeded_patient_id, seeded_wards_and_beds
     ): 
         patient_id = seeded_patient_id

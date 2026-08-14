@@ -3,30 +3,22 @@
 #243 (BB-W7-01) — OPD core journey:
 registration -> consultation -> order -> result -> invoice -> payment.
 
-Drives real HTTP endpoints in sequence against real Postgres, carrying
-state (visit_id, encounter_id, order_id, invoice_id...) from one step to
-the next — the thing a unit test structurally cannot do, and the layer
-your lead flagged as the one that would have caught today's 5 production
-bugs (queue allocator rollback, NOT NULL columns with no seed, THID
-sequence recovery inside an aborted transaction).
+All routes are mounted under /api/v1. Every JSON response (success or
+error) is wrapped by app/common/envelope.py as:
+  {"success": bool, "data": ..., "error": null | {...}, "meta": {...}}
+so every access below goes through resp.json()["data"][...], not
+resp.json()[...] directly.
 
-All routes are mounted under /api/v1 (confirmed via
-`python -c "from app.main import app; [print(r.path) for r in app.routes]"`)
-— every URL below reflects that real prefix, not a guess.
+Three real schema bugs found and fixed via this test, migrations 0035
+and 0035a:
+  - visit_number_counters table was missing entirely
+  - idempotency_keys.updated_at column was missing
+  - visits.row_version column was missing
+All three confirmed fixed live against Docker Postgres (port 55432).
 
 ASSUMPTION FLAGGED: app/billing/schemas.py wasn't available when this was
 written, so InvoiceBuildResponse's exact field name for the created
-invoice id is guessed as `invoice_id` below (marked inline). Confirm
-against the real schema before relying on this passing.
-
-CURRENTLY XFAIL — two real schema bugs found via this test:
-(1) visit_number_counters table missing entirely — used by
-    app/opd/visit_number.py, never created by any migration (0001-0034
-    checked via git grep, zero matches). Hit first, on every POST /visits.
-(2) idempotency_keys.updated_at missing from migration 0003a (model
-    expects it via Timestamps mixin, DB doesn't have it) — would be hit
-    on Idempotency-Key replay once (1) is fixed.
-Both owned by B1 — see conversation with lead.
+invoice id is guessed as `invoice_id` below (marked inline).
 """
 from __future__ import annotations
 
@@ -45,18 +37,6 @@ from tests.integration.conftest import (
 
 
 class TestOPDCoreJourney:
-    @pytest.mark.xfail(
-        reason="Blocked on two real schema bugs found via this test: "
-               "(1) visit_number_counters table missing entirely — used by "
-               "app/opd/visit_number.py, never created by any migration "
-               "(0001-0034 checked via git grep, zero matches). This is hit "
-               "first, on every call to POST /visits. "
-               "(2) idempotency_keys.updated_at missing from migration 0003a "
-               "(model expects it via Timestamps mixin, DB doesn't have it) — "
-               "would be hit on Idempotency-Key replay once (1) is fixed. "
-               "Both owned by B1 — see conversation with lead.",
-        strict=False,
-    )
     def test_full_opd_journey_registration_to_payment(self, client_as, seeded_patient_id):
         patient_id = seeded_patient_id
 
@@ -75,7 +55,7 @@ class TestOPDCoreJourney:
             },
         )
         assert visit_resp.status_code == 201, visit_resp.text
-        visit = visit_resp.json()
+        visit = visit_resp.json()["data"]
         visit_id = visit["id"]
         assert visit["status"] in ("registered", "waiting")
 
@@ -102,7 +82,7 @@ class TestOPDCoreJourney:
                 "visit_date": "2026-08-12T09:05:00Z",
             },
         )
-        assert first.json()["id"] == second.json()["id"], (
+        assert first.json()["data"]["id"] == second.json()["data"]["id"], (
             "Idempotency-Key replay failed — a retried registration created "
             "a second visit instead of returning the stored response."
         )
@@ -116,12 +96,12 @@ class TestOPDCoreJourney:
                 "visit_id": visit_id,
                 "provider_user_id": doctor_id,
                 "created_by": doctor_id,
-                "encounter_type": "opd_consult",
+                "encounter_type": "consultation",
                 "chief_complaint": "Journey test complaint",
             },
         )
         assert encounter_resp.status_code == 201, encounter_resp.text
-        encounter = encounter_resp.json()
+        encounter = encounter_resp.json()["data"]
         encounter_id = encounter["id"]
 
         # --- Step 3: order (orders/router.py -> POST /api/v1/orders) ---
@@ -136,7 +116,7 @@ class TestOPDCoreJourney:
             },
         )
         assert order_resp.status_code == 201, order_resp.text
-        order = order_resp.json()
+        order = order_resp.json()["data"]
         order_id = order["id"]
         assert order["status"] not in (None, "")
 
@@ -151,7 +131,7 @@ class TestOPDCoreJourney:
             },
         )
         assert item_resp.status_code == 201, item_resp.text
-        lab_item_id = item_resp.json()["id"]
+        lab_item_id = item_resp.json()["data"]["id"]
 
         collect_resp = client.put(
             f"/api/v1/pathology/order-items/{lab_item_id}/sample-collection",
@@ -172,7 +152,7 @@ class TestOPDCoreJourney:
             json={},
         )
         assert verify_resp.status_code == 200, verify_resp.text
-        assert verify_resp.json()["status"] == "final"
+        assert verify_resp.json()["data"]["status"] == "final"
 
         # --- Step 5: invoice (billing/router.py) ---
         client = client_as(RECEPTIONIST)
@@ -181,7 +161,7 @@ class TestOPDCoreJourney:
             json={"dry_run": False},
         )
         assert build_resp.status_code == 200, build_resp.text
-        build_body = build_resp.json()
+        build_body = build_resp.json()["data"]
         invoice_id = build_body.get("invoice_id") or build_body.get("id")
         assert invoice_id is not None, (
             f"Could not find invoice id on InvoiceBuildResponse: {build_body}"
