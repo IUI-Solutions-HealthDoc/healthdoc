@@ -103,6 +103,7 @@ async def create_prescription(
     await db.flush()
 
     resolved_ingredient_codes: list[str | None] = []
+    warnings: list[str] = []
 
     for item in payload.items:
         ingredient_code: str | None = None
@@ -111,6 +112,10 @@ async def create_prescription(
             if inventory_item is not None:
                 ingredient_code = inventory_item.ingredient_code
         resolved_ingredient_codes.append(ingredient_code)
+        if ingredient_code is None:
+            warnings.append(
+                f"Allergy check not performed for '{item.medicine_name}' -- no ingredient code"
+            )
 
         allergy_override_reason: str | None = None
         allergy_override_by: UUID | None = None
@@ -160,7 +165,8 @@ async def create_prescription(
             )
 
     interaction_warnings = check_interactions(resolved_ingredient_codes)
-    return prescription, interaction_warnings
+    warnings.extend(interaction_warnings)
+    return prescription, warnings
 
 
 async def get_prescription(db: AsyncSession, prescription_id: UUID) -> Prescription | None:

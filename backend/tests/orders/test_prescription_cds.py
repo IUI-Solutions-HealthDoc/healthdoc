@@ -112,6 +112,9 @@ class TestAllergyBlocking:
         prescription, warnings = await service.create_prescription(db, payload, created_by=doctor.id)
         items = await service.get_prescription_items(db, prescription.id)
         assert items[0].allergy_override_reason is None
+        assert len(warnings) == 1
+        assert "Herbal cough syrup" in warnings[0]
+        assert "not performed" in warnings[0]
 
 
 class TestInteractionWarnings:

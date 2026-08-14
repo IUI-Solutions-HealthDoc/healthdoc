@@ -50,7 +50,7 @@ async def create_prescription(payload: PrescriptionCreate, current_db_user: Curr
     Interaction warnings never block -- they come back on a 201 inside
     the response body, not as an error."""
     try:
-        prescription, interaction_warnings = await service.create_prescription(
+        prescription, warnings = await service.create_prescription(
             db, payload, current_db_user.id,
         )
     except service.EncounterNotFound:
@@ -71,7 +71,7 @@ async def create_prescription(payload: PrescriptionCreate, current_db_user: Curr
         patient_id=prescription.patient_id, notes=prescription.notes,
         created_at=prescription.created_at, updated_at=prescription.updated_at,
         items=[PrescriptionItemOut.model_validate(i) for i in items],
-        interaction_warnings=interaction_warnings,
+        interaction_warnings=warnings,
     )
 
 
