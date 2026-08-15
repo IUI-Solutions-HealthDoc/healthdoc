@@ -94,7 +94,8 @@ async def pharmacy_seed(db_session: AsyncSession) -> dict[str, uuid.UUID]:
     """), {"id": encounter_id, "visit_id": visit_id, "facility_id": facility_id,
              "provider": doctor_id, "created_by": doctor_id})
     await db_session.execute(text("""
-        INSERT INTO prescriptions (id, encounter_id, facility_id, patient_id, created_by)
+        INSERT INTO prescriptions
+            (id, encounter_id, facility_id, patient_id, created_by)
         VALUES (:id, :encounter_id, :facility_id, :patient_id, :created_by)
     """), {"id": prescription_id, "encounter_id": encounter_id, "facility_id": facility_id,
              "patient_id": patient_id, "created_by": doctor_id})

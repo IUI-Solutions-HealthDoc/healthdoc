@@ -11,7 +11,6 @@ from app.auth.deps import CurrentDbUser, require_roles
 from app.common.db import get_db
 from app.orders import service
 from app.orders.schemas import OrderCreate, OrderOut
-from app.users.models import Facility
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 
@@ -20,8 +19,15 @@ router = APIRouter(prefix="/orders", tags=["orders"])
              dependencies=[Depends(require_roles("doctor", "nurse", "admin"))])
 async def create_order(payload: OrderCreate, current_db_user: CurrentDbUser,
                         db: AsyncSession = Depends(get_db)) -> OrderOut:
-    facility = await db.get(Facility, current_db_user.facility_id)
-    order = await service.create_order(db, payload, facility.timezone)
+    """No facility lookup here (see #362) -- create_order() resolves
+    the business-date timezone from the encounter's own facility now,
+    not the caller's. current_db_user.facility_id was never the right
+    facility for this: it's whoever is logged in, which can legitimately
+    differ from the facility the encounter/order actually belongs to."""
+    try:
+        order = await service.create_order(db, payload)
+    except service.EncounterNotFound:
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="encounter_not_found")
     return OrderOut.model_validate(order)
 
 
