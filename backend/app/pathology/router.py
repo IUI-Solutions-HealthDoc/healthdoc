@@ -501,6 +501,13 @@ async def _publish_critical_alert(db: AsyncSession, item: LabOrderItem,
     except ImportError:
         return
 
+    # facility comes off the order, not the caller and not the department:
+    # lab_order_items.department_id is nullable, orders.facility_id is not
+    # (0022). A critical-result alert belongs to the facility that ran the
+    # test, whoever happens to be entering the result.
+    from app.orders.models import Order
+    order = await db.get(Order, item.order_id)
+
     notification = NotificationHistory(
         event_type="lab_critical_result",
         payload={
@@ -509,6 +516,7 @@ async def _publish_critical_alert(db: AsyncSession, item: LabOrderItem,
             "flagged_field_count": len(flagged_fields),
         },
         department_id=item.department_id,
+        facility_id=order.facility_id,
     )
     db.add(notification)
     await db.flush()

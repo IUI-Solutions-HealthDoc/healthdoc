@@ -52,7 +52,10 @@ Resolved — was correctly blocked on another module's file:
 Not touched (per review, tracked separately, not this PR):
   - file_access_log.file_id ondelete=RESTRICT vs DPDP erasure conflict.
   - No retention/cleanup path for orphaned MinIO objects on delete.
-  - file_access_log not partitioned (Tech Lead's call, not mine).
+
+Decided (Tech Lead, #233): file_access_log stays unpartitioned. See
+FileAccessLog's own docstring below for the reasoning — don't reopen
+this in review without re-reading that first.
 """
 
 import uuid
@@ -136,6 +139,12 @@ class FileAccessLog(UUIDPk, Base):
     row's event timestamp, and an append-only row with an updated_at
     that can never legitimately change would be misleading. Same
     judgment call made for consent_withdrawals in migration 0004.
+
+    Not partitioned, unlike audit_logs — decided, not an oversight.
+    audit_logs takes a write on every mutation across the whole app;
+    this table takes one per file read/upload, a much lower rate, so
+    partitioning it now would add a maintenance path for a problem it
+    may never have. Revisit once it passes ~10M rows.
     """
 
     __tablename__ = "file_access_log"

@@ -22,7 +22,17 @@ cost lands on whoever pulls rather than on whoever parked. Hence: out of the pat
 
 ## Current contents
 
-**Empty.** First time since 4 August.
+**Empty.** 0038 (`doctor_reviews`) moved back to `versions/` -- its real
+parent (0036, `patient_merge_log_decision_reason`) merged into staging.
+0037 (Priyanshu's original prescriptions.facility_id migration, #353) was
+dropped entirely, not merged: it renamed constraints to names 0006 had
+already given them and failed on a fresh database. The surviving work
+from that effort landed as 0035 (`patients_row_version`) and 0036
+instead. 0038's down_revision was corrected from 0037 to 0036 -- see
+that file's own docstring for the full history (down_revision was wrong
+twice before this: first 0031 as a too-early placeholder, forking the
+chain; then 0037, correct in principle but pointing at a migration that
+turned out not to exist).
 
 The pile peaked at six: 0009, 0019, 0020, and 0032–0034. It drained as the chain
 below it merged, and none of the three that came out last needed a single edit —

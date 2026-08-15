@@ -39,12 +39,12 @@ def queue_channel(department_id: Union[str, uuid.UUID]) -> str:
 
 
 def department_channel(department_id: Union[str, uuid.UUID]) -> str:
-    """Generic channel for department-scoped staff alerts."""
+    """Generic department-scoped channel for staff alerts."""
     return f"dept:{department_id}"
  
  
 def facility_channel(facility_id: Union[str, uuid.UUID]) -> str:
-    """Generic channel for facility-wide staff alerts."""
+    """Generic facility-wide channel for staff alerts."""
     return f"facility:{facility_id}"
 
 

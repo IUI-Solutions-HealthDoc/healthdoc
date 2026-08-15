@@ -6,6 +6,7 @@ triggers the automatic advance via service.complete_by_visit_id(). Admin
 keeps manual overrides for edge cases.
 """
 import uuid
+from datetime import date 
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,13 +19,21 @@ from app.common.redis import publish_event
 from app.queue import service
 from app.queue.schemas import (
     CompleteAdvanceOut,
+    HodDashboardOverviewOut,
     QueueCreate,
     QueueOut,
     QueueTokenGenerateRequest,
     QueueTokenListItemOut,
     QueueTokenListOut,
     QueueTokenOut,
+    RosterAvailabilityUpdate,
+    RosterCreate,
+    RosterOut,
     TokenPriorityElevate,
+    PendingLabOrderOut,
+    TokenReassign,
+    DepartmentWorkloadOut,
+    EmergencyEscalationOut,
 )
 
 router = APIRouter(prefix="/queue", tags=["queue"])
@@ -190,3 +199,221 @@ async def list_queue_tokens(
         now_serving=result["now_serving"],
         items=[QueueTokenListItemOut(**item) for item in result["items"]],
     ).model_dump(mode="json")
+
+
+# ---------------- ROSTER: CREATE (hod/admin only) ----------------
+@router.post(
+    "/rosters",
+    status_code=201,
+    dependencies=[Depends(require_roles("hod", "admin"))],
+)
+async def create_roster_entry(
+    payload: RosterCreate,
+    user: CurrentUser,
+    current_db_user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+    actor: AuditActor = Depends(get_current_actor_dependency),
+) -> dict:
+    _caller_user_id, _caller_facility_id, caller_department_id = await service.resolve_caller_full_context(
+        db, user.sub
+    )
+    entry = await service.create_roster_entry(
+        db,
+        staff_user_id=payload.staff_user_id,
+        department_id=payload.department_id,
+        room_id=payload.room_id,
+        shift=payload.shift,
+        roster_date=payload.roster_date,
+        caller_facility_id=current_db_user.facility_id,
+        caller_roles=current_db_user.roles,
+        caller_department_id=caller_department_id,
+    )
+    return RosterOut.model_validate(entry).model_dump(mode="json")
+ 
+ 
+# ---------------- ROSTER: LIST ----------------
+@router.get(
+    "/rosters",
+    dependencies=[Depends(require_roles("doctor", "nurse", "receptionist", "hod", "admin"))],
+)
+async def list_roster(
+    department_id: uuid.UUID,
+    roster_date: date,
+    current_db_user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    entries = await service.list_roster(db, department_id, roster_date, current_db_user.facility_id)
+    return {"items": [RosterOut.model_validate(e).model_dump(mode="json") for e in entries]}
+ 
+ 
+# ---------------- ROSTER: AVAILABILITY (hod/admin only) ----------------
+@router.patch(
+    "/rosters/{roster_id}/availability",
+    dependencies=[Depends(require_roles("hod", "admin"))],
+)
+async def update_roster_availability(
+    roster_id: uuid.UUID,
+    payload: RosterAvailabilityUpdate,
+    user: CurrentUser,
+    current_db_user: CurrentDbUser,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    actor: AuditActor = Depends(get_current_actor_dependency),
+) -> dict:
+    _caller_user_id, _caller_facility_id, caller_department_id = await service.resolve_caller_full_context(
+        db, user.sub
+    )
+    entry, pending_event = await service.update_roster_availability(
+        db,
+        roster_id=roster_id,
+        is_available=payload.is_available,
+        caller_facility_id=current_db_user.facility_id,
+        caller_roles=current_db_user.roles,
+        caller_department_id=caller_department_id,
+    )
+    if pending_event is not None:
+        background_tasks.add_task(
+            publish_event, pending_event["channel"], pending_event["event_type"], pending_event["payload"]
+        )
+    return RosterOut.model_validate(entry).model_dump(mode="json")
+ 
+ 
+# ---------------- QUEUE: PAUSE (hod/admin only) ----------------
+@router.post(
+    "/queues/{queue_id}/pause",
+    dependencies=[Depends(require_roles("hod", "admin"))],
+)
+async def pause_queue(
+    queue_id: uuid.UUID,
+    user: CurrentUser,
+    current_db_user: CurrentDbUser,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    actor: AuditActor = Depends(get_current_actor_dependency),
+) -> dict:
+    _caller_user_id, _caller_facility_id, caller_department_id = await service.resolve_caller_full_context(
+        db, user.sub
+    )
+    queue, pending_event = await service.pause_queue(
+        db, queue_id, current_db_user.facility_id, current_db_user.roles, caller_department_id
+    )
+    if pending_event is not None:
+        background_tasks.add_task(
+            publish_event, pending_event["channel"], pending_event["event_type"], pending_event["payload"]
+        )
+    return QueueOut.model_validate(queue).model_dump(mode="json")
+ 
+ 
+# ---------------- QUEUE: RESUME (hod/admin only) ----------------
+@router.post(
+    "/queues/{queue_id}/resume",
+    dependencies=[Depends(require_roles("hod", "admin"))],
+)
+async def resume_queue(
+    queue_id: uuid.UUID,
+    user: CurrentUser,
+    current_db_user: CurrentDbUser,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    actor: AuditActor = Depends(get_current_actor_dependency),
+) -> dict:
+    _caller_user_id, _caller_facility_id, caller_department_id = await service.resolve_caller_full_context(
+        db, user.sub
+    )
+    queue, pending_event = await service.resume_queue(
+        db, queue_id, current_db_user.facility_id, current_db_user.roles, caller_department_id
+    )
+    if pending_event is not None:
+        background_tasks.add_task(
+            publish_event, pending_event["channel"], pending_event["event_type"], pending_event["payload"]
+        )
+    return QueueOut.model_validate(queue).model_dump(mode="json")
+
+
+# ---------------- HOD DASHBOARD: OVERVIEW ----------------
+@router.get(
+    "/hod-dashboard/{department_id}",
+    dependencies=[Depends(require_roles("hod", "admin"))],
+)
+async def get_hod_dashboard_overview(
+    department_id: uuid.UUID,
+    overview_date: date,
+    current_db_user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    overview = await service.get_hod_dashboard_overview(
+        db, department_id, overview_date, current_db_user.facility_id
+    )
+    return HodDashboardOverviewOut(**overview).model_dump(mode="json")
+
+
+# ---------------- HOD DASHBOARD: PENDING LAB ORDERS ----------------
+@router.get(
+    "/hod-dashboard/{department_id}/pending-lab-orders",
+    dependencies=[Depends(require_roles("hod", "admin"))],
+)
+async def get_pending_lab_orders(
+    department_id: uuid.UUID,
+    current_db_user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    items = await service.get_pending_lab_orders(db, department_id, current_db_user.facility_id)
+    return {"items": [PendingLabOrderOut(**item).model_dump(mode="json") for item in items]}
+
+
+# ---------------- HOD DASHBOARD: REASSIGN TOKEN (hod/admin only) ----------------
+@router.post(
+    "/tokens/{token_id}/reassign",
+    dependencies=[Depends(require_roles("hod", "admin"))],
+)
+async def reassign_token(
+    token_id: uuid.UUID,
+    payload: TokenReassign,
+    user: CurrentUser,
+    current_db_user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+    actor: AuditActor = Depends(get_current_actor_dependency),
+) -> dict:
+    _caller_user_id, _caller_facility_id, caller_department_id = await service.resolve_caller_full_context(
+        db, user.sub
+    )
+    new_token = await service.reassign_token(
+        db,
+        token_id=token_id,
+        target_queue_id=payload.target_queue_id,
+        caller_facility_id=current_db_user.facility_id,
+        caller_roles=current_db_user.roles,
+        caller_department_id=caller_department_id,
+    )
+    return QueueTokenOut.model_validate(new_token).model_dump(mode="json")
+
+
+# ---------------- HOD DASHBOARD: DEPARTMENT WORKLOAD ----------------
+@router.get(
+    "/hod-dashboard/{department_id}/workload",
+    dependencies=[Depends(require_roles("hod", "admin"))],
+)
+async def get_department_workload(
+    department_id: uuid.UUID,
+    workload_date: date,
+    current_db_user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    workload = await service.get_department_workload(
+        db, department_id, workload_date, current_db_user.facility_id
+    )
+    return DepartmentWorkloadOut(**workload).model_dump(mode="json")
+
+
+# ---------------- HOD DASHBOARD: EMERGENCY ESCALATIONS ----------------
+@router.get(
+    "/hod-dashboard/{department_id}/emergency-escalations",
+    dependencies=[Depends(require_roles("hod", "admin"))],
+)
+async def get_emergency_escalations(
+    department_id: uuid.UUID,
+    current_db_user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    escalations = await service.get_emergency_escalations(db, department_id, current_db_user.facility_id)
+    return {"items": [EmergencyEscalationOut(**item).model_dump(mode="json") for item in escalations]}
