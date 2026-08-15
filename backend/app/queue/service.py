@@ -288,6 +288,9 @@ async def _advance_queue(db: AsyncSession, queue: Queue) -> tuple[QueueToken | N
         event_type="token_called",
         payload=payload,
         department_id=queue.department_id,
+        # The queue's facility, not the caller's — an admin acting across
+        # facilities must not file this row under their own.
+        facility_id=queue.facility_id,
     ))
     await db.flush()
 
@@ -619,6 +622,9 @@ async def update_roster_availability(
             event_type="roster_availability_changed",
             payload=payload,
             department_id=entry.department_id,
+            # The department's facility, not the caller's — an admin may act
+            # across facilities and must not file this under their own.
+            facility_id=department.facility_id,
         ))
         await db.flush()
         pending_event = {
@@ -669,6 +675,7 @@ async def _set_queue_open_state(
         event_type=event_type,
         payload=payload,
         department_id=queue.department_id,
+        facility_id=queue.facility_id,
     ))
     await db.flush()
  

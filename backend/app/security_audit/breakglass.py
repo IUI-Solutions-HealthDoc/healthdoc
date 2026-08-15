@@ -97,13 +97,15 @@ async def break_glass(payload: BreakGlassRequest,
     # 3) Dual notification (patient + compliance) — enqueued via notifications
     for target in ("patient", "compliance"):
         await db.execute(text("""
-            INSERT INTO notification_history (id, event_type, payload, created_at)
+            INSERT INTO notification_history
+                (id, event_type, payload, facility_id, created_at)
             VALUES (uuid_generate_v4(), 'break_glass_used',
-                    CAST(:p AS jsonb), :ts)
+                    CAST(:p AS jsonb), :fid, :ts)
         """), {"p": json.dumps({"target": target,
                                "patient_id": payload.patient_id,
                                "by": user.username,
                                "expires_at": expires.isoformat()}),
+               "fid": caller["facility_id"],
                "ts": now})
 
     return {"granted": True, "patient_id": payload.patient_id,

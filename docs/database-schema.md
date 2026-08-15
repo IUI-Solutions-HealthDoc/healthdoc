@@ -153,7 +153,9 @@ do not merge out of order.**
 | 0036 | patient_merge_log_decision_reason | ALTER patient_merge_log: decision_reason | B2 (#353) |
 | 0036a | prescriptions_facility_id | ALTER prescriptions: facility_id | B3+B6 — out-of-band insert, `down_revision = "0036"`. The ORM has declared this column since 0008 and no migration ever created it; it stayed hidden until code first inserted a Prescription through the ORM |
 | 0037 | patients_constraint_naming | ALTER patients: constraint names -> NAMING_CONVENTION | B2 (#353) |
-| 0038 | guardian_verification | ALTER patients: is_minor, guardian_verified, guardian_verification_method | B2 (W3) — 0035/0036/0037 are taken by #353, which was already written against them |
+| 0038 | doctor_reviews | doctor_reviews | B3 (W4) — #361, written against this number |
+| 0039 | notification_history_facility_id | ALTER notification_history: facility_id NOT NULL | B4 — no facility column meant no way to scope #230's read API |
+| 0040 | guardian_verification | ALTER patients: is_minor, guardian_verified, guardian_verification_method | B2 (W3) — moved from 0038; ready work takes the number |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -1066,8 +1068,13 @@ trigger is enough. Revisit if a facility's row count makes the index unwieldy.
 event_type varchar(50) NOT NULL                  -- token_called, token_status_changed, ...
 payload jsonb NOT NULL                           -- jsonb, not json (Suprita draft had json)
 department_id UUID NULL → departments
+facility_id UUID NOT NULL → facilities        -- added 0039
 ```
 Append-only by convention (internal writes only; no update endpoint).
+`facility_id` is NOT NULL and `department_id` is not: a facility-wide
+announcement has no department, but no notification belongs to no facility.
+**Every read of this table must filter on `facility_id`** — the payloads are
+operational detail about one hospital's queues and results.
 **PII rule:** payloads are shown on public queue displays and kept long-term — they may
 contain `token_display`, department/room, and UUIDs, but **never** patient names, UHID,
 mobile numbers, or clinical facts.
@@ -1637,6 +1644,33 @@ CHECK (discharge_type <> 'transferred'
        OR destination_facility_id IS NOT NULL
        OR destination_facility_name IS NOT NULL)
 ```
+
+
+### 0038 — doctor_reviews (B3, W4)
+
+**doctor_reviews** (0038, B3) — doctor sign-off on an encounter and on individual
+lab/radiology results. Transcribed from #361; that PR owns this table.
+```
+encounter_id UUID NOT NULL → encounters
+reviewed_by UUID NOT NULL → users
+lab_order_item_id UUID NULL → lab_order_items
+radiology_order_item_id UUID NULL → radiology_order_items
+status varchar(50) NOT NULL DEFAULT 'pending'   -- pending|reviewed|signed_off
+notes text · signed_off_at timestamptz
+```
+Both result FKs are nullable: a review can cover the encounter as a whole, or one
+specific result. `signed_off_at` is separate from `status` because the timestamp is
+the auditable fact — NABH asks when a result was seen, not what a column says now.
+
+### 0039 — notification_history.facility_id (B4)
+
+```
+ALTER notification_history ADD facility_id UUID NOT NULL → facilities
+INDEX ix_notification_history_facility_id_created_at (facility_id, created_at)
+```
+The table had no facility column, so a row with a NULL `department_id` could not be
+attributed and no read could be scoped. Added before #230 builds the read API rather
+than after, because the alternative is fixing an endpoint as well as a table.
 
 
 ## 4. API field contract (backend → frontend)

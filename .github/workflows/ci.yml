@@ -50,10 +50,33 @@ jobs:
           --health-cmd "redis-cli ping"
           --health-interval 5s --health-timeout 5s --health-retries 10
 
+      # Real MinIO, for the same reason as real Postgres above. The files
+      # module's load-bearing guarantee is that content type is decided by
+      # sniffed magic bytes and sha256 is computed at upload — both only
+      # provable against an actual object store. Skipping these tests when
+      # MinIO is unreachable would leave the presigned-URL XSS defence
+      # (§4A.4) permanently unverified, which is the one thing in that
+      # module worth verifying.
+      #
+      # MinIO is NOT here — it is started as a step below. `services:` cannot
+      # supply a command, and minio/minio needs `server /data`; without it the
+      # entrypoint prints usage and exits, so the container would appear to
+      # start and every test would still get ECONNREFUSED. bitnami/minio,
+      # whose entrypoint does start a server, no longer publishes the tags
+      # this needed. A `docker run` step is explicit and does not depend on
+      # someone else's entrypoint.
+
     env:
       TEST_DATABASE_URL: postgresql+asyncpg://healthdoc:healthdoc@localhost:5432/healthdoc_test
       DATABASE_URL: postgresql+asyncpg://healthdoc:healthdoc@localhost:5432/healthdoc_test
       REDIS_URL: redis://localhost:6379/0
+
+      # Must match the MINIO_ROOT_USER/PASSWORD on the service above.
+      MINIO_ENDPOINT: localhost:9000
+      MINIO_ROOT_USER: healthdoc
+      MINIO_ROOT_PASSWORD: healthdoc-test-secret
+      MINIO_BUCKET_FILES: hd-files
+      MINIO_BUCKET_REPORTS: hd-reports
 
       # The app's lifespan validates these before serving traffic (B1 crypto
       # fix): base64 of exactly 32 bytes, and not one of the known
@@ -84,6 +107,27 @@ jobs:
       # Add test dependencies to requirements-dev.txt, not to this file.
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
+
+      # Started here rather than under `services:` because a service container
+      # cannot be given a command, and minio/minio does nothing without
+      # `server /data`. Real MinIO rather than skipping the files tests: the
+      # module's guarantees — content type from sniffed magic bytes, sha256
+      # computed at upload — are only provable against an actual object store,
+      # and a skipped test there is how the §4A.4 presigned-URL XSS defence
+      # quietly stops being verified.
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=healthdoc \
+            -e MINIO_ROOT_PASSWORD=healthdoc-test-secret \
+            minio/minio:latest server /data
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:9000/minio/health/live >/dev/null; then
+              echo "MinIO ready after ${i} attempt(s)"; exit 0
+            fi
+            sleep 2
+          done
+          echo "MinIO did not become ready — logs follow:"; docker logs minio; exit 1
 
       - name: Lint (style only — does not block)
         run: ruff check . || true
