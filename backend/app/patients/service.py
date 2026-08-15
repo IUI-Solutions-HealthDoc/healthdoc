@@ -470,7 +470,9 @@ async def request_merge(
 # fails the build the day a new FK to patients.id appears without a
 # matching entry here. Do not add a table name here without also adding
 # the repointing code for it below.
-REPOINTED_ON_MERGE: frozenset[str] = frozenset({"patient_identifiers", "visits", "ot_schedules", "fhir_bundle_transactions"})
+REPOINTED_ON_MERGE: frozenset[str] = frozenset(
+    {"patient_identifiers", "visits", "ot_schedules", "fhir_bundle_transactions", "files"}
+)
 
 # patient_merge_log itself has FKs to patients.id (source_patient_id,
 # target_patient_id) — these must NEVER be repointed. It's the audit trail
@@ -559,6 +561,7 @@ async def approve_merge(
     await _repoint_identifiers(db, source=source, target=target)
     await _repoint_visits(db, source=source, target=target)
     await _repoint_ot_schedules(db, source=source, target=target)
+    await _repoint_files(db, source=source, target=target)
     await _repoint_fhir_bundle_transactions(db, source=source, target=target)
 
     async with audited_mutation(
@@ -678,6 +681,36 @@ async def _repoint_fhir_bundle_transactions(
         text(
             "UPDATE fhir_bundle_transactions SET patient_id = :target_id "
             "WHERE patient_id = :source_id"
+        ),
+        {"target_id": target.id, "source_id": source.id},
+    )
+    await db.flush()
+
+
+async def _repoint_files(db: AsyncSession, *, source: Patient, target: Patient) -> None:
+    """Moves source's files rows onto target.
+
+    0019 created files with a patient_id FK and no repointing logic; the guard
+    test only sees the table once the files router is registered, which #365
+    does. Repointed rather than exempted: unlike patient_merge_log, which is
+    the evidence of the merge and must never be rewritten, files holds the
+    patient's own documents — photos, ID proofs, scanned consent, report PDFs.
+
+    Without this, the surviving patient's document list silently omits
+    everything uploaded before the merge, which is the same failure mode
+    _repoint_visits exists to prevent.
+
+    Raw SQL rather than importing FileRecord: that import would register the
+    model on Base.metadata as a side effect, changing which tables the guard
+    sees on branches that don't wire the files router. The table exists from
+    0019 regardless.
+
+    No uniqueness to collide with — a file belongs to one patient, so every
+    source row simply moves.
+    """
+    await db.execute(
+        text(
+            "UPDATE files SET patient_id = :target_id WHERE patient_id = :source_id"
         ),
         {"target_id": target.id, "source_id": source.id},
     )
