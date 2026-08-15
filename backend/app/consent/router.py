@@ -193,3 +193,43 @@ async def withdraw_consent(
         facility_id=user.facility_id,
     )
     return ConsentWithdrawalOut.model_validate(withdrawal)
+
+
+# ---------------------------------------------------------------------------
+# [#228] Patient portal — patient views their own consent records
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/me/records",
+    response_model=list[ConsentRecordOut],
+    dependencies=[
+        Depends(
+            log_patient_data_access(
+                resource_type="consent_records",
+                purpose_code="self_review",
+                access_channel=AccessChannel.API.value,
+                consent_required=False,
+            )
+        ),
+    ],
+    summary="[#228] Patient views their own consent records (self-service portal)",
+)
+async def list_my_consent_records(
+    user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+) -> list[ConsentRecordOut]:
+    """Patient views their own consent records.
+
+    patient_id is sourced from the authenticated user's token — a patient
+    can only ever see their own records, never another patient's.
+    Requires patient_id to be set on the user record (portal users only).
+    """
+    if not hasattr(user, "patient_id") or user.patient_id is None:
+        raise HTTPException(403, {
+            "code": "not_a_patient_user",
+            "message": "This endpoint is for patient portal users only",
+        })
+    records = await service.list_consent_records_for_patient(
+        db, user.patient_id, facility_id=user.facility_id
+    )
+    return [ConsentRecordOut.model_validate(r) for r in records]

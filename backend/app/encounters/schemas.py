@@ -72,3 +72,28 @@ class DiagnosisOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     model_config = {"from_attributes": True}
+
+
+class DoctorReviewCreate(BaseModel):
+    lab_order_item_id: UUID | None = None
+    radiology_order_item_id: UUID | None = None
+    notes: str | None = None
+
+
+class DoctorReviewStatusUpdate(BaseModel):
+    status: str = Field(..., description="reviewed | signed_off")
+    notes: str | None = None
+
+
+class DoctorReviewOut(BaseModel):
+    id: UUID
+    encounter_id: UUID
+    reviewed_by: UUID
+    lab_order_item_id: UUID | None
+    radiology_order_item_id: UUID | None
+    status: str
+    notes: str | None
+    signed_off_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+    model_config = {"from_attributes": True}

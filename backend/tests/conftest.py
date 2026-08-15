@@ -15,6 +15,8 @@ from app.common.db import Base
 from app.audit.models import AuditLog
 from app.departments.models import Department, Room
 from app.users.models import Facility, User
+from app.integrations.abdm.fhir.models import FhirBundleTransaction
+from app.outbox.models import OutboxEvent
 from app.queue import service
 from sqlalchemy import ARRAY, Column, Table, event
 
@@ -105,6 +107,14 @@ async def db():
         dbapi_connection.create_function("char_length", 1, lambda s: len(s) if s else 0)
         _outbox_seq_counter = count(1)
         dbapi_connection.create_function("nextval", 1, lambda seq_name: next(_outbox_seq_counter))
+
+        _seq_counters: dict[str, int] = {}
+
+        def _nextval(seq_name):
+            _seq_counters[seq_name] = _seq_counters.get(seq_name, 0) + 1
+            return _seq_counters[seq_name]
+
+        dbapi_connection.create_function("nextval", 1, _nextval)
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

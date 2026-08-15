@@ -38,6 +38,16 @@ def queue_channel(department_id: Union[str, uuid.UUID]) -> str:
     return f"queue:{department_id}"
 
 
+def department_channel(department_id: Union[str, uuid.UUID]) -> str:
+    """Generic department-scoped channel for staff alerts."""
+    return f"dept:{department_id}"
+ 
+ 
+def facility_channel(facility_id: Union[str, uuid.UUID]) -> str:
+    """Generic facility-wide channel for staff alerts."""
+    return f"facility:{facility_id}"
+
+
 async def publish(channel: str, message: str) -> None:
     """Publish a raw string message to a channel."""
     try:
