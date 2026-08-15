@@ -21,6 +21,19 @@ from app.pharmacy.schemas import (
     PrescriptionQueueItem,
     PrescriptionQueueResponse,
     SubstitutionApprovalRequest,
+    GrnCreate,
+    GrnItemOut,
+    GrnOut,
+    GrnVerifyRequest,
+    IndentCreate,
+    IndentOut,
+    IndentItemOut,
+    IndentApprovalRequest,
+    ReorderAlertItem,
+    ReorderAlertsResponse,
+    AdjustmentCreate,
+    AdjustmentOut,
+    AdjustmentApprovalRequest,
 )
 
 # ---------------------------------------------------------------------------
@@ -851,4 +864,594 @@ async def _recompute_dispense_status(db: AsyncSession, dispense_id: str) -> None
     await db.execute(
         text("UPDATE pharmacy_dispenses SET status = :status, updated_at = now() WHERE id = :id"),
         {"status": new_status, "id": str(dispense_id)},
+    )
+
+# -- B6-W5-01: GRN --------------------------------------------------------
+
+async def create_grn(
+    db: AsyncSession,
+    payload: GrnCreate,
+    *,
+    current_user_id: UUID,
+    facility_id: UUID,
+) -> GrnOut:
+    grn_id = uuid4()
+    await db.execute(
+        text("""
+            INSERT INTO grn
+                (id, facility_id, supplier_id, invoice_number, received_date,
+                 status, created_by, updated_by)
+            VALUES
+                (:id, :facility_id, :supplier_id, :invoice_number, :received_date,
+                 'draft', :user_id, :user_id)
+        """),
+        {
+            "id": str(grn_id), "facility_id": str(facility_id),
+            "supplier_id": str(payload.supplier_id),
+            "invoice_number": payload.invoice_number,
+            "received_date": payload.received_date,
+            "user_id": str(current_user_id),
+        },
+    )
+
+    items_out: list[GrnItemOut] = []
+    for item in payload.items:
+        item_id = uuid4()
+        await db.execute(
+            text("""
+                INSERT INTO grn_items
+                    (id, grn_id, item_id, batch_number, expiry_date, quantity, unit_price)
+                VALUES
+                    (:id, :grn_id, :item_id, :batch_number, :expiry_date, :quantity, :unit_price)
+            """),
+            {
+                "id": str(item_id), "grn_id": str(grn_id), "item_id": str(item.item_id),
+                "batch_number": item.batch_number, "expiry_date": item.expiry_date,
+                "quantity": item.quantity, "unit_price": item.unit_price,
+            },
+        )
+        items_out.append(GrnItemOut(
+            id=item_id, item_id=item.item_id, batch_number=item.batch_number,
+            expiry_date=item.expiry_date, quantity=item.quantity, unit_price=item.unit_price,
+        ))
+
+    await write_audit_log(
+        db, facility_id=facility_id, user_id=current_user_id, action="create",
+        resource_type="grn", resource_id=grn_id,
+        new_value={"supplier_id": str(payload.supplier_id), "item_count": len(items_out)},
+    )
+
+    return GrnOut(
+        id=grn_id, supplier_id=payload.supplier_id, invoice_number=payload.invoice_number,
+        received_date=payload.received_date, status="draft", items=items_out,
+    )
+
+
+async def verify_grn(
+    db: AsyncSession,
+    grn_id: UUID,
+    payload: GrnVerifyRequest,
+    *,
+    current_user_id: UUID,
+    facility_id: UUID,
+) -> GrnOut:
+    grn_row = (
+        await db.execute(
+            text("""
+                SELECT id, supplier_id, invoice_number, received_date, status
+                FROM grn WHERE id = :id AND facility_id = :facility_id FOR UPDATE
+            """),
+            {"id": str(grn_id), "facility_id": str(facility_id)},
+        )
+    ).mappings().first()
+    if grn_row is None:
+        raise HTTPException(status_code=404, detail="GRN not found")
+    if grn_row["status"] not in ("draft", "received"):
+        raise HTTPException(status_code=409, detail=f"Cannot verify GRN in status '{grn_row['status']}'")
+
+    loc_row = (
+        await db.execute(
+            text("SELECT id FROM stock_locations WHERE id = :id AND facility_id = :facility_id"),
+            {"id": str(payload.stock_location_id), "facility_id": str(facility_id)},
+        )
+    ).mappings().first()
+    if loc_row is None:
+        raise HTTPException(status_code=404, detail="Stock location not found for this facility")
+
+    grn_items = (
+        await db.execute(
+            text("""
+                SELECT id, item_id, batch_number, expiry_date, quantity, unit_price
+                FROM grn_items WHERE grn_id = :grn_id
+            """),
+            {"grn_id": str(grn_id)},
+        )
+    ).mappings().all()
+    if not grn_items:
+        raise HTTPException(status_code=409, detail="GRN has no items")
+
+    items_out: list[GrnItemOut] = []
+    for gi in grn_items:
+        existing_batch = (
+            await db.execute(
+                text("""
+                    SELECT id, quantity FROM inventory_batches
+                    WHERE item_id = :item_id AND batch_number = :batch_number
+                      AND stock_location_id = :loc_id
+                    FOR UPDATE
+                """),
+                {
+                    "item_id": str(gi["item_id"]), "batch_number": gi["batch_number"],
+                    "loc_id": str(payload.stock_location_id),
+                },
+            )
+        ).mappings().first()
+
+        if existing_batch is not None:
+            batch_id = existing_batch["id"]
+        else:
+            batch_id = uuid4()
+            await db.execute(
+                text("""
+                    INSERT INTO inventory_batches
+                        (id, item_id, batch_number, expiry_date, quantity,
+                         purchase_rate, stock_location_id)
+                    VALUES
+                        (:id, :item_id, :batch_number, :expiry_date, 0,
+                         :purchase_rate, :loc_id)
+                """),
+                {
+                    "id": str(batch_id), "item_id": str(gi["item_id"]),
+                    "batch_number": gi["batch_number"], "expiry_date": gi["expiry_date"],
+                    "purchase_rate": gi["unit_price"],
+                    "loc_id": str(payload.stock_location_id),
+                },
+            )
+
+        ledger_id = uuid4()
+        await db.execute(
+            text("""
+                INSERT INTO stock_ledger
+                    (id, item_id, batch_id, transaction_type, quantity,
+                     reference_type, reference_id, performed_by)
+                VALUES
+                    (:id, :item_id, :batch_id, 'purchase', :qty,
+                     'grn', :grn_id, :user_id)
+            """),
+            {
+                "id": str(ledger_id), "item_id": str(gi["item_id"]), "batch_id": str(batch_id),
+                "qty": gi["quantity"], "grn_id": str(grn_id), "user_id": str(current_user_id),
+            },
+        )
+
+        items_out.append(GrnItemOut(
+            id=gi["id"], item_id=gi["item_id"], batch_number=gi["batch_number"],
+            expiry_date=gi["expiry_date"], quantity=gi["quantity"], unit_price=gi["unit_price"],
+        ))
+
+    await db.execute(
+        text("UPDATE grn SET status = 'verified', updated_by = :user_id, "
+             "updated_at = now() WHERE id = :id"),
+        {"user_id": str(current_user_id), "id": str(grn_id)},
+    )
+
+    await write_audit_log(
+        db, facility_id=facility_id, user_id=current_user_id, action="verify",
+        resource_type="grn", resource_id=grn_id,
+        new_value={"stock_location_id": str(payload.stock_location_id), "item_count": len(items_out)},
+    )
+
+    return GrnOut(
+        id=grn_id, supplier_id=grn_row["supplier_id"], invoice_number=grn_row["invoice_number"],
+        received_date=grn_row["received_date"], status="verified", items=items_out,
+    )
+
+
+# -- B6-W5-01: Indents ----------------------------------------------------
+
+async def create_indent(
+    db: AsyncSession,
+    payload: IndentCreate,
+    *,
+    current_user_id: UUID,
+    facility_id: UUID,
+) -> IndentOut:
+    dept_row = (
+        await db.execute(
+            text("SELECT id FROM departments WHERE id = :id AND facility_id = :facility_id"),
+            {"id": str(payload.department_id), "facility_id": str(facility_id)},
+        )
+    ).mappings().first()
+    if dept_row is None:
+        raise HTTPException(status_code=404, detail="Department not found for this facility")
+
+    indent_id = uuid4()
+    await db.execute(
+        text("""
+            INSERT INTO indents
+                (id, facility_id, department_id, status, created_by, updated_by)
+            VALUES
+                (:id, :facility_id, :department_id, 'requested', :user_id, :user_id)
+        """),
+        {
+            "id": str(indent_id), "facility_id": str(facility_id),
+            "department_id": str(payload.department_id), "user_id": str(current_user_id),
+        },
+    )
+
+    items_out: list[IndentItemOut] = []
+    for item in payload.items:
+        item_id = uuid4()
+        await db.execute(
+            text("""
+                INSERT INTO indent_items (id, indent_id, item_id, quantity_requested)
+                VALUES (:id, :indent_id, :item_id, :quantity_requested)
+            """),
+            {
+                "id": str(item_id), "indent_id": str(indent_id),
+                "item_id": str(item.item_id), "quantity_requested": item.quantity_requested,
+            },
+        )
+        items_out.append(IndentItemOut(
+            id=item_id, item_id=item.item_id, quantity_requested=item.quantity_requested,
+        ))
+
+    await write_audit_log(
+        db, facility_id=facility_id, user_id=current_user_id, action="create",
+        resource_type="indents", resource_id=indent_id,
+        new_value={"department_id": str(payload.department_id), "item_count": len(items_out)},
+    )
+
+    return IndentOut(
+        id=indent_id, department_id=payload.department_id, status="requested",
+        approved_by=None, items=items_out,
+    )
+
+
+async def approve_indent(
+    db: AsyncSession,
+    indent_id: UUID,
+    payload: IndentApprovalRequest,
+    *,
+    current_user_id: UUID,
+    facility_id: UUID,
+) -> IndentOut:
+    indent_row = (
+        await db.execute(
+            text("""
+                SELECT id, department_id, status FROM indents
+                WHERE id = :id AND facility_id = :facility_id FOR UPDATE
+            """),
+            {"id": str(indent_id), "facility_id": str(facility_id)},
+        )
+    ).mappings().first()
+    if indent_row is None:
+        raise HTTPException(status_code=404, detail="Indent not found")
+    if indent_row["status"] != "requested":
+        raise HTTPException(
+            status_code=409, detail=f"Cannot decide indent in status '{indent_row['status']}'"
+        )
+
+    hod_row = (
+        await db.execute(
+            text("SELECT department_id FROM users WHERE id = :id"),
+            {"id": str(current_user_id)},
+        )
+    ).mappings().first()
+    if hod_row is None or hod_row["department_id"] != indent_row["department_id"]:
+        raise HTTPException(
+            status_code=403, detail="Only the HOD of this indent's own department may decide it"
+        )
+
+    new_status = "approved" if payload.approve else "rejected"
+    await db.execute(
+        text("""
+            UPDATE indents SET status = :status, approved_by = :user_id,
+                updated_by = :user_id, updated_at = now()
+            WHERE id = :id
+        """),
+        {"status": new_status, "user_id": str(current_user_id), "id": str(indent_id)},
+    )
+
+    await write_audit_log(
+        db, facility_id=facility_id, user_id=current_user_id,
+        action="approve" if payload.approve else "reject",
+        resource_type="indents", resource_id=indent_id,
+        new_value={"reason": payload.reason},
+    )
+
+    items = (
+        await db.execute(
+            text("SELECT id, item_id, quantity_requested FROM indent_items WHERE indent_id = :id"),
+            {"id": str(indent_id)},
+        )
+    ).mappings().all()
+    items_out = [
+        IndentItemOut(id=i["id"], item_id=i["item_id"], quantity_requested=i["quantity_requested"])
+        for i in items
+    ]
+
+    return IndentOut(
+        id=indent_id, department_id=indent_row["department_id"], status=new_status,
+        approved_by=current_user_id, items=items_out,
+    )
+
+
+async def issue_indent(
+    db: AsyncSession,
+    indent_id: UUID,
+    *,
+    current_user_id: UUID,
+    facility_id: UUID,
+) -> IndentOut:
+    indent_row = (
+        await db.execute(
+            text("""
+                SELECT id, department_id, status, approved_by FROM indents
+                WHERE id = :id AND facility_id = :facility_id FOR UPDATE
+            """),
+            {"id": str(indent_id), "facility_id": str(facility_id)},
+        )
+    ).mappings().first()
+    if indent_row is None:
+        raise HTTPException(status_code=404, detail="Indent not found")
+    if indent_row["status"] != "approved":
+        raise HTTPException(
+            status_code=409, detail=f"Cannot issue indent in status '{indent_row['status']}'"
+        )
+
+    items = (
+        await db.execute(
+            text("SELECT id, item_id, quantity_requested FROM indent_items WHERE indent_id = :id"),
+            {"id": str(indent_id)},
+        )
+    ).mappings().all()
+
+    items_out: list[IndentItemOut] = []
+    for it in items:
+        remaining = it["quantity_requested"]
+        batches = (
+            await db.execute(
+                text("""
+                    SELECT ib.id, ib.quantity FROM inventory_batches ib
+                    JOIN stock_locations sl ON sl.id = ib.stock_location_id
+                    WHERE ib.item_id = :item_id AND sl.facility_id = :facility_id
+                      AND ib.quantity > 0
+                    ORDER BY ib.expiry_date ASC
+                    FOR UPDATE
+                """),
+                {"item_id": str(it["item_id"]), "facility_id": str(facility_id)},
+            )
+        ).mappings().all()
+
+        available = sum((b["quantity"] for b in batches), Decimal("0"))
+        if available < remaining:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Insufficient stock for item {it['item_id']}: "
+                       f"requested {remaining}, available {available}",
+            )
+
+        for batch in batches:
+            if remaining <= 0:
+                break
+            take = min(batch["quantity"], remaining)
+            ledger_id = uuid4()
+            await db.execute(
+                text("""
+                    INSERT INTO stock_ledger
+                        (id, item_id, batch_id, transaction_type, quantity,
+                         reference_type, reference_id, performed_by)
+                    VALUES
+                        (:id, :item_id, :batch_id, 'issue', :neg_qty,
+                         'indent', :indent_id, :user_id)
+                """),
+                {
+                    "id": str(ledger_id), "item_id": str(it["item_id"]),
+                    "batch_id": str(batch["id"]), "neg_qty": -take,
+                    "indent_id": str(indent_id), "user_id": str(current_user_id),
+                },
+            )
+            remaining -= take
+
+        items_out.append(IndentItemOut(
+            id=it["id"], item_id=it["item_id"], quantity_requested=it["quantity_requested"],
+        ))
+
+    await db.execute(
+        text("""
+            UPDATE indents SET status = 'issued', updated_by = :user_id, updated_at = now()
+            WHERE id = :id
+        """),
+        {"user_id": str(current_user_id), "id": str(indent_id)},
+    )
+
+    await write_audit_log(
+        db, facility_id=facility_id, user_id=current_user_id, action="issue",
+        resource_type="indents", resource_id=indent_id,
+        new_value={"item_count": len(items_out)},
+    )
+
+    return IndentOut(
+        id=indent_id, department_id=indent_row["department_id"], status="issued",
+        approved_by=indent_row["approved_by"], items=items_out,
+    )
+
+
+# -- B6-W5-01: Reorder calc -----------------------------------------------
+
+async def get_reorder_alerts(
+    db: AsyncSession,
+    *,
+    facility_id: UUID,
+) -> ReorderAlertsResponse:
+    rows = (
+        await db.execute(
+            text("""
+                SELECT
+                    ii.id AS item_id,
+                    ii.name AS item_name,
+                    ii.reorder_level,
+                    COALESCE(SUM(ib.quantity), 0) AS current_stock
+                FROM inventory_items ii
+                LEFT JOIN inventory_batches ib ON ib.item_id = ii.id
+                LEFT JOIN stock_locations sl
+                    ON sl.id = ib.stock_location_id AND sl.facility_id = :facility_id
+                WHERE ii.is_active
+                GROUP BY ii.id, ii.name, ii.reorder_level
+                HAVING COALESCE(SUM(ib.quantity), 0) <= ii.reorder_level
+                ORDER BY ii.name
+            """),
+            {"facility_id": str(facility_id)},
+        )
+    ).mappings().all()
+
+    return ReorderAlertsResponse(
+        items=[
+            ReorderAlertItem(
+                item_id=r["item_id"], item_name=r["item_name"],
+                reorder_level=r["reorder_level"], current_stock=r["current_stock"],
+            )
+            for r in rows
+        ]
+    )
+
+
+# -- B6-W5-01: Adjustments (dual sign-off) --------------------------------
+
+async def create_adjustment(
+    db: AsyncSession,
+    payload: AdjustmentCreate,
+    *,
+    current_user_id: UUID,
+    facility_id: UUID,
+) -> AdjustmentOut:
+    batch_row = (
+        await db.execute(
+            text("""
+                SELECT ib.id FROM inventory_batches ib
+                JOIN stock_locations sl ON sl.id = ib.stock_location_id
+                WHERE ib.id = :batch_id AND ib.item_id = :item_id AND sl.facility_id = :facility_id
+            """),
+            {
+                "batch_id": str(payload.batch_id), "item_id": str(payload.item_id),
+                "facility_id": str(facility_id),
+            },
+        )
+    ).mappings().first()
+    if batch_row is None:
+        raise HTTPException(status_code=404, detail="Batch not found for this item/facility")
+
+    if payload.first_approver_id == current_user_id:
+        raise HTTPException(
+            status_code=422,
+            detail="The designated first approver must be different from the creator",
+        )
+
+    adjustment_id = uuid4()
+    await db.execute(
+        text("""
+            INSERT INTO adjustments
+                (id, facility_id, item_id, batch_id, quantity_change, reason,
+                 first_approver_id, status, created_by, updated_by)
+            VALUES
+                (:id, :facility_id, :item_id, :batch_id, :quantity_change, :reason,
+                 :first_approver_id, 'pending', :user_id, :user_id)
+        """),
+        {
+            "id": str(adjustment_id), "facility_id": str(facility_id),
+            "item_id": str(payload.item_id), "batch_id": str(payload.batch_id),
+            "quantity_change": payload.quantity_change, "reason": payload.reason,
+            "first_approver_id": str(payload.first_approver_id),
+            "user_id": str(current_user_id),
+        },
+    )
+
+    await write_audit_log(
+        db, facility_id=facility_id, user_id=current_user_id, action="create",
+        resource_type="adjustments", resource_id=adjustment_id,
+        new_value={
+            "item_id": str(payload.item_id), "batch_id": str(payload.batch_id),
+            "quantity_change": str(payload.quantity_change), "reason": payload.reason,
+        },
+    )
+
+    return AdjustmentOut(
+        id=adjustment_id, item_id=payload.item_id, batch_id=payload.batch_id,
+        quantity_change=payload.quantity_change, reason=payload.reason,
+        first_approver_id=payload.first_approver_id, second_approver_id=None, status="pending",
+    )
+
+
+async def approve_adjustment(
+    db: AsyncSession,
+    adjustment_id: UUID,
+    payload: AdjustmentApprovalRequest,
+    *,
+    current_user_id: UUID,
+    facility_id: UUID,
+) -> AdjustmentOut:
+    adj_row = (
+        await db.execute(
+            text("""
+                SELECT id, item_id, batch_id, quantity_change, reason,
+                       first_approver_id, status, created_by
+                FROM adjustments WHERE id = :id AND facility_id = :facility_id FOR UPDATE
+            """),
+            {"id": str(adjustment_id), "facility_id": str(facility_id)},
+        )
+    ).mappings().first()
+    if adj_row is None:
+        raise HTTPException(status_code=404, detail="Adjustment not found")
+    if adj_row["status"] != "pending":
+        raise HTTPException(
+            status_code=409, detail=f"Cannot decide adjustment in status '{adj_row['status']}'"
+        )
+    if current_user_id == adj_row["first_approver_id"] or current_user_id == adj_row["created_by"]:
+        raise HTTPException(
+            status_code=403,
+            detail="The second approver must be different from both the creator and the first approver",
+        )
+
+    new_status = "approved" if payload.approve else "rejected"
+    await db.execute(
+        text("""
+            UPDATE adjustments SET status = :status, second_approver_id = :user_id,
+                updated_by = :user_id, updated_at = now()
+            WHERE id = :id
+        """),
+        {"status": new_status, "user_id": str(current_user_id), "id": str(adjustment_id)},
+    )
+
+    if payload.approve:
+        ledger_id = uuid4()
+        await db.execute(
+            text("""
+                INSERT INTO stock_ledger
+                    (id, item_id, batch_id, transaction_type, quantity,
+                     reference_type, reference_id, performed_by, reason)
+                VALUES
+                    (:id, :item_id, :batch_id, 'adjustment', :qty,
+                     'adjustments', :adjustment_id, :user_id, :reason)
+            """),
+            {
+                "id": str(ledger_id), "item_id": str(adj_row["item_id"]),
+                "batch_id": str(adj_row["batch_id"]), "qty": adj_row["quantity_change"],
+                "adjustment_id": str(adjustment_id), "user_id": str(current_user_id),
+                "reason": adj_row["reason"],
+            },
+        )
+
+    await write_audit_log(
+        db, facility_id=facility_id, user_id=current_user_id,
+        action="approve" if payload.approve else "reject",
+        resource_type="adjustments", resource_id=adjustment_id,
+        new_value={"reason": payload.reason},
+    )
+
+    return AdjustmentOut(
+        id=adjustment_id, item_id=adj_row["item_id"], batch_id=adj_row["batch_id"],
+        quantity_change=adj_row["quantity_change"], reason=adj_row["reason"],
+        first_approver_id=adj_row["first_approver_id"], second_approver_id=current_user_id,
+        status=new_status,
     )

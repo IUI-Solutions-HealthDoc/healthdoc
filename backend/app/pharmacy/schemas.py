@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -151,3 +151,105 @@ class SubstitutionApprovalRequest(BaseModel):
     rejection_reason: str | None = Field(
         default=None, description="Required if approved=false"
     )
+
+# -- B6-W5-01: Inventory (GRN, Indent, Adjustment) --------------------------
+
+class GrnItemCreate(BaseModel):
+    item_id: UUID
+    batch_number: str | None = None
+    expiry_date: date | None = None
+    quantity: Decimal
+    unit_price: Decimal | None = None
+
+
+class GrnCreate(BaseModel):
+    supplier_id: UUID
+    invoice_number: str | None = None
+    received_date: date
+    items: list[GrnItemCreate]
+
+
+class GrnItemOut(BaseModel):
+    id: UUID
+    item_id: UUID
+    batch_number: str | None
+    expiry_date: date | None
+    quantity: Decimal
+    unit_price: Decimal | None
+
+
+class GrnOut(BaseModel):
+    id: UUID
+    supplier_id: UUID
+    invoice_number: str | None
+    received_date: date
+    status: str
+    items: list[GrnItemOut]
+
+
+class IndentItemCreate(BaseModel):
+    item_id: UUID
+    quantity_requested: Decimal
+
+
+class IndentCreate(BaseModel):
+    department_id: UUID
+    items: list[IndentItemCreate]
+
+
+class IndentItemOut(BaseModel):
+    id: UUID
+    item_id: UUID
+    quantity_requested: Decimal
+
+
+class IndentOut(BaseModel):
+    id: UUID
+    department_id: UUID
+    status: str
+    approved_by: UUID | None
+    items: list[IndentItemOut]
+
+
+class IndentApprovalRequest(BaseModel):
+    approve: bool
+    reason: str | None = None
+
+
+class ReorderAlertItem(BaseModel):
+    item_id: UUID
+    item_name: str
+    reorder_level: Decimal
+    current_stock: Decimal
+
+
+class ReorderAlertsResponse(BaseModel):
+    items: list[ReorderAlertItem]
+
+
+class AdjustmentCreate(BaseModel):
+    item_id: UUID
+    batch_id: UUID
+    quantity_change: Decimal
+    reason: str
+    first_approver_id: UUID
+
+
+class AdjustmentOut(BaseModel):
+    id: UUID
+    item_id: UUID
+    batch_id: UUID
+    quantity_change: Decimal
+    reason: str
+    first_approver_id: UUID
+    second_approver_id: UUID | None
+    status: str
+
+
+class AdjustmentApprovalRequest(BaseModel):
+    approve: bool
+    reason: str | None = None
+
+
+class GrnVerifyRequest(BaseModel):
+    stock_location_id: UUID

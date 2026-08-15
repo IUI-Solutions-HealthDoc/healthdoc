@@ -125,3 +125,71 @@ async def pharmacy_seed(db_session: AsyncSession) -> dict[str, uuid.UUID]:
         "prescription_id": prescription_id, "prescription_item_id": prescription_item_id,
         "medicine_id": medicine_id, "early_batch_id": early_batch_id, "late_batch_id": late_batch_id,
     }
+
+
+@pytest_asyncio.fixture
+async def inventory_seed(db_session: AsyncSession, pharmacy_seed: dict) -> dict:
+    """Extra seed data for B6-W5-01: GRN, indent, adjustment tests.
+    Reuses pharmacy_seed's facility/department/medicine; adds a supplier,
+    a stock location, an HOD user, and a second pharmacist for dual sign-off.
+    """
+    supplier_id = uuid.uuid4()
+    location_id = uuid.uuid4()
+    hod_id = uuid.uuid4()
+    second_pharmacist_id = uuid.uuid4()
+    other_department_id = uuid.uuid4()
+    other_hod_id = uuid.uuid4()
+
+    await db_session.execute(text("""
+        INSERT INTO suppliers (id, facility_id, name)
+        VALUES (:id, :facility_id, 'Test Supplier')
+    """), {"id": supplier_id, "facility_id": pharmacy_seed["facility_id"]})
+
+    await db_session.execute(text("""
+        INSERT INTO stock_locations (id, name, location_type, facility_id)
+        VALUES (:id, 'Test GRN Store', 'central', :facility_id)
+    """), {"id": location_id, "facility_id": pharmacy_seed["facility_id"]})
+
+    await db_session.execute(text("""
+        INSERT INTO users (id, keycloak_sub, username, full_name, facility_id, department_id)
+        VALUES (:id, :sub, :username, 'HOD User', :facility_id, :department_id)
+    """), {
+        "id": hod_id, "sub": f"inventory-test-hod-{hod_id}",
+        "username": f"hod-{uuid.uuid4().hex[:8]}",
+        "facility_id": pharmacy_seed["facility_id"], "department_id": pharmacy_seed["department_id"],
+    })
+
+    await db_session.execute(text("""
+        INSERT INTO users (id, keycloak_sub, username, full_name, facility_id, department_id)
+        VALUES (:id, :sub, :username, 'Second Pharmacist', :facility_id, :department_id)
+    """), {
+        "id": second_pharmacist_id, "sub": f"inventory-test-pharm2-{second_pharmacist_id}",
+        "username": f"pharm2-{uuid.uuid4().hex[:8]}",
+        "facility_id": pharmacy_seed["facility_id"], "department_id": pharmacy_seed["department_id"],
+    })
+
+    # A second department + its own HOD, to prove cross-department approval is rejected.
+    await db_session.execute(text("""
+        INSERT INTO departments (id, name, code, facility_id)
+        VALUES (:id, 'Other Dept', :code, :facility_id)
+    """), {"id": other_department_id, "code": f"OD{uuid.uuid4().hex[:6]}",
+             "facility_id": pharmacy_seed["facility_id"]})
+    await db_session.execute(text("""
+        INSERT INTO users (id, keycloak_sub, username, full_name, facility_id, department_id)
+        VALUES (:id, :sub, :username, 'Other HOD', :facility_id, :department_id)
+    """), {
+        "id": other_hod_id, "sub": f"inventory-test-otherhod-{other_hod_id}",
+        "username": f"otherhod-{uuid.uuid4().hex[:8]}",
+        "facility_id": pharmacy_seed["facility_id"], "department_id": other_department_id,
+    })
+
+    await db_session.flush()
+    return {
+        **pharmacy_seed,
+        "supplier_id": supplier_id,
+        "location_id": location_id,
+        "hod_id": hod_id,
+        "second_pharmacist_id": second_pharmacist_id,
+        "other_department_id": other_department_id,
+        "other_hod_id": other_hod_id,
+    }
