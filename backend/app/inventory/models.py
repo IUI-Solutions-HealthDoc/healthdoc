@@ -88,8 +88,8 @@ class DrugInteraction(Base, UUIDPk, Timestamps):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     __table_args__ = (
-        CheckConstraint("severity IN ('contraindicated','major','moderate','minor')", name="ck_drug_interactions_severity"),
-        CheckConstraint("ingredient_code_a < ingredient_code_b", name="ck_drug_interactions_ordered_pair"),
+        CheckConstraint("severity IN ('contraindicated','major','moderate','minor')", name="severity"),
+        CheckConstraint("ingredient_code_a < ingredient_code_b", name="ordered_pair"),
         UniqueConstraint("ingredient_code_a", "ingredient_code_b"),
         Index("ix_drug_interactions_a", "ingredient_code_a"),
         Index("ix_drug_interactions_b", "ingredient_code_b"),

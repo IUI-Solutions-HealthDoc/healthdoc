@@ -44,6 +44,16 @@ def stock_alert_channel(facility_id: str | uuid.UUID) -> str:
 def department_channel(department_id: str | uuid.UUID) -> str:
     """Generic department-scoped channel for staff alerts."""
     return f"dept:{department_id}"
+
+
+def facility_channel(facility_id: str | uuid.UUID) -> str:
+    """Generic facility-wide channel for staff alerts.
+
+    Distinct from stock_alert_channel above: that one is the pharmacy's
+    low-stock stream, this is the general facility-wide staff channel the
+    notifications module publishes to. Both exist on purpose.
+    """
+    return f"facility:{facility_id}"
   
 async def publish(channel: str, message: str) -> None:
     """Publish a raw string message to a channel."""
