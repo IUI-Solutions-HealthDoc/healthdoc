@@ -71,6 +71,18 @@ async def test_dispense_uses_ledger_trigger_and_writes_audit(db_session, pharmac
 
 @pytest.mark.asyncio
 async def test_insufficient_stock_is_atomic(db_session, pharmacy_seed):
+    async def _count(table: str) -> int:
+        return (await db_session.execute(text(f"SELECT count(*) FROM {table}"))).scalar_one()
+
+    # Snapshot rather than assert zero. These were absolute counts, which held
+    # only while nothing else in the fixture produced audit rows; most models
+    # now opt into auto-auditing via __audit_resource_type__, so the seed alone
+    # writes to audit_logs. Comparing before/after tests what this actually
+    # cares about — that the failed dispense wrote nothing — and keeps working
+    # however much the fixture grows.
+    before = {t: await _count(t)
+              for t in ("pharmacy_dispenses", "stock_ledger", "audit_logs")}
+
     with pytest.raises(HTTPException) as exc_info:
         await create_dispense(
             db_session,
@@ -85,15 +97,10 @@ async def test_insufficient_stock_is_atomic(db_session, pharmacy_seed):
             facility_id=pharmacy_seed["facility_id"],
         )
     assert exc_info.value.status_code == 422
-    assert (await db_session.execute(text(
-        "SELECT count(*) FROM pharmacy_dispenses"
-    ))).scalar_one() == 0
-    assert (await db_session.execute(text(
-        "SELECT count(*) FROM stock_ledger"
-    ))).scalar_one() == 0
-    assert (await db_session.execute(text(
-        "SELECT count(*) FROM audit_logs"
-    ))).scalar_one() == 0
+    for table, count_before in before.items():
+        assert await _count(table) == count_before, (
+            f"{table} changed — the failed dispense was not atomic"
+        )
 
 
 @pytest.mark.asyncio

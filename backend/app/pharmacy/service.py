@@ -358,11 +358,14 @@ async def _publish_low_stock_alerts(
         }
         await db.execute(
             text("""
-                INSERT INTO notification_history (id, event_type, payload, department_id, created_at)
-                SELECT uuid_generate_v4(), :event_type, CAST(:payload AS jsonb), ii.owning_department_id, now()
+                INSERT INTO notification_history
+                    (id, event_type, payload, department_id, facility_id, created_at)
+                SELECT uuid_generate_v4(), :event_type, CAST(:payload AS jsonb),
+                       ii.owning_department_id, :facility_id, now()
                 FROM inventory_items ii WHERE ii.id = :item_id
             """),
-            {"event_type": event_type, "payload": json.dumps(payload), "item_id": str(r["item_id"])},
+            {"event_type": event_type, "payload": json.dumps(payload),
+             "item_id": str(r["item_id"]), "facility_id": str(facility_id)},
         )
         await publish_event(stock_alert_channel(facility_id), event_type, payload)
 
