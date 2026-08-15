@@ -105,6 +105,8 @@ async def db():
         # conftest creates every table in the app, so one module's Postgres-ism
         # breaks another module's tests.
         dbapi_connection.create_function("char_length", 1, lambda s: len(s) if s else 0)
+        _outbox_seq_counter = count(1)
+        dbapi_connection.create_function("nextval", 1, lambda seq_name: next(_outbox_seq_counter))
 
         _seq_counters: dict[str, int] = {}
 
