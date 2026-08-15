@@ -35,6 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.opd import visit_number
 from app.opd.models import Visit
 from app.opd.schemas import VisitCreate
+from app.integrations.abdm.fhir.service import build_encounter_close_bundles
 
 ALLOWED_TRANSITIONS: dict[str, set[str]] = {
     "registered": {"in_consultation", "lwbs", "cancelled"},
@@ -145,6 +146,9 @@ async def transition_visit_status(
     visit.status = target_status
     visit.updated_by = updated_by
     visit.row_version += 1
+
+    if target_status == "closed":
+        await build_encounter_close_bundles(db, visit)
 
     await db.flush()
     await db.refresh(visit)

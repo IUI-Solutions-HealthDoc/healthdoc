@@ -17,9 +17,9 @@ from app.common.enums import OtStatus
 class OtSchedule(Base, UUIDPk, Timestamps, Blame):
     __tablename__ = "ot_schedules"
     __table_args__ = (
-        CheckConstraint(OtStatus.sql_check("status"), name="ck_ot_schedules_status"),
+        CheckConstraint(OtStatus.sql_check("status"), name="status"),
         CheckConstraint(
-            "scheduled_end > scheduled_start", name="ck_ot_schedules_time_order"
+            "scheduled_end > scheduled_start", name="time_order"
         ),
     )
 
@@ -43,7 +43,7 @@ class OtRecord(Base, UUIDPk, Timestamps):
     __table_args__ = (
         CheckConstraint(
             "started_at IS NULL OR ended_at IS NULL OR ended_at > started_at",
-            name="ck_ot_records_time_order",
+            name="time_order",
         ),
     )
 
