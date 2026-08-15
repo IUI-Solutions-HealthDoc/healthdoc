@@ -855,3 +855,164 @@ async def _recompute_dispense_status(db: AsyncSession, dispense_id: str) -> None
         text("UPDATE pharmacy_dispenses SET status = :status, updated_at = now() WHERE id = :id"),
         {"status": new_status, "id": str(dispense_id)},
     )
+# ---------------------------------------------------------------------------
+# Pharmacy MIS report
+# ---------------------------------------------------------------------------
+
+from datetime import date as _date, timedelta as _timedelta
+from app.pharmacy.schemas import PharmacyMisReport as _PharmacyMisReport
+
+
+async def _facility_business_date(db: AsyncSession, facility_id: UUID) -> _date:
+    """Current business date for this facility - schema doc's blanket rule:
+    business dates use the facility's IANA timezone, never bare UTC now() or
+    CURRENT_DATE. Used only to default date_to/date_from when the caller
+    omits them.
+    """
+    row = (
+        await db.execute(
+            text("SELECT (now() AT TIME ZONE timezone)::date AS business_date "
+                 "FROM facilities WHERE id = :id"),
+            {"id": str(facility_id)},
+        )
+    ).mappings().first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Facility not found")
+    return row["business_date"]
+
+
+async def get_pharmacy_mis_report(
+    db: AsyncSession,
+    *,
+    facility_id: UUID,
+    date_from: _date | None,
+    date_to: _date | None,
+    expiry_window_days: int = 30,
+) -> _PharmacyMisReport:
+    """
+    Read-only aggregate - no mutation, so per app/audit/service.py's own
+    manual-path/query-path split this does NOT call write_audit_log().
+
+    fill_rate/turnaround anchor on prescriptions.created_at; stockout/
+    substitution counts anchor on pharmacy_dispenses.created_at instead.
+
+    expiring_batches_count/expiring_stock_value are NOT period-scoped -
+    always a snapshot as of now, relative to period_end + expiry_window_days.
+    """
+    resolved_date_to = date_to or await _facility_business_date(db, facility_id)
+    resolved_date_from = date_from or (resolved_date_to - _timedelta(days=30))
+    if resolved_date_from > resolved_date_to:
+        raise HTTPException(422, "date_from must be on or before date_to")
+
+    facility_id_str = str(facility_id)
+    params = {
+        "facility_id": facility_id_str,
+        "date_from": resolved_date_from,
+        "date_to": resolved_date_to,
+    }
+
+    prescriptions_total = (
+        await db.execute(
+            text("""
+                SELECT count(*)
+                FROM prescriptions p
+                JOIN patients pt ON pt.id = p.patient_id
+                WHERE pt.facility_id = :facility_id
+                  AND p.created_at::date BETWEEN :date_from AND :date_to
+            """),
+            params,
+        )
+    ).scalar_one()
+
+    dispense_stats = (
+        await db.execute(
+            text("""
+                SELECT
+                    count(*) AS dispenses_total,
+                    count(*) FILTER (WHERE pd.status = :out_of_stock) AS stockout_count,
+                    count(*) FILTER (WHERE pd.status = :dispensed) AS dispensed_count
+                FROM pharmacy_dispenses pd
+                JOIN prescriptions p ON p.id = pd.prescription_id
+                JOIN patients pt ON pt.id = p.patient_id
+                WHERE pt.facility_id = :facility_id
+                  AND pd.created_at::date BETWEEN :date_from AND :date_to
+            """),
+            {**params, "out_of_stock": DispenseStatus.OUT_OF_STOCK, "dispensed": DispenseStatus.DISPENSED},
+        )
+    ).mappings().one()
+    dispenses_total = dispense_stats["dispenses_total"]
+    stockout_count = dispense_stats["stockout_count"]
+    dispensed_count = dispense_stats["dispensed_count"]
+
+    substitution_count = (
+        await db.execute(
+            text("""
+                SELECT count(*)
+                FROM pharmacy_dispense_items pdi
+                JOIN pharmacy_dispenses pd ON pd.id = pdi.dispense_id
+                JOIN prescriptions p ON p.id = pd.prescription_id
+                JOIN patients pt ON pt.id = p.patient_id
+                WHERE pt.facility_id = :facility_id
+                  AND pd.created_at::date BETWEEN :date_from AND :date_to
+                  AND pdi.is_substitute
+            """),
+            params,
+        )
+    ).scalar_one()
+
+    avg_turnaround_minutes = (
+        await db.execute(
+            text("""
+                SELECT avg(EXTRACT(EPOCH FROM (pd.created_at - p.created_at)) / 60.0)
+                FROM pharmacy_dispenses pd
+                JOIN prescriptions p ON p.id = pd.prescription_id
+                JOIN patients pt ON pt.id = p.patient_id
+                WHERE pt.facility_id = :facility_id
+                  AND pd.created_at::date BETWEEN :date_from AND :date_to
+                  AND pd.version = 1
+            """),
+            params,
+        )
+    ).scalar_one()
+
+    expiring = (
+        await db.execute(
+            text("""
+                SELECT
+                    count(*) AS expiring_batches_count,
+                    COALESCE(sum(ib.quantity * COALESCE(ib.issue_rate_mrp, 0)), 0) AS expiring_stock_value
+                FROM inventory_batches ib
+                JOIN stock_locations sl ON sl.id = ib.stock_location_id
+                WHERE sl.facility_id = :facility_id
+                  AND ib.quantity > 0
+                  AND ib.expiry_date <= (:date_to::date + (:window || ' days')::interval)
+            """),
+            {"facility_id": facility_id_str, "date_to": resolved_date_to, "window": expiry_window_days},
+        )
+    ).mappings().one()
+
+    fill_rate_pct = (
+        (Decimal(dispensed_count) / Decimal(prescriptions_total) * 100)
+        if prescriptions_total > 0 else Decimal("0")
+    )
+    substitution_rate_pct = (
+        (Decimal(substitution_count) / Decimal(dispenses_total) * 100)
+        if dispenses_total > 0 else Decimal("0")
+    )
+
+    return _PharmacyMisReport(
+        facility_id=facility_id,
+        period_start=resolved_date_from,
+        period_end=resolved_date_to,
+        prescriptions_total=prescriptions_total,
+        dispenses_total=dispenses_total,
+        fill_rate_pct=fill_rate_pct,
+        stockout_count=stockout_count,
+        substitution_count=substitution_count,
+        substitution_rate_pct=substitution_rate_pct,
+        avg_turnaround_minutes=(
+            Decimal(str(avg_turnaround_minutes)) if avg_turnaround_minutes is not None else None
+        ),
+        expiring_batches_count=expiring["expiring_batches_count"],
+        expiring_stock_value=Decimal(str(expiring["expiring_stock_value"])),
+    )

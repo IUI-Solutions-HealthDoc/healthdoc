@@ -151,3 +151,44 @@ class SubstitutionApprovalRequest(BaseModel):
     rejection_reason: str | None = Field(
         default=None, description="Required if approved=false"
     )
+# ---------------------------------------------------------------------------
+# Pharmacy MIS report (GET /pharmacy/mis)
+# ---------------------------------------------------------------------------
+
+from datetime import date as _date
+
+
+class PharmacyMisReport(BaseModel):
+    facility_id: UUID
+    period_start: _date
+    period_end: _date
+
+    prescriptions_total: int
+    dispenses_total: int
+    fill_rate_pct: Decimal = Field(
+        description="dispensed-status dispenses / prescriptions_total; 0 when "
+        "prescriptions_total is 0"
+    )
+    stockout_count: int = Field(
+        description="dispenses with status='out_of_stock' in the period"
+    )
+    substitution_count: int = Field(
+        description="pharmacy_dispense_items rows with is_substitute=true in the period"
+    )
+    substitution_rate_pct: Decimal = Field(
+        description="substitution_count / dispenses_total; 0 when dispenses_total is 0"
+    )
+    avg_turnaround_minutes: Decimal | None = Field(
+        default=None,
+        description="avg minutes between prescription creation and its first dispense "
+        "(version=1) in the period; null when no first-dispenses fall in the period",
+    )
+    expiring_batches_count: int = Field(
+        description="inventory_batches with quantity > 0 expiring within "
+        "expiry_window_days of period_end, at this facility's stock locations - "
+        "a live snapshot, not period-scoped like the fields above"
+    )
+    expiring_stock_value: Decimal = Field(
+        description="sum(quantity * issue_rate_mrp) for those same expiring batches; "
+        "a NULL issue_rate_mrp counts in expiring_batches_count but contributes 0 here"
+    )
