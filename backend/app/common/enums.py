@@ -227,6 +227,10 @@ class MergeStatus(CheckedEnum):
     UNMERGED = "unmerged"
 
 
+class MergeSourceType(CheckedEnum):
+    THID = "thid"
+    DUPLICATE_UHID = "duplicate_uhid"
+
 class OrderType(CheckedEnum):
     LAB = "lab"
     RADIOLOGY = "radiology"

@@ -179,3 +179,45 @@ class Diagnosis(Base, UUIDPk, Timestamps, Blame):
         ),
         Index("ix_diagnoses_icd_code_icd_version", "icd_code", "icd_version"),
     )
+
+class DoctorReview(Base, UUIDPk, Timestamps, Blame):
+    """
+    Doctor sign-off on an encounter, optionally attached to a specific
+    lab or radiology result. Mutable (status transitions in place), so
+    unlike lab_results/radiology_reports this is NOT append-only/versioned
+    -- it uses the full Blame mixin (created_by + updated_by).
+
+    lab_order_item_id / radiology_order_item_id are both nullable: set
+    one when the review is about a specific incoming result, leave both
+    null for a general encounter sign-off/closing note.
+    """
+    __tablename__ = "doctor_reviews"
+
+    __audit_resource_type__ = "doctor_reviews"
+    __audit_facility_id_field__ = "facility_id"
+
+    encounter_id = Column(UUID(as_uuid=True), ForeignKey("encounters.id", ondelete="RESTRICT"),
+                           nullable=False)
+    facility_id = Column(UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="RESTRICT"),
+                          nullable=False)
+    reviewed_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"),
+                          nullable=False)
+    lab_order_item_id = Column(UUID(as_uuid=True), ForeignKey("lab_order_items.id", ondelete="RESTRICT"),
+                                nullable=True)
+    radiology_order_item_id = Column(UUID(as_uuid=True), ForeignKey("radiology_order_items.id", ondelete="RESTRICT"),
+                                      nullable=True)
+    status = Column(String(50), nullable=False, server_default="pending")
+    notes = Column(Text, nullable=True)
+    signed_off_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'reviewed', 'signed_off')",
+            name="status",
+        ),
+        Index("ix_doctor_reviews_encounter_id", "encounter_id"),
+        Index("ix_doctor_reviews_facility_id", "facility_id"),
+        Index("ix_doctor_reviews_reviewed_by", "reviewed_by"),
+        Index("ix_doctor_reviews_lab_order_item_id", "lab_order_item_id"),
+        Index("ix_doctor_reviews_radiology_order_item_id", "radiology_order_item_id"),
+    )

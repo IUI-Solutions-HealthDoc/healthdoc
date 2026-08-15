@@ -393,6 +393,7 @@ async def update_patient(
             setattr(patient, field, getattr(payload, field))
 
         patient.updated_by = updated_by
+        patient.row_version += 1
         audit.new_value = {f: _json_safe_value(getattr(patient, f)) for f in fields_being_changed}
 
     await db.flush()
@@ -469,7 +470,9 @@ async def request_merge(
 # fails the build the day a new FK to patients.id appears without a
 # matching entry here. Do not add a table name here without also adding
 # the repointing code for it below.
-REPOINTED_ON_MERGE: frozenset[str] = frozenset({"patient_identifiers", "visits", "ot_schedules"})
+REPOINTED_ON_MERGE: frozenset[str] = frozenset(
+    {"patient_identifiers", "visits", "ot_schedules", "fhir_bundle_transactions", "files", "admissions"}
+)
 
 # patient_merge_log itself has FKs to patients.id (source_patient_id,
 # target_patient_id) — these must NEVER be repointed. It's the audit trail
@@ -558,9 +561,25 @@ async def approve_merge(
     await _repoint_identifiers(db, source=source, target=target)
     await _repoint_visits(db, source=source, target=target)
     await _repoint_ot_schedules(db, source=source, target=target)
+    await _repoint_admissions(db, source=source, target=target)
+    await _repoint_files(db, source=source, target=target)
+    await _repoint_fhir_bundle_transactions(db, source=source, target=target)
 
-    source.status = "merged"
-    source.merged_into_patient_id = target.id
+    async with audited_mutation(
+        db,
+        facility_id=source.facility_id,
+        action=AuditAction.UHID_MERGE,
+        resource_type="patients",
+        patient_id=source.id,
+    ) as audit:
+        audit.resource_id = source.id
+        audit.old_value = _patient_snapshot(source)
+        source.status = "merged"
+        source.merged_into_patient_id = target.id
+        source.row_version += 1
+        audit.new_value = _patient_snapshot(source)
+        audit.reason = merge_log.reason
+
     await db.flush()
 
     merge_log.status = "approved"
@@ -635,6 +654,92 @@ async def _repoint_visits(db: AsyncSession, *, source: Patient, target: Patient)
     await db.flush()
 
 
+async def _repoint_fhir_bundle_transactions(
+    db: AsyncSession, *, source: Patient, target: Patient
+) -> None:
+    """Moves source's ABDM transmission records onto target.
+
+    0026 created fhir_bundle_transactions with a patient_id FK and no
+    repointing logic; the guard test only saw it once #367 registered the
+    ORM model. Repointed rather than exempted: unlike patient_merge_log,
+    which must never be rewritten because it is the evidence of the merge,
+    this table records what was transmitted *about a person*, and after a
+    merge that person is the target.
+
+    0026's index is (patient_id, transmitted_at) and exists to answer "what
+    was transmitted about this patient, and when" — the question a DPDP
+    access request asks. Rows left on the dead source id make that answer
+    incomplete for the surviving patient.
+
+    Raw SQL rather than the ORM model on purpose: FhirBundleTransaction
+    arrives with #367, and this module has to keep importing on branches
+    without it. The table exists from 0026 either way.
+
+    No uniqueness to collide with — a transmission is a point-in-time fact,
+    so every source row simply moves.
+    """
+    await db.execute(
+        text(
+            "UPDATE fhir_bundle_transactions SET patient_id = :target_id "
+            "WHERE patient_id = :source_id"
+        ),
+        {"target_id": target.id, "source_id": source.id},
+    )
+    await db.flush()
+
+
+async def _repoint_files(db: AsyncSession, *, source: Patient, target: Patient) -> None:
+    """Moves source's files rows onto target.
+
+    0019 created files with a patient_id FK and no repointing logic; the guard
+    test only sees the table once the files router is registered, which #365
+    does. Repointed rather than exempted: unlike patient_merge_log, which is
+    the evidence of the merge and must never be rewritten, files holds the
+    patient's own documents — photos, ID proofs, scanned consent, report PDFs.
+
+    Without this, the surviving patient's document list silently omits
+    everything uploaded before the merge, which is the same failure mode
+    _repoint_visits exists to prevent.
+
+    Raw SQL rather than importing FileRecord: that import would register the
+    model on Base.metadata as a side effect, changing which tables the guard
+    sees on branches that don't wire the files router. The table exists from
+    0019 regardless.
+
+    No uniqueness to collide with — a file belongs to one patient, so every
+    source row simply moves.
+    """
+    await db.execute(
+        text(
+            "UPDATE files SET patient_id = :target_id WHERE patient_id = :source_id"
+        ),
+        {"target_id": target.id, "source_id": source.id},
+    )
+    await db.flush()
+
+
+async def _repoint_admissions(db: AsyncSession, *, source: Patient, target: Patient) -> None:
+    """Moves source's admissions rows onto target.
+
+    An admission is core clinical history — ward, bed, dates, discharge. Left on the dead source id, the surviving patient's record shows no inpatient stays at all from before the merge.
+
+    Surfaced by test_repointing_covers_every_patient_fk: the FK to patients.id
+    was always there, and became visible to the guard when the model was
+    registered on Base.metadata.
+
+    Raw SQL rather than importing the model — that import would register it as
+    a side effect, changing which tables the guard sees on branches that do not
+    otherwise load it. The table exists in the database either way.
+    """
+    await db.execute(
+        text(
+            "UPDATE admissions SET patient_id = :target_id WHERE patient_id = :source_id"
+        ),
+        {"target_id": target.id, "source_id": source.id},
+    )
+    await db.flush()
+
+
 async def _repoint_ot_schedules(db: AsyncSession, *, source: Patient, target: Patient) -> None:
     """Moves source's ot_schedules rows onto target (§3 0006 merge
     repointing rule). Same shape as _repoint_visits: ot_schedules.
@@ -648,6 +753,26 @@ async def _repoint_ot_schedules(db: AsyncSession, *, source: Patient, target: Pa
 
     await db.execute(
         update(OtSchedule).where(OtSchedule.patient_id == source.id).values(patient_id=target.id)
+    )
+    await db.flush()
+
+
+async def _repoint_fhir_bundle_transactions(db: AsyncSession, *, source: Patient, target: Patient) -> None:
+    """Moves source's fhir_bundle_transactions rows onto target (§3 0006
+    merge repointing rule). Same shape as _repoint_visits/_repoint_ot_schedules:
+    fhir_bundle_transactions.patient_id has no per-patient uniqueness
+    constraint, so every source row simply moves. This branch's own migration
+    (0038-adjacent FHIR module) introduced the FK, so it's this PR's job to
+    keep the guard test (test_patient_merge.py) covering it rather than
+    leaving a gap it just created -- same precedent as ot_schedules above.
+    Without this, /patients/{id}/history for the target silently omits the
+    record that a FHIR bundle was ever built/transmitted for visits that
+    happened before the merge.
+    """
+    from app.integrations.abdm.fhir.models import FhirBundleTransaction
+
+    await db.execute(
+        update(FhirBundleTransaction).where(FhirBundleTransaction.patient_id == source.id).values(patient_id=target.id)
     )
     await db.flush()
 

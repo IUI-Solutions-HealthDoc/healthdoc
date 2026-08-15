@@ -13,7 +13,7 @@ from app.common.db import Base
 from app.common.models import UUIDPk, Timestamps, Blame, Versioned
 from app.common.enums import (
     Sex, IdentityPath, IdentityStatus, PatientStatus,
-    IdentifierType, MergeStatus,
+    IdentifierType, MergeStatus, MergeSourceType,
 )
 
 
@@ -53,6 +53,16 @@ class Patient(Base, UUIDPk, Timestamps, Blame, Versioned):
     photo_file_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)  # FK to files added in 0019
     abha_number: Mapped[str | None] = mapped_column(String(17), unique=True, nullable=True)
 
+    # 0030 — ABHA linking token (B1). Encrypted same scheme as patient_identifiers.
+    abha_linking_token_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    abha_linking_key_version: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    abha_linked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # 0022 — guardian verification (B2).
+    is_minor: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    guardian_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    guardian_verification_method: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
     identity_path: Mapped[str] = mapped_column(String(50), nullable=False)
     identity_status: Mapped[str] = mapped_column(String(50), nullable=False, server_default="verified")
     status: Mapped[str] = mapped_column(String(50), nullable=False, server_default="active")
@@ -86,7 +96,7 @@ class PatientIdentifier(Base, UUIDPk, Timestamps):
 class PatientMergeLog(Base, UUIDPk, Timestamps):
     __tablename__ = "patient_merge_log"
     __table_args__ = (
-        CheckConstraint("source_type IN ('thid', 'duplicate_uhid')", name="source_type"),
+        CheckConstraint(MergeSourceType.sql_check("source_type"), name="source_type"),
         CheckConstraint(MergeStatus.sql_check("status"), name="status"),
     )
 
