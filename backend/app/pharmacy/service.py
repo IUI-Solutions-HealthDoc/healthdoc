@@ -702,14 +702,6 @@ async def create_dispense(
                     "batch_id": str(alloc.batch_id),
                 },
             )
-            await db.execute(
-                text("""
-                    UPDATE inventory_batches
-                    SET quantity = quantity - :qty, updated_at = now()
-                    WHERE id = :batch_id
-                """),
-                {"qty": alloc.quantity, "batch_id": str(alloc.batch_id)},
-            )
             row_ids.append(item_row_id)
             batch_allocations_out.append(BatchAllocation(
                 batch_id=alloc.batch_id, batch_number=alloc.batch_number,
@@ -906,14 +898,6 @@ async def approve_substitution(
                 "dispense_id": item_row["dispense_id"], "performed_by": str(approving_user_id),
                 "batch_id": str(alloc.batch_id),
             },
-        )
-        await db.execute(
-            text("""
-                UPDATE inventory_batches
-                SET quantity = quantity - :qty, updated_at = now()
-                WHERE id = :batch_id
-            """),
-            {"qty": alloc.quantity, "batch_id": str(alloc.batch_id)},
         )
 
         item_row_ids.append(row_id)
