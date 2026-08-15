@@ -103,7 +103,7 @@ async def get_prescription_queue(
 
 
 # ---------------------------------------------------------------------------
-# Medicine search — FEFO batch ordering
+# Medicine search - FEFO batch ordering
 # ---------------------------------------------------------------------------
 
 async def search_medicines(
@@ -182,7 +182,7 @@ async def search_medicines(
  
 
 class BatchAllocationResult:
-    """Internal — one (batch, quantity) slice picked during FEFO allocation."""
+    """Internal - one (batch, quantity) slice picked during FEFO allocation."""
     __slots__ = ("batch_id", "batch_number", "expiry_date", "quantity")
 
     def __init__(self, batch_id, batch_number, expiry_date, quantity):
@@ -256,7 +256,7 @@ async def _write_notification(
     """Log a notification-worthy event to notification_history.
 
     notification_history has no per-recipient/title/body/status columns of
-    its own (event_type, payload JSONB, department_id, created_at) — those
+    its own (event_type, payload JSONB, department_id, created_at) - those
     fields are carried inside payload instead of being column-mapped 1:1.
     """
     try:
@@ -450,13 +450,13 @@ async def create_dispense(
         text("SELECT id FROM prescriptions WHERE id = :id FOR UPDATE"),
         {"id": str(payload.prescription_id)},
     )
-    # pr-check: ignore — MAX()+1 is safe HERE and only here, because the
+    # pr-check: ignore - MAX()+1 is safe HERE and only here, because the
     # SELECT ... FOR UPDATE above already serialises every concurrent dispense
     # for this prescription. Two callers cannot both read the same MAX.
     #
     # Same exception as queue/service.py:202, and the same caveat: do NOT copy
     # this pattern anywhere the parent row isn't already locked. Where no
-    # single row lock covers the scope — accession numbers, receipt numbers —
+    # single row lock covers the scope - accession numbers, receipt numbers -
     # use a counters row instead (app/common/accession.py, billing_counters).
     next_version = (
         await db.execute(
@@ -528,7 +528,7 @@ async def create_dispense(
                 title="Medicine substitution needs your approval",
                 body=(
                     f"Pharmacist requested substituting prescription item "
-                    f"{p['prescription_item_id']} — reason: {p['substitute_reason'] or 'not given'}"
+                    f"{p['prescription_item_id']} - reason: {p['substitute_reason'] or 'not given'}"
                 ),
                 reference_id=item_row_id,
             )
@@ -859,7 +859,9 @@ async def _recompute_dispense_status(db: AsyncSession, dispense_id: str) -> None
 # Pharmacy MIS report
 # ---------------------------------------------------------------------------
 
-from datetime import date as _date, timedelta as _timedelta
+from datetime import date as _date
+from datetime import timedelta as _timedelta
+
 from app.pharmacy.schemas import PharmacyMisReport as _PharmacyMisReport
 
 
@@ -985,7 +987,7 @@ async def get_pharmacy_mis_report(
                 JOIN stock_locations sl ON sl.id = ib.stock_location_id
                 WHERE sl.facility_id = :facility_id
                   AND ib.quantity > 0
-                  AND ib.expiry_date <= (:date_to::date + (:window || ' days')::interval)
+                  AND ib.expiry_date <= (CAST(:date_to AS date) + (interval '1 day' * :window))
             """),
             {"facility_id": facility_id_str, "date_to": resolved_date_to, "window": expiry_window_days},
         )

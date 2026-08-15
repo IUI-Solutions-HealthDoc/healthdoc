@@ -1,3 +1,4 @@
+﻿from datetime import date
 from typing import Annotated
 from uuid import UUID
 
@@ -13,12 +14,14 @@ from app.pharmacy.schemas import (
     DispenseItemOut,
     DispenseOut,
     MedicineSearchResponse,
+    PharmacyMisReport,
     PrescriptionQueueResponse,
     SubstitutionApprovalRequest,
 )
 from app.pharmacy.service import (
     approve_substitution,
     create_dispense,
+    get_pharmacy_mis_report,
     get_prescription_queue,
     search_medicines,
 )
@@ -115,6 +118,7 @@ async def create_dispense_endpoint(
     )
     return result
 
+
 @router.post(
     "/dispenses/items/{item_id}/approve",
     response_model=DispenseItemOut,
@@ -138,14 +142,9 @@ async def approve_substitution_endpoint(
     )
 
 
-from datetime import date as _date
-from app.pharmacy.schemas import PharmacyMisReport as _PharmacyMisReport
-from app.pharmacy.service import get_pharmacy_mis_report as _get_pharmacy_mis_report
-
-
 @router.get(
     "/mis",
-    response_model=_PharmacyMisReport,
+    response_model=PharmacyMisReport,
     dependencies=[
         Depends(require_module("pharmacy")),
         Depends(require_roles("pharmacist", "admin", "hod")),
@@ -154,11 +153,11 @@ from app.pharmacy.service import get_pharmacy_mis_report as _get_pharmacy_mis_re
 async def pharmacy_mis_report(
     current_user: CurrentDbUser,
     db: DbSession,
-    date_from: _date | None = Query(default=None),
-    date_to: _date | None = Query(default=None),
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
     expiry_window_days: int = Query(default=30, ge=1, le=365),
-) -> _PharmacyMisReport:
-    return await _get_pharmacy_mis_report(
+) -> PharmacyMisReport:
+    return await get_pharmacy_mis_report(
         db,
         facility_id=current_user.facility_id,
         date_from=date_from,
