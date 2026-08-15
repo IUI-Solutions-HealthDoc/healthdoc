@@ -251,6 +251,7 @@ async def _resolve_medicine_item_id(db: AsyncSession, prescription_item_id: UUID
 async def _write_notification(
     db: AsyncSession, *, recipient_user_id: UUID, notification_type: str,
     title: str, body: str, reference_type: str, reference_id: str,
+    facility_id: UUID,
 ) -> None:
     """Log a notification-worthy event to notification_history.
 
@@ -262,13 +263,14 @@ async def _write_notification(
         await db.execute(
             text("""
                 INSERT INTO notification_history
-                    (id, event_type, payload)
+                    (id, event_type, payload, facility_id)
                 VALUES
-                    (:id, :event_type, CAST(:payload AS jsonb))
+                    (:id, :event_type, CAST(:payload AS jsonb), :facility_id)
             """),
             {
                 "id": str(uuid4()),
                 "event_type": notification_type,
+                "facility_id": str(facility_id),
                 "payload": json.dumps({
                     "recipient_user_id": str(recipient_user_id),
                     "title": title,
@@ -292,7 +294,8 @@ async def _notify_substitution_stakeholders(
     row = (
     await db.execute(
         text("""
-            SELECT e.provider_user_id AS doctor_id
+            SELECT e.provider_user_id AS doctor_id,
+                   e.facility_id AS facility_id
             FROM prescriptions p
             JOIN encounters e ON e.id = p.encounter_id
             WHERE p.id = :id
@@ -307,7 +310,7 @@ async def _notify_substitution_stakeholders(
         await _write_notification(
             db, recipient_user_id=row["doctor_id"], notification_type="pharmacy_substitution",
             title=title, body=body, reference_type="pharmacy_dispense_items",
-            reference_id=reference_id,
+            reference_id=reference_id, facility_id=row["facility_id"],
         )
 
 

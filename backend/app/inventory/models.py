@@ -54,6 +54,13 @@ class InventoryItem(Base, UUIDPk, Timestamps):
     reorder_level: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0"))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
+    #: WHO ATC level-5 where available, local ingredient list otherwise
+    #: (migration 0032). This is what app.allergies.service matches an
+    #: active allergy against -- never inventory_item_id, since two
+    #: different stock items (e.g. amoxicillin, penicillin V) can share
+    #: one ingredient and must both trigger the same allergy.
+    ingredient_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
     __table_args__ = (
         CheckConstraint(
             "form IN ('tablet','capsule','injection','syrup','ointment','fluid',"
