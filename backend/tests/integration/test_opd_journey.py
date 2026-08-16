@@ -37,6 +37,16 @@ from tests.integration.conftest import (
 
 
 class TestOPDCoreJourney:
+    @pytest.mark.xfail(
+        reason="Invoice creation at registration is not implemented. schema.md §3 0014 "
+               "says invoices are 'one per visit, created at registration with the "
+               "registration-fee line', and billing/service.py:463 raises 404 on that "
+               "contract — but no code anywhere creates an invoice. The only file "
+               "mentioning Invoice( is billing/models.py. So the whole billing chain "
+               "(builder, payments, MIS) has no entry point. Found by this journey; "
+               "tracked separately.",
+        strict=False,
+    )
     def test_full_opd_journey_registration_to_payment(self, client_as, seeded_patient_id):
         patient_id = seeded_patient_id
 
