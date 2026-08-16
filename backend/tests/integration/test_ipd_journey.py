@@ -77,7 +77,7 @@ def seeded_wards_and_beds() -> None:
 
 
 class TestIPDCoreJourney:
-     @pytest.mark.xfail(
+    @pytest.mark.xfail(
         reason="visit_number_counters bug is now fixed (migration 0035), so "
                "Step 1 (visit creation) now passes. Blocked at Step 2: "
                "POST /api/v1/admissions has no registered route at all — "
@@ -90,9 +90,9 @@ class TestIPDCoreJourney:
                "this journey can progress further.",
         strict=False,
     )
-  def test_full_ipd_journey_admission_to_discharge(
+    def test_full_ipd_journey_admission_to_discharge(
         self, client_as, seeded_patient_id, seeded_wards_and_beds
-    ): 
+    ):
         patient_id = seeded_patient_id
         doctor_id = str(uuid.uuid5(uuid.NAMESPACE_OID, DOCTOR.sub))
 
