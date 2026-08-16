@@ -17,3 +17,8 @@ minio-data/
 .vscode/
 .reviews/
 .vscode/
+
+# Local working material — PR dumps, issue exports, one-off notes. Kept next
+# to the project so it is not scattered across the filesystem, but never
+# committed: large, regenerable from `gh`, and stale within a day.
+.local-archive/

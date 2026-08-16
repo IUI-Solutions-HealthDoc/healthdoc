@@ -16,9 +16,24 @@ from app.common.redis import (
 
 @pytest.fixture(autouse=True)
 async def _cleanup_redis():
-    """Ensure every test starts and ends with a fresh pooled connection."""
+    """Ensure every test starts and ends with a fresh pooled connection.
+
+    close_redis() is best-effort here. app.common.redis caches the pool in a
+    module-level global, but pytest-asyncio gives each test its own event
+    loop — so a connection opened during one test is closed from a different
+    loop's teardown, and asyncio raises when it tries to close a transport
+    whose loop is gone. Dropping the reference is the part that matters; the
+    socket is collected either way.
+
+    Same root cause as the QueuePool-across-loops problem in the pathology
+    and radiology conftests, solved there with NullPool.
+    """
     yield
-    await close_redis()
+    try:
+        await close_redis()
+    except Exception:
+        import app.common.redis as _redis
+        _redis._pool = None
 
 
 def test_queue_channel_naming():
