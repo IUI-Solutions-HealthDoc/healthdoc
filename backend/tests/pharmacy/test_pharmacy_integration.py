@@ -71,15 +71,17 @@ async def test_dispense_uses_ledger_trigger_and_writes_audit(db_session, pharmac
 
 @pytest.mark.asyncio
 async def test_insufficient_stock_is_atomic(db_session, pharmacy_seed):
-    # Counts BEFORE, not absolute zeros. audit_logs is written by most of the
-    # suite, so "the table is empty" only held when pharmacy ran alone — it
-    # started failing at 'assert 25 == 0' once the suite grew, which says
-    # nothing about this rollback. What atomicity actually claims is that
-    # nothing NEW was written, and that is what this now asserts.
-    before = {
-        t: (await db_session.execute(text(f"SELECT count(*) FROM {t}"))).scalar_one()
-        for t in ("pharmacy_dispenses", "stock_ledger", "audit_logs")
-    }
+    async def _count(table: str) -> int:
+        return (await db_session.execute(text(f"SELECT count(*) FROM {table}"))).scalar_one()
+
+    # Snapshot rather than assert zero. These were absolute counts, which held
+    # only while nothing else in the fixture produced audit rows; most models
+    # now opt into auto-auditing via __audit_resource_type__, so the seed alone
+    # writes to audit_logs. Comparing before/after tests what this actually
+    # cares about — that the failed dispense wrote nothing — and keeps working
+    # however much the fixture grows.
+    before = {t: await _count(t)
+              for t in ("pharmacy_dispenses", "stock_ledger", "audit_logs")}
 
     with pytest.raises(HTTPException) as exc_info:
         await create_dispense(
@@ -96,12 +98,8 @@ async def test_insufficient_stock_is_atomic(db_session, pharmacy_seed):
         )
     assert exc_info.value.status_code == 422
     for table, count_before in before.items():
-        count_after = (
-            await db_session.execute(text(f"SELECT count(*) FROM {table}"))
-        ).scalar_one()
-        assert count_after == count_before, (
-            f"{table} gained {count_after - count_before} row(s) despite the "
-            f"dispense failing — the rollback is not atomic"
+        assert await _count(table) == count_before, (
+            f"{table} changed — the failed dispense was not atomic"
         )
 
 

@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.allergies.models import Allergy
 from app.common.enums import AllergyStatus
 
-#: Minimum length for an override rationale. "ok" is not a clinical justification.
+
 OVERRIDE_REASON_MIN_CHARS = 20
 
 
@@ -81,3 +81,4 @@ async def check_prescription_item(
         raise AllergyConflict(match)
 
     return match
+

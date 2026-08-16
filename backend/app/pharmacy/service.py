@@ -9,14 +9,19 @@ from fastapi import HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.allergies.service import AllergyConflict, check_prescription_item
 from app.audit.service import write_audit_log
 from app.common.enums import DispenseStatus, NotificationStatus
+from app.common.redis import publish_event, stock_alert_channel
+from app.pharmacy.interactions import DrugInteractionConflict, check_against_existing
 from app.pharmacy.schemas import (
     BatchAllocation,
     BatchAvailability,
     DispenseCreate,
     DispenseItemOut,
     DispenseOut,
+    ExpiringBatch,
+    ExpiryTrackerResponse,
     MedicineSearchResult,
     PrescriptionQueueItem,
     PrescriptionQueueResponse,
@@ -264,6 +269,7 @@ async def _resolve_medicine_item_id(db: AsyncSession, prescription_item_id: UUID
 async def _write_notification(
     db: AsyncSession, *, recipient_user_id: UUID, notification_type: str,
     title: str, body: str, reference_type: str, reference_id: str,
+    facility_id: UUID,
 ) -> None:
     """Log a notification-worthy event to notification_history.
 
@@ -275,13 +281,14 @@ async def _write_notification(
         await db.execute(
             text("""
                 INSERT INTO notification_history
-                    (id, event_type, payload)
+                    (id, event_type, payload, facility_id)
                 VALUES
-                    (:id, :event_type, CAST(:payload AS jsonb))
+                    (:id, :event_type, CAST(:payload AS jsonb), :facility_id)
             """),
             {
                 "id": str(uuid4()),
                 "event_type": notification_type,
+                "facility_id": str(facility_id),
                 "payload": json.dumps({
                     "recipient_user_id": str(recipient_user_id),
                     "title": title,
@@ -305,7 +312,8 @@ async def _notify_substitution_stakeholders(
     row = (
     await db.execute(
         text("""
-            SELECT e.provider_user_id AS doctor_id
+            SELECT e.provider_user_id AS doctor_id,
+                   e.facility_id AS facility_id
             FROM prescriptions p
             JOIN encounters e ON e.id = p.encounter_id
             WHERE p.id = :id
@@ -320,8 +328,59 @@ async def _notify_substitution_stakeholders(
         await _write_notification(
             db, recipient_user_id=row["doctor_id"], notification_type="pharmacy_substitution",
             title=title, body=body, reference_type="pharmacy_dispense_items",
-            reference_id=reference_id,
+            reference_id=reference_id, facility_id=row["facility_id"],
         )
+
+
+async def _publish_low_stock_alerts(
+    db: AsyncSession, *, facility_id: UUID, plan: list[dict]
+) -> None:
+    batch_ids: set[str] = set()
+    for p in plan:
+        for alloc in p.get("allocations", []):
+            batch_ids.add(str(alloc.batch_id))
+    if not batch_ids:
+        return
+
+    rows = (
+        await db.execute(
+            text("""
+                SELECT ii.id AS item_id, ii.name, ii.reorder_level,
+                       COALESCE(SUM(ib2.quantity), 0) AS total_remaining
+                FROM inventory_items ii
+                JOIN inventory_batches ib2 ON ib2.item_id = ii.id
+                JOIN stock_locations sl2 ON sl2.id = ib2.stock_location_id
+                WHERE ii.id IN (
+                    SELECT DISTINCT ib.item_id FROM inventory_batches ib
+                    WHERE ib.id = ANY(:batch_ids)
+                ) AND sl2.facility_id = :facility_id
+                GROUP BY ii.id, ii.name, ii.reorder_level
+            """),
+            {"batch_ids": list(batch_ids), "facility_id": str(facility_id)},
+        )
+    ).mappings().all()
+    for r in rows:
+        if r["total_remaining"] > r["reorder_level"]:
+            continue
+        event_type = "low_stock" if r["total_remaining"] > 0 else "out_of_stock"
+        payload = {
+            "item_id": str(r["item_id"]),
+            "item_name": r["name"],
+            "total_remaining": str(r["total_remaining"]),
+            "reorder_level": str(r["reorder_level"]),
+        }
+        await db.execute(
+            text("""
+                INSERT INTO notification_history
+                    (id, event_type, payload, department_id, facility_id, created_at)
+                SELECT uuid_generate_v4(), :event_type, CAST(:payload AS jsonb),
+                       ii.owning_department_id, :facility_id, now()
+                FROM inventory_items ii WHERE ii.id = :item_id
+            """),
+            {"event_type": event_type, "payload": json.dumps(payload),
+             "item_id": str(r["item_id"]), "facility_id": str(facility_id)},
+        )
+        await publish_event(stock_alert_channel(facility_id), event_type, payload)
 
 
 async def create_dispense(
@@ -340,6 +399,74 @@ async def create_dispense(
     ).mappings().first()
     if presc_row is None:
         raise HTTPException(status_code=404, detail="Prescription not found")
+
+    _checked_ingredient_codes: list[str] = []
+    for item in payload.items:
+        target_item_id = item.substitute_item_id
+        if target_item_id is None:
+            row = (
+                await db.execute(
+                    text("""
+                        SELECT ii.ingredient_code
+                        FROM prescription_items pi
+                        JOIN inventory_items ii ON ii.id = pi.medicine_item_id
+                        WHERE pi.id = :id
+                    """),
+                    {"id": str(item.prescription_item_id)},
+                )
+            ).mappings().first()
+        else:
+            row = (
+                await db.execute(
+                    text("SELECT ingredient_code FROM inventory_items WHERE id = :id"),
+                    {"id": str(target_item_id)},
+                )
+            ).mappings().first()
+        ingredient_code = row["ingredient_code"] if row else None
+
+        try:
+            await check_prescription_item(
+                db,
+                patient_id=presc_row["patient_id"],
+                ingredient_code=ingredient_code,
+                override_reason=item.allergy_override_reason,
+            )
+        except AllergyConflict as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "allergy_conflict",
+                    "prescription_item_id": str(item.prescription_item_id),
+                    "substance": exc.allergy.substance_text,
+                    "severity": exc.allergy.severity,
+                    "absolute": exc.absolute,
+                    "reaction": exc.allergy.reaction,
+                },
+            ) from exc
+
+        try:
+            await check_against_existing(
+                db,
+                new_ingredient_code=ingredient_code,
+                existing_ingredient_codes=_checked_ingredient_codes,
+                override_reason=item.interaction_override_reason,
+            )
+        except DrugInteractionConflict as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "drug_interaction_conflict",
+                    "prescription_item_id": str(item.prescription_item_id),
+                    "ingredient_a": exc.interaction.ingredient_code_a,
+                    "ingredient_b": exc.interaction.ingredient_code_b,
+                    "severity": exc.interaction.severity,
+                    "absolute": exc.absolute,
+                    "description": exc.interaction.description,
+                },
+            ) from exc
+
+        if ingredient_code is not None:
+            _checked_ingredient_codes.append(ingredient_code)
 
     plan: list[dict] = []
     # Track quantity already claimed against each explicitly-pinned batch_id
@@ -460,17 +587,9 @@ async def create_dispense(
         text("SELECT id FROM prescriptions WHERE id = :id FOR UPDATE"),
         {"id": str(payload.prescription_id)},
     )
-    # pr-check: ignore — MAX()+1 is safe HERE and only here, because the
-    # SELECT ... FOR UPDATE above already serialises every concurrent dispense
-    # for this prescription. Two callers cannot both read the same MAX.
-    #
-    # Same exception as queue/service.py:202, and the same caveat: do NOT copy
-    # this pattern anywhere the parent row isn't already locked. Where no
-    # single row lock covers the scope — accession numbers, receipt numbers —
-    # use a counters row instead (app/common/accession.py, billing_counters).
     next_version = (
         await db.execute(
-            text("SELECT COALESCE(MAX(version), 0) + 1 FROM pharmacy_dispenses "  # pr-check: ignore
+            text("SELECT COALESCE(MAX(version), 0) + 1 FROM pharmacy_dispenses "
                  "WHERE prescription_id = :id"),
             {"id": str(payload.prescription_id)},
         )
@@ -620,6 +739,16 @@ async def create_dispense(
             batches=batch_allocations_out,
         ))
 
+    overrides = [
+        {
+            "prescription_item_id": str(i.prescription_item_id),
+            "allergy_override_reason": i.allergy_override_reason,
+            "interaction_override_reason": i.interaction_override_reason,
+        }
+        for i in payload.items
+        if i.allergy_override_reason or i.interaction_override_reason
+    ]
+
     await write_audit_log(
         db, facility_id=facility_id, user_id=current_user_id, action="create",
         resource_type="pharmacy_dispenses", resource_id=UUID(dispense_id),
@@ -627,8 +756,11 @@ async def create_dispense(
         new_value={
             "prescription_id": str(payload.prescription_id), "version": next_version,
             "status": overall_status,
+            "overrides": overrides if overrides else None,
         },
     )
+
+    await _publish_low_stock_alerts(db, facility_id=facility_id, plan=plan)
 
     return DispenseOut(
         id=dispense_id, prescription_id=payload.prescription_id, visit_id=None,
@@ -1119,7 +1251,7 @@ async def approve_indent(
     indent_row = (
         await db.execute(
             text("""
-                SELECT id, department_id, status FROM indents
+                SELECT id, department_id, status, created_by FROM indents
                 WHERE id = :id AND facility_id = :facility_id FOR UPDATE
             """),
             {"id": str(indent_id), "facility_id": str(facility_id)},
@@ -1141,6 +1273,18 @@ async def approve_indent(
     if hod_row is None or hod_row["department_id"] != indent_row["department_id"]:
         raise HTTPException(
             status_code=403, detail="Only the HOD of this indent's own department may decide it"
+        )
+
+    # Maker-checker: the requester cannot decide their own indent. A HOD
+    # raising an indent for their own department is the normal case, not an
+    # edge case, so without this the dual sign-off #219 asks for collapses to
+    # one person. Same rule create_adjustment/approve_adjustment already apply
+    # below, and the same shape as emergency/service.py's merge approval.
+    if indent_row["created_by"] == current_user_id:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "self_approval_not_allowed",
+                    "message": "The requester cannot approve their own indent"},
         )
 
     new_status = "approved" if payload.approve else "rejected"
@@ -1454,4 +1598,56 @@ async def approve_adjustment(
         quantity_change=adj_row["quantity_change"], reason=adj_row["reason"],
         first_approver_id=adj_row["first_approver_id"], second_approver_id=current_user_id,
         status=new_status,
+    )
+
+async def get_expiry_tracker(
+    db: AsyncSession,
+    *,
+    facility_id: UUID,
+    stock_location_id: UUID | None,
+    threshold_days: int,
+) -> ExpiryTrackerResponse:
+    where = ["sl.facility_id = :facility_id", "ib.quantity > 0"]
+    params: dict = {
+        "facility_id": str(facility_id),
+        "threshold_days": threshold_days,
+    }
+    if stock_location_id is not None:
+        where.append("ib.stock_location_id = :stock_location_id")
+        params["stock_location_id"] = str(stock_location_id)
+
+    where_clause = " AND ".join(where)
+
+    rows = (
+        await db.execute(
+            text(f"""
+                SELECT
+                    ib.id AS batch_id, ib.item_id, ii.name AS item_name,
+                    ib.batch_number, ib.expiry_date, ib.quantity,
+                    ib.stock_location_id, sl.name AS stock_location_name,
+                    (ib.expiry_date - (now() AT TIME ZONE fac.timezone)::date) AS days_to_expiry
+                FROM inventory_batches ib
+                JOIN stock_locations sl ON sl.id = ib.stock_location_id
+                JOIN facilities fac ON fac.id = sl.facility_id
+                JOIN inventory_items ii ON ii.id = ib.item_id
+                WHERE {where_clause}
+                    AND (ib.expiry_date - (now() AT TIME ZONE fac.timezone)::date) <= :threshold_days
+                ORDER BY ib.expiry_date ASC
+            """),
+            params,
+        )
+    ).mappings().all()
+
+    return ExpiryTrackerResponse(
+        threshold_days=threshold_days,
+        items=[
+            ExpiringBatch(
+                batch_id=r["batch_id"], item_id=r["item_id"], item_name=r["item_name"],
+                batch_number=r["batch_number"], expiry_date=r["expiry_date"].isoformat(),
+                days_to_expiry=r["days_to_expiry"], quantity=r["quantity"],
+                stock_location_id=r["stock_location_id"],
+                stock_location_name=r["stock_location_name"],
+            )
+            for r in rows
+        ],
     )

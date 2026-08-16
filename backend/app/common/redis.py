@@ -6,7 +6,6 @@ import json
 import logging
 import uuid
 from contextlib import asynccontextmanager
-from typing import Union
 
 import redis.asyncio as aioredis
 from redis.exceptions import RedisError
@@ -33,21 +32,29 @@ async def close_redis() -> None:
         _pool = None
 
 
-def queue_channel(department_id: Union[str, uuid.UUID]) -> str:
+def queue_channel(department_id: str | uuid.UUID) -> str:
     """Channel name for a department's queue display board."""
     return f"queue:{department_id}"
 
 
-def department_channel(department_id: Union[str, uuid.UUID]) -> str:
+def stock_alert_channel(facility_id: str | uuid.UUID) -> str:
+    """Channel name for a facility's stock alert SSE stream."""
+    return f"stock_alerts:{facility_id}"
+  
+def department_channel(department_id: str | uuid.UUID) -> str:
     """Generic department-scoped channel for staff alerts."""
     return f"dept:{department_id}"
- 
- 
-def facility_channel(facility_id: Union[str, uuid.UUID]) -> str:
-    """Generic facility-wide channel for staff alerts."""
+
+
+def facility_channel(facility_id: str | uuid.UUID) -> str:
+    """Generic facility-wide channel for staff alerts.
+
+    Distinct from stock_alert_channel above: that one is the pharmacy's
+    low-stock stream, this is the general facility-wide staff channel the
+    notifications module publishes to. Both exist on purpose.
+    """
     return f"facility:{facility_id}"
-
-
+  
 async def publish(channel: str, message: str) -> None:
     """Publish a raw string message to a channel."""
     try:

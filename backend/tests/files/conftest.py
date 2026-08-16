@@ -181,6 +181,24 @@ async def facility_id(engine: AsyncEngine) -> AsyncGenerator[uuid.UUID, None]:
 
 
 @pytest_asyncio.fixture
+async def second_facility_id(engine: AsyncEngine) -> AsyncGenerator[uuid.UUID, None]:
+    """A second facility — for cross-facility scoping tests."""
+    fid = uuid.uuid4()
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                """
+                INSERT INTO facilities (id, code, name, state_code)
+                VALUES (:id, :code, 'Files Test Facility 2', 'RJ')
+                """
+            ),
+            {"id": fid, "code": f"FCIL{uuid.uuid4().hex[:6]}"},
+        )
+    yield fid
+    # No DELETE — see facility_id's docstring.
+
+
+@pytest_asyncio.fixture
 async def user_id(engine: AsyncEngine, facility_id: uuid.UUID) -> uuid.UUID:
     """One throwaway users row, scoped to facility_id.
 
