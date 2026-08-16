@@ -22,3 +22,4 @@ minio-data/
 # to the project so it is not scattered across the filesystem, but never
 # committed: large, regenerable from `gh`, and stale within a day.
 .local-archive/
+test_output.txt

@@ -1,7 +1,7 @@
-"""0035a_visits_row_version
+"""0041a_visits_row_version
 
-Revision ID: 0035a
-Revises: 0035
+Revision ID: 0041a
+Revises: 0041
 Create Date: 2026-08-14
 
 Fixes a third schema gap found via the #243 (BB-W7-01) OPD integration
@@ -24,8 +24,8 @@ clause always includes every mapped column.
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0035a"
-down_revision = "0035"
+revision = "0041a"
+down_revision = "0041"
 branch_labels = None
 depends_on = None
 

@@ -1,7 +1,7 @@
-"""0035c_lab_order_items_released_status
+"""0041c_lab_order_items_released_status
 
-Revision ID: 0035c
-Revises: 0035b
+Revision ID: 0041c
+Revises: 0041b
 Create Date: 2026-08-14
 
 Fifth schema gap found via #243 — same bug class as radiology's own
@@ -32,8 +32,8 @@ existing name with no transformation.
 """
 from alembic import op
 
-revision = "0035c"
-down_revision = "0035b"
+revision = "0041c"
+down_revision = "0041b"
 branch_labels = None
 depends_on = None
 

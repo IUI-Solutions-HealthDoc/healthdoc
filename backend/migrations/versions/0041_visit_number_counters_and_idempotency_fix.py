@@ -1,7 +1,7 @@
-"""0035_visit_number_counters_and_idempotency_fix
+"""0041_visit_number_counters_and_idempotency_fix
 
-Revision ID: 0035
-Revises: 0034
+Revision ID: 0041
+Revises: 0040
 Create Date: 2026-08-14
 
 Fixes two schema gaps found via the #243 (BB-W7-01) OPD/IPD integration
@@ -25,8 +25,8 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-revision = "0035"
-down_revision = "0034"
+revision = "0041"
+down_revision = "0040"
 branch_labels = None
 depends_on = None
 

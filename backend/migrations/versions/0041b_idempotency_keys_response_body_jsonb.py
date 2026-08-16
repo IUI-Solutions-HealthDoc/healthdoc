@@ -1,7 +1,7 @@
-"""0035b_idempotency_keys_response_body_jsonb
+"""0041b_idempotency_keys_response_body_jsonb
 
-Revision ID: 0035b
-Revises: 0035a
+Revision ID: 0041b
+Revises: 0041a
 Create Date: 2026-08-14
 
 Fixes a fourth schema gap found via #243. IdempotencyKey model
@@ -16,8 +16,8 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-revision = "0035b"
-down_revision = "0035a"
+revision = "0041b"
+down_revision = "0041a"
 branch_labels = None
 depends_on = None
 
