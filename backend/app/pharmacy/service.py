@@ -919,8 +919,9 @@ async def get_pharmacy_mis_report(
                 SELECT count(*)
                 FROM prescriptions p
                 JOIN patients pt ON pt.id = p.patient_id
+                JOIN facilities fac ON fac.id = pt.facility_id
                 WHERE pt.facility_id = :facility_id
-                  AND p.created_at::date BETWEEN :date_from AND :date_to
+                  AND (p.created_at AT TIME ZONE fac.timezone)::date BETWEEN :date_from AND :date_to
             """),
             params,
         )
@@ -936,8 +937,9 @@ async def get_pharmacy_mis_report(
                 FROM pharmacy_dispenses pd
                 JOIN prescriptions p ON p.id = pd.prescription_id
                 JOIN patients pt ON pt.id = p.patient_id
+                JOIN facilities fac ON fac.id = pt.facility_id
                 WHERE pt.facility_id = :facility_id
-                  AND pd.created_at::date BETWEEN :date_from AND :date_to
+                  AND (pd.created_at AT TIME ZONE fac.timezone)::date BETWEEN :date_from AND :date_to
             """),
             {**params, "out_of_stock": DispenseStatus.OUT_OF_STOCK, "dispensed": DispenseStatus.DISPENSED},
         )
@@ -954,8 +956,9 @@ async def get_pharmacy_mis_report(
                 JOIN pharmacy_dispenses pd ON pd.id = pdi.dispense_id
                 JOIN prescriptions p ON p.id = pd.prescription_id
                 JOIN patients pt ON pt.id = p.patient_id
+                JOIN facilities fac ON fac.id = pt.facility_id
                 WHERE pt.facility_id = :facility_id
-                  AND pd.created_at::date BETWEEN :date_from AND :date_to
+                  AND (pd.created_at AT TIME ZONE fac.timezone)::date BETWEEN :date_from AND :date_to
                   AND pdi.is_substitute
             """),
             params,
@@ -969,8 +972,9 @@ async def get_pharmacy_mis_report(
                 FROM pharmacy_dispenses pd
                 JOIN prescriptions p ON p.id = pd.prescription_id
                 JOIN patients pt ON pt.id = p.patient_id
+                JOIN facilities fac ON fac.id = pt.facility_id
                 WHERE pt.facility_id = :facility_id
-                  AND pd.created_at::date BETWEEN :date_from AND :date_to
+                  AND (pd.created_at AT TIME ZONE fac.timezone)::date BETWEEN :date_from AND :date_to
                   AND pd.version = 1
             """),
             params,
