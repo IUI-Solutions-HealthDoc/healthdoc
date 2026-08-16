@@ -1034,6 +1034,22 @@ async def _facility_business_date(db: AsyncSession, facility_id: UUID) -> _date:
     return row["business_date"]
 
 
+async def _facility_timezone(db: AsyncSession, facility_id: UUID) -> str:
+    """Facility's IANA timezone string - sibling to _facility_business_date,
+    for callers that need the raw timezone to bind as a query param rather
+    than a computed business date.
+    """
+    row = (
+        await db.execute(
+            text("SELECT timezone FROM facilities WHERE id = :id"),
+            {"id": str(facility_id)},
+        )
+    ).mappings().first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Facility not found")
+    return row["timezone"]
+
+
 async def get_pharmacy_mis_report(
     db: AsyncSession,
     *,
@@ -1058,10 +1074,12 @@ async def get_pharmacy_mis_report(
         raise HTTPException(422, "date_from must be on or before date_to")
 
     facility_id_str = str(facility_id)
+    tz = await _facility_timezone(db, facility_id)
     params = {
         "facility_id": facility_id_str,
         "date_from": resolved_date_from,
         "date_to": resolved_date_to,
+        "tz": tz,
     }
 
     prescriptions_total = (
@@ -1070,9 +1088,8 @@ async def get_pharmacy_mis_report(
                 SELECT count(*)
                 FROM prescriptions p
                 JOIN patients pt ON pt.id = p.patient_id
-                JOIN facilities fac ON fac.id = pt.facility_id
                 WHERE pt.facility_id = :facility_id
-                  AND (p.created_at AT TIME ZONE fac.timezone)::date BETWEEN :date_from AND :date_to
+                  AND (p.created_at AT TIME ZONE :tz)::date BETWEEN :date_from AND :date_to
             """),
             params,
         )
@@ -1088,9 +1105,8 @@ async def get_pharmacy_mis_report(
                 FROM pharmacy_dispenses pd
                 JOIN prescriptions p ON p.id = pd.prescription_id
                 JOIN patients pt ON pt.id = p.patient_id
-                JOIN facilities fac ON fac.id = pt.facility_id
                 WHERE pt.facility_id = :facility_id
-                  AND (pd.created_at AT TIME ZONE fac.timezone)::date BETWEEN :date_from AND :date_to
+                  AND (pd.created_at AT TIME ZONE :tz)::date BETWEEN :date_from AND :date_to
             """),
             {**params, "out_of_stock": DispenseStatus.OUT_OF_STOCK, "dispensed": DispenseStatus.DISPENSED},
         )
@@ -1107,9 +1123,8 @@ async def get_pharmacy_mis_report(
                 JOIN pharmacy_dispenses pd ON pd.id = pdi.dispense_id
                 JOIN prescriptions p ON p.id = pd.prescription_id
                 JOIN patients pt ON pt.id = p.patient_id
-                JOIN facilities fac ON fac.id = pt.facility_id
                 WHERE pt.facility_id = :facility_id
-                  AND (pd.created_at AT TIME ZONE fac.timezone)::date BETWEEN :date_from AND :date_to
+                  AND (pd.created_at AT TIME ZONE :tz)::date BETWEEN :date_from AND :date_to
                   AND pdi.is_substitute
             """),
             params,
@@ -1123,9 +1138,8 @@ async def get_pharmacy_mis_report(
                 FROM pharmacy_dispenses pd
                 JOIN prescriptions p ON p.id = pd.prescription_id
                 JOIN patients pt ON pt.id = p.patient_id
-                JOIN facilities fac ON fac.id = pt.facility_id
                 WHERE pt.facility_id = :facility_id
-                  AND (pd.created_at AT TIME ZONE fac.timezone)::date BETWEEN :date_from AND :date_to
+                  AND (pd.created_at AT TIME ZONE :tz)::date BETWEEN :date_from AND :date_to
                   AND pd.version = 1
             """),
             params,

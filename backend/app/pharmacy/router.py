@@ -1,4 +1,4 @@
-﻿from datetime import date
+from datetime import date
 from typing import Annotated
 from uuid import UUID
 
