@@ -156,7 +156,11 @@ do not merge out of order.**
 | 0038 | doctor_reviews | doctor_reviews | B3 (W4) — #361, written against this number |
 | 0039 | notification_history_facility_id | ALTER notification_history: facility_id NOT NULL | B4 — no facility column meant no way to scope #230's read API |
 | 0040 | drug_interactions | drug_interactions | B6 (W4) — #381 declares the ORM model and queries it on every dispense; no migration ever created the table |
-| 0041 | guardian_verification | ALTER patients: is_minor, guardian_verified, guardian_verification_method | B2 (W3) — moved 0036 → 0038 → 0040 → 0041 as written work took each number; still unwritten |
+| 0041 | visit_number_counters_and_idempotency_fix | visit_number_counters (+ idempotency_keys.updated_at) | B5 (#383) — the table app/opd/visit_number.py has always needed and no migration created |
+| 0041a | visits_row_version | ALTER visits: row_version | B5 (#383) |
+| 0041b | idempotency_keys_response_body_jsonb | ALTER idempotency_keys: response_body -> jsonb | B5 (#383) |
+| 0041c | lab_order_items_released_status | ALTER lab_order_items: status CHECK gains 'released' | B5 (#383) |
+| 0042 | guardian_verification | ALTER patients: is_minor, guardian_verified, guardian_verification_method | B2 (W3) — moved again as written work took the number; still unwritten |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -650,6 +654,22 @@ cannot be overridden, matching the allergy gate.
 `is_active` rather than deleting — a rule withdrawn later must stop firing without
 erasing the record that it once did, since a prescription overridden last month was
 overridden against the rule as it stood then.
+
+**visit_number_counters** (0041, B3/B5) — per-facility, per-day visit number allocator
+```
+facility_id UUID NOT NULL → facilities · counter_date date NOT NULL
+seq int NOT NULL DEFAULT 0
+UNIQUE (facility_id, counter_date)
+```
+Same shape as `order_number_counters` and for the same reason: `counter_date` is the
+**business date** in the facility's timezone, never UTC, and allocation is a single
+`INSERT ... ON CONFLICT DO UPDATE ... RETURNING` so the first visit of each day cannot
+race.
+
+The model in `app/opd/models.py` carried a TODO saying this table had no home in §2 since
+it was written, and `app/opd/visit_number.py` has depended on it for every `POST /visits`
+throughout. It was only surfaced by #383's OPD journey test, because unit tests build
+schema from `Base.metadata` — which creates the table the migrations never did.
 
 **prescriptions** `[Blame]` — header; drugs are items (one row per drug, not one big text)
 ```
