@@ -8,14 +8,15 @@ keeps manual overrides for edge cases.
 import uuid
 from datetime import date 
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.deps import AuditActor, get_current_actor_dependency
 from app.auth.deps import CurrentDbUser, CurrentUser, require_roles
 from app.common.db import get_db
 from app.common.idempotency import check_idempotency, hash_request_body, record_idempotent_response
-from app.common.redis import publish_event
+from app.common.redis import publish_event, queue_channel, subscribe
 from app.queue import service
 from app.queue.schemas import (
     CompleteAdvanceOut,
@@ -201,6 +202,48 @@ async def list_queue_tokens(
     ).model_dump(mode="json")
 
 
+# ---------------- PUBLIC DISPLAY -- SSE STREAM ----------------  # <<< NEW: everything below this line
+# No require_roles / no CurrentUser here on purpose: this is the OPD wall
+# screen, which has no login. Payload reaching this endpoint is already
+# PII-free (token/doctor/room only) -- built that way in service.py's
+# _advance_queue(), not filtered here.
+@router.get("/display/{department_id}/stream")
+async def queue_display_stream(department_id: uuid.UUID, request: Request) -> StreamingResponse:
+    """
+    Streams live queue-display events for one department as
+    Server-Sent Events. A browser (or a dumb TV browser) opens this once
+    and receives a new "data: ..." line every time call-next publishes
+    a token_called event for this department.
+ 
+    Rate limiting, the 5s cache, and per-IP connection caps described in
+    schema doc §4A.7 are nginx-level concerns (infra/), not handled here.
+ 
+    Disconnect detection is currently blocked by a known bug in
+    EnvelopeMiddleware (BaseHTTPMiddleware incompatible with streaming
+    responses) -- confirmed, not yet fixed as of this commit. The
+    polling logic below is correct and will start working once that's
+    resolved; no changes needed here when it is.
+    """
+    channel = queue_channel(department_id)
+ 
+    async def event_stream():
+        async with subscribe(channel) as pubsub:
+            while True:
+                if await request.is_disconnected():
+                    break
+                message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                if message is None:
+                    continue
+                yield f"data: {message['data']}\n\n"
+ 
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 # ---------------- ROSTER: CREATE (hod/admin only) ----------------
 @router.post(
     "/rosters",

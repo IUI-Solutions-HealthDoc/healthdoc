@@ -48,11 +48,19 @@ class InventoryItem(Base, UUIDPk, Timestamps):
     item_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     is_controlled_drug: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     manufacturer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ingredient_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
     owning_department_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("departments.id"), nullable=True
     )
     reorder_level: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=Decimal("0"))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    #: WHO ATC level-5 where available, local ingredient list otherwise
+    #: (migration 0032). This is what app.allergies.service matches an
+    #: active allergy against -- never inventory_item_id, since two
+    #: different stock items (e.g. amoxicillin, penicillin V) can share
+    #: one ingredient and must both trigger the same allergy.
+    ingredient_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     __table_args__ = (
         CheckConstraint(
@@ -66,7 +74,30 @@ class InventoryItem(Base, UUIDPk, Timestamps):
             name="item_type",
         ),
         Index("ix_inventory_items_owning_department_id", "owning_department_id"),
+        Index("ix_inventory_items_ingredient_code", "ingredient_code"),
     )
+
+
+class DrugInteraction(Base, UUIDPk, Timestamps):
+    __tablename__ = "drug_interactions"
+
+    ingredient_code_a: Mapped[str] = mapped_column(String(50), nullable=False)
+    ingredient_code_b: Mapped[str] = mapped_column(String(50), nullable=False)
+    severity: Mapped[str] = mapped_column(String(50), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    __table_args__ = (
+        CheckConstraint("severity IN ('contraindicated','major','moderate','minor')", name="severity"),
+        CheckConstraint("ingredient_code_a < ingredient_code_b", name="ordered_pair"),
+        UniqueConstraint("ingredient_code_a", "ingredient_code_b"),
+        Index("ix_drug_interactions_a", "ingredient_code_a"),
+        Index("ix_drug_interactions_b", "ingredient_code_b"),
+    )
+
+    @property
+    def is_absolute(self) -> bool:
+        return self.severity == "contraindicated"
 
 
 class StockLocation(Base, UUIDPk, Timestamps):

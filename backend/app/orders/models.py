@@ -61,7 +61,7 @@ class Prescription(Base, UUIDPk, Timestamps, Blame):
 
     __tablename__ = "prescriptions"
 
-    __audit_resource_type__ = "orders"
+    __audit_resource_type__ = "prescriptions"
     __audit_facility_id_field__ = "facility_id"
     __audit_encounter_id_field__ = "encounter_id"
 
@@ -98,11 +98,26 @@ class PrescriptionItem(Base, UUIDPk, Timestamps):
     medicine_name = Column(Text, nullable=False)
     dosage = Column(String(50), nullable=True)
     frequency = Column(String(50), nullable=True)
-    duration_days = Column(UUID(as_uuid=True), nullable=True)  # placeholder, fix below
+    duration_days = Column(Integer, nullable=True)
     route = Column(String(30), nullable=True)
     instructions = Column(Text, nullable=True)
     status = Column(String(50), nullable=False, server_default="prescribed")
 
+    # Allergy override trail (migration 0032). Both NULL = no conflict was
+    # ever raised for this item. Both set = a conflict was raised and a
+    # clinician overrode it -- the CHECK below enforces "all or nothing"
+    # and the 20-char floor, mirroring the DB constraint exactly so an ORM
+    # write can never produce a half-recorded override.
+    allergy_override_reason = Column(Text, nullable=True)
+    allergy_override_by = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=True
+    )
+
     __table_args__ = (
         Index("ix_prescription_items_prescription_id", "prescription_id"),
+        CheckConstraint(
+            "(allergy_override_reason IS NULL AND allergy_override_by IS NULL) "
+            "OR (char_length(allergy_override_reason) >= 20 AND allergy_override_by IS NOT NULL)",
+            name="allergy_override",
+        ),
     )

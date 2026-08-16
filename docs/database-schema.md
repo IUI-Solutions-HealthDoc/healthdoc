@@ -155,7 +155,8 @@ do not merge out of order.**
 | 0037 | patients_constraint_naming | ALTER patients: constraint names -> NAMING_CONVENTION | B2 (#353) |
 | 0038 | doctor_reviews | doctor_reviews | B3 (W4) — #361, written against this number |
 | 0039 | notification_history_facility_id | ALTER notification_history: facility_id NOT NULL | B4 — no facility column meant no way to scope #230's read API |
-| 0040 | guardian_verification | ALTER patients: is_minor, guardian_verified, guardian_verification_method | B2 (W3) — moved from 0038; ready work takes the number |
+| 0040 | drug_interactions | drug_interactions | B6 (W4) — #381 declares the ORM model and queries it on every dispense; no migration ever created the table |
+| 0041 | guardian_verification | ALTER patients: is_minor, guardian_verified, guardian_verification_method | B2 (W3) — moved 0036 → 0038 → 0040 → 0041 as written work took each number; still unwritten |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -628,6 +629,27 @@ ordered_at   timestamptz NOT NULL DEFAULT now()
 INDEX ix_orders_order_type_status (order_type, status)
 INDEX ix_orders_patient_id (patient_id) · INDEX ix_orders_encounter_id (encounter_id)
 ```
+
+**drug_interactions** (0040, B6) — pairwise interaction rules, read on every dispense
+```
+ingredient_code_a varchar(50) NOT NULL · ingredient_code_b varchar(50) NOT NULL
+severity varchar(50) NOT NULL      -- contraindicated|major|moderate|minor
+description text NOT NULL
+is_active boolean NOT NULL DEFAULT true
+CHECK (ingredient_code_a < ingredient_code_b)
+UNIQUE (ingredient_code_a, ingredient_code_b)
+```
+An interaction between A and B is one fact, not two. The CHECK enforces a canonical
+ordering and `find_interaction()` sorts before querying, so `(A,B)` and `(B,A)` resolve
+to the same row — a rule that matched in only one direction would be worse than no rule.
+
+`is_absolute` is **not** a column: the model derives it from
+`severity == 'contraindicated'`, so the two cannot disagree. Absolute interactions
+cannot be overridden, matching the allergy gate.
+
+`is_active` rather than deleting — a rule withdrawn later must stop firing without
+erasing the record that it once did, since a prescription overridden last month was
+overridden against the rule as it stood then.
 
 **prescriptions** `[Blame]` — header; drugs are items (one row per drug, not one big text)
 ```

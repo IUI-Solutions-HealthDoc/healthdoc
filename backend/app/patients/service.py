@@ -471,7 +471,7 @@ async def request_merge(
 # matching entry here. Do not add a table name here without also adding
 # the repointing code for it below.
 REPOINTED_ON_MERGE: frozenset[str] = frozenset(
-    {"patient_identifiers", "visits", "ot_schedules", "fhir_bundle_transactions", "files"}
+    {"patient_identifiers", "visits", "ot_schedules", "fhir_bundle_transactions", "files", "admissions"}
 )
 
 # patient_merge_log itself has FKs to patients.id (source_patient_id,
@@ -561,6 +561,7 @@ async def approve_merge(
     await _repoint_identifiers(db, source=source, target=target)
     await _repoint_visits(db, source=source, target=target)
     await _repoint_ot_schedules(db, source=source, target=target)
+    await _repoint_admissions(db, source=source, target=target)
     await _repoint_files(db, source=source, target=target)
     await _repoint_fhir_bundle_transactions(db, source=source, target=target)
 
@@ -711,6 +712,28 @@ async def _repoint_files(db: AsyncSession, *, source: Patient, target: Patient) 
     await db.execute(
         text(
             "UPDATE files SET patient_id = :target_id WHERE patient_id = :source_id"
+        ),
+        {"target_id": target.id, "source_id": source.id},
+    )
+    await db.flush()
+
+
+async def _repoint_admissions(db: AsyncSession, *, source: Patient, target: Patient) -> None:
+    """Moves source's admissions rows onto target.
+
+    An admission is core clinical history — ward, bed, dates, discharge. Left on the dead source id, the surviving patient's record shows no inpatient stays at all from before the merge.
+
+    Surfaced by test_repointing_covers_every_patient_fk: the FK to patients.id
+    was always there, and became visible to the guard when the model was
+    registered on Base.metadata.
+
+    Raw SQL rather than importing the model — that import would register it as
+    a side effect, changing which tables the guard sees on branches that do not
+    otherwise load it. The table exists in the database either way.
+    """
+    await db.execute(
+        text(
+            "UPDATE admissions SET patient_id = :target_id WHERE patient_id = :source_id"
         ),
         {"target_id": target.id, "source_id": source.id},
     )
