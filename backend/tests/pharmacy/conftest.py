@@ -22,6 +22,10 @@ if sys.platform == "win32":
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 
+# NB: a `pytestmark` in a conftest applies to that conftest, not to the test
+# modules beside it — so it never skipped anything. The skip has to happen in
+# the fixture, which every one of these tests goes through. Without it you get
+# an AssertionError traceback per test instead of a skip.
 pytestmark = pytest.mark.skipif(
     not TEST_DATABASE_URL,
     reason="TEST_DATABASE_URL is required for real PostgreSQL pharmacy tests",
@@ -30,7 +34,8 @@ pytestmark = pytest.mark.skipif(
 
 @pytest_asyncio.fixture
 async def engine() -> AsyncGenerator[AsyncEngine, None]:
-    assert TEST_DATABASE_URL
+    if not TEST_DATABASE_URL:
+        pytest.skip("needs real PostgreSQL — run `make test-pg` from the repo root")
     test_engine = create_async_engine(TEST_DATABASE_URL, pool_pre_ping=True)
     yield test_engine
     await test_engine.dispose()
