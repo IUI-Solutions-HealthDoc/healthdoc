@@ -200,6 +200,20 @@ billing_counters_t = sa.table(
     sa.column("counter_date"), sa.column("last_value"),
 )
 
+# charge_master (0033) — effective-dated tariff. Table has existed since 0033
+# with no ORM model and no reader; #389 makes registration its first consumer.
+charge_master_t = sa.table(
+    "charge_master",
+    sa.column("id"), sa.column("facility_id"), sa.column("charge_code"),
+    sa.column("charge_category"), sa.column("description"), sa.column("unit_price"),
+    sa.column("scheme_code"), sa.column("effective_from"), sa.column("effective_to"),
+    sa.column("is_active"),
+)
+
+#: The tariff row every facility must have for registration to price its invoice.
+#: Seeds and facility onboarding both depend on this exact string.
+REGISTRATION_CHARGE_CODE = "REGISTRATION"
+
 # A corrected result still means the work is complete/billable — the
 # correction itself doesn't un-bill the earlier line (that's a
 # refund/dispute concern, out of scope here).
@@ -672,12 +686,25 @@ def check_pmjay_eligibility(patient_id: uuid.UUID, visit_id: uuid.UUID) -> PMJAY
 
 
 async def _allocate_billing_number(
-    db: AsyncSession, facility_id: uuid.UUID, counter_type: str, prefix: str
+    db: AsyncSession,
+    facility_id: uuid.UUID,
+    counter_type: str,
+    prefix: str,
+    *,
+    business_date: date | None = None,
 ) -> str:
     """
-    Gapless RCP-/RFD-<FACILITY>-<YYYYMMDD>-<SEQ5> numbering per schema
+    Gapless INV-/RCP-/RFD-<FACILITY>-<YYYYMMDD>-<SEQ5> numbering per schema
     doc §3 0014 (billing_counters, UNIQUE(facility_id, counter_type,
     counter_date)).
+
+    `business_date` is the caller's already-computed facility-local date. Pass
+    it whenever the caller has one: registration allocates a visit number and an
+    invoice number for the same event, and two independent clock reads can
+    straddle midnight and stamp them with different dates. Omit it and this
+    reads the clock itself, which is correct for standalone receipt and refund
+    numbering. Same rule as opd/visit_number.py — one business_date per request,
+    computed once and threaded through.
 
     The doc's literal instruction is "allocate with SELECT ... FOR
     UPDATE inside the same transaction". I've used INSERT ... ON
@@ -709,7 +736,10 @@ async def _allocate_billing_number(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"facility_id={facility_id} has no matching facilities row.",
         )
-    facility_code, today = row.code, row.business_date
+    # The caller's date wins when supplied — see the docstring on why two
+    # independent reads of "today" must not be allowed to disagree.
+    facility_code = row.code
+    today = business_date if business_date is not None else row.business_date
 
     upsert = (
         pg_insert(billing_counters_t)
@@ -729,6 +759,117 @@ async def _allocate_billing_number(
     sequence = result.scalar_one()
 
     return f"{prefix}-{facility_code}-{today:%Y%m%d}-{sequence:05d}"
+
+
+async def registration_charge(
+    db: AsyncSession, facility_id: uuid.UUID, business_date: date
+) -> sa.Row | None:
+    """The tariff in force for registration at this facility on this date.
+
+    Effective-dated: `effective_from <= date < effective_to`, with an open
+    `effective_to` meaning "still current". Ordered newest-first so a
+    superseding row wins if two overlap — 0033's ck_charge_master_effective_range
+    guarantees each row is internally sane but not that two rows cannot overlap.
+
+    The date must be the caller's business date, not `now()`. A patient
+    registering at 01:00 IST is registering on today's tariff, and a bare
+    date read here would give them yesterday's.
+    """
+    result = await db.execute(
+        sa.select(
+            charge_master_t.c.id,
+            charge_master_t.c.unit_price,
+            charge_master_t.c.description,
+            charge_master_t.c.charge_category,
+        )
+        .where(
+            charge_master_t.c.facility_id == facility_id,
+            charge_master_t.c.charge_code == REGISTRATION_CHARGE_CODE,
+            charge_master_t.c.is_active.is_(True),
+            charge_master_t.c.effective_from <= business_date,
+            sa.or_(
+                charge_master_t.c.effective_to.is_(None),
+                charge_master_t.c.effective_to >= business_date,
+            ),
+        )
+        .order_by(charge_master_t.c.effective_from.desc())
+        .limit(1)
+    )
+    return result.first()
+
+
+async def create_registration_invoice(
+    db: AsyncSession,
+    *,
+    visit_id: uuid.UUID,
+    patient_id: uuid.UUID,
+    facility_id: uuid.UUID,
+    business_date: date,
+    created_by: uuid.UUID,
+) -> Invoice:
+    """The one invoice per visit that §3 0014 has always promised.
+
+    Called by opd.create_visit inside the registration transaction, so a visit
+    and its invoice are created together or not at all. Everything downstream —
+    preview, build, payment posting, billing MIS — assumes this row exists;
+    `_get_invoice_for_visit` 404s without it. Until #389 nothing created one, so
+    the entire billing chain had no entry point.
+
+    Raises 409 when the facility has no active REGISTRATION tariff. That fails
+    registration, which is deliberate: the alternative is a zero-rupee invoice
+    that looks legitimate and is discovered at month-end reconciliation. A
+    missing tariff is a five-minute configuration fix; a quarter of mispriced
+    invoices is not.
+    """
+    charge = await registration_charge(db, facility_id, business_date)
+    if charge is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "registration_tariff_not_configured",
+                "message": (
+                    f"No active '{REGISTRATION_CHARGE_CODE}' row in charge_master for "
+                    f"facility_id={facility_id} effective {business_date}. Add the tariff "
+                    f"before registering patients at this facility."
+                ),
+            },
+        )
+
+    amount = Decimal(charge.unit_price)
+    invoice_number = await _allocate_billing_number(
+        db, facility_id, "invoice", "INV", business_date=business_date
+    )
+
+    invoice = Invoice(
+        id=uuid.uuid4(),
+        invoice_number=invoice_number,
+        visit_id=visit_id,
+        patient_id=patient_id,
+        facility_id=facility_id,
+        status="draft",
+        gross_amount=amount,
+        discount_amount=Decimal("0"),
+        scheme_adjustment=Decimal("0"),
+        net_amount=amount,
+        created_by=created_by,
+    )
+    db.add(invoice)
+    await db.flush()
+
+    db.add(
+        InvoiceItem(
+            id=uuid.uuid4(),
+            invoice_id=invoice.id,
+            charge_category=charge.charge_category,
+            description=charge.description,
+            quantity=Decimal("1"),
+            unit_price=amount,
+            amount=amount,
+            charge_master_id=charge.id,
+        )
+    )
+    await db.flush()
+    return invoice
 
 
 async def _facility_timezone(db: AsyncSession, facility_id: uuid.UUID) -> str:

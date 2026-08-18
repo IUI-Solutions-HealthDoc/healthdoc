@@ -78,7 +78,9 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -88,6 +90,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
+from sqlalchemy import true as sa_true
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -163,6 +166,60 @@ class Invoice(UUIDPk, Blame, Timestamps, Base):
         return f"<Invoice id={self.id} number={self.invoice_number} status={self.status}>"
 
 
+class ChargeMaster(UUIDPk, Blame, Timestamps, Base):
+    """Effective-dated tariff catalogue — schema §3 0033.
+
+    Created by 0033 and had no ORM model until #389, which is why nothing read
+    it: `pricing.py` still carries hardcoded fallbacks with a comment saying it
+    would query charge_master "once 0033 lands". It landed; nothing followed up.
+
+    `charge_code` is stable across price changes and is what a line means
+    conceptually; a new price is a NEW ROW with a later `effective_from`, never
+    an edit — so an invoice raised last quarter still resolves to the tariff
+    that was actually charged.
+
+    Constraint names are passed bare. NAMING_CONVENTION renders `ck` as
+    `ck_%(table_name)s_%(constraint_name)s`, so passing the already-prefixed
+    name here would produce `ck_charge_master_ck_charge_master_...` and drift
+    from what 0033 actually created.
+    """
+
+    __tablename__ = "charge_master"
+
+    facility_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False)
+    charge_code: Mapped[str] = mapped_column(String(30), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    charge_category: Mapped[str] = mapped_column(String(50), nullable=False)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+
+    #: NULL = the general tariff. 'PMJAY' etc. is a scheme rate, which wins when
+    #: the invoice carries that scheme_code.
+    scheme_code: Mapped[str | None] = mapped_column(String(30), nullable=True)
+
+    effective_from: Mapped[date] = mapped_column(Date, nullable=False)
+    effective_to: Mapped[date | None] = mapped_column(Date, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=sa_true())
+
+    __table_args__ = (
+        CheckConstraint("unit_price >= 0", name="unit_price_non_negative"),
+        CheckConstraint(
+            "effective_to IS NULL OR effective_to > effective_from",
+            name="effective_range"),
+        CheckConstraint(
+            "charge_category IN ('registration','consultation','lab','radiology',"
+            "'pharmacy','procedure','ipd_stay','blood','other')",
+            name="charge_category"),
+        UniqueConstraint(
+            "facility_id", "charge_code", "scheme_code", "effective_from",
+            name="uq_charge_master_version"),
+        Index("ix_charge_master_lookup", "facility_id", "charge_code", "scheme_code"),
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<ChargeMaster {self.charge_code} @ {self.unit_price} from {self.effective_from}>"
+
+
 class InvoiceItem(UUIDPk, Base):
     """
     One charge line on an invoice (e.g. one lab test's fee). Frozen by a
@@ -201,6 +258,21 @@ class InvoiceItem(UUIDPk, Base):
     quantity: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False, server_default="1")
     unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)  # quantity * unit_price, app-computed
+
+    #: The exact tariff row this line was priced from (0033). charge_code on
+    #: charge_master is stable across price changes and is what the line means
+    #: conceptually; this pins which version of the price was actually charged,
+    #: so a later tariff revision cannot silently rewrite history.
+    #:
+    #: Nullable because lines predating 0033, and any priced by pricing.py's
+    #: hardcoded fallbacks rather than the tariff, have no row to point at.
+    #: Added here in #389 — 0033 created the column and the ORM never gained it,
+    #: so it was invisible to every model-driven test.
+    charge_master_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("charge_master.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (

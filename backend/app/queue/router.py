@@ -218,11 +218,13 @@ async def queue_display_stream(department_id: uuid.UUID, request: Request) -> St
     Rate limiting, the 5s cache, and per-IP connection caps described in
     schema doc §4A.7 are nginx-level concerns (infra/), not handled here.
  
-    Disconnect detection is currently blocked by a known bug in
-    EnvelopeMiddleware (BaseHTTPMiddleware incompatible with streaming
-    responses) -- confirmed, not yet fixed as of this commit. The
-    polling logic below is correct and will start working once that's
-    resolved; no changes needed here when it is.
+    Disconnect detection works. It was blocked by EnvelopeMiddleware being a
+    BaseHTTPMiddleware, which never forwarded http.disconnect to the endpoint --
+    so the polling below could not see a departed client, the generator was
+    never closed, and every dropped display leaked its Redis subscription for
+    the life of the process. The middleware is raw ASGI now and the note that
+    used to say "correct but not yet working" no longer applies: this is
+    covered by test_sse_stream_unsubscribes_on_disconnect.
     """
     channel = queue_channel(department_id)
  

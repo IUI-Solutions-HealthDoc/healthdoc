@@ -4,7 +4,7 @@ Mirrors pathology/schemas.py pattern - snake_case, id + accession_number both re
 """
 import uuid
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class RadiologyOrderItemCreate(BaseModel):
@@ -27,8 +27,7 @@ class RadiologyOrderItemOut(BaseModel):
     status: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ScheduleRequest(BaseModel):
@@ -74,5 +73,4 @@ class RadiologyReportOut(BaseModel):
     created_at: datetime
     tat_minutes: int | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

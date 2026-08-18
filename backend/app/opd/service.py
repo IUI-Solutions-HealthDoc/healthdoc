@@ -114,6 +114,30 @@ async def create_visit(
     db.add(visit)
     await db.flush()
     await db.refresh(visit)
+
+    # The visit's invoice (#389). Schema §3 0014: "one per visit, created at
+    # registration with the registration-fee line" — billing.preview/build,
+    # payment posting and the billing MIS all assume this row exists, and
+    # _get_invoice_for_visit 404s without it. Nothing created one until now, so
+    # every visit ever registered has an unusable billing chain.
+    #
+    # Same transaction as the visit and its counter, deliberately: a visit
+    # without an invoice is precisely the state we are fixing, so it must not be
+    # reachable by a failure between two commits. Imported here rather than at
+    # module scope to keep opd -> billing from becoming an import cycle.
+    #
+    # Shares this request's single business_date, so the visit number and the
+    # invoice number cannot be stamped with different days across midnight.
+    from app.billing.service import create_registration_invoice
+
+    await create_registration_invoice(
+        db,
+        visit_id=visit.id,
+        patient_id=visit.patient_id,
+        facility_id=visit.facility_id,
+        business_date=business_date,
+        created_by=created_by,
+    )
     return visit
 
 

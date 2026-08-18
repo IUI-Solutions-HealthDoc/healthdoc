@@ -74,6 +74,7 @@ columns — that's intentional, not an oversight.
 
 import csv
 import io
+import ipaddress
 import json
 import logging
 import uuid
@@ -93,6 +94,35 @@ from app.common.db import SessionLocal
 logger = logging.getLogger(__name__)
 
 MAX_PAGE_SIZE = 100  # §4.3: page_size capped server-side; large exports go through /logs/export instead.
+
+
+def _coerce_inet(value: str | None, *, action: str, resource_type: str) -> str | None:
+    """audit_logs.ip_address is INET, so a non-IP string is a hard DataError.
+
+    The value ultimately comes from `request.client.host`, which is not always
+    an address: Starlette's TestClient reports the literal 'testclient', and a
+    unix-socket or misconfigured-proxy deployment can produce a hostname. When
+    that happened the INSERT raised, and because the audit write shares the
+    caller's transaction it took the whole request down with it — a clinician
+    could not post a payment because the audit row could not record an IP.
+
+    An audit entry with a NULL ip_address is a small loss. Refusing to bill the
+    patient is a large one, and it is not what append-only auditing is for. So
+    an unparseable value is dropped and logged loudly rather than raised.
+    """
+    if value is None:
+        return None
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        logger.warning(
+            "audit: ip_address %r is not a valid IP — storing NULL "
+            "(action=%s resource_type=%s). Check the proxy's X-Forwarded-For "
+            "handling if this appears in production.",
+            value, action, resource_type,
+        )
+        return None
+    return value
 
 
 def _build_audit_log(
@@ -145,6 +175,8 @@ def _build_audit_log(
             "will be NULL on this row",
             action, resource_type,
         )
+
+    ip_address = _coerce_inet(ip_address, action=action, resource_type=resource_type)
 
     # chain_seq is trigger-assigned on INSERT; prev_hash/entry_hash/
     # signature/signer_key_id/sealed_at all stay NULL here — the async

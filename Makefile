@@ -11,6 +11,26 @@ export
 TEST_DB := $(POSTGRES_DB)_test
 TEST_DATABASE_URL := postgresql+asyncpg://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@localhost:$(POSTGRES_PORT)/$(TEST_DB)
 
+# The app's lifespan validates these before serving traffic, so any test that
+# enters TestClient as a context manager errors at setup without them. Same
+# values as .github/workflows/ci.yml on purpose — a test that passes locally
+# and fails in CI over key config wastes more time than it saves.
+#
+# Deterministic test values, not secrets. Real deployments get real keys.
+TEST_PII_ENCRYPTION_KEY := dkWUFyQpoVWEpmm4NovS1ketf25uP0WKr6z/sNC1ADk=
+TEST_AADHAAR_HMAC_KEY   := MYXTZ1OUDwLh3yYU63CgWnvqVib9FJHqEdLoi4IUrAA=
+# .env points REDIS_URL and MINIO_ENDPOINT at the compose service names, which
+# is correct for the backend container and unresolvable from the host. Tests run
+# on the host, so they need the published ports instead.
+TEST_REDIS_URL      := redis://localhost:$(or $(REDIS_PORT),6379)/0
+TEST_MINIO_ENDPOINT := localhost:$(or $(MINIO_PORT),9000)
+
+TEST_ENV := TEST_DATABASE_URL="$(TEST_DATABASE_URL)" DATABASE_URL="$(TEST_DATABASE_URL)" \
+	PII_ENCRYPTION_KEY="$(TEST_PII_ENCRYPTION_KEY)" \
+	AADHAAR_HMAC_KEY="$(TEST_AADHAAR_HMAC_KEY)" \
+	REDIS_URL="$(TEST_REDIS_URL)" \
+	MINIO_ENDPOINT="$(TEST_MINIO_ENDPOINT)"
+
 setup:            ## First-time setup: .env, certs, build, start, migrate
 	./scripts/dev_setup.sh
 
@@ -39,14 +59,11 @@ test-db:          ## Create + migrate the test database (idempotent)
 	@$(COMPOSE) exec -T postgres psql -U $(POSTGRES_USER) -d postgres -tc \
 		"SELECT 1 FROM pg_database WHERE datname='$(TEST_DB)'" | grep -q 1 \
 		|| $(COMPOSE) exec -T postgres createdb -U $(POSTGRES_USER) $(TEST_DB)
-	@cd backend && TEST_DATABASE_URL="$(TEST_DATABASE_URL)" \
-		DATABASE_URL="$(TEST_DATABASE_URL)" alembic upgrade head
+	@cd backend && $(TEST_ENV) alembic upgrade head
 	@echo "$(TEST_DB) ready at localhost:$(POSTGRES_PORT)"
 
 test-pg: test-db  ## Run the tests that need real PostgreSQL: make test-pg k=late_utc
-	@cd backend && TEST_DATABASE_URL="$(TEST_DATABASE_URL)" \
-		DATABASE_URL="$(TEST_DATABASE_URL)" \
-		pytest $(if $(k),-k "$(k)",) $(if $(p),$(p),tests/) -q
+	@cd backend && $(TEST_ENV) pytest $(if $(k),-k "$(k)",) $(if $(p),$(p),tests/) -q
 
 lint:             ## Lint backend + frontend
 	$(COMPOSE) exec backend ruff check .

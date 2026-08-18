@@ -4,7 +4,7 @@ JSON field names = column names, snake_case, no renaming layer (Master Schema §
 """
 import uuid
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class LabOrderItemCreate(BaseModel):
@@ -31,8 +31,7 @@ class LabOrderItemOut(BaseModel):
     estimated_minutes: int | None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SampleCollectionRequest(BaseModel):
@@ -81,8 +80,7 @@ class LabResultOut(BaseModel):
     created_at: datetime
     tat_minutes: int | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class LabResultHistoryOut(BaseModel):

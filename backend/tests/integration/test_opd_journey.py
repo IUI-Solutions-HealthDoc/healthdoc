@@ -37,16 +37,13 @@ from tests.integration.conftest import (
 
 
 class TestOPDCoreJourney:
-    @pytest.mark.xfail(
-        reason="Invoice creation at registration is not implemented. schema.md §3 0014 "
-               "says invoices are 'one per visit, created at registration with the "
-               "registration-fee line', and billing/service.py:463 raises 404 on that "
-               "contract — but no code anywhere creates an invoice. The only file "
-               "mentioning Invoice( is billing/models.py. So the whole billing chain "
-               "(builder, payments, MIS) has no entry point. Found by this journey; "
-               "tracked separately.",
-        strict=False,
-    )
+    # xfail removed in #389. This journey is what found the gap: §3 0014 promised
+    # "one per visit, created at registration with the registration-fee line",
+    # billing/service.py enforced it, and nothing created one — the only file
+    # mentioning Invoice( was billing/models.py. POST /visits now creates the
+    # invoice and its fee line inside the registration transaction, priced from
+    # charge_master (seeded in conftest). If this starts failing on the invoice
+    # step again, the billing chain has lost its entry point a second time.
     def test_full_opd_journey_registration_to_payment(self, client_as, seeded_patient_id):
         patient_id = seeded_patient_id
 

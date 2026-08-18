@@ -130,6 +130,22 @@ async def _seed() -> None:
                     {"id": uid, "sub": user.sub, "username": user.username, "fac": TEST_FACILITY_ID})
 
             creator = uuid.uuid5(uuid.NAMESPACE_OID, RECEPTIONIST.sub)
+
+            # The registration tariff (#389). POST /visits now creates the visit's
+            # invoice in the same transaction and prices its fee line from
+            # charge_master, so a facility with no active REGISTRATION row cannot
+            # register patients — it 409s with registration_tariff_not_configured.
+            # That is deliberate: the alternative was zero-rupee invoices that look
+            # legitimate. Every facility seed needs this row, including the demo one.
+            await conn.execute(sa.text(
+                "INSERT INTO charge_master (id, facility_id, charge_code, description, "
+                "  charge_category, unit_price, effective_from, is_active, created_by) "
+                "VALUES (:id, :fac, 'REGISTRATION', 'OPD registration fee', "
+                "        'registration', 200.00, DATE '2020-01-01', true, :by) "
+                "ON CONFLICT (id) DO NOTHING"),
+                {"id": uuid.uuid5(uuid.NAMESPACE_OID, "charge-master-registration"),
+                 "fac": TEST_FACILITY_ID, "by": creator})
+
             await conn.execute(sa.text(
                 "INSERT INTO patients (id, full_name, sex, identity_path, facility_id, "
                 " created_by, age_years, uhid) "

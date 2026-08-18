@@ -66,6 +66,45 @@ async def _seed_wards_and_beds() -> None:
                 "VALUES (:id, :ward, 'B-01', 'vacant') "
                 "ON CONFLICT (id) DO NOTHING"),
                 {"id": BED_B_ID, "ward": WARD_B_ID})
+
+            # Clear any admission this journey left behind on a previous run.
+            #
+            # The beds have fixed ids, and 0034 enforces one active admission per
+            # bed — so the second run of this test got "409 Bed is already
+            # occupied" from its own last pass. That 409 is the constraint working
+            # exactly as intended; it is the test that was not re-runnable.
+            #
+            # Deliberately scoped to this journey's two beds. A blanket DELETE FROM
+            # admissions would take out other suites' data in a shared test DB.
+            # Children first: discharges, patient_movement_log and
+            # discharge_notifications all FK to admissions with ondelete=RESTRICT,
+            # and 0023's vitals can hang off an admission too. RESTRICT is correct
+            # for a clinical record — a discharge summary must not vanish because
+            # someone deleted the admission — it just means test cleanup has to
+            # unwind in dependency order.
+            beds = {"bed_a": BED_A_ID, "bed_b": BED_B_ID}
+            admissions_here = (
+                "SELECT id FROM admissions WHERE bed_id IN (:bed_a, :bed_b)")
+
+            # discharge_notifications hangs off discharges (discharge_id), not off
+            # admissions — so it has to go before discharges, two levels down.
+            await conn.execute(sa.text(
+                "DELETE FROM discharge_notifications WHERE discharge_id IN "
+                f"(SELECT id FROM discharges WHERE admission_id IN ({admissions_here}))"),
+                beds)
+
+            for table in ("discharges", "patient_movement_log",
+                          "intake_output_records", "vitals"):
+                await conn.execute(sa.text(
+                    f"DELETE FROM {table} WHERE admission_id IN ({admissions_here})"),
+                    beds)
+
+            await conn.execute(sa.text(
+                "DELETE FROM admissions WHERE bed_id IN (:bed_a, :bed_b)"),
+                {"bed_a": BED_A_ID, "bed_b": BED_B_ID})
+            await conn.execute(sa.text(
+                "UPDATE beds SET status = 'vacant' WHERE id IN (:bed_a, :bed_b)"),
+                {"bed_a": BED_A_ID, "bed_b": BED_B_ID})
     finally:
         await engine.dispose()
 
@@ -77,19 +116,16 @@ def seeded_wards_and_beds() -> None:
 
 
 class TestIPDCoreJourney:
-    @pytest.mark.xfail(
-        reason="visit_number_counters bug is now fixed (migration 0035), so "
-               "Step 1 (visit creation) now passes. Blocked at Step 2: "
-               "POST /api/v1/admissions has no registered route at all — "
-               "confirmed via full route dump "
-               "(python -c \"from app.main import app; "
-               "[print(r.path) for r in app.routes]\" | grep admission "
-               "returns nothing). app/admissions/ only has models.py, no "
-               "router.py exists. This is a missing feature, not a schema "
-               "bug — someone needs to build the admissions router before "
-               "this journey can progress further.",
-        strict=False,
-    )
+    # xfail removed. The reason recorded here — "POST /api/v1/admissions has no
+    # registered route at all ... app/admissions/ only has models.py" — was true
+    # when written and is not any more: #216 added the router, and app/ipd/router.py
+    # re-exports it because MODULES gates on "ipd", not "admissions".
+    #
+    # Worth knowing why that was so easy to get wrong twice (this xfail, and my own
+    # review comment on #216): main.py used to catch ModuleNotFoundError around the
+    # whole import and log "has no router.py yet", so a router that existed but
+    # failed to import — or one loaded under a different module name — looked
+    # identical to one that had never been written. That now raises instead.
     def test_full_ipd_journey_admission_to_discharge(
         self, client_as, seeded_patient_id, seeded_wards_and_beds
     ):
@@ -111,7 +147,11 @@ class TestIPDCoreJourney:
             },
         )
         assert visit_resp.status_code == 201, visit_resp.text
-        visit_id = visit_resp.json()["id"]
+        # EnvelopeMiddleware wraps every response as {success, data, error, meta},
+        # so the payload is under "data" — same as the OPD journey does. Noted as
+        # assumption 2 in this module's docstring; now confirmed against a running
+        # app rather than assumed.
+        visit_id = visit_resp.json()["data"]["id"]
 
         # Step 2: admit the patient
         client = client_as(DOCTOR)
@@ -127,37 +167,53 @@ class TestIPDCoreJourney:
             },
         )
         assert admission_resp.status_code == 201, admission_resp.text
-        admission = admission_resp.json()
+        admission = admission_resp.json()["data"]
         admission_id = admission["id"]
         assert admission["status"] == "admitted"
 
-        # Step 3 (temporarily commented out — see instructions)
-        # transfer_resp = client.put(
-        #     TRANSFER_PATH.format(admission_id=admission_id),
-        #     json={
-        #         "to_ward_id": str(WARD_B_ID),
-        #         "to_bed_id": str(BED_B_ID),
-        #         "reason": "Journey test transfer",
-        #         "moved_by": doctor_id,
-        #     },
-        # )
-        # assert transfer_resp.status_code in (200, 201), (
-        #     f"Transfer failed ({transfer_resp.status_code}): {transfer_resp.text}. "
-        #     f"Check TRANSFER_PATH against app/admissions/router.py."
-        # )
+        # Step 3: transfer. Enabled now that the routes are confirmed against a
+        # running app — POST, not PUT, and there is no separate /discharges
+        # collection; both hang off the admission.
+        transfer_resp = client.post(
+            TRANSFER_PATH.format(admission_id=admission_id),
+            json={
+                "to_ward_id": str(WARD_B_ID),
+                "to_bed_id": str(BED_B_ID),
+                "reason": "Journey test transfer",
+                "moved_by": doctor_id,
+            },
+        )
+        assert transfer_resp.status_code in (200, 201), transfer_resp.text
 
-        # Step 4 (temporarily commented out — see instructions)
-        # discharge_resp = client.post(
-        #     "/api/v1/discharges",
-        #     json={
-        #         "admission_id": admission_id,
-        #         "discharged_at": "2026-08-13T11:00:00Z",
-        #         "discharge_type": "discharged",
-        #         "discharge_summary": "Journey test discharge - no complications.",
-        #     },
-        # )
-        # assert discharge_resp.status_code == 201, discharge_resp.text
-        # discharge = discharge_resp.json()
-        # assert discharge["admission_id"] == admission_id
+        # 0034 enforces one active admission per bed, so a transfer that failed to
+        # release the old bed would make the next admission there impossible.
+        assert transfer_resp.json()["data"]["bed_id"] == str(BED_B_ID)
 
-        print("ADMISSION RESPONSE:", admission)
+        # Step 4: discharge.
+        discharge_resp = client.post(
+            f"/api/v1/admissions/{admission_id}/discharge",
+            json={
+                "discharged_at": "2026-08-13T11:00:00Z",
+                "discharge_type": "discharged",
+                "discharge_summary": "Journey test discharge - no complications.",
+            },
+        )
+        assert discharge_resp.status_code in (200, 201), discharge_resp.text
+
+        # The endpoint returns the discharge record (DischargeOut), not the
+        # admission — so assert on what it actually returns, then read the
+        # admission back to confirm it really transitioned. The second check is
+        # the one that matters: a discharge row written without closing the
+        # admission would leave bed B occupied forever under 0034.
+        discharge = discharge_resp.json()["data"]
+        assert discharge["admission_id"] == admission_id
+        assert discharge["discharge_type"] == "discharged"
+
+        after = client.get(f"/api/v1/admissions/{admission_id}")
+        assert after.status_code == 200, after.text
+        assert after.json()["data"]["status"] == "discharged"
+
+        # Step 5: the discharge summary must be retrievable afterwards — it is the
+        # document the patient leaves with and the FHIR DischargeSummary source.
+        summary_resp = client.get(f"/api/v1/admissions/{admission_id}/discharge-summary")
+        assert summary_resp.status_code == 200, summary_resp.text

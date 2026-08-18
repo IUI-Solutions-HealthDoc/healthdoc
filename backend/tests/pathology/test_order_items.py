@@ -18,7 +18,10 @@ def test_create_lab_order_item(client_as, seeded_order_id):
     assert body["test_name"] == "CBC"
     assert body["status"] == "placed"
     assert body["accession_number"].startswith("LAB-")
-    return body["id"]
+    # No return: pytest cannot chain a test's return value into another test, so
+    # returning it did nothing except raise PytestReturnNotNoneWarning — which in
+    # a future pytest becomes an error. Tests that need an item create their own.
+    assert body["id"]
 
 
 def test_wrong_role_cannot_create_order_item(client_as, seeded_order_id):

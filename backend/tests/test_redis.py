@@ -32,8 +32,11 @@ async def _cleanup_redis():
     try:
         await close_redis()
     except Exception:
+        # Drop this loop's pool without awaiting it. get_redis() is now keyed by
+        # running loop (a single module-level pool could not survive more than
+        # one), so the fallback has to clear the same key close_redis() would.
         import app.common.redis as _redis
-        _redis._pool = None
+        _redis._pools.pop(_redis._loop_key(), None)
 
 
 def test_queue_channel_naming():

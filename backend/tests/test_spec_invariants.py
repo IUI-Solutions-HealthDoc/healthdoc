@@ -40,19 +40,46 @@ def test_float_money_loses_paise():
 
 
 # ---------- FINDING: gapless counter vs MAX()+1 under concurrency ----------
-def _max_plus_one(db, lock=None):
-    cur = db.execute("SELECT COALESCE(MAX(seq),0) FROM tokens")
-    nxt = cur.fetchone()[0] + 1
-    time.sleep(0.001)                     # window where another thread reads the same MAX
-    db.execute("INSERT INTO tokens(seq) VALUES (?)", (nxt,))
-    db.commit()
+def _max_plus_one(path):
+    """One thread's allocation, on its OWN connection.
 
-def test_max_plus_one_produces_duplicates_under_concurrency():
-    db = sqlite3.connect(":memory:", check_same_thread=False)
-    db.execute("CREATE TABLE tokens(seq INT)")
-    threads = [threading.Thread(target=_max_plus_one, args=(db,)) for _ in range(10)]
+    This used to share a single :memory: connection across ten threads with
+    check_same_thread=False. sqlite3 connections are not concurrency-safe, so
+    the threads clobbered each other's cursor state: some raised InterfaceError,
+    others got None back from fetchone() and died on the subscript. pytest
+    surfaced five PytestUnhandledThreadExceptionWarnings per run.
+
+    The test still passed — but for the wrong reason. It asserts that MAX()+1
+    collides, and threads that crash before inserting also produce a short,
+    duplicate-looking table. Giving each thread a real connection to a shared
+    file means the collisions it observes are genuine read-then-write races,
+    which is the invariant this file exists to demonstrate.
+    """
+    db = sqlite3.connect(path, timeout=10)
+    try:
+        nxt = db.execute("SELECT COALESCE(MAX(seq),0) FROM tokens").fetchone()[0] + 1
+        time.sleep(0.01)                  # window where another thread reads the same MAX
+        db.execute("INSERT INTO tokens(seq) VALUES (?)", (nxt,))
+        db.commit()
+    finally:
+        db.close()
+
+def test_max_plus_one_produces_duplicates_under_concurrency(tmp_path):
+    path = str(tmp_path / "race.db")
+    setup = sqlite3.connect(path)
+    setup.execute("CREATE TABLE tokens(seq INT)")
+    setup.commit(); setup.close()
+
+    threads = [threading.Thread(target=_max_plus_one, args=(path,)) for _ in range(10)]
     [t.start() for t in threads]; [t.join() for t in threads]
+
+    db = sqlite3.connect(path)
     seqs = [r[0] for r in db.execute("SELECT seq FROM tokens")]
+    db.close()
+
+    # Every thread must have got as far as inserting — otherwise the duplicates
+    # below could be an artefact of crashed threads rather than the race.
+    assert len(seqs) == 10, f"expected 10 allocations, got {len(seqs)}"
     assert len(seqs) != len(set(seqs)), "MAX()+1 must collide — that's the bug"
 
 def test_counter_row_with_lock_is_gapless_and_unique():

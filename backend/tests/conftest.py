@@ -1,6 +1,15 @@
+import sqlite3
 import uuid
-from datetime import date
+from datetime import date, datetime
 from itertools import count
+
+# Python 3.12 deprecates sqlite3's built-in date/datetime adapters and removes
+# them in a later release, so every test that binds a date to the SQLite test
+# engine emits a DeprecationWarning — and would eventually fail outright.
+# Registering them explicitly keeps the stored format identical (ISO-8601, what
+# the old default did) while making the choice ours rather than the stdlib's.
+sqlite3.register_adapter(date, lambda d: d.isoformat())
+sqlite3.register_adapter(datetime, lambda d: d.isoformat())
 
 import pytest
 from fastapi.testclient import TestClient

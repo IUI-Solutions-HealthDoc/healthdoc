@@ -2,6 +2,7 @@
 
 B4-W1-02 extends this with the pub/sub helper for queue-display websockets.
 """
+import asyncio
 import json
 import logging
 import uuid
@@ -14,22 +15,47 @@ from app.common.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-_pool: aioredis.Redis | None = None
+#: One pool per event loop, keyed by the loop itself.
+#:
+#: This was a single module-level pool. An asyncio Redis client binds its
+#: connections to the loop that created them, so the first loop to call
+#: get_redis() owned the pool forever — and any *other* loop that reused it got
+#: "Future attached to a different loop", then "Event loop is closed" once the
+#: original had finished.
+#:
+#: In production there is one loop per worker process, so this never showed. It
+#: showed the moment the SSE tests booted uvicorn on its own loop alongside
+#: pytest's: the queue display stream died on subscribe, and the client saw an
+#: empty 200 rather than an error.
+_pools: dict[object, aioredis.Redis] = {}
+
+_NO_LOOP = object()
+
+
+def _loop_key() -> object:
+    try:
+        return asyncio.get_running_loop()
+    except RuntimeError:
+        return _NO_LOOP
 
 
 def get_redis() -> aioredis.Redis:
-    """Return a pooled Redis connection."""
-    global _pool
-    if _pool is None:
-        _pool = aioredis.from_url(get_settings().redis_url, decode_responses=True, health_check_interval=30)
-    return _pool
+    """Return a pooled Redis connection for the calling event loop."""
+    key = _loop_key()
+    pool = _pools.get(key)
+    if pool is None:
+        pool = aioredis.from_url(
+            get_settings().redis_url, decode_responses=True, health_check_interval=30
+        )
+        _pools[key] = pool
+    return pool
+
 
 async def close_redis() -> None:
-    """Close the pooled connection. Call from FastAPI's lifespan on shutdown."""
-    global _pool
-    if _pool is not None:
-        await _pool.aclose()
-        _pool = None
+    """Close this loop's pooled connection. Call from FastAPI's lifespan on shutdown."""
+    pool = _pools.pop(_loop_key(), None)
+    if pool is not None:
+        await pool.aclose()
 
 
 def queue_channel(department_id: str | uuid.UUID) -> str:
