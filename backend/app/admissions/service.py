@@ -15,9 +15,10 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.admissions.models import Admission, Bed, Discharge, DischargeNotification, PatientMovementLog
+from app.admissions.models import Admission, Bed, Discharge, DischargeNotification, PatientMovementLog, Ward
 from app.audit.service import write_audit_log
 # Reused from billing.service rather than duplicated -- pure auth/identity
 # helper (keycloak_sub -> users.id), not billing-specific. Candidate for
@@ -25,6 +26,7 @@ from app.audit.service import write_audit_log
 from app.billing.service import resolve_actor_user_id
 from app.integrations.abdm.fhir import service as fhir_service
 from app.opd.models import Visit
+from app.patients.models import Patient
 
 
 class VisitNotFound(Exception):
@@ -40,6 +42,11 @@ class BedNotFound(Exception):
 class BedNotAvailable(Exception):
     def __init__(self, bed_id: UUID):
         self.bed_id = bed_id
+
+
+class WardNotFound(Exception):
+    def __init__(self, ward_id: UUID):
+        self.ward_id = ward_id
 
 
 class AdmissionNotFound(Exception):
@@ -90,7 +97,7 @@ async def admit_patient(
     bed = await db.get(Bed, bed_id)
     if bed is None:
         raise BedNotFound(bed_id)
-    if await _active_admission_on_bed(db, bed_id) is not None:
+    if bed.status not in ("vacant", "reserved"):
         raise BedNotAvailable(bed_id)
 
     admission = Admission(
@@ -100,7 +107,13 @@ async def admit_patient(
     )
     db.add(admission)
     bed.status = "occupied"
-    await db.flush()
+
+    try:
+        await db.flush()
+    except IntegrityError as e:
+        if getattr(e.orig, "sqlstate", None) == "23505":
+            raise BedNotAvailable(bed_id)
+        raise
 
     await write_audit_log(
         db, facility_id=visit.facility_id, action="create", resource_type="admissions",
@@ -124,8 +137,7 @@ async def transfer_patient(
     to_bed = await db.get(Bed, to_bed_id)
     if to_bed is None:
         raise BedNotFound(to_bed_id)
-    existing = await _active_admission_on_bed(db, to_bed_id)
-    if existing is not None and existing.id != admission.id:
+    if to_bed.status not in ("vacant", "reserved"):
         raise BedNotAvailable(to_bed_id)
 
     old_ward_id, old_bed_id = admission.ward_id, admission.bed_id
@@ -143,7 +155,13 @@ async def transfer_patient(
     admission.ward_id = to_ward_id
     admission.bed_id = to_bed_id
     admission.updated_by = moved_by
-    await db.flush()
+
+    try:
+        await db.flush()
+    except IntegrityError as e:
+        if getattr(e.orig, "sqlstate", None) == "23505":
+            raise BedNotAvailable(to_bed_id)
+        raise
 
     visit = await db.get(Visit, admission.visit_id)
     await write_audit_log(
@@ -218,3 +236,78 @@ async def get_movements(db: AsyncSession, admission_id: UUID) -> list[PatientMov
 async def get_discharge(db: AsyncSession, admission_id: UUID) -> Discharge | None:
     result = await db.execute(select(Discharge).where(Discharge.admission_id == admission_id))
     return result.scalar_one_or_none()
+
+
+async def get_ward_bed_grid(db: AsyncSession, ward_id: UUID, caller_facility_id: UUID) -> list[dict]:
+    """One row per bed, with the occupant's identity if occupied --
+    authenticated clinical view, unlike the public queue display.
+    Matches §20.1 (nurses manage patient list + bed status together)."""
+    ward = await db.get(Ward, ward_id)
+    if ward is None or ward.facility_id != caller_facility_id:
+        raise WardNotFound(ward_id)
+
+    beds_result = await db.execute(select(Bed).where(Bed.ward_id == ward_id))
+    beds = beds_result.scalars().all()
+
+    grid = []
+    for bed in beds:
+        occupant = None
+        admission = await _active_admission_on_bed(db, bed.id)
+        if admission is not None:
+            patient = await db.get(Patient, admission.patient_id)
+            occupant = {
+                "admission_id": admission.id,
+                "patient_id": admission.patient_id,
+                "patient_name": patient.full_name if patient else None,
+                "uhid": patient.uhid if patient else None,
+                "admitted_at": admission.admitted_at,
+            }
+        grid.append({
+            "bed_id": bed.id,
+            "bed_number": bed.bed_number,
+            "status": bed.status,
+            "occupant": occupant,
+        })
+    return grid
+
+
+async def reconcile_bed_status(db: AsyncSession, facility_id: UUID | None = None) -> list[dict]:
+    """admissions is authoritative; beds.status is a mirror, updated in
+    the same transaction as the admission -- this never writes, only
+    reports where the two disagree, so a human decides how to fix it.
+    Two ways to disagree:
+      - bed says occupied, but no active admission points to it
+      - bed says vacant/reserved/maintenance, but an active admission does
+    Optionally scoped to one facility via ward_id -> wards.facility_id;
+    omit for a full sweep across every facility."""
+    beds_query = select(Bed)
+    if facility_id is not None:
+        beds_query = beds_query.join(Ward, Ward.id == Bed.ward_id).where(Ward.facility_id == facility_id)
+    beds = (await db.execute(beds_query)).scalars().all()
+ 
+    admissions_result = await db.execute(select(Admission).where(Admission.status == "admitted"))
+    active_admissions_by_bed = {a.bed_id: a for a in admissions_result.scalars().all()}
+ 
+    mismatches = []
+    for bed in beds:
+        active_admission = active_admissions_by_bed.get(bed.id)
+ 
+        if bed.status == "occupied" and active_admission is None:
+            mismatches.append({
+                "bed_id": bed.id,
+                "ward_id": bed.ward_id,
+                "bed_status": bed.status,
+                "active_admission_id": None,
+                "issue": "bed marked occupied but no active admission points to it",
+            })
+        elif bed.status != "occupied" and active_admission is not None:
+            mismatches.append({
+                "bed_id": bed.id,
+                "ward_id": bed.ward_id,
+                "bed_status": bed.status,
+                "active_admission_id": active_admission.id,
+                "issue": f"bed marked '{bed.status}' but admission {active_admission.id} is active on it",
+            })
+ 
+    return mismatches
+ 
