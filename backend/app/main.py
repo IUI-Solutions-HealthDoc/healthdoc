@@ -18,12 +18,14 @@ from app.common.redis import get_redis
 log = logging.getLogger("healthdoc")
 
 MODULES = [
-    "audit", "billing", "blood_bank", "consent", "departments", "emergency",
-    "encounters", "files", "inventory", "ipd", "notifications", "nursing",
-    "opd", "orders", "ot", "outbox", "pathology", "patients", "pharmacy",
-    "queue", "radiology", "registration", "reports", "security_audit",
-    "users", "wards",
+    "allergies", "audit", "billing", "blood_bank", "consent", "departments",
+    "emergency", "encounters", "files", "inventory", "ipd", "notifications",
+    "nursing", "opd", "orders", "ot", "outbox", "pathology", "patients",
+    "pharmacy", "queue", "radiology", "registration", "reports",
+    "security_audit", "users", "wards",
 ]
+# NB: "ipd" re-exports app.admissions.router — admissions is intentionally absent
+# from this list. See app/ipd/router.py before concluding it is unmounted.
 
 settings = get_settings()
 
@@ -91,24 +93,44 @@ async def health_deep() -> dict:
     return {"status": status, "checks": checks}
 
 
-for name in MODULES:
+def _include(module_path: str, *, optional_name: str | None = None) -> None:
+    """Mount one router.
+
+    A bare `except ModuleNotFoundError` here used to swallow two very different
+    things. "app.wards.router does not exist yet" is expected during build-out.
+    "app.files.router exists but `import minio` inside it failed" is an outage:
+    the whole module disappears from the API, with one WARNING line and a
+    process that starts up perfectly healthy.
+
+    That is how #233's file endpoints can be written, merged, tested and still
+    be absent from a running server. So a missing *router module* is skipped,
+    and anything else — a missing dependency, a typo in an import, a broken
+    sibling module — is raised and stops the process.
+    """
     try:
-        module = importlib.import_module(f"app.{name}.router")
-        app.include_router(module.router, prefix=settings.api_prefix)
-    except ModuleNotFoundError:
-        log.warning("module app.%s has no router.py yet — skipped", name)
+        module = importlib.import_module(module_path)
+    except ModuleNotFoundError as exc:
+        if optional_name is not None and exc.name == module_path:
+            log.warning("module app.%s has no router.py yet — skipped", optional_name)
+            return
+        log.error("router %s failed to import: %s", module_path, exc)
+        raise
+    app.include_router(module.router, prefix=settings.api_prefix)
+
+
+for name in MODULES:
+    _include(f"app.{name}.router", optional_name=name)
 
 # B1-owned routers that don't live at app/<name>/router.py — included explicitly.
-# NOTE: breakglass router is NOT registered yet — break_glass_grants (0004),
-# data_access_log (0004), and notification_history (0020) are unmerged.
-# Registering it would make the emergency path 500 with UndefinedTable.
-# Re-add once #266 (0004) and #??? (0020) merge.
 _B1_ROUTERS = [
     "app.integrations.abdm.identity.router",  # ABHA capture (W6-01)
+    # Break-glass (#391). This sat unregistered behind a note saying
+    # break_glass_grants / data_access_log (0004) and notification_history (0020)
+    # were unmerged and would 500 with UndefinedTable. All three merged — staging
+    # is at 0041c — so the blocker was stale, not real. Emergency access is a NABH
+    # DHS and DPDP control; having the audit tables without the enforcement path
+    # is the worse half to be missing.
+    "app.security_audit.breakglass",
 ]
 for path in _B1_ROUTERS:
-    try:
-        mod = importlib.import_module(path)
-        app.include_router(mod.router, prefix=settings.api_prefix)
-    except ModuleNotFoundError as exc:
-        log.warning("B1 router %s not importable: %s", path, exc)
+    _include(path)
