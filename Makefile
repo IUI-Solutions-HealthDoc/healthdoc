@@ -62,6 +62,10 @@ test-db:          ## Create + migrate the test database (idempotent)
 	@cd backend && $(TEST_ENV) alembic upgrade head
 	@echo "$(TEST_DB) ready at localhost:$(POSTGRES_PORT)"
 
+test-db-reset:    ## Drop and rebuild the test database (after editing a migration)
+	-@$(COMPOSE) exec -T postgres dropdb -U $(POSTGRES_USER) --if-exists $(TEST_DB)
+	@$(MAKE) test-db
+
 test-pg: test-db  ## Run the tests that need real PostgreSQL: make test-pg k=late_utc
 	@cd backend && $(TEST_ENV) pytest $(if $(k),-k "$(k)",) $(if $(p),$(p),tests/) -q
 

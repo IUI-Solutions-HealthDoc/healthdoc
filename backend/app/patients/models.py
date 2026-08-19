@@ -12,8 +12,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.common.db import Base
 from app.common.models import UUIDPk, Timestamps, Blame, Versioned
 from app.common.enums import (
-    Sex, IdentityPath, IdentityStatus, PatientStatus,
-    IdentifierType, MergeStatus, MergeSourceType,
+    GuardianVerificationMethod, IdentifierType, IdentityPath, IdentityStatus,
+    MergeSourceType, MergeStatus, PatientStatus, Sex,
 )
 
 
@@ -32,6 +32,13 @@ class Patient(Base, UUIDPk, Timestamps, Blame, Versioned):
         CheckConstraint(IdentityPath.sql_check("identity_path"), name="identity_path"),
         CheckConstraint(IdentityStatus.sql_check("identity_status"), name="identity_status"),
         CheckConstraint(PatientStatus.sql_check("status"), name="status"),
+        # Added with 0042. GuardianVerificationMethod already existed in
+        # common/enums.py with nothing enforcing it.
+        CheckConstraint(
+            "guardian_verification_method IS NULL OR "
+            + GuardianVerificationMethod.sql_check("guardian_verification_method"),
+            name="guardian_verification_method",
+        ),
     )
 
     uhid: Mapped[str | None] = mapped_column(String(30), nullable=True)  # unique via partial index
@@ -58,10 +65,17 @@ class Patient(Base, UUIDPk, Timestamps, Blame, Versioned):
     abha_linking_key_version: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
     abha_linked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    # 0022 — guardian verification (B2).
+    # 0042 — guardian verification (B2). The comment here said 0022 for months;
+    # no migration created these columns until 0042, so every ORM INSERT into
+    # patients failed against a migrated database while passing in tests, which
+    # build their schema from Base.metadata. Found by #393's concurrency test.
+    #
+    # varchar(30) per §3, not 50 — the widest permitted value is
+    # 'manual_document'. The CHECKs live in 0042; names are passed bare because
+    # NAMING_CONVENTION prefixes them (a pre-prefixed name double-prefixes).
     is_minor: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     guardian_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
-    guardian_verification_method: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    guardian_verification_method: Mapped[str | None] = mapped_column(String(30), nullable=True)
 
     identity_path: Mapped[str] = mapped_column(String(50), nullable=False)
     identity_status: Mapped[str] = mapped_column(String(50), nullable=False, server_default="verified")

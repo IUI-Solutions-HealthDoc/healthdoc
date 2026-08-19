@@ -20,7 +20,7 @@ from app.admissions.models import Admission, Bed, Ward
 from app.common.config import get_settings
 from app.opd.models import Visit
 from app.patients.models import Patient
-from app.users.models import Facility
+from app.users.models import Facility, User
 
 pytestmark = pytest.mark.asyncio
 
@@ -50,32 +50,50 @@ async def test_concurrent_admission_never_double_books_bed():
     bed_id = uuid.uuid4()
     visit_id_a = uuid.uuid4()
     visit_id_b = uuid.uuid4()
+    # A real users row: patients.created_by and visits.created_by are FKs to
+    # users.id, so a bare uuid4() violates fk_patients_created_by against a
+    # migrated database. This only surfaced once DATABASE_URL was set for the
+    # suite -- before that _real_database_is_ready() skipped the whole test.
+    actor_id = uuid.uuid4()
 
     async with Session() as setup:
         setup.add(Facility(id=facility_id, code=f"CONC{uuid.uuid4().hex[:4]}", name="Concurrency Test", state_code="TS"))
+        await setup.commit()
+    async with Session() as setup:
+        setup.add(User(
+            id=actor_id, keycloak_sub=f"conc-{uuid.uuid4().hex[:12]}",
+            username=f"conc_{uuid.uuid4().hex[:8]}", full_name="Concurrency Test Actor",
+            facility_id=facility_id,
+        ))
         await setup.commit()
     async with Session() as setup:
         setup.add(Patient(
             id=patient_id, uhid=f"UHID{uuid.uuid4().hex[:8]}", full_name="Concurrency Patient",
             sex="male", dob=date(1990, 1, 1), facility_id=facility_id,
             identity_path="demographics_only", identity_status="verified",
-            created_by=uuid.uuid4(),
+            created_by=actor_id,
         ))
         await setup.commit()
+    # Ward committed before the bed: beds.ward_id is an FK to wards.id, and
+    # adding both to one session left the INSERT order to the unit of work,
+    # which put beds first and violated fk_beds_ward_id. Same two-step shape as
+    # the facility/patient seeding above.
     async with Session() as setup:
         setup.add(Ward(id=ward_id, name="Concurrency Ward", facility_id=facility_id))
+        await setup.commit()
+    async with Session() as setup:
         setup.add(Bed(id=bed_id, ward_id=ward_id, bed_number="C1", status="vacant"))
         await setup.commit()
     async with Session() as setup:
         setup.add(Visit(
             id=visit_id_a, visit_number=f"V{uuid.uuid4().hex[:8]}", patient_id=patient_id,
             facility_id=facility_id, visit_type="ipd", visit_date=datetime.now(timezone.utc),
-            created_by=uuid.uuid4(),
+            created_by=actor_id,
         ))
         setup.add(Visit(
             id=visit_id_b, visit_number=f"V{uuid.uuid4().hex[:8]}", patient_id=patient_id,
             facility_id=facility_id, visit_type="ipd", visit_date=datetime.now(timezone.utc),
-            created_by=uuid.uuid4(),
+            created_by=actor_id,
         ))
         await setup.commit()
 
@@ -84,7 +102,7 @@ async def test_concurrent_admission_never_double_books_bed():
             try:
                 async with session.begin():
                     await service.admit_patient(
-                        session, visit_id=visit_id, ward_id=ward_id, bed_id=bed_id, created_by=uuid.uuid4(),
+                        session, visit_id=visit_id, ward_id=ward_id, bed_id=bed_id, created_by=actor_id,
                     )
                 return "admitted"
             except service.BedNotAvailable:
@@ -120,7 +138,17 @@ async def test_concurrent_admission_never_double_books_bed():
             await cleanup.execute(Bed.__table__.delete().where(Bed.id == bed_id))
             await cleanup.execute(Ward.__table__.delete().where(Ward.id == ward_id))
             await cleanup.execute(Patient.__table__.delete().where(Patient.id == patient_id))
-            await cleanup.execute(Facility.__table__.delete().where(Facility.id == facility_id))
+            # The actor and its facility are deliberately NOT deleted.
+            #
+            # admit_patient() writes audit_logs rows referencing this user, and
+            # audit_logs is append-only and hash-chained by design — 0003's
+            # triggers refuse DELETE, and fk_audit_logs_user_id then pins the
+            # user, which in turn pins the facility. Removing them would mean
+            # punching a hole in the audit chain to tidy up a test, which is
+            # exactly backwards.
+            #
+            # Both ids are fresh uuid4s per run, so the leftovers accumulate
+            # harmlessly in healthdoc_test and never collide.
             await cleanup.commit()
 
     await engine.dispose()

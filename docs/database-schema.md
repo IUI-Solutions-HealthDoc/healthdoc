@@ -160,7 +160,7 @@ do not merge out of order.**
 | 0041a | visits_row_version | ALTER visits: row_version | B5 (#383) |
 | 0041b | idempotency_keys_response_body_jsonb | ALTER idempotency_keys: response_body -> jsonb | B5 (#383) |
 | 0041c | lab_order_items_released_status | ALTER lab_order_items: status CHECK gains 'released' | B5 (#383) |
-| 0042 | guardian_verification | ALTER patients: is_minor, guardian_verified, guardian_verification_method | B2 (W3) — moved again as written work took the number; still unwritten |
+| 0042 | guardian_verification | ALTER patients: is_minor, guardian_verified, guardian_verification_method (+ method CHECK) | B2 (W3) — written at last; the ORM had declared these since W3 and no migration created them |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -1220,7 +1220,7 @@ endpoint_url text · is_active boolean NOT NULL DEFAULT true
 ```
 Also in 0022a: `ALTER consent_records ADD consent_manager_id UUID NULL → consent_managers`.
 
-**patients additions** (0038, B2)
+**patients additions** (0042, B2)
 ```
 is_minor boolean NOT NULL DEFAULT false           -- set at registration from dob/age_years
 guardian_verified boolean NOT NULL DEFAULT false
@@ -1228,6 +1228,8 @@ guardian_verification_method varchar(30) NULL     -- aadhaar|digilocker|manual_d
 ```
 Healthcare exemptions to parental-consent rules still require documentation — that is
 what these columns evidence. Guardian name/relationship columns already exist (0006).
+
+0042 adds one CHECK: the method must be one of the three above when set.
 
 **vitals** (0023, B3/nursing) `[Blame]` — NABH structured capture; one row per measurement set
 ```
