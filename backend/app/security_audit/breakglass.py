@@ -265,7 +265,7 @@ class BreakGlassRevoke(BaseModel):
 @router.post("/{grant_id}/revoke",
              dependencies=[Depends(require_roles("emergency", "doctor", "admin"))])
 async def revoke_grant(
-    grant_id: str,
+    grant_id: uuid.UUID,
     payload: BreakGlassRevoke,
     user: Annotated[AuthUser, Depends(get_current_user)],
     db: AsyncSession = Depends(get_db),
@@ -327,7 +327,7 @@ async def revoke_grant(
 @router.post("/{grant_id}/review",
              dependencies=[Depends(require_roles("auditor", "admin"))])
 async def review_grant(
-    grant_id: str,
+    grant_id: uuid.UUID,
     payload: BreakGlassReview,
     user: Annotated[AuthUser, Depends(get_current_user)],
     db: AsyncSession = Depends(get_db),

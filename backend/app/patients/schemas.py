@@ -4,7 +4,24 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+
+def _normalise_aadhaar(value: str | None) -> str | None:
+    """Return the 12 digits accepted by the blind-index function.
+
+    Formatting spaces and hyphens are harmless and common on paper forms. Any
+    other character, or a non-12-digit value, is rejected by Pydantic so it
+    cannot become the ValueError/HTTP 500 found by authenticated ZAP.
+    """
+    if value is None:
+        return None
+    if any(not (character.isdigit() or character in " -") for character in value):
+        raise ValueError("aadhaar_number may contain only digits, spaces and hyphens")
+    digits = "".join(character for character in value if character.isdigit())
+    if len(digits) != 12:
+        raise ValueError("aadhaar_number must contain exactly 12 digits")
+    return digits
 
 class PatientCreate(BaseModel):
     full_name: str
@@ -15,8 +32,10 @@ class PatientCreate(BaseModel):
     abha_number: str | None = None
     aadhaar_number: str | None = None
 
+    _validate_aadhaar = field_validator("aadhaar_number")(_normalise_aadhaar)
+
     @model_validator(mode="after")
-    def _dob_or_age_required(self) -> "PatientCreate":
+    def _dob_or_age_required(self) -> PatientCreate:
         if self.dob is None and self.age_years is None:
             raise ValueError("Either dob or age_years is required")
         return self
@@ -45,7 +64,7 @@ class PatientUpdate(BaseModel):
     reason: str | None = None  # audit reason, not stored on patient row
 
     @model_validator(mode="after")
-    def _at_least_one_field(self) -> "PatientUpdate":
+    def _at_least_one_field(self) -> PatientUpdate:
         updateable = (
             "full_name", "sex", "dob", "age_years", "mobile", "abha_number",
             "guardian_name", "guardian_relationship",
@@ -109,8 +128,10 @@ class PatientSearchRequest(BaseModel):
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1, le=100)
 
+    _validate_aadhaar = field_validator("aadhaar_number")(_normalise_aadhaar)
+
     @model_validator(mode="after")
-    def _at_least_one_criterion(self) -> "PatientSearchRequest":
+    def _at_least_one_criterion(self) -> PatientSearchRequest:
         if not any([self.full_name, self.mobile, self.uhid, self.aadhaar_number, self.abha_number]):
             raise ValueError("At least one search criterion is required")
         return self

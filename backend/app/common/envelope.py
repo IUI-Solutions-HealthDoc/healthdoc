@@ -31,11 +31,14 @@ any body arrives — only `application/json` is collected and rewrapped.
 """
 import json
 import uuid
+from collections import deque
+from urllib.parse import unquote_to_bytes
 
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 SKIP_PATHS = ("/docs", "/openapi.json", "/redoc")
+MAX_JSON_REQUEST_BYTES = 1024 * 1024
 
 
 class EnvelopeMiddleware:
@@ -53,6 +56,67 @@ class EnvelopeMiddleware:
         path = scope.get("path", "")
         skip_path = any(path.endswith(p) for p in SKIP_PATHS)
 
+        # PostgreSQL text cannot contain NUL. Before this guard, an encoded
+        # `%00` in any string query parameter reached asyncpg and became a 500
+        # (18 routes were found by the authenticated ZAP run). Reject it once
+        # at the HTTP boundary instead of relying on every schema author to
+        # remember the same storage constraint.
+        query_string = scope.get("query_string", b"")
+        if "\x00" in path or b"\x00" in unquote_to_bytes(query_string):
+            await self._send_rejection(
+                send,
+                request_id,
+                status=400,
+                code="invalid_control_character",
+                message="Request values must not contain NUL characters.",
+            )
+            return
+
+        # JSON represents NUL as `\\u0000`, so scanning only raw ASGI bytes is
+        # insufficient. Buffer JSON requests (which FastAPI would materialise
+        # for validation anyway), parse them, and replay the exact body. The
+        # explicit limit prevents a client using JSON parsing as a memory DoS;
+        # clinical file uploads use multipart and do not pass through here.
+        receive_for_app = receive
+        content_type = headers.get("content-type", "").split(";", 1)[0].strip().lower()
+        if content_type == "application/json" or content_type.endswith("+json"):
+            buffered: deque[Message] = deque()
+            body = bytearray()
+            while True:
+                message = await receive()
+                buffered.append(message)
+                if message["type"] != "http.request":
+                    break
+                body.extend(message.get("body", b""))
+                if len(body) > MAX_JSON_REQUEST_BYTES:
+                    await self._send_rejection(
+                        send,
+                        request_id,
+                        status=413,
+                        code="json_body_too_large",
+                        message="JSON request body exceeds the 1 MiB limit.",
+                    )
+                    return
+                if not message.get("more_body", False):
+                    break
+
+            if self._json_contains_nul(bytes(body)):
+                await self._send_rejection(
+                    send,
+                    request_id,
+                    status=400,
+                    code="invalid_control_character",
+                    message="Request values must not contain NUL characters.",
+                )
+                return
+
+            async def replay_receive() -> Message:
+                if buffered:
+                    return buffered.popleft()
+                return await receive()
+
+            receive_for_app = replay_receive
+
         # Set by handle_start, read by handle_body.
         state: dict = {"wrap": False, "start": None, "body": bytearray()}
 
@@ -60,6 +124,10 @@ class EnvelopeMiddleware:
             if message["type"] == "http.response.start":
                 response_headers = MutableHeaders(scope=message)
                 response_headers["X-Request-ID"] = request_id
+                response_headers["X-Content-Type-Options"] = "nosniff"
+                response_headers["Cross-Origin-Resource-Policy"] = "same-origin"
+                if "cache-control" not in response_headers:
+                    response_headers["Cache-Control"] = "no-store"
 
                 content_type = response_headers.get("content-type", "").split(";")[0]
                 state["wrap"] = not skip_path and content_type == "application/json"
@@ -83,7 +151,62 @@ class EnvelopeMiddleware:
             # non-JSON: forwarded untouched, one chunk at a time.
             await send(message)
 
-        await self.app(scope, receive, send_wrapper)
+        await self.app(scope, receive_for_app, send_wrapper)
+
+    @staticmethod
+    def _json_contains_nul(body: bytes) -> bool:
+        if b"\x00" in body:
+            return True
+        try:
+            payload = json.loads(body) if body else None
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            # FastAPI owns malformed-JSON reporting. This guard only answers
+            # whether otherwise valid input contains a storage-invalid NUL.
+            return False
+
+        def contains(value: object) -> bool:
+            if isinstance(value, str):
+                return "\x00" in value
+            if isinstance(value, list):
+                return any(contains(item) for item in value)
+            if isinstance(value, dict):
+                return any(contains(key) or contains(item) for key, item in value.items())
+            return False
+
+        return contains(payload)
+
+    @staticmethod
+    async def _send_rejection(
+        send: Send,
+        request_id: str,
+        *,
+        status: int,
+        code: str,
+        message: str,
+    ) -> None:
+        body = json.dumps(
+            {
+                "success": False,
+                "data": None,
+                "error": {"code": code, "message": message},
+                "meta": {"request_id": request_id},
+            }
+        ).encode()
+        await send(
+            {
+                "type": "http.response.start",
+                "status": status,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode()),
+                    (b"x-request-id", request_id.encode("latin-1", errors="replace")),
+                    (b"x-content-type-options", b"nosniff"),
+                    (b"cross-origin-resource-policy", b"same-origin"),
+                    (b"cache-control", b"no-store"),
+                ],
+            }
+        )
+        await send({"type": "http.response.body", "body": body})
 
     @staticmethod
     async def _send_envelope(send: Send, state: dict, request_id: str) -> None:

@@ -39,3 +39,16 @@ Run `./scripts/security/run_zap_api_scan.sh` from the repository root with the
 local compose stack running. Reports and the pre-scan backup are written under
 the ignored `backups/zap/` directory. The Wednesday schedule and manual trigger
 in `.github/workflows/zap-security.yml` repeat the same authenticated gate.
+
+## P0/P1 hardening rerun — 24 August 2026
+
+Issue #240's final rerun imported 292 OpenAPI URLs and exercised 661 URLs after
+the malformed-input fixes. It reported:
+
+- **zero** server-error, debug-disclosure, format-string, High or Critical findings;
+- one Medium false positive matching prose in `openapi.json` (not SQL source);
+- one Low content-type class covering the intentional CSV export and SSE stream.
+
+The evidence is under ignored local artifacts at
+`backups/zap/p0-hardening-final-20260824/`. This rerun is the proof that all 18
+prior HTTP 500 instances were removed, not merely downgraded or allowlisted.
