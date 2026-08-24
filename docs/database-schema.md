@@ -568,6 +568,11 @@ before_snapshot jsonb NOT NULL · after_snapshot jsonb
 decision_reason text NULL                       -- Why the merge was accepted or rejected.
 ```
 
+**patient_portal_bindings** (0051) — append-only verified portal identity proof
+- `user_id` and `patient_id` are each unique while `revoked_at IS NULL`; every FK is indexed.
+- Verification is `abha_otp` or `in_person_document`; the evidence reference is never returned.
+- Revocation retains verifier, timestamp and reason; `/me` APIs never accept a patient id.
+
 ### 0007 — visits, encounters, diagnoses (B3)
 
 **visits** `[Blame]`
