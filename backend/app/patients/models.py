@@ -3,18 +3,35 @@ import uuid
 from datetime import date, datetime
 
 from sqlalchemy import (
-    Boolean, CheckConstraint, Date, DateTime, ForeignKey,
-    LargeBinary, SmallInteger, String, Text, UniqueConstraint, func,
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    LargeBinary,
+    SmallInteger,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.common.db import Base
-from app.common.models import UUIDPk, Timestamps, Blame, Versioned
 from app.common.enums import (
-    GuardianVerificationMethod, IdentifierType, IdentityPath, IdentityStatus,
-    MergeSourceType, MergeStatus, PatientStatus, Sex,
+    GuardianVerificationMethod,
+    IdentifierType,
+    IdentityPath,
+    IdentityStatus,
+    MergeSourceType,
+    MergeStatus,
+    PatientStatus,
+    Sex,
 )
+from app.common.models import Blame, Timestamps, UUIDPk, Versioned
 
 
 class Patient(Base, UUIDPk, Timestamps, Blame, Versioned):
@@ -133,3 +150,66 @@ class PatientMergeLog(Base, UUIDPk, Timestamps):
 
     before_snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)
     after_snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+
+class PatientPortalBinding(Base, UUIDPk, Timestamps):
+    """Verified, revocable account-to-patient identity boundary.
+
+    Rows are append-only across re-verification.  Revoking a binding preserves
+    who established it and why it ended; partial unique indexes guarantee that
+    one active portal account maps to exactly one active patient and vice versa.
+    """
+
+    __tablename__ = "patient_portal_bindings"
+    __table_args__ = (
+        CheckConstraint(
+            "verification_method IN ('abha_otp','in_person_document')",
+            name="verification_method",
+        ),
+        CheckConstraint(
+            "revoked_at IS NULL OR (revoked_by IS NOT NULL AND revocation_reason IS NOT NULL)",
+            name="revocation_complete",
+        ),
+        Index(
+            "uq_patient_portal_bindings_active_user",
+            "user_id",
+            unique=True,
+            postgresql_where=text("revoked_at IS NULL"),
+            sqlite_where=text("revoked_at IS NULL"),
+        ),
+        Index(
+            "uq_patient_portal_bindings_active_patient",
+            "patient_id",
+            unique=True,
+            postgresql_where=text("revoked_at IS NULL"),
+            sqlite_where=text("revoked_at IS NULL"),
+        ),
+        Index("ix_patient_portal_bindings_user_id", "user_id"),
+        Index("ix_patient_portal_bindings_patient_id", "patient_id"),
+        Index("ix_patient_portal_bindings_facility_id", "facility_id"),
+        Index("ix_patient_portal_bindings_verified_by", "verified_by"),
+        Index("ix_patient_portal_bindings_revoked_by", "revoked_by"),
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    patient_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("patients.id", ondelete="RESTRICT"), nullable=False
+    )
+    facility_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False
+    )
+    verification_method: Mapped[str] = mapped_column(String(30), nullable=False)
+    verification_reference: Mapped[str] = mapped_column(Text, nullable=False)
+    verified_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    verified_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT")
+    )
+    revocation_reason: Mapped[str | None] = mapped_column(Text)

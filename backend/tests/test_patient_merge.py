@@ -3,9 +3,17 @@ than no merge — this test turns a silently-missing repoint into a red
 build. It needs no database connection; it inspects SQLAlchemy metadata
 directly, so it works even without the async-Postgres fixture (see
 conftest.py discussion in review)."""
+from datetime import UTC
+
 import app.main  # noqa: F401  ensures every model module is imported and
-                  # registered on Base.metadata before we inspect it
-from app.patients.service import REPOINTED_ON_MERGE, AUDIT_TABLES_EXEMPT_FROM_REPOINTING, PENDING_REPOINT_OTHER_MODULES, _tables_with_fk_to_patients
+
+# registered on Base.metadata before we inspect it
+from app.patients.service import (
+    AUDIT_TABLES_EXEMPT_FROM_REPOINTING,
+    PENDING_REPOINT_OTHER_MODULES,
+    REPOINTED_ON_MERGE,
+    _tables_with_fk_to_patients,
+)
 
 
 def test_repointing_covers_every_patient_fk():
@@ -34,11 +42,12 @@ async def test_repoint_visits_and_ot_schedules_moves_child_rows(db, seed):
     repointing logic itself (reproduced with these two calls disabled
     too) -- worth its own bug report, out of scope here."""
     import uuid
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timedelta
+
     from app.opd.models import Visit
     from app.ot.models import OtSchedule
     from app.patients.models import Patient
-    from app.patients.service import _repoint_visits, _repoint_ot_schedules
+    from app.patients.service import _repoint_ot_schedules, _repoint_visits
 
     dept, room, doctor = seed
     facility_id = dept.facility_id
@@ -72,10 +81,10 @@ async def test_repoint_visits_and_ot_schedules_moves_child_rows(db, seed):
         patient_id=source.id,
         facility_id=facility_id,
         visit_type="opd",
-        visit_date=datetime.now(timezone.utc),
+        visit_date=datetime.now(UTC),
         created_by=doctor.id,
     )
-    _now = datetime.now(timezone.utc)
+    _now = datetime.now(UTC)
     ot_schedule = OtSchedule(
         id=uuid.uuid4(),
         visit_id=visit.id,
@@ -97,3 +106,50 @@ async def test_repoint_visits_and_ot_schedules_moves_child_rows(db, seed):
     await db.refresh(ot_schedule)
     assert visit.patient_id == target.id
     assert ot_schedule.patient_id == target.id
+
+
+async def test_patient_portal_binding_follows_the_surviving_patient(db, seed):
+    import uuid
+
+    from sqlalchemy import select
+
+    from app.patients.models import Patient, PatientPortalBinding
+    from app.patients.service import _reconcile_patient_portal_bindings
+
+    dept, _room, verifier = seed
+    source = Patient(
+        id=uuid.uuid4(), thid=f"TH-SRC-{uuid.uuid4().hex[:8]}", full_name="Source",
+        sex="unknown", age_years=30, identity_path="demographics_only",
+        facility_id=dept.facility_id, created_by=verifier.id,
+    )
+    target = Patient(
+        id=uuid.uuid4(), thid=f"TH-TGT-{uuid.uuid4().hex[:8]}", full_name="Target",
+        sex="unknown", age_years=30, identity_path="demographics_only",
+        facility_id=dept.facility_id, created_by=verifier.id,
+    )
+    db.add_all([source, target])
+    await db.flush()
+    binding = PatientPortalBinding(
+        user_id=verifier.id,
+        patient_id=source.id,
+        facility_id=dept.facility_id,
+        verification_method="in_person_document",
+        verification_reference="TEST-ID-CHECK",
+        verified_by=verifier.id,
+    )
+    db.add(binding)
+    await db.flush()
+
+    await _reconcile_patient_portal_bindings(
+        db, source=source, target=target, approved_by=verifier.id
+    )
+
+    moved = (
+        await db.execute(
+            select(PatientPortalBinding.patient_id, PatientPortalBinding.revoked_at).where(
+                PatientPortalBinding.user_id == verifier.id
+            )
+        )
+    ).one()
+    assert moved.patient_id == target.id
+    assert moved.revoked_at is None

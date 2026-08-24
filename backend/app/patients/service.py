@@ -11,17 +11,31 @@ advisory lock needed, and no serialization of concurrent registrations.
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
-
 import uuid
-from sqlalchemy import text, select, func, update
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
+
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.common.security import encrypt_pii, aadhaar_blind_index, aadhaar_blind_indexes_all_versions, current_hmac_key_version, current_aes_key_version
 from app.audit.actions import AuditAction
 from app.audit.service import audited_mutation
-from app.patients.models import Patient, PatientIdentifier, PatientMergeLog
+from app.common.security import (
+    aadhaar_blind_index,
+    aadhaar_blind_indexes_all_versions,
+    current_aes_key_version,
+    current_hmac_key_version,
+    encrypt_pii,
+)
+from app.patients.models import (
+    Patient,
+    PatientIdentifier,
+    PatientMergeLog,
+    PatientPortalBinding,
+)
 
+if TYPE_CHECKING:
+    from app.patients.schemas import PatientUpdate
 
 _FACILITY_CODE_RE = re.compile(r"^[A-Za-z0-9_]{1,20}$")
 
@@ -178,7 +192,7 @@ def build_aadhaar_identifier(
     # copied from another patient's identifier can't decrypt cleanly here.
     # patient_id is already known (caller generates it before calling this),
     # identifier_type is always "aadhaar" for this function specifically.
-    aad = f"{patient_id}:aadhaar".encode("utf-8")
+    aad = f"{patient_id}:aadhaar".encode()
     return PatientIdentifier(
         patient_id=patient_id,
         identifier_type="aadhaar",
@@ -339,7 +353,7 @@ async def update_patient(
     *,
     patient_id: uuid.UUID,
     facility_id: uuid.UUID,
-    payload: "PatientUpdate",
+    payload: PatientUpdate,
     updated_by: uuid.UUID,
     reason: str | None = None,
 ) -> Patient:
@@ -358,7 +372,6 @@ async def update_patient(
     The audit row and the patient UPDATE share the same transaction via
     get_db() — if either fails, both roll back (see audit/service.py docstring).
     """
-    from app.patients.schemas import PatientUpdate  # local import — avoids circular
 
     patient = await db.get(Patient, patient_id)
     if patient is None or patient.deleted_at is not None:
@@ -409,12 +422,12 @@ def _json_safe_value(v: object) -> object:
     from uuid import UUID
     if isinstance(v, UUID):
         return str(v)
-    if isinstance(v, (datetime, date)):
+    if isinstance(v, datetime | date):
         return v.isoformat()
     return v
 
 
-def _patient_snapshot(patient: "Patient") -> dict:
+def _patient_snapshot(patient: Patient) -> dict:
     """Minimal before/after snapshot for patient_merge_log — captures only the
     fields the merge action itself can change, not full PHI."""
     return {
@@ -435,7 +448,7 @@ async def request_merge(
     source_type: str,
     reason: str | None,
     requested_by: uuid.UUID,
-) -> "PatientMergeLog":
+) -> PatientMergeLog:
     from app.patients.models import PatientMergeLog
 
     if source_patient_id == target_patient_id:
@@ -498,6 +511,7 @@ REPOINTED_ON_MERGE: frozenset[str] = frozenset(
         "vitals",
         "medication_administration",
         "clinical_incidents",
+        "patient_portal_bindings",
     }
 )
 
@@ -535,9 +549,10 @@ async def approve_merge(
     merge_log_id: uuid.UUID,
     approved_by: uuid.UUID,
     caller_facility_id: uuid.UUID | None = None,
-) -> "PatientMergeLog":
+) -> PatientMergeLog:
+    from datetime import datetime
+
     from app.patients.models import PatientMergeLog
-    from datetime import datetime, timezone
 
     # Blocker 6: lock the merge log row for the duration of this decision.
     # Without this, two supervisors approving the same request concurrently
@@ -601,6 +616,9 @@ async def approve_merge(
     await _repoint_admissions(db, source=source, target=target)
     await _repoint_files(db, source=source, target=target)
     await _repoint_fhir_bundle_transactions(db, source=source, target=target)
+    await _reconcile_patient_portal_bindings(
+        db, source=source, target=target, approved_by=approved_by
+    )
 
     async with audited_mutation(
         db,
@@ -621,7 +639,7 @@ async def approve_merge(
 
     merge_log.status = "approved"
     merge_log.approved_by = approved_by
-    merge_log.approved_at = datetime.now(timezone.utc)
+    merge_log.approved_at = datetime.now(UTC)
     merge_log.after_snapshot = {"source": _patient_snapshot(source), "target": _patient_snapshot(target)}
     await db.flush()
     await db.refresh(merge_log)
@@ -668,6 +686,78 @@ async def _repoint_identifiers(db: AsyncSession, *, source: Patient, target: Pat
                 f"cannot auto-repoint, needs manual resolution before this "
                 f"merge can be approved"
             )
+    await db.flush()
+
+
+async def _reconcile_patient_portal_bindings(
+    db: AsyncSession,
+    *,
+    source: Patient,
+    target: Patient,
+    approved_by: uuid.UUID,
+) -> None:
+    """Preserve portal safety when two patient records become one.
+
+    A lone source binding follows the surviving patient. If both records have
+    active portal accounts, the source binding is revoked instead: silently
+    granting two accounts access to one clinical identity is not an acceptable
+    conflict resolution. Registration can re-verify the revoked account later.
+    Historical revoked bindings remain on the original patient as evidence.
+    """
+    active = (
+        await db.execute(
+            select(PatientPortalBinding)
+            .where(
+                PatientPortalBinding.patient_id.in_([source.id, target.id]),
+                PatientPortalBinding.revoked_at.is_(None),
+            )
+            .with_for_update()
+        )
+    ).scalars().all()
+    source_binding = next((row for row in active if row.patient_id == source.id), None)
+    if source_binding is None:
+        return
+
+    target_has_binding = any(row.patient_id == target.id for row in active)
+    old_value = {
+        "patient_id": str(source.id),
+        "revoked_at": None,
+    }
+    if target_has_binding:
+        now = datetime.now(UTC)
+        values = {
+            "revoked_at": now,
+            "revoked_by": approved_by,
+            "revocation_reason": "patient_merge_requires_identity_reverification",
+        }
+        new_value = {"patient_id": str(source.id), "revoked_at": now.isoformat()}
+        reason = "patient_merge_requires_identity_reverification"
+    else:
+        values = {"patient_id": target.id}
+        new_value = {"patient_id": str(target.id), "revoked_at": None}
+        reason = "patient_merge_repoint"
+
+    async with audited_mutation(
+        db,
+        facility_id=source.facility_id,
+        action=AuditAction.UPDATE,
+        resource_type="patient_portal_bindings",
+        user_id=approved_by,
+        patient_id=source.id,
+    ) as audit:
+        audit.resource_id = source_binding.id
+        audit.old_value = old_value
+        audit.new_value = new_value
+        audit.reason = reason
+        await db.execute(
+            update(PatientPortalBinding)
+            .where(
+                PatientPortalBinding.patient_id == source.id,
+                PatientPortalBinding.user_id == source_binding.user_id,
+                PatientPortalBinding.revoked_at.is_(None),
+            )
+            .values(**values)
+        )
     await db.flush()
 
 
@@ -934,7 +1024,7 @@ async def reject_merge(
     rejected_by: uuid.UUID,
     reason: str | None,
     caller_facility_id: uuid.UUID | None = None,
-) -> "PatientMergeLog":
+) -> PatientMergeLog:
     from app.patients.models import PatientMergeLog
 
     merge_log = await db.get(PatientMergeLog, merge_log_id)
