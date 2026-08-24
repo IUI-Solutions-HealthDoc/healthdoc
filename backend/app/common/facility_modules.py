@@ -21,7 +21,7 @@ is an upsert and not an update.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.auth.deps import CurrentDbUser, require_roles
+from app.common.cache import invalidate
 from app.common.db import Base, get_db
 from app.common.enums import ModuleCode
 from app.common.models import Timestamps, UUIDPk
@@ -99,12 +100,13 @@ class FacilityModuleUpdate(BaseModel):
 router = APIRouter(prefix="/facility/modules", tags=["facility"])
 
 _ADMIN = (Depends(require_roles("admin")),)
+_DB_DEPENDENCY = Depends(get_db)
 
 
 @router.get("", response_model=FacilityModuleListOut, dependencies=list(_ADMIN))
 async def list_facility_modules(
     current_db_user: CurrentDbUser,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = _DB_DEPENDENCY,
 ) -> FacilityModuleListOut:
     """Every toggleable module with its state at the caller's facility.
 
@@ -148,7 +150,7 @@ async def update_facility_module(
     module_code: str,
     payload: FacilityModuleUpdate,
     current_db_user: CurrentDbUser,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = _DB_DEPENDENCY,
 ) -> FacilityModuleOut:
     """Enable or disable one module at the caller's own facility.
 
@@ -190,7 +192,7 @@ async def update_facility_module(
         )
     ).scalar_one_or_none()
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if row is None:
         row = FacilityModule(
             id=uuid.uuid4(),
@@ -217,4 +219,5 @@ async def update_facility_module(
     await db.flush()
     await db.commit()
     await db.refresh(row)
+    await invalidate("facility-capabilities", str(current_db_user.facility_id))
     return FacilityModuleOut.model_validate(row)
