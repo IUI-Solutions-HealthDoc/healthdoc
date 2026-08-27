@@ -3,3 +3,7 @@ pytest==8.*
 pytest-asyncio==0.23.*
 ruff==0.5.*
 aiosqlite==0.20.*
+
+# WASA requires zero active unpatched CVEs, re-verified before the audit.
+# `make audit-deps` runs this against requirements.txt.
+pip-audit>=2.7

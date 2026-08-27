@@ -20,20 +20,24 @@ Storing `sub` where `users.id` belongs has produced three separate defects:
 lab dual-verification silently never matched (#260), and two FK violations on
 writes (#310, #311). Anything that records "who did this" wants CurrentDbUser.
 """
+import logging
 import time
 import uuid
 from typing import Annotated
 
 import httpx
+import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError, jwt
+from jwt import InvalidTokenError, PyJWKSet
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.config import get_settings
 from app.common.db import get_db
+
+log = logging.getLogger("healthdoc.auth")
 
 _bearer = HTTPBearer(auto_error=False)
 _jwks_cache: dict = {"keys": None, "fetched_at": 0.0}
@@ -64,26 +68,76 @@ async def _get_jwks() -> dict:
     return _jwks_cache["keys"]
 
 
+def _signing_key(token: str, jwks: dict):
+    """Pick the JWKS key matching this token's `kid`.
+
+    python-jose accepted the whole JWKS and chose internally. PyJWT wants one
+    key, which is an improvement: selecting by `kid` explicitly means an
+    unexpected key never gets tried, and a token whose `kid` we do not publish
+    is refused rather than quietly matched against something else.
+    """
+    kid = jwt.get_unverified_header(token).get("kid")
+    if not kid:
+        raise InvalidTokenError("token header carries no kid")
+    for key in PyJWKSet.from_dict(jwks).keys:
+        if key.key_id == kid:
+            return key.key
+    raise InvalidTokenError("no JWKS key matches this token's kid")
+
+
 async def get_current_user(
     creds: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
 ) -> AuthUser:
     if creds is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Missing bearer token")
+
+    settings = get_settings()
+    token = creds.credentials
     try:
+        jwks = await _get_jwks()
+        # AUDIENCE. `jwt_audience` unset means the aud claim is not checked,
+        # which is what python-jose was doing behind `verify_aud: False` and a
+        # "tighten later" comment. Unverified aud means a token minted for ANY
+        # other client in this realm is accepted here.
+        #
+        # It is not enabled by default because it only works once the realm
+        # emits the right audience, and turning it on against a Keycloak that
+        # does not would lock every user out. app/main.py refuses to start in
+        # production while it is unset, so the gap cannot reach an environment
+        # that matters — see _assert_production_auth_hardening there.
+        audience = settings.jwt_audience or None
         claims = jwt.decode(
-            creds.credentials,
-            await _get_jwks(),
+            token,
+            _signing_key(token, jwks),
             algorithms=["RS256"],
-            issuer=get_settings().jwt_issuer,
-            options={"verify_aud": False}, # tighten per-client in W2 hardening
+            issuer=settings.jwt_issuer,
+            audience=audience,
+            options={
+                "verify_aud": audience is not None,
+                # PyJWT does not require these by default. A token with no exp
+                # never expires, and one with no sub has no subject to scope by.
+                "require": ["exp", "iat", "sub"],
+            },
         )
-    except JWTError as exc:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, f"Invalid token: {exc}") from exc
+    except InvalidTokenError as exc:
+        # The reason goes to the log, never to the caller. The old message was
+        # f"Invalid token: {exc}", which tells an attacker probing with forged
+        # tokens exactly which check failed — signature vs expiry vs issuer is
+        # a free oracle for narrowing an attack.
+        log.warning("JWT rejected: %s", type(exc).__name__)
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token") from exc
+    except httpx.HTTPError as exc:
+        # JWKS unreachable is OUR outage, not the caller's bad credential.
+        # Returning 401 would tell every user their login is broken.
+        log.error("JWKS fetch failed during token verification: %s", type(exc).__name__)
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "Identity provider unavailable"
+        ) from exc
+
     return AuthUser(
         sub=claims["sub"],
         username=claims.get("preferred_username", ""),
         roles=claims.get("realm_access", {}).get("roles", []),
-
         amr=claims.get("amr", []),
     )
 

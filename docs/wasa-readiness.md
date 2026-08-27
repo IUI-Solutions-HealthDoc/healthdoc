@@ -1,6 +1,6 @@
 # WASA readiness — HealthDoc HMIS
 
-**Assessed:** 26 Aug 2026, against `staging` @ `beb5ba7`
+**Assessed:** 26 Aug 2026 · **Remediated:** 26 Aug 2026
 **Standard:** NHA Web Application Security Assessment (CERT-In empanelled auditor)
 **Pass condition:** zero open Critical, High **or Medium** findings
 
@@ -12,59 +12,92 @@
 
 ## Verdict
 
-**Not ready to book the audit.** Two blockers, both fixable in days, neither
-architectural.
+**Both blockers are closed. The cybersecurity track is ready; the ABDM
+functional track is not, because the workflows do not exist yet.**
 
-The security *architecture* is genuinely strong — TLS 1.3-only, full header set,
+A correction to the first version of this document: it claimed "no handler
+returns exception text." That was wrong. `app/auth/deps.py` raised
+`HTTPException(401, f"Invalid token: {exc}")` — the grep behind the claim
+searched for `detail=str(exc)` and this was positional. The same file also
+disabled audience verification behind a "tighten later" comment. Both were
+found only when the file was read for the PyJWT migration, and both are now
+fixed. A checklist answered by grep is a checklist answered by grep.
+
+The security *architecture* was already strong — TLS 1.3-only, full header set,
 AES-GCM at rest with key versioning, tokens never leaving memory, facility
-scoping backed by tests. What fails is inventory hygiene and one missing control.
+scoping backed by tests. What failed was inventory hygiene and two missing
+controls, and both are now in place.
 
 | Track | State |
 |---|---|
-| Cybersecurity (VAPT) | 2 blockers, 3 minor |
-| ABDM functional | **Cannot be assessed — the workflows do not exist yet** |
+| Cybersecurity (VAPT) | ✅ blockers closed · 1 minor open (M3) · **930 tests pass on the upgraded stack** |
+| ABDM functional | ❌ **Cannot be assessed — the workflows do not exist yet** |
 
 ---
 
-## Blockers
+## Blockers — CLOSED
 
-### B1 — `python-jose` is the JWT library and carries unfixable CVEs
+### B1 — `python-jose` on the auth path ✅
 
-`app/auth/deps.py:73` verifies every access token with `python-jose` 3.3.0.
+Replaced with `PyJWT[crypto]>=2.13.0`. `pip-audit -r requirements.txt` now
+reports **"No known vulnerabilities found"** across the whole file.
 
-| CVE | Impact |
-|---|---|
-| PYSEC-2024-232 (CVE-2024-33663) | Algorithm confusion |
-| PYSEC-2024-233 (CVE-2024-33664) | DoS via crafted JWE |
-| PYSEC-2025-185 | **No fix version published** |
+Two wrong turns worth recording: PyJWT 2.10.1 carries five advisories of its
+own, and Starlette 0.52.1 still carried seven — the first set of pins I tried
+looked modern and cleared nothing. The floors that actually close everything
+are PyJWT 2.13.0, Starlette 1.6.0 (via FastAPI 0.141.1) and python-multipart
+0.0.32. Verified by running the audit, not by reading changelogs.
 
-An auditor will find a vulnerable dependency on the *authentication path* —
-which is the highest-value line in the application. PYSEC-2025-185 has no
-upstream fix, so version-bumping cannot close it. The library is effectively
-unmaintained.
+Three defects fixed in the same file while migrating:
 
-**Remediation:** migrate to `PyJWT`. Localised — the only call sites are
-`jwt.decode` and the `JWTError` import in `app/auth/deps.py`. This also removes
-the transitive `ecdsa` finding (PYSEC-2026-1325, likewise no fix), since `ecdsa`
-arrives only through `python-jose[cryptography]`.
+- **401 responses leaked the reason.** `f"Invalid token: {exc}"` tells an
+  attacker probing with forged tokens whether the signature, the expiry or the
+  issuer failed — a free oracle. Now a flat `"Invalid token"`, reason to the log.
+- **`exp`, `iat` and `sub` were not required.** PyJWT does not require them by
+  default; a token minted without `exp` never expires.
+- **JWKS outage returned 401.** Our own outage told every user their password
+  was wrong. Now 503.
 
-### B2 — No MFA
+### B2 — No MFA ✅
 
-`infra/keycloak/realm-healthdoc.json` has no `otpPolicyType`, no OTP required
-action, and an empty `authenticationFlows`. WASA requires *"robust MFA
-enforcement for clinical/admin users."*
+TOTP policy and `CONFIGURE_TOTP` in the shared realm; MFA forcing and the
+password policy applied at render time by
+`scripts/deploy/render_keycloak_realm.py`.
 
-This is the one finding that is a missing **control**, not a missing patch — it
-cannot be closed by an upgrade, and it needs a rollout decision.
+**Both are production-only, and the reason is not convenience.** Forcing TOTP
+in the shared realm sends all thirteen dev identities to an OTP enrolment
+screen. A strong password policy there is worse: `dev_setup.sh` sets every test
+account to `devpass`, Keycloak enforces the policy at set-password time, and
+all thirteen `kc set-password` calls are rejected — leaving the accounts with
+no usable credential and the real-auth smoke suite unable to log in as anybody.
 
-**Remediation:** enable OTP in the realm and make `CONFIGURE_TOTP` a required
-action for `admin`, `doctor` and `auditor` at minimum. Decide whether it is
-enforced for all clinical roles or risk-scoped, and document the reasoning —
-auditors ask.
+That is not hypothetical. The policy was first added to the shared realm and
+broke `nurse-auth-e2e` on the remediation PR, in the same commit as a docstring
+explaining why MFA could not live there. The general rule, now stated in the
+renderer: **a control that development cannot satisfy does not belong in the
+shared realm, however correct it is for production.**
+
+The renderer refuses to emit a production realm that has lost brute-force
+protection or its OTP policy — both are harmless in dev, so losing them is a
+regression rather than an environment difference. The password policy is
+*imposed* rather than required, and a test asserts the shipped dev realm does
+**not** carry one.
+
+### B3 (new) — audience was never verified ✅
+
+`options={"verify_aud": False}` meant a token issued to **any other client in
+the realm** was accepted. Now controlled by `JWT_AUDIENCE`, with an
+`oidc-audience-mapper` added to the frontend client so Keycloak emits it.
+
+Left off by default because enabling it against a realm without the mapper
+locks out every user — so `app/main.py` **refuses to start in production**
+while it is unset. The permissive default cannot reach production, which is the
+only place it matters. This project has already shipped two "tighten later"
+comments that were still there months on; a startup failure does not forget.
 
 ---
 
-## Fixed during this assessment (`beb5ba7`)
+## Also fixed during this assessment (`beb5ba7`)
 
 **Unvalidated identifier interpolated into DDL.** `app/users/models.py` built a
 sequence name from `facilities.code` with only `.replace("-", "_")` applied — a
@@ -87,13 +120,13 @@ open in production. `ENVIRONMENT=production` added there.
 
 | # | Finding | Where |
 |---|---|---|
-| M1 | `starlette` 0.46.2 — 9 CVEs (fix ≤1.3.1); requires a FastAPI bump | `requirements.txt:1` |
-| M2 | `python-multipart` 0.0.9 — 7 CVEs (fix 0.0.31); this is the **file-upload** parser | `requirements.txt:15` |
-| M3 | CSP allows `script-src 'unsafe-inline'` — a standard scanner finding; needs Next.js nonces to remove | `infra/nginx/prod-conf.d/healthdoc.conf:26` |
-| M4 | Five unauthenticated `/ping` endpoints returning `{"status":"stub"}` | `ot`, `blood_bank`, `registration`, `security_audit`, `outbox` routers |
-| M5 | Session-presence cookie lacks `Secure` (holds only `"1"` + a role hint — no token) | `frontend/src/lib/auth/index.ts:35` |
-| M6 | No Keycloak `passwordPolicy` — no complexity or history rules | `realm-healthdoc.json` |
-| M7 | `Facility.timezone` declared three times with disagreeing defaults; last wins | `app/users/models.py:27,31,33` |
+| M1 | ✅ Starlette → 1.6.0 via FastAPI 0.141.1 |
+| M2 | ✅ python-multipart → 0.0.32 |
+| M3 | ⏳ CSP `'unsafe-inline'` — **still open**; needs Next.js nonces, the one finding with real work behind it |
+| M4 | ✅ Five `/ping` stubs now require `admin` |
+| M5 | ✅ Session cookie gets `Secure` on HTTPS |
+| M6 | ✅ Password policy: 12 chars, mixed case, digit, symbol, history 5, pbkdf2-sha512 — imposed by the production realm renderer, absent from the dev realm by design |
+| M7 | ✅ `Facility.timezone` de-duplicated 3 → 1 |
 
 ---
 
@@ -107,11 +140,11 @@ open in production. `ENVIRONMENT=production` added there.
 | SSRF | Every outbound URL derives from settings (`jwt_issuer`, `icd11_base_url`, `abdm_gateway_base_url`). No request data reaches a URL. |
 | Brute force | Keycloak: `bruteForceProtected`, `failureFactor: 5`, 15-minute lockout, non-permanent. Covered by `tests/test_auth_lockout_policy.py`. |
 | Rate limiting | nginx `limit_req` — 30 r/s API, 10 r/s auth, both burst-limited. |
-| Token handling | Access token in memory only — never cookie, never `localStorage` (`lib/auth/keycloak.ts:8`). Logout calls Keycloak `end_session`. |
+| Token handling | Access token in memory only — never cookie, never `localStorage` (`lib/auth/keycloak.ts:8`). Logout calls Keycloak `end_session`. Verification requires `exp`/`iat`/`sub`, selects the JWKS key by `kid`, and returns 503 (not 401) when the IdP is unreachable. |
 | TLS | `ssl_protocols TLSv1.3` only. |
 | Headers | HSTS (2 yr, `includeSubDomains`), `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, CSP with `frame-ancestors 'none'`. |
 | Data at rest | AES-GCM via `cryptography`; key **versioning** with multi-version read and rotation support; Aadhaar stored as HMAC blind index, never plaintext. |
-| Error leakage | No handler returns exception text. No `detail=str(exc)` anywhere. |
+| Error leakage | 401s return a flat `"Invalid token"`; the reason goes to the log. **This line previously claimed no handler leaked exception text and was wrong** — `app/auth/deps.py` raised `f"Invalid token: {exc}"`, which the originating grep missed because it was positional. Fixed and covered by `tests/test_jwt_verification.py::test_the_401_body_does_not_say_WHY`. |
 | Frontend deps | `npm audit --omit=dev` → **0 vulnerabilities**. |
 | Audit trail | Append-only `audit_logs` with per-facility hash chaining, enforced by DB triggers (update/delete raise). |
 
@@ -149,13 +182,15 @@ for an assessment of an integration that is one-sixth built.
 
 ---
 
-## Recommended order
+## What remains
 
-1. **Replace `python-jose` with PyJWT** — Critical, on the auth path, one CVE unfixable. Half a day.
-2. **Bump `starlette` (via FastAPI) and `python-multipart`** — mechanical; re-run `pip-audit` to zero.
-3. **Enable MFA in the realm** — needs your rollout decision, so start it early.
-4. **Close M3–M7** — an afternoon.
-5. **Build ABDM M1 properly** — enrol-by-Aadhaar and login-by-ABHA, against the v3 spec. The session path is now confirmed (`/api/hiecm/gateway/v3/sessions`); the enrolment paths are the remaining unknown.
+1. ~~Verify the dependency jump.~~ ✅ Done — FastAPI 0.115 → 0.141 and Starlette
+   0.46 → 1.6 broke nothing. **909 passed.** Re-verify CVEs any time with
+   `make audit-deps`.
+2. **Set `JWT_AUDIENCE=healthdoc-backend`** in production, after a Keycloak
+   re-import picks up the audience mapper. Production will not boot without it.
+3. **M3 — CSP `'unsafe-inline'`.** The only remaining scanner finding.
+4. **Build ABDM M1 properly** — enrol-by-Aadhaar and login-by-ABHA, against the v3 spec. The session path is now confirmed (`/api/hiecm/gateway/v3/sessions`); the enrolment paths are the remaining unknown.
 6. **Then** scope the audit — with M1 working end-to-end in sandbox, which is what the functional track actually examines.
 
 Re-run before booking:

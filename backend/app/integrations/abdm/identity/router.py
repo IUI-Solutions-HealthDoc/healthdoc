@@ -13,7 +13,7 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,6 +26,12 @@ from app.integrations.abdm.client import (
     AbdmRejected,
     AbdmUnavailable,
     get_abdm_client,
+)
+from app.integrations.abdm.identity import service as identity_service
+from app.integrations.abdm.identity.crypto import AbdmPublicKeyMissing
+from app.integrations.abdm.identity.otp_session import (
+    OtpSessionMismatch,
+    OtpSessionNotFound,
 )
 from app.outbox.service import enqueue
 from app.patients.models import Patient
@@ -273,3 +279,227 @@ async def unlink_abha(
     )
     await db.refresh(patient)
     return AbhaOut(patient_id=patient.id, abha_number=None)
+
+
+# ---------------------------------------------------------------- M1 flows
+#
+# Creating an ABHA (Aadhaar + OTP) and proving an existing one (ABHA + OTP).
+# Both are two-legged: request, then verify. Our session id is what the client
+# holds between the legs — ABDM's transaction id never leaves the server,
+# because a client holding it could replay it against ABDM directly.
+#
+# Gated to the desk that actually registers patients. Not admin: an
+# administrator is not the person with the patient in front of them, and an
+# identity flow completed by someone who never met them is exactly the
+# attribution gap this codebase has fixed three times elsewhere.
+
+class AadhaarOtpRequest(BaseModel):
+    #: Twelve digits. Encrypted before transmission and never stored.
+    aadhaar: str = Field(min_length=12, max_length=12, pattern=r"^\d{12}$")
+
+
+class AbhaLoginOtpRequest(BaseModel):
+    abha_number: str
+    #: Optional: attach the verified ABHA to a patient already registered here.
+    patient_id: uuid.UUID | None = None
+
+
+class OtpVerifyRequest(BaseModel):
+    session_id: str
+    otp: str = Field(min_length=4, max_length=8, pattern=r"^\d{4,8}$")
+    #: Enrolment only — the mobile to attach to the new ABHA.
+    mobile: str | None = Field(default=None, pattern=r"^\d{10}$")
+
+
+class OtpRequestedOut(BaseModel):
+    session_id: str
+    masked_mobile: str | None = None
+
+
+class AbhaIssuedOut(BaseModel):
+    abha_number: str
+    abha_address: str | None = None
+    name: str | None = None
+    gender: str | None = None
+    date_of_birth: str | None = None
+    #: Deliberately absent: the linking token. It is a credential, it is stored
+    #: encrypted server-side by the link endpoint, and a browser has no use for
+    #: it. Returning it would put it in a response body, a proxy log and a
+    #: React devtools tree for no gain.
+
+
+def _identity_error(exc: identity_service.AbdmIdentityError) -> HTTPException:
+    return HTTPException(502, {"code": exc.code, "message": exc.message})
+
+
+def _unavailable(reason: str) -> HTTPException:
+    return HTTPException(503, {"code": "abdm_unavailable", "message": reason})
+
+
+@router.post(
+    "/enrol/aadhaar/request-otp",
+    response_model=OtpRequestedOut,
+    dependencies=[Depends(require_roles("receptionist", "doctor"))],
+)
+async def enrol_request_otp(
+    payload: AadhaarOtpRequest,
+    current_db_user: CurrentDbUser,
+) -> OtpRequestedOut:
+    """Send an OTP to the mobile registered against this Aadhaar.
+
+    The Aadhaar number is encrypted in this call and referenced nowhere after
+    it — not in the OTP session, not in an audit row, not in a log line.
+    """
+    try:
+        result = await identity_service.request_aadhaar_otp(
+            aadhaar=payload.aadhaar,
+            facility_id=str(current_db_user.facility_id),
+            started_by=str(current_db_user.id),
+        )
+    except AbdmNotConfigured:
+        raise _unavailable("ABDM credentials are not configured on this server")
+    except AbdmPublicKeyMissing:
+        raise _unavailable("ABDM public certificate is not configured on this server")
+    except AbdmUnavailable:
+        raise _unavailable("ABDM did not respond")
+    except AbdmRejected as exc:
+        # Status only. The gateway's body can echo the identifier we just sent.
+        log.warning("ABDM declined an enrolment OTP request (%s)", exc.status_code)
+        raise HTTPException(502, {
+            "code": "abdm_rejected",
+            "message": "ABDM declined the request",
+        })
+    except identity_service.AbdmIdentityError as exc:
+        raise _identity_error(exc)
+
+    return OtpRequestedOut(session_id=result.session_id, masked_mobile=result.masked_mobile)
+
+
+@router.post(
+    "/enrol/aadhaar/verify-otp",
+    response_model=AbhaIssuedOut,
+    dependencies=[Depends(require_roles("receptionist", "doctor"))],
+)
+async def enrol_verify_otp(
+    payload: OtpVerifyRequest,
+    current_db_user: CurrentDbUser,
+) -> AbhaIssuedOut:
+    """Present the OTP and receive a newly created ABHA."""
+    try:
+        issued = await identity_service.enrol_by_aadhaar_otp(
+            session_id=payload.session_id,
+            otp=payload.otp,
+            mobile=payload.mobile,
+            facility_id=str(current_db_user.facility_id),
+        )
+    except (OtpSessionNotFound, OtpSessionMismatch):
+        # One response for expired, already-spent, wrong-facility and
+        # wrong-purpose. Distinguishing them would confirm that someone else's
+        # transaction exists, which is the enumeration oracle this codebase
+        # avoids with 404-not-403 everywhere else.
+        raise HTTPException(404, {
+            "code": "otp_session_not_found",
+            "message": "This OTP session has expired or does not exist",
+        })
+    except AbdmNotConfigured:
+        raise _unavailable("ABDM credentials are not configured on this server")
+    except AbdmPublicKeyMissing:
+        raise _unavailable("ABDM public certificate is not configured on this server")
+    except AbdmUnavailable:
+        raise _unavailable("ABDM did not respond")
+    except AbdmRejected as exc:
+        log.warning("ABDM declined an enrolment verification (%s)", exc.status_code)
+        raise HTTPException(502, {
+            "code": "abdm_rejected",
+            "message": "ABDM declined the OTP",
+        })
+    except identity_service.AbdmIdentityError as exc:
+        raise _identity_error(exc)
+
+    return AbhaIssuedOut(
+        abha_number=issued.abha_number,
+        abha_address=issued.abha_address,
+        name=issued.name,
+        gender=issued.gender,
+        date_of_birth=issued.date_of_birth,
+    )
+
+
+@router.post(
+    "/login/request-otp",
+    response_model=OtpRequestedOut,
+    dependencies=[Depends(require_roles("receptionist", "doctor"))],
+)
+async def login_request_otp(
+    payload: AbhaLoginOtpRequest,
+    current_db_user: CurrentDbUser,
+) -> OtpRequestedOut:
+    """Send an OTP to the mobile behind an ABHA the patient says they hold."""
+    try:
+        result = await identity_service.request_login_otp(
+            abha_number=_normalise_abha(payload.abha_number),
+            facility_id=str(current_db_user.facility_id),
+            started_by=str(current_db_user.id),
+            patient_id=str(payload.patient_id) if payload.patient_id else None,
+        )
+    except AbdmNotConfigured:
+        raise _unavailable("ABDM credentials are not configured on this server")
+    except AbdmPublicKeyMissing:
+        raise _unavailable("ABDM public certificate is not configured on this server")
+    except AbdmUnavailable:
+        raise _unavailable("ABDM did not respond")
+    except AbdmRejected as exc:
+        log.warning("ABDM declined a login OTP request (%s)", exc.status_code)
+        raise HTTPException(502, {
+            "code": "abdm_rejected",
+            "message": "ABDM declined the request",
+        })
+    except identity_service.AbdmIdentityError as exc:
+        raise _identity_error(exc)
+
+    return OtpRequestedOut(session_id=result.session_id, masked_mobile=result.masked_mobile)
+
+
+@router.post(
+    "/login/verify-otp",
+    response_model=AbhaIssuedOut,
+    dependencies=[Depends(require_roles("receptionist", "doctor"))],
+)
+async def login_verify_otp(
+    payload: OtpVerifyRequest,
+    current_db_user: CurrentDbUser,
+) -> AbhaIssuedOut:
+    """The OTP proves the patient holds this ABHA."""
+    try:
+        issued = await identity_service.verify_login_otp(
+            session_id=payload.session_id,
+            otp=payload.otp,
+            facility_id=str(current_db_user.facility_id),
+        )
+    except (OtpSessionNotFound, OtpSessionMismatch):
+        raise HTTPException(404, {
+            "code": "otp_session_not_found",
+            "message": "This OTP session has expired or does not exist",
+        })
+    except AbdmNotConfigured:
+        raise _unavailable("ABDM credentials are not configured on this server")
+    except AbdmPublicKeyMissing:
+        raise _unavailable("ABDM public certificate is not configured on this server")
+    except AbdmUnavailable:
+        raise _unavailable("ABDM did not respond")
+    except AbdmRejected as exc:
+        log.warning("ABDM declined a login verification (%s)", exc.status_code)
+        raise HTTPException(502, {
+            "code": "abdm_rejected",
+            "message": "ABDM declined the OTP",
+        })
+    except identity_service.AbdmIdentityError as exc:
+        raise _identity_error(exc)
+
+    return AbhaIssuedOut(
+        abha_number=issued.abha_number,
+        abha_address=issued.abha_address,
+        name=issued.name,
+        gender=issued.gender,
+        date_of_birth=issued.date_of_birth,
+    )
