@@ -1,7 +1,7 @@
 # HealthDoc dev commands — run from repo root
 COMPOSE := docker compose -f infra/docker-compose.yml --env-file .env
 
-.PHONY: setup up down logs ps migrate revision test test-db test-pg lint contract migration-rehearsal fe be certs
+.PHONY: setup up down logs ps migrate revision test test-db test-pg lint audit-deps contract migration-rehearsal fe be certs
 
 # Tests that need a real PostgreSQL read TEST_DATABASE_URL and are skipped
 # without it. Built from .env so it follows POSTGRES_PORT (55432 here, not the
@@ -77,6 +77,13 @@ test-db-reset:    ## Drop and rebuild the test database (after editing a migrati
 
 test-pg: test-db  ## Run the tests that need real PostgreSQL: make test-pg k=late_utc
 	@cd backend && $(TEST_ENV) ../.venv/bin/pytest $(if $(k),-k "$(k)",) $(if $(p),$(p),tests/) -q
+
+audit-deps:       ## CVE scan of backend + frontend dependencies (WASA gate)
+	@echo "== backend (pip-audit) =="
+	@cd backend && ../.venv/bin/pip-audit -r requirements.txt --progress-spinner off
+	@echo "== frontend (npm audit) =="
+	@cd frontend && npm audit --omit=dev
+	@echo "OK: no known vulnerabilities"
 
 lint:             ## Lint backend + frontend
 	$(COMPOSE) exec backend ruff check .

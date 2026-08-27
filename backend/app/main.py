@@ -35,6 +35,41 @@ MODULES = [
 settings = get_settings()
 
 
+def _assert_production_auth_hardening() -> None:
+    """Refuse to serve production traffic with a development-grade auth config.
+
+    Some hardening cannot be switched on by default without breaking every
+    running dev stack — audience verification only works once the Keycloak
+    realm emits a resource-server `aud`, and enabling it against a realm that
+    does not locks out every user.
+
+    The usual answer is a permissive default plus a comment asking someone to
+    remember. This project has been bitten by exactly that: `verify_aud: False`
+    carried a "tighten per-client in W2 hardening" note and was still there
+    months later, and the OpenAPI schema shipped exposed because `environment`
+    defaulted to "dev" and no production env file overrode it.
+
+    So the permissive default stays for dev and becomes a HARD FAILURE in
+    production. A misconfigured deployment does not start, which is loud, early
+    and cheap — as opposed to passing an audit while accepting tokens minted
+    for a different client.
+    """
+    if settings.environment.strip().lower() not in {"prod", "production"}:
+        return
+
+    missing = []
+    if not settings.jwt_audience:
+        missing.append(
+            "JWT_AUDIENCE is unset — the `aud` claim is not verified, so a token "
+            "issued to any other client in this realm would be accepted"
+        )
+    if missing:
+        raise RuntimeError(
+            "Refusing to start in production with development auth settings:\n  - "
+            + "\n  - ".join(missing)
+        )
+
+
 @asynccontextmanager
 async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
     """Validate cryptographic configuration before serving traffic."""
@@ -43,6 +78,7 @@ async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
     _get_encryption_key()
     _get_hmac_key()
     log.info("Crypto keys validated")
+    _assert_production_auth_hardening()
     yield
 
 

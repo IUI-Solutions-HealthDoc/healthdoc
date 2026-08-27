@@ -32,7 +32,11 @@ function getCookie(name: string): string | null {
 }
 
 function setCookie(name: string, value: string) {
-  document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=86400; SameSite=Lax`;
+    // `Secure` on anything but plain-HTTP localhost. These carry no token — a
+  // presence flag and a role hint — but a cookie without Secure is a scanner
+  // finding on its own, and the app is HTTPS everywhere it is not a dev box.
+  const secure = location.protocol === "https:" ? "; Secure" : "";
+  document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=86400; SameSite=Lax${secure}`;
 }
 
 function deleteCookie(name: string) {
