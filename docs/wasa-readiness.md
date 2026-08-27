@@ -30,7 +30,7 @@ controls, and both are now in place.
 
 | Track | State |
 |---|---|
-| Cybersecurity (VAPT) | ✅ blockers closed · 1 minor open (M3) · **909 tests pass on the upgraded stack** |
+| Cybersecurity (VAPT) | ✅ blockers closed · 1 minor open (M3) · **930 tests pass on the upgraded stack** |
 | ABDM functional | ❌ **Cannot be assessed — the workflows do not exist yet** |
 
 ---
@@ -60,15 +60,28 @@ Three defects fixed in the same file while migrating:
 
 ### B2 — No MFA ✅
 
-TOTP policy, a 12-character password policy with history and pbkdf2-sha512, and
-`CONFIGURE_TOTP` added to the realm.
+TOTP policy and `CONFIGURE_TOTP` in the shared realm; MFA forcing and the
+password policy applied at render time by
+`scripts/deploy/render_keycloak_realm.py`.
 
-**Forced in production only**, via `scripts/deploy/render_keycloak_realm.py`.
-Setting it as a default action in the dev realm would send all thirteen dev
-identities and the Puppeteer smoke suite to an OTP enrolment screen. The
-renderer now also refuses to emit a production realm that lacks brute-force
-protection, a password policy or an OTP policy — a rendered realm that quietly
-lost its MFA is worse than no rendered realm.
+**Both are production-only, and the reason is not convenience.** Forcing TOTP
+in the shared realm sends all thirteen dev identities to an OTP enrolment
+screen. A strong password policy there is worse: `dev_setup.sh` sets every test
+account to `devpass`, Keycloak enforces the policy at set-password time, and
+all thirteen `kc set-password` calls are rejected — leaving the accounts with
+no usable credential and the real-auth smoke suite unable to log in as anybody.
+
+That is not hypothetical. The policy was first added to the shared realm and
+broke `nurse-auth-e2e` on the remediation PR, in the same commit as a docstring
+explaining why MFA could not live there. The general rule, now stated in the
+renderer: **a control that development cannot satisfy does not belong in the
+shared realm, however correct it is for production.**
+
+The renderer refuses to emit a production realm that has lost brute-force
+protection or its OTP policy — both are harmless in dev, so losing them is a
+regression rather than an environment difference. The password policy is
+*imposed* rather than required, and a test asserts the shipped dev realm does
+**not** carry one.
 
 ### B3 (new) — audience was never verified ✅
 
@@ -112,7 +125,7 @@ open in production. `ENVIRONMENT=production` added there.
 | M3 | ⏳ CSP `'unsafe-inline'` — **still open**; needs Next.js nonces, the one finding with real work behind it |
 | M4 | ✅ Five `/ping` stubs now require `admin` |
 | M5 | ✅ Session cookie gets `Secure` on HTTPS |
-| M6 | ✅ Password policy: 12 chars, mixed case, digit, symbol, history 5, pbkdf2-sha512 |
+| M6 | ✅ Password policy: 12 chars, mixed case, digit, symbol, history 5, pbkdf2-sha512 — imposed by the production realm renderer, absent from the dev realm by design |
 | M7 | ✅ `Facility.timezone` de-duplicated 3 → 1 |
 
 ---
