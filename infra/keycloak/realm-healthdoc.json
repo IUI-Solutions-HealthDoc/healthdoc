@@ -96,6 +96,17 @@
             "access.token.claim": "true",
             "lightweight.claim": "false"
           }
+        },
+        {
+          "name": "healthdoc-backend-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "healthdoc-backend",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
         }
       ],
       "attributes": {
@@ -230,6 +241,23 @@
       "realmRoles": [
         "admin"
       ]
+    }
+  ],
+  "otpPolicyType": "totp",
+  "otpPolicyAlgorithm": "HmacSHA1",
+  "otpPolicyDigits": 6,
+  "otpPolicyPeriod": 30,
+  "otpPolicyLookAheadWindow": 1,
+  "otpPolicyCodeReusable": false,
+  "requiredActions": [
+    {
+      "alias": "CONFIGURE_TOTP",
+      "name": "Configure OTP",
+      "providerId": "CONFIGURE_TOTP",
+      "enabled": true,
+      "defaultAction": false,
+      "priority": 10,
+      "config": {}
     }
   ]
 }
