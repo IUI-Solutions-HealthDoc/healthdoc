@@ -249,7 +249,6 @@
   "otpPolicyPeriod": 30,
   "otpPolicyLookAheadWindow": 1,
   "otpPolicyCodeReusable": false,
-  "passwordPolicy": "length(12) and upperCase(1) and lowerCase(1) and digits(1) and specialChars(1) and notUsername and passwordHistory(5) and hashAlgorithm(pbkdf2-sha512)",
   "requiredActions": [
     {
       "alias": "CONFIGURE_TOTP",

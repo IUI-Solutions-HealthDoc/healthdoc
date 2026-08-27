@@ -17,6 +17,18 @@ forcing it; this renderer forces it. That keeps one source of truth for realm
 shape while letting the two environments differ where they must — and, unlike a
 runbook step, it cannot be forgotten, because production realms are only ever
 produced by this script.
+
+THE SAME APPLIES TO THE PASSWORD POLICY, LEARNED THE HARD WAY
+
+A twelve-character policy was added to the shared realm and broke every dev
+login: dev_setup.sh sets thirteen accounts to "devpass", and Keycloak enforces
+the policy at set-password time, so all thirteen ended up with no usable
+credential. The rule now lives here.
+
+The general form: A CONTROL THAT DEVELOPMENT CANNOT SATISFY DOES NOT BELONG IN
+THE SHARED REALM. Forcing MFA and requiring strong passwords are both correct
+for production and both fatal to a dev stack, so both are applied at render
+time rather than at rest.
 """
 
 import argparse
@@ -28,6 +40,25 @@ from urllib.parse import urlsplit
 #: so this applies realm-wide rather than to clinical roles alone — which is
 #: stricter than WASA asks and simpler to evidence to an auditor.
 _FORCED_REQUIRED_ACTIONS = ("CONFIGURE_TOTP",)
+
+#: SET here, not required from the source realm.
+#:
+#: This first lived in infra/keycloak/realm-healthdoc.json and broke every dev
+#: login. scripts/dev_setup.sh provisions thirteen identities with the password
+#: "devpass"; Keycloak enforces the policy on `kc set-password`, so a
+#: twelve-character rule with upper/digit/symbol meant every one of those calls
+#: was rejected and nurse-auth-e2e could not sign in as anybody.
+#:
+#: Exactly the trap this module already documents for CONFIGURE_TOTP — and I
+#: walked into it one setting later. A control that dev cannot satisfy does not
+#: belong in the shared realm at all, no matter how correct it is for
+#: production. Defining it here means dev keeps working, production gets the
+#: real rule, and nobody has to remember a runbook step.
+_PRODUCTION_PASSWORD_POLICY = (
+    "length(12) and upperCase(1) and lowerCase(1) and digits(1) "
+    "and specialChars(1) and notUsername and passwordHistory(5) "
+    "and hashAlgorithm(pbkdf2-sha512)"
+)
 
 
 def _harden(realm: dict) -> None:
@@ -50,11 +81,14 @@ def _harden(realm: dict) -> None:
             "add them to infra/keycloak/realm-healthdoc.json"
         )
 
-    # Refuse to emit a production realm that lost its brute-force settings.
+    # Password rules are IMPOSED, not inherited — see the constant above for
+    # why the source realm must not carry them.
+    realm["passwordPolicy"] = _PRODUCTION_PASSWORD_POLICY
+
+    # These two are safe in dev, so they are required from source rather than
+    # imposed: if someone deletes them, that is a regression worth failing on.
     if not realm.get("bruteForceProtected"):
         raise ValueError("source realm must set bruteForceProtected")
-    if not realm.get("passwordPolicy"):
-        raise ValueError("source realm must set a passwordPolicy")
     if not realm.get("otpPolicyType"):
         raise ValueError("source realm must define an otpPolicyType for MFA")
 

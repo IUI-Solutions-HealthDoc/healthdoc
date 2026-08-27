@@ -19,14 +19,11 @@ REAL_REALM = Path(__file__).parents[2] / "infra" / "keycloak" / "realm-healthdoc
 def _realm_dict() -> dict:
     """A source realm that is actually VALID.
 
-    This fixture used to carry only `clients`, because origin substitution was
-    all the renderer did. The renderer now also refuses to emit a production
-    realm that has lost its MFA, brute-force or password controls — and the old
-    fixture, lacking all three, made that guard fire.
-
-    That failure was the guard working. The fix is to describe a realistic
-    realm here rather than to soften the check: a fixture thin enough to be
-    invalid is a fixture that cannot tell you whether rendering is correct.
+    Deliberately carries NO passwordPolicy. A dev realm must not have one:
+    dev_setup.sh provisions thirteen accounts with "devpass", and Keycloak
+    enforces the policy at set-password time, so a strong rule in the shared
+    realm leaves every dev identity without a usable credential. The renderer
+    imposes the production policy instead.
     """
     return {
         "clients": [
@@ -48,7 +45,6 @@ def _realm_dict() -> dict:
             }
         ],
         "bruteForceProtected": True,
-        "passwordPolicy": "length(12)",
         "otpPolicyType": "totp",
         "sslRequired": "external",
     }
@@ -127,7 +123,6 @@ def test_the_dev_realm_is_not_mutated(tmp_path: Path) -> None:
     [
         ("requiredActions", "CONFIGURE_TOTP"),
         ("bruteForceProtected", "bruteForceProtected"),
-        ("passwordPolicy", "passwordPolicy"),
         ("otpPolicyType", "otpPolicyType"),
     ],
 )
@@ -157,4 +152,41 @@ def test_the_shipped_dev_realm_can_actually_be_rendered(tmp_path: Path) -> None:
     mappers = {m["name"] for m in frontend.get("protocolMappers", [])}
     assert "healthdoc-backend-audience" in mappers, (
         "the audience mapper is gone — JWT_AUDIENCE would lock every user out"
+    )
+
+
+# ------------------------------------------------------- imposed, not inherited
+
+def test_production_render_imposes_the_password_policy(tmp_path: Path) -> None:
+    """The source realm has none; the rendered one must.
+
+    This is the regression that broke nurse-auth-e2e: the policy was put in the
+    shared realm, Keycloak rejected `kc set-password ... devpass` for all
+    thirteen dev identities, and every real-auth login failed. The rule is
+    correct for production and fatal to dev, so it is applied here.
+    """
+    source = _source(tmp_path)
+    assert "passwordPolicy" not in json.loads(source.read_text(encoding="utf-8"))
+
+    destination = tmp_path / "out.json"
+    renderer.render(source, destination, "https://healthdoc.example.org")
+
+    policy = json.loads(destination.read_text(encoding="utf-8"))["passwordPolicy"]
+    assert "length(12)" in policy
+    assert "hashAlgorithm(pbkdf2-sha512)" in policy
+
+
+def test_the_dev_realm_carries_no_password_policy() -> None:
+    """Guards the shipped file, not a fixture.
+
+    If someone re-adds a policy to infra/keycloak/realm-healthdoc.json, every
+    dev login breaks and the failure surfaces as an inscrutable e2e timeout.
+    Fail here instead, where the message can say why.
+    """
+    realm = json.loads(REAL_REALM.read_text(encoding="utf-8"))
+    assert "passwordPolicy" not in realm, (
+        "the dev realm has a passwordPolicy. dev_setup.sh sets every test "
+        "identity to 'devpass'; Keycloak enforces the policy at set-password "
+        "time, so this leaves all thirteen accounts unusable. Put production "
+        "password rules in scripts/deploy/render_keycloak_realm.py instead."
     )
