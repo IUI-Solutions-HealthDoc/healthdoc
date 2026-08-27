@@ -32,15 +32,16 @@ function getCookie(name: string): string | null {
 }
 
 function setCookie(name: string, value: string) {
-    // `Secure` on anything but plain-HTTP localhost. These carry no token — a
-  // presence flag and a role hint — but a cookie without Secure is a scanner
-  // finding on its own, and the app is HTTPS everywhere it is not a dev box.
+  // `Secure` on HTTPS only — plain HTTP localhost (:3010) cannot store Secure
+  // cookies. These carry no token (presence flag + role hint), but scanners
+  // still flag a missing Secure attribute on production HTTPS.
   const secure = location.protocol === "https:" ? "; Secure" : "";
   document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=86400; SameSite=Lax${secure}`;
 }
 
 function deleteCookie(name: string) {
-  document.cookie = `${name}=; path=/; max-age=0`;
+  const secure = location.protocol === "https:" ? "; Secure" : "";
+  document.cookie = `${name}=; path=/; max-age=0${secure}`;
 }
 
 /** True when middleware should treat the browser as "has a session" (UX only). */

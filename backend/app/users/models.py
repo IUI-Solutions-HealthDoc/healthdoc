@@ -24,7 +24,9 @@ class Facility(Base, UUIDPk, Timestamps):
     code: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     state_code: Mapped[str] = mapped_column(String(5), nullable=False)
-    timezone: Mapped[str] = mapped_column(String(50), nullable=False, server_default="Asia/Kolkata")
+    timezone: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="Asia/Kolkata", server_default="Asia/Kolkata"
+    )
     district: Mapped[str | None] = mapped_column(Text)
     facility_type: Mapped[str | None] = mapped_column(String(50))
     hfr_facility_id: Mapped[str | None] = mapped_column(String(50))

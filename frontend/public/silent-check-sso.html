@@ -15,8 +15,6 @@
       Deliberately does nothing else: it must not import the app bundle, and it
       must not read or store the token — the parent frame keeps it in memory.
     -->
-    <script>
-      parent.postMessage(location.href, location.origin);
-    </script>
+    <script>parent.postMessage(location.href, location.origin);</script>
   </body>
 </html>
