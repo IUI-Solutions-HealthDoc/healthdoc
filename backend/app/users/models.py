@@ -28,9 +28,7 @@ class Facility(Base, UUIDPk, Timestamps):
     district: Mapped[str | None] = mapped_column(Text)
     facility_type: Mapped[str | None] = mapped_column(String(50))
     hfr_facility_id: Mapped[str | None] = mapped_column(String(50))
-    timezone: Mapped[str] = mapped_column(String(50), nullable=False, default="Asia/Kolkata")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    timezone: Mapped[str] = mapped_column(String(50), nullable=False, server_default="Asia/Kolkata")
 
 
 class User(Base, UUIDPk, Timestamps):
