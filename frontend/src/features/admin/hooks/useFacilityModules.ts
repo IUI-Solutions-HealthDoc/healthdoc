@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { toast } from "@/components/ui/toast";
+import { getUserFacingError } from "@/lib/api";
 import {
   getFacilityCapabilities,
   listFacilityModules,
@@ -14,6 +15,7 @@ export function useFacilityModules() {
   const [modules, setModules] = useState<FacilityModule[]>([]);
   const [capabilities, setCapabilities] = useState<FacilityCapabilities | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   /** Keyed on module_code, not row id: a module with no stored row has no id
    *  until the first time somebody disables it. */
   const [busyCode, setBusyCode] = useState<string | null>(null);
@@ -27,6 +29,11 @@ export function useFacilityModules() {
       ]);
       setModules(mods);
       setCapabilities(caps);
+      setError(null);
+    } catch (reason) {
+      setModules([]);
+      setCapabilities(null);
+      setError(getUserFacingError(reason, "Could not load facility modules."));
     } finally {
       setLoading(false);
     }
@@ -59,5 +66,5 @@ export function useFacilityModules() {
     [refresh],
   );
 
-  return { modules, capabilities, loading, busyCode, toggle, refresh };
+  return { modules, capabilities, loading, error, busyCode, toggle, refresh };
 }

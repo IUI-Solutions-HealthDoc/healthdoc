@@ -25,10 +25,7 @@ const DEFAULT_ROUTES: Record<Role, string> = {
   [ROLES.HOD]: "/hod",
   [ROLES.AUDITOR]: "/audit-viewer",
   [ROLES.PATIENT]: "/patient-portal",
-  // Platform administration has not been built. Never redirect this cloud-only
-  // role into the facility-admin workspace: its realm contract explicitly
-  // bars access to facility clinical data.
-  [ROLES.SUPERADMIN]: "/workspace-unavailable",
+  [ROLES.SUPERADMIN]: "/superadmin",
 };
 
 /**
@@ -49,10 +46,9 @@ const ROUTE_PREFIXES: Record<Role, readonly string[]> = {
   // intentionally excludes supervisors. Their maker-checker promotion APIs
   // need a separate records-authority screen (#221) at /supervisor/merges.
   [ROLES.SUPERVISOR]: ["/supervisor", "/reports"],
-  // Admin gets /hod because the hod-dashboard endpoints accept "admin" too.
-  // The screen itself explains that an account with no department has nothing
-  // to scope to, rather than inventing a cross-department picker.
-  [ROLES.ADMIN]: ["/admin", "/billing", "/reports", "/audit-viewer", "/hod"],
+  // The backend accepts admin on some HOD reads for operational support, but
+  // that does not make a department-operating dashboard part of the admin UI.
+  [ROLES.ADMIN]: ["/admin", "/billing", "/reports", "/audit-viewer"],
   // /inventory is NOT decoration here. Indent approval is gated
   // `require_roles("hod")` — HOD ONLY — and the approve/reject buttons live on
   // Inventory -> Indents. Without this prefix the one action only a department
@@ -60,7 +56,7 @@ const ROUTE_PREFIXES: Record<Role, readonly string[]> = {
   [ROLES.HOD]: ["/hod", "/queue-display", "/inventory"],
   [ROLES.AUDITOR]: ["/audit-viewer", "/reports", "/admin/data-protection"],
   [ROLES.PATIENT]: ["/patient-portal"],
-  [ROLES.SUPERADMIN]: ["/workspace-unavailable"],
+  [ROLES.SUPERADMIN]: ["/superadmin"],
 };
 
 /**

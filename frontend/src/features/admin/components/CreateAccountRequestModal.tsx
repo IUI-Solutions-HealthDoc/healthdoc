@@ -15,8 +15,13 @@ import Typography from "@mui/material/Typography";
 import { toast } from "@/components/ui/toast";
 import { meridian } from "@/styles/theme";
 import { createAccountRequest } from "../api";
-import { REALM_ROLES, REALM_ROLE_LABELS } from "../constants";
+import { REALM_ROLE_LABELS } from "../constants";
 import type { RealmRole, UserAccountRequest } from "../types";
+import {
+  FACILITY_STAFF_ROLES,
+  type FieldErrors,
+  validateAccountRequest,
+} from "../validation";
 
 type Props = {
   open: boolean;
@@ -36,20 +41,56 @@ export function CreateAccountRequestModal({ open, onClose, onCreated }: Props) {
   const [registration_number, setReg] = useState("");
   const [qualification, setQual] = useState("");
   const [roles, setRoles] = useState<RealmRole[]>([]);
+  const [errors, setErrors] = useState<FieldErrors>({});
+
+  const clearError = (field: string) => {
+    setErrors((current) => {
+      if (!current[field]) return current;
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
+  };
 
   const toggleRole = (role: RealmRole) => {
+    clearError("roles");
     setRoles((prev) =>
       prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role],
     );
   };
 
+  const reset = () => {
+    setName("");
+    setUsername("");
+    setJustification("");
+    setDesignation("");
+    setEmployeeId("");
+    setEmail("");
+    setMobile("");
+    setReg("");
+    setQual("");
+    setRoles([]);
+    setErrors({});
+  };
+
+  const handleClose = () => {
+    if (busy) return;
+    reset();
+    onClose();
+  };
+
   const submit = async () => {
-    if (!requested_for_full_name.trim() || !requested_username.trim() || !justification.trim()) {
-      toast.error("requested_for_full_name, requested_username, justification required");
-      return;
-    }
-    if (roles.length === 0) {
-      toast.error("requested_roles must include at least one Keycloak role");
+    const validationErrors = validateAccountRequest({
+      fullName: requested_for_full_name,
+      username: requested_username,
+      email,
+      mobile,
+      justification,
+      roles,
+    });
+    setErrors(validationErrors);
+    if (Object.keys(validationErrors).length > 0) {
+      toast.error("Please correct the highlighted fields before submitting the request.");
       return;
     }
     setBusy(true);
@@ -70,6 +111,7 @@ export function CreateAccountRequestModal({ open, onClose, onCreated }: Props) {
       });
       toast.success("Account request filed");
       onCreated(row);
+      reset();
       onClose();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Create failed");
@@ -79,7 +121,7 @@ export function CreateAccountRequestModal({ open, onClose, onCreated }: Props) {
   };
 
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
+    <Dialog open={open} onClose={handleClose} fullWidth maxWidth="sm">
       <DialogTitle sx={{ fontWeight: 700, color: meridian.textPrimary }}>
         New account request (0028)
       </DialogTitle>
@@ -89,27 +131,42 @@ export function CreateAccountRequestModal({ open, onClose, onCreated }: Props) {
         </Typography>
         <Stack spacing={1.5}>
           <TextField
-            label="requested_for_full_name"
+            label="Full name"
             size="small"
             required
             value={requested_for_full_name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => {
+              setName(e.target.value);
+              clearError("fullName");
+            }}
+            error={Boolean(errors.fullName)}
+            helperText={errors.fullName}
           />
           <TextField
-            label="requested_username"
+            label="Username"
             size="small"
             required
             value={requested_username}
-            onChange={(e) => setUsername(e.target.value)}
+            onChange={(e) => {
+              setUsername(e.target.value);
+              clearError("username");
+            }}
+            error={Boolean(errors.username)}
+            helperText={errors.username ?? "Letters, numbers, dots, hyphens or underscores; no spaces"}
           />
           <TextField
-            label="justification"
+            label="Justification"
             size="small"
             required
             multiline
             minRows={2}
             value={justification}
-            onChange={(e) => setJustification(e.target.value)}
+            onChange={(e) => {
+              setJustification(e.target.value);
+              clearError("justification");
+            }}
+            error={Boolean(errors.justification)}
+            helperText={errors.justification ?? "At least 10 characters for the approver's audit trail"}
           />
           <TextField
             label="designation"
@@ -123,8 +180,30 @@ export function CreateAccountRequestModal({ open, onClose, onCreated }: Props) {
             value={employee_id}
             onChange={(e) => setEmployeeId(e.target.value)}
           />
-          <TextField label="email" size="small" value={email} onChange={(e) => setEmail(e.target.value)} />
-          <TextField label="mobile" size="small" value={mobile} onChange={(e) => setMobile(e.target.value)} />
+          <TextField
+            label="Email"
+            type="email"
+            size="small"
+            value={email}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              clearError("email");
+            }}
+            error={Boolean(errors.email)}
+            helperText={errors.email}
+          />
+          <TextField
+            label="Mobile"
+            type="tel"
+            size="small"
+            value={mobile}
+            onChange={(e) => {
+              setMobile(e.target.value);
+              clearError("mobile");
+            }}
+            error={Boolean(errors.mobile)}
+            helperText={errors.mobile ?? "Indian E.164 format: +91XXXXXXXXXX"}
+          />
           <TextField
             label="registration_number"
             size="small"
@@ -137,9 +216,13 @@ export function CreateAccountRequestModal({ open, onClose, onCreated }: Props) {
             value={qualification}
             onChange={(e) => setQual(e.target.value)}
           />
-          <Typography sx={{ fontSize: "0.8125rem", fontWeight: 600 }}>requested_roles</Typography>
+          <Typography sx={{ fontSize: "0.8125rem", fontWeight: 600 }}>Staff roles</Typography>
+          <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary }}>
+            Multiple roles are supported. Patient and platform-superadmin roles use separate
+            identity-governance workflows.
+          </Typography>
           <Stack direction="row" useFlexGap sx={{ flexWrap: "wrap", gap: 0.5 }}>
-            {REALM_ROLES.filter((r) => r !== "patient").map((role) => (
+            {FACILITY_STAFF_ROLES.map((role) => (
               <FormControlLabel
                 key={role}
                 control={
@@ -153,10 +236,15 @@ export function CreateAccountRequestModal({ open, onClose, onCreated }: Props) {
               />
             ))}
           </Stack>
+          {errors.roles ? (
+            <Typography sx={{ fontSize: "0.75rem", color: meridian.danger }}>
+              {errors.roles}
+            </Typography>
+          ) : null}
         </Stack>
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2 }}>
-        <Button onClick={onClose} sx={{ textTransform: "none" }}>
+        <Button onClick={handleClose} disabled={busy} sx={{ textTransform: "none" }}>
           Cancel
         </Button>
         <Button

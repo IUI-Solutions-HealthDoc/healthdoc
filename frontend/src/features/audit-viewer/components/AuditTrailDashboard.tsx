@@ -2,14 +2,11 @@
 
 import { useState } from "react";
 import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
 import Tab from "@mui/material/Tab";
 import Tabs from "@mui/material/Tabs";
 import Typography from "@mui/material/Typography";
 
-import { toast } from "@/components/ui/toast";
 import { meridian } from "@/styles/theme";
-import { attemptMutateAuditLog } from "../api";
 import { useAuditEntry } from "../hooks/useAuditEntry";
 import { useAuditLogs } from "../hooks/useAuditLogs";
 import { useDataAccessLogs } from "../hooks/useDataAccessLogs";
@@ -39,14 +36,6 @@ export function AuditTrailDashboard() {
 
   const handleSelect = (row: AuditLog) => {
     setSelected({ id: row.id, created_at: row.created_at });
-  };
-
-  const demoBlockedMutate = async () => {
-    try {
-      await attemptMutateAuditLog();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Append-only reject");
-    }
   };
 
   return (
@@ -87,14 +76,6 @@ export function AuditTrailDashboard() {
         }}
       >
         <span>UPDATE/DELETE are blocked by trg_audit_logs_block_update — viewer is read-only.</span>
-        <Button
-          size="small"
-          variant="outlined"
-          onClick={() => void demoBlockedMutate()}
-          sx={{ textTransform: "none", fontWeight: 600, borderRadius: "10px" }}
-        >
-          Try mutate (demo)
-        </Button>
       </Box>
 
       <Tabs

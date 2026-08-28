@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Typography from "@mui/material/Typography";
@@ -11,6 +11,7 @@ import { useUserDetail } from "../hooks/useUserDetail";
 import { useUserEditor } from "../hooks/useUserEditor";
 import { useUsers } from "../hooks/useUsers";
 import type { User } from "../types";
+import { listDepartments, type Department } from "../api/departments";
 import { AdminPageHeader } from "./AdminPageHeader";
 import { CreateUserModal } from "./CreateUserModal";
 import { UserListPanel } from "./UserListPanel";
@@ -20,6 +21,7 @@ export function UsersWorkspace() {
   const {
     users,
     loading: listLoading,
+    error: listError,
     filters,
     setQuery,
     setActiveFilter,
@@ -28,8 +30,23 @@ export function UsersWorkspace() {
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [departments, setDepartments] = useState<Department[]>([]);
 
-  const { user, setUser, loading: detailLoading } = useUserDetail(selectedId);
+  useEffect(() => {
+    let cancelled = false;
+    void listDepartments()
+      .then((response) => {
+        if (!cancelled) setDepartments(response.items);
+      })
+      .catch(() => {
+        if (!cancelled) setDepartments([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const { user, setUser, loading: detailLoading, error: detailError } = useUserDetail(selectedId);
 
   const onSaved = useCallback(
     (next: User) => {
@@ -44,6 +61,7 @@ export function UsersWorkspace() {
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
       <AdminPageHeader
+        backHref="/admin"
         eyebrow="Admin"
         title="Users"
         subtitle="Staff profiles (users) · activate / deactivate · bootstrap create"
@@ -75,6 +93,12 @@ export function UsersWorkspace() {
           </>
         }
       />
+
+      {listError ? (
+        <Typography role="alert" sx={{ color: meridian.danger, fontSize: "0.875rem" }}>
+          {listError}
+        </Typography>
+      ) : null}
 
       <Box
         sx={{
@@ -120,6 +144,19 @@ export function UsersWorkspace() {
               Pick someone from the list to view and edit their profile, or create a bootstrap user.
             </Typography>
           </Box>
+        ) : detailError ? (
+          <Box
+            role="alert"
+            sx={{
+              borderRadius: "16px",
+              border: `1px solid ${meridian.border}`,
+              p: 4,
+              minHeight: 420,
+              color: meridian.danger,
+            }}
+          >
+            {detailError}
+          </Box>
         ) : detailLoading || !editor.draft ? (
           <Box
             sx={{
@@ -137,6 +174,8 @@ export function UsersWorkspace() {
             draft={editor.draft}
             busy={editor.busy}
             isDirty={editor.isDirty}
+            errors={editor.errors}
+            departments={departments}
             onChange={(key, value) => {
               if (
                 key === "full_name" ||

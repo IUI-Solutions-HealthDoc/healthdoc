@@ -225,7 +225,6 @@ const ROLE_DASHBOARDS = [
       { path: "/admin/maintenance", expectCalls: true },
       { path: "/reports", expectCalls: true },
       { path: "/billing", expectCalls: true },
-      { path: "/hod", expectCalls: true },
     ],
   },
   {
@@ -260,14 +259,12 @@ const ROLE_DASHBOARDS = [
   {
     name: "superadmin",
     username: "dev.superadmin",
-    landingPath: "/workspace-unavailable",
-    unsupportedReason:
-      "Cloud platform-management APIs and UI do not exist; facility admin is forbidden",
+    landingPath: "/superadmin",
     dashboards: [
       {
-        path: "/workspace-unavailable",
-        expectCalls: false,
-        expectedText: "Workspace not available",
+        path: "/superadmin",
+        expectCalls: true,
+        expectedText: "Registered facilities",
       },
     ],
   },
@@ -314,6 +311,20 @@ async function signIn(page, role) {
   // The pathname changes before silent SSO has restored the in-memory token.
   // #main-content exists only after MainLayout knows this role is authenticated.
   await page.waitForSelector("#main-content", { timeout: 60_000 });
+  await page.waitForSelector("#workspace-sidebar", { timeout: 30_000 });
+
+  const visibleMenuPaths = await page.evaluate(() =>
+    [...document.querySelectorAll("#workspace-sidebar a[href]")]
+      .map((link) => new URL(link.href).pathname)
+      .sort(),
+  );
+  const expectedMenuPaths = role.dashboards.map((dashboard) => dashboard.path).sort();
+  if (JSON.stringify(visibleMenuPaths) !== JSON.stringify(expectedMenuPaths)) {
+    throw new Error(
+      `role menu mismatch; expected ${expectedMenuPaths.join(", ")}; ` +
+        `rendered ${visibleMenuPaths.join(", ")}`,
+    );
+  }
 }
 
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -321,6 +332,20 @@ const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
 async function exercisePatientConsent(page) {
   await page.waitForSelector("#main-content form input", { timeout: 30_000 });
   await page.type("#main-content form input", "Dev Patient");
+  // Name search is intentionally paired with DOB: a fuzzy name alone is not
+  // enough identity evidence to attach consent or a clinical visit.
+  await page.evaluate(() => {
+    const date = document.querySelector("#main-content form input[type='date']");
+    if (date) {
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value",
+      )?.set;
+      setter?.call(date, "1990-01-01");
+      date.dispatchEvent(new Event("input", { bubbles: true }));
+      date.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  });
   const searchClicked = await page.evaluate(() => {
     const button = [...document.querySelectorAll("#main-content form button")].find(
       (candidate) => candidate.textContent?.trim() === "Search",

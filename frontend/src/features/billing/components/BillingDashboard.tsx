@@ -8,7 +8,7 @@ import Typography from "@mui/material/Typography";
 
 import { toast } from "@/components/ui/toast";
 import { meridian } from "@/styles/theme";
-import { attemptMutatePayment, createRefund, getInvoice } from "../api";
+import { createRefund, getInvoice } from "../api";
 import { useCollectPayment } from "../hooks/useCollectPayment";
 import { useInvoiceDetail } from "../hooks/useInvoiceDetail";
 import { useInvoiceEditor } from "../hooks/useInvoiceEditor";
@@ -74,14 +74,6 @@ export function BillingDashboard() {
 
   const handleSelect = (id: string) => {
     setSelectedId(id);
-  };
-
-  const demoImmutable = async () => {
-    try {
-      await attemptMutatePayment();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Immutable payment");
-    }
   };
 
   return (
@@ -253,7 +245,6 @@ export function BillingDashboard() {
                       setRefundBusy(false);
                     }
                   }}
-                  onDemoImmutable={() => void demoImmutable()}
                 />
               ) : null}
 

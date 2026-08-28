@@ -18,16 +18,19 @@ import { toast } from "@/components/ui/toast";
 import { meridian } from "@/styles/theme";
 import { useCurrentUser } from "@/features/session/useCurrentUser";
 import { createUser } from "../api";
-import { REALM_ROLES, REALM_ROLE_LABELS } from "../constants";
+import { REALM_ROLE_LABELS } from "../constants";
 import type { RealmRole, User } from "../types";
+import {
+  FACILITY_STAFF_ROLES,
+  type FieldErrors,
+  validateCreateUser,
+} from "../validation";
 
 type Props = {
   open: boolean;
   onClose: () => void;
   onCreated: (user: User) => void;
 };
-
-const STAFF_ROLES = REALM_ROLES.filter((r) => r !== "patient");
 
 function SectionLabel({ children }: { children: ReactNode }) {
   return (
@@ -61,8 +64,19 @@ export function CreateUserModal({ open, onClose, onCreated }: Props) {
   const [qualification, setQualification] = useState("");
   const [temporary_password, setTemporaryPassword] = useState("");
   const [roles, setRoles] = useState<RealmRole[]>([]);
+  const [errors, setErrors] = useState<FieldErrors>({});
+
+  const clearError = (field: string) => {
+    setErrors((current) => {
+      if (!current[field]) return current;
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
+  };
 
   const toggleRole = (role: RealmRole) => {
+    clearError("roles");
     setRoles((prev) =>
       prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role],
     );
@@ -79,16 +93,27 @@ export function CreateUserModal({ open, onClose, onCreated }: Props) {
     setQualification("");
     setTemporaryPassword("");
     setRoles([]);
+    setErrors({});
   };
 
   const handleClose = () => {
     if (busy) return;
+    reset();
     onClose();
   };
 
   const submit = async () => {
-    if (!username.trim() || !full_name.trim() || temporary_password.length < 8) {
-      toast.error("Username, full name, and temporary password (min 8) are required");
+    const validationErrors = validateCreateUser({
+      username,
+      fullName: full_name,
+      email,
+      mobile,
+      temporaryPassword: temporary_password,
+      roles,
+    });
+    setErrors(validationErrors);
+    if (Object.keys(validationErrors).length > 0) {
+      toast.error("Please correct the highlighted fields before creating the user.");
       return;
     }
     setBusy(true);
@@ -224,10 +249,14 @@ export function CreateUserModal({ open, onClose, onCreated }: Props) {
             size="small"
             required
             value={username}
-            onChange={(e) => setUsername(e.target.value)}
+            onChange={(e) => {
+              setUsername(e.target.value);
+              clearError("username");
+            }}
             disabled={busy}
             sx={fieldSx}
-            helperText="Keycloak login id"
+            error={Boolean(errors.username)}
+            helperText={errors.username ?? "Letters, numbers, dots, hyphens or underscores; no spaces"}
           />
           <TextField
             label="Temporary password"
@@ -235,10 +264,14 @@ export function CreateUserModal({ open, onClose, onCreated }: Props) {
             type="password"
             required
             value={temporary_password}
-            onChange={(e) => setTemporaryPassword(e.target.value)}
+            onChange={(e) => {
+              setTemporaryPassword(e.target.value);
+              clearError("temporaryPassword");
+            }}
             disabled={busy}
             sx={fieldSx}
-            helperText="Min 8 chars · Keycloak only — never stored on users"
+            error={Boolean(errors.temporaryPassword)}
+            helperText={errors.temporaryPassword ?? "Min 8 chars · Keycloak only — never stored on users"}
           />
         </Stack>
 
@@ -249,26 +282,40 @@ export function CreateUserModal({ open, onClose, onCreated }: Props) {
             size="small"
             required
             value={full_name}
-            onChange={(e) => setFullName(e.target.value)}
+            onChange={(e) => {
+              setFullName(e.target.value);
+              clearError("fullName");
+            }}
             disabled={busy}
             sx={fieldSx}
+            error={Boolean(errors.fullName)}
+            helperText={errors.fullName}
           />
           <TextField
             label="Email"
             size="small"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              clearError("email");
+            }}
             disabled={busy}
             sx={fieldSx}
+            error={Boolean(errors.email)}
+            helperText={errors.email}
           />
           <TextField
             label="Mobile"
             size="small"
             value={mobile}
-            onChange={(e) => setMobile(e.target.value)}
+            onChange={(e) => {
+              setMobile(e.target.value);
+              clearError("mobile");
+            }}
             disabled={busy}
             sx={fieldSx}
-            helperText="E.164 e.g. +91XXXXXXXXXX"
+            error={Boolean(errors.mobile)}
+            helperText={errors.mobile ?? "E.164 e.g. +91XXXXXXXXXX"}
           />
           <TextField
             label="Designation"
@@ -314,13 +361,13 @@ export function CreateUserModal({ open, onClose, onCreated }: Props) {
           }}
         >
           <Typography sx={{ m: 0, mb: 1.25, fontSize: "0.75rem", color: meridian.textSecondary }}>
-            Select one or more roles. Patient portal role is omitted from bootstrap staffing.
+            Multiple roles are supported. Patient and platform-superadmin roles are managed
+            outside facility staffing.
             {roles.length > 0 ? ` · ${roles.length} selected` : ""}
           </Typography>
           <Stack direction="row" useFlexGap sx={{ flexWrap: "wrap", gap: 0.75 }}>
-            {STAFF_ROLES.map((role) => {
+            {FACILITY_STAFF_ROLES.map((role) => {
               const selected = roles.includes(role);
-              const governance = role === "superadmin";
               return (
                 <Chip
                   key={role}
@@ -332,33 +379,22 @@ export function CreateUserModal({ open, onClose, onCreated }: Props) {
                   sx={{
                     fontWeight: 600,
                     height: 30,
-                    borderColor: selected
-                      ? governance
-                        ? `${meridian.warning}88`
-                        : "transparent"
-                      : meridian.border,
-                    bgcolor: selected
-                      ? governance
-                        ? "rgba(180, 83, 9, 0.14)"
-                        : meridian.brandPrimary
-                      : meridian.surface,
-                    color: selected
-                      ? governance
-                        ? meridian.warning
-                        : "#ffffff"
-                      : meridian.textPrimary,
+                    borderColor: selected ? "transparent" : meridian.border,
+                    bgcolor: selected ? meridian.brandPrimary : meridian.surface,
+                    color: selected ? "#ffffff" : meridian.textPrimary,
                     "&:hover": {
-                      bgcolor: selected
-                        ? governance
-                          ? "rgba(180, 83, 9, 0.2)"
-                          : meridian.brandDeep
-                        : "#e8eef5",
+                      bgcolor: selected ? meridian.brandDeep : "#e8eef5",
                     },
                   }}
                 />
               );
             })}
           </Stack>
+          {errors.roles ? (
+            <Typography sx={{ mt: 1, fontSize: "0.75rem", color: meridian.danger }}>
+              {errors.roles}
+            </Typography>
+          ) : null}
         </Box>
 
         <Typography

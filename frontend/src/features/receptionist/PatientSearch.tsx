@@ -20,6 +20,7 @@ type Props = {
 
 const EMPTY: PatientSearchRequest = {
   full_name: "",
+  dob: "",
   mobile: "",
   uhid: "",
   abha_number: "",
@@ -58,13 +59,28 @@ export function PatientSearch({ onSelect, selectLabel = "Select" }: Props) {
       criteria.uhid?.trim() ||
       criteria.abha_number?.trim(),
   );
+  const mobileInvalid = Boolean(
+    criteria.mobile?.trim() && !/^\d{10}$/.test(criteria.mobile.trim()),
+  );
+  const abhaInvalid = Boolean(
+    criteria.abha_number?.trim() && !/^\d{14}$/.test(criteria.abha_number.trim()),
+  );
+  const nameNeedsDob = Boolean(criteria.full_name?.trim() && !criteria.dob);
+  const formInvalid = mobileInvalid || abhaInvalid || nameNeedsDob;
 
   function set(field: keyof PatientSearchRequest, value: string) {
     setCriteria((current) => ({ ...current, [field]: value }));
   }
 
   async function search(nextPage: number) {
-    if (!hasCriterion) return;
+    if (!hasCriterion || formInvalid) {
+      setError(
+        nameNeedsDob
+          ? "Date of birth is required for a name search."
+          : "Correct the mobile or ABHA number before searching.",
+      );
+      return;
+    }
 
     setBusy(true);
     setError(null);
@@ -103,7 +119,7 @@ export function PatientSearch({ onSelect, selectLabel = "Select" }: Props) {
   return (
     <section className="space-y-6">
       <form onSubmit={run} className="surface-card space-y-4 p-6">
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
           <label className="space-y-1 text-sm">
             <span className="text-muted-foreground">Name</span>
             <input
@@ -115,12 +131,27 @@ export function PatientSearch({ onSelect, selectLabel = "Select" }: Props) {
           </label>
 
           <label className="space-y-1 text-sm">
+            <span className="text-muted-foreground">Date of birth</span>
+            <input
+              type="date"
+              className="w-full rounded-md border border-border px-3 py-2"
+              value={criteria.dob ?? ""}
+              max={new Date().toISOString().slice(0, 10)}
+              onChange={(e) => set("dob", e.target.value)}
+              required={Boolean(criteria.full_name?.trim())}
+            />
+          </label>
+
+          <label className="space-y-1 text-sm">
             <span className="text-muted-foreground">Mobile</span>
             <input
               className="w-full rounded-md border border-border px-3 py-2"
               value={criteria.mobile ?? ""}
               onChange={(e) => set("mobile", e.target.value)}
               inputMode="numeric"
+              pattern="[0-9]{10}"
+              maxLength={10}
+              placeholder="10-digit mobile number"
               autoComplete="off"
             />
           </label>
@@ -141,6 +172,9 @@ export function PatientSearch({ onSelect, selectLabel = "Select" }: Props) {
               className="w-full rounded-md border border-border px-3 py-2"
               value={criteria.abha_number ?? ""}
               onChange={(e) => set("abha_number", e.target.value)}
+              inputMode="numeric"
+              pattern="[0-9]{14}"
+              maxLength={14}
               autoComplete="off"
             />
           </label>
@@ -153,7 +187,7 @@ export function PatientSearch({ onSelect, selectLabel = "Select" }: Props) {
         <div className="flex items-center gap-3">
           <button
             type="submit"
-            disabled={!hasCriterion || busy}
+          disabled={!hasCriterion || formInvalid || busy}
             className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
           >
             {busy ? "Searching…" : "Search"}
@@ -174,6 +208,11 @@ export function PatientSearch({ onSelect, selectLabel = "Select" }: Props) {
               Enter at least one criterion.
             </span>
           )}
+          {nameNeedsDob ? (
+            <span className="text-sm text-danger">Date of birth is required with name.</span>
+          ) : mobileInvalid || abhaInvalid ? (
+            <span className="text-sm text-danger">Check the mobile or ABHA format.</span>
+          ) : null}
         </div>
       </form>
 

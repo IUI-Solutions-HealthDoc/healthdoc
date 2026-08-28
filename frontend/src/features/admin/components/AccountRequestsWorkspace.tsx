@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import MenuItem from "@mui/material/MenuItem";
@@ -9,6 +9,7 @@ import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 
 import { toast } from "@/components/ui/toast";
+import { useCurrentUser } from "@/features/session/useCurrentUser";
 import { meridian } from "@/styles/theme";
 import { approveAccountRequest, rejectAccountRequest } from "../api";
 import { REALM_ROLE_LABELS } from "../constants";
@@ -20,7 +21,8 @@ import { ApprovalStatusChip } from "./ApprovalStatusChip";
 import { CreateAccountRequestModal } from "./CreateAccountRequestModal";
 
 export function AccountRequestsWorkspace() {
-  const { items, loading, status, setStatus, refresh } = useAccountRequests("pending");
+  const { user: currentUser } = useCurrentUser();
+  const { items, loading, error: loadError, status, setStatus, refresh } = useAccountRequests("pending");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [rejection_reason, setRejectionReason] = useState("");
@@ -31,9 +33,17 @@ export function AccountRequestsWorkspace() {
    */
   const [temporaryPassword, setTemporaryPassword] = useState("");
   const [busy, setBusy] = useState(false);
+  const [decision, setDecision] = useState<"approve" | "reject" | null>(null);
 
   const selected: UserAccountRequest | null =
     items.find((r) => r.id === selectedId) ?? null;
+  const isOwnRequest = Boolean(selected && currentUser?.id === selected.requested_by);
+
+  useEffect(() => {
+    setDecision(null);
+    setTemporaryPassword("");
+    setRejectionReason("");
+  }, [selectedId]);
 
   const onApprove = async () => {
     if (!selected) return;
@@ -46,6 +56,7 @@ export function AccountRequestsWorkspace() {
       await approveAccountRequest(selected.id, temporaryPassword);
       toast.success("Request approved", "Keycloak account + users row created");
       setTemporaryPassword("");
+      setDecision(null);
       setSelectedId(null);
       void refresh();
     } catch (e) {
@@ -66,6 +77,7 @@ export function AccountRequestsWorkspace() {
       await rejectAccountRequest(selected.id, rejection_reason);
       toast.success("Request rejected");
       setRejectionReason("");
+      setDecision(null);
       setSelectedId(null);
       void refresh();
     } catch (e) {
@@ -78,6 +90,7 @@ export function AccountRequestsWorkspace() {
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
       <AdminPageHeader
+        backHref="/admin"
         eyebrow="Admin"
         title="Account requests"
         subtitle="user_account_requests (0028) — maker-checker staffing"
@@ -99,6 +112,12 @@ export function AccountRequestsWorkspace() {
           </Button>
         }
       />
+
+      {loadError ? (
+        <Typography role="alert" sx={{ color: meridian.danger, fontSize: "0.875rem" }}>
+          {loadError}
+        </Typography>
+      ) : null}
 
       <Box
         sx={{
@@ -262,29 +281,53 @@ export function AccountRequestsWorkspace() {
 
               {selected.status === "pending" ? (
                 <>
-                  <TextField
-                    label="Temporary password"
-                    type="password"
-                    size="small"
-                    fullWidth
-                    value={temporaryPassword}
-                    onChange={(e) => setTemporaryPassword(e.target.value)}
-                    helperText="Required when approving — this creates the Keycloak account. Minimum 8 characters."
-                    sx={{ mb: 2 }}
-                  />
-                  <TextField
-                    label="Rejection reason"
-                    size="small"
-                    fullWidth
-                    value={rejection_reason}
-                    onChange={(e) => setRejectionReason(e.target.value)}
-                    helperText="Required when rejecting"
-                  />
+                  {isOwnRequest ? (
+                    <Box
+                      role="status"
+                      sx={{
+                        borderRadius: "10px",
+                        border: `1px solid ${meridian.border}`,
+                        bgcolor: meridian.muted,
+                        p: 2,
+                        color: meridian.textSecondary,
+                        fontSize: "0.875rem",
+                      }}
+                    >
+                      You submitted this request. Maker-checker policy requires a different
+                      administrator to approve or reject it.
+                    </Box>
+                  ) : decision === "approve" ? (
+                    <TextField
+                      autoFocus
+                      label="Temporary password"
+                      type="password"
+                      size="small"
+                      fullWidth
+                      value={temporaryPassword}
+                      onChange={(e) => setTemporaryPassword(e.target.value)}
+                      helperText="Minimum 8 characters. The user must change it at first sign-in."
+                    />
+                  ) : decision === "reject" ? (
+                    <TextField
+                      autoFocus
+                      label="Rejection reason"
+                      size="small"
+                      fullWidth
+                      value={rejection_reason}
+                      onChange={(e) => setRejectionReason(e.target.value)}
+                      helperText="Required for the reviewable audit trail"
+                    />
+                  ) : (
+                    <Typography sx={{ fontSize: "0.875rem", color: meridian.textSecondary }}>
+                      Choose approve or reject below. Only the field required for that decision
+                      will be shown.
+                    </Typography>
+                  )}
                 </>
               ) : null}
             </Box>
 
-            {selected.status === "pending" ? (
+            {selected.status === "pending" && !isOwnRequest ? (
               <Box sx={adminStickyActionsSx}>
                 <Typography
                   sx={{ m: 0, fontSize: "0.8125rem", fontWeight: 600, color: meridian.textSecondary }}
@@ -292,20 +335,36 @@ export function AccountRequestsWorkspace() {
                   Maker-checker · approver ≠ requester
                 </Typography>
                 <Stack direction="row" useFlexGap sx={{ gap: 1.25, flexWrap: "wrap" }}>
+                  {decision ? (
+                    <Button
+                      variant="text"
+                      disabled={busy}
+                      onClick={() => setDecision(null)}
+                      sx={{ textTransform: "none", fontWeight: 600 }}
+                    >
+                      Cancel
+                    </Button>
+                  ) : null}
                   <Button
                     variant="outlined"
                     color="error"
                     disabled={busy}
-                    onClick={() => void onReject()}
+                    onClick={() => {
+                      if (decision === "reject") void onReject();
+                      else setDecision("reject");
+                    }}
                     sx={{ textTransform: "none", fontWeight: 600, borderRadius: "10px" }}
                   >
-                    Reject
+                    {decision === "reject" ? "Confirm rejection" : "Reject"}
                   </Button>
                   <Button
                     variant="contained"
                     color="primary"
                     disabled={busy}
-                    onClick={() => void onApprove()}
+                    onClick={() => {
+                      if (decision === "approve") void onApprove();
+                      else setDecision("approve");
+                    }}
                     sx={{
                       textTransform: "none",
                       fontWeight: 700,
@@ -315,7 +374,7 @@ export function AccountRequestsWorkspace() {
                       "&:hover": { bgcolor: meridian.brandDeep },
                     }}
                   >
-                    Approve
+                    {decision === "approve" ? "Confirm approval" : "Approve"}
                   </Button>
                 </Stack>
               </Box>

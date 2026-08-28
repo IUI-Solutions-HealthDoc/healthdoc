@@ -3,10 +3,6 @@
 // document a patient keeps. Removed (P1.1); never send a facility from the
 // browser.
 //
-// MOCK_CASHIER_USER_ID / MOCK_SUPERVISOR_USER_ID below are still referenced
-// by receipt display; collected_by/approved_by come from the token on the
-// write path, so these are cosmetic and go when the receipt shows the real
-// collector.
 import type {
   ChargeCategory,
   InvoiceStatus,
@@ -14,13 +10,6 @@ import type {
   PaymentStatus,
   SchemeOptionCode,
 } from "./types";
-
-
-
-/** Mock user UUIDs for payments.collected_by / refunds.approved_by. */
-export const MOCK_CASHIER_USER_ID = "00000000-0000-4000-8000-000000000101";
-export const MOCK_SUPERVISOR_USER_ID = "00000000-0000-4000-8000-000000000102";
-
 export const RECEIPT_PREFIX = "RCP";
 export const REFUND_PREFIX = "RFD";
 
