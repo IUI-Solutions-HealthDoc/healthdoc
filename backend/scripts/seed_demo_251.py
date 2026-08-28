@@ -36,6 +36,7 @@ from app.common.enums import (
 )
 from app.consent.models import ConsentPurpose, ConsentRecord
 from app.departments.models import Department, Room
+from app.dpdp import models as _dpdp_models  # noqa: F401 -- registers consent_managers FK
 from app.nursing.models import Vitals
 from app.opd.models import Visit
 from app.patients.models import Patient
@@ -85,6 +86,26 @@ async def _upsert(
     else:
         for key, value in values.items():
             setattr(row, key, value)
+    await session.flush()
+    return row
+
+
+async def _insert_consent_if_missing(
+    session: AsyncSession,
+    **values: Any,
+) -> ConsentRecord:
+    """Insert the deterministic grant once; never rewrite its frozen evidence.
+
+    The database deliberately permits only consent status transitions after
+    insert. Treating this append-only evidence like the mutable demo rows makes
+    a second seed run violate the freeze trigger even when the values happen to
+    describe the same grant.
+    """
+    row = await session.get(ConsentRecord, CONSENT_ID)
+    if row is not None:
+        return row
+    row = ConsentRecord(id=CONSENT_ID, **values)
+    session.add(row)
     await session.flush()
     return row
 
@@ -163,8 +184,8 @@ async def seed() -> None:
                 purpose_code="clinical_review", description="Direct clinical care demo consent",
                 default_expiry_days=30, requires_explicit_consent=True, is_active=True,
             )
-        await _upsert(
-            session, ConsentRecord, CONSENT_ID,
+        await _insert_consent_if_missing(
+            session,
             patient_id=PATIENT_ID, visit_id=OPD_VISIT_ID, purpose_id=consent_purpose.id,
             granted_by_type="patient", granted_by_user_id=None, channel="written",
             granted_at=now, expires_at=now + timedelta(days=30),

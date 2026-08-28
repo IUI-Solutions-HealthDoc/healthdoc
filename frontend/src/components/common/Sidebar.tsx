@@ -213,7 +213,7 @@ export default function Sidebar({ open, setOpen }: SidebarProps) {
           ) : (
             groups.map(([group, items]) => (
               <div key={group}>
-                <p className="mb-2 text-[11px] uppercase tracking-[2px] text-gray-400 font-semibold">
+                <p className="mb-2 text-[11px] uppercase tracking-[2px] text-gray-600 font-semibold">
                   {group}
                 </p>
                 <div className="space-y-1">
