@@ -44,10 +44,6 @@ export function ReversalFormModal({ open, payment, busy, onClose, onSubmit }: Pr
     await onSubmit({
       amount: toMoney(amount),
       reason: reason.trim(),
-      idempotency_key:
-        typeof crypto !== "undefined" && "randomUUID" in crypto
-          ? crypto.randomUUID()
-          : `idem-rfd-${Date.now()}`,
     });
   };
 

@@ -145,15 +145,12 @@ export type CollectPaymentInput = {
   mode: PaymentMode;
   currency?: string;
   collected_at?: string | null;
-  /** Required when swapping to live API */
-  idempotency_key?: string;
 };
 
 /** POST /billing/payments/{id}/refunds — requires Idempotency-Key header on wire. */
 export type CreateRefundInput = {
   amount: Money | number;
   reason: string;
-  idempotency_key?: string;
 };
 
 export type PaymentWithRefunds = Payment & {

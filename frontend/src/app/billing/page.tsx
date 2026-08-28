@@ -1,5 +1,9 @@
-import { LiveInvoiceQueue } from "@/features/billing/components/LiveInvoiceQueue";
+import { BillingDashboard } from "@/features/billing";
 
 export default function Page() {
-  return <LiveInvoiceQueue />;
+  return (
+    <div className="p-6">
+      <BillingDashboard />
+    </div>
+  );
 }

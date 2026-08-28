@@ -7,6 +7,9 @@
 // Keycloak on reload (silent SSO) and refreshed by lib/auth.ts.
 // Never add a storage write here without Tech Lead sign-off.
 
+import { apiErrorCode, userFacingApiError } from "./api-error-policy.mjs";
+export { userFacingApiError } from "./api-error-policy.mjs";
+
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api/v1";
 
 let accessToken: string | null = null;
@@ -23,24 +26,13 @@ export function getAccessToken(): string | null {
 export interface Envelope<T> {
   success: boolean;
   data: T | null;
-  error: { code: number; message: unknown } | null;
+  error: { code: number | string; message: unknown } | null;
   meta: { request_id?: string };
 }
 
-function errorMessage(value: unknown): string {
-  if (typeof value === "string" && value.trim()) return value;
-  if (value && typeof value === "object") {
-    const detail = (value as { detail?: unknown }).detail;
-    if (typeof detail === "string" && detail.trim()) return detail;
-    const nestedMessage = (value as { message?: unknown }).message;
-    if (typeof nestedMessage === "string" && nestedMessage.trim()) return nestedMessage;
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return "Request failed";
-    }
-  }
-  return "Request failed";
+export function getUserFacingError(error: unknown, fallback = "The request could not be completed."): string {
+  if (error instanceof ApiError) return error.message;
+  return fallback;
 }
 
 export class ApiError extends Error {
@@ -55,11 +47,11 @@ export class ApiError extends Error {
   }
   /** 409 module_disabled — render "not offered at this facility", not an error page. */
   get isModuleDisabled(): boolean {
-    return this.code === 409 && (this.payload as { code?: string })?.code === "module_disabled";
+    return this.code === 409 && apiErrorCode(this.payload) === "module_disabled";
   }
   /** 409 stale_write — someone else saved first; show a diff, never silently overwrite. */
   get isStaleWrite(): boolean {
-    return this.code === 409 && (this.payload as { code?: string })?.code === "stale_write";
+    return this.code === 409 && apiErrorCode(this.payload) === "stale_write";
   }
 }
 
@@ -103,15 +95,25 @@ export async function api<T>(path: string, init: ApiOptions = {}): Promise<T> {
   try {
     body = (await res.json()) as Envelope<T>;
   } catch {
-    throw new ApiError(res.status, "Malformed response from server");
+    throw new ApiError(
+      res.status,
+      userFacingApiError(res.status),
+      res.headers.get("x-request-id") ?? undefined,
+    );
   }
 
   if (!body.success || body.error) {
+    const statusCode =
+      typeof body.error?.code === "number" ? body.error.code : res.status;
+    const payload =
+      typeof body.error?.code === "string"
+        ? { code: body.error.code, message: body.error.message }
+        : (body.error?.message ?? body.error);
     throw new ApiError(
-      body.error?.code ?? res.status,
-      errorMessage(body.error?.message),
+      statusCode,
+      userFacingApiError(statusCode, payload),
       body.meta?.request_id,
-      body.error?.message ?? body.error,
+      payload,
     );
   }
   return body.data as T;

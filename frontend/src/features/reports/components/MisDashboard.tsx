@@ -55,6 +55,7 @@ export function MisDashboard() {
   const { items, loading, error, period, setPeriod, customFrom, customTo, setCustomFrom, setCustomTo } = useKpis("7d");
   const [focusCode, setFocusCode] = useState<CoreKpiCode | null>(null);
   const [capabilities, setCapabilities] = useState<FacilityCapabilities | null>(null);
+  const customRangeInvalid = Boolean(customFrom && customTo && customFrom > customTo);
 
   useEffect(() => {
     let cancelled = false;
@@ -237,7 +238,11 @@ export function MisDashboard() {
               ))}
             </ToggleButtonGroup>
             {period === "custom" ? (
-              <Stack direction="row" spacing={1}>
+              <Stack
+                direction={{ xs: "column", sm: "row" }}
+                spacing={1}
+                sx={{ width: { xs: "100%", sm: "auto" }, minWidth: 0 }}
+              >
                 <TextField
                   size="small"
                   type="date"
@@ -246,6 +251,8 @@ export function MisDashboard() {
                   onChange={(e) => setCustomFrom(e.target.value)}
                   slotProps={{ inputLabel: { shrink: true } }}
                   sx={{
+                    minWidth: { xs: 0, sm: 150 },
+                    flex: { xs: "1 1 auto", sm: "0 1 170px" },
                     "& .MuiInputBase-root": {
                       bgcolor: "rgb(255 255 255 / 0.95)",
                       borderRadius: "10px",
@@ -263,8 +270,12 @@ export function MisDashboard() {
                   label="To"
                   value={customTo}
                   onChange={(e) => setCustomTo(e.target.value)}
+                  error={customRangeInvalid}
+                  helperText={customRangeInvalid ? "Must be on or after From" : undefined}
                   slotProps={{ inputLabel: { shrink: true } }}
                   sx={{
+                    minWidth: { xs: 0, sm: 150 },
+                    flex: { xs: "1 1 auto", sm: "0 1 170px" },
                     "& .MuiInputBase-root": {
                       bgcolor: "rgb(255 255 255 / 0.95)",
                       borderRadius: "10px",

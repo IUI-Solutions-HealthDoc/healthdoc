@@ -88,6 +88,7 @@ export const REALM_ROLE_LABELS: Record<RealmRole, string> = {
  */
 export type MatrixCapability =
   | ModuleCode
+  | "facilities"
   | "patients"
   | "registration"
   | "opd"
@@ -101,6 +102,7 @@ export type MatrixCapability =
   | "emergency";
 
 export const MATRIX_CAPABILITIES: MatrixCapability[] = [
+  "facilities",
   "patients",
   "registration",
   "opd",
@@ -120,6 +122,7 @@ export const MATRIX_CAPABILITIES: MatrixCapability[] = [
 ];
 
 export const MATRIX_CAPABILITY_LABELS: Record<MatrixCapability, string> = {
+  facilities: "Facilities",
   patients: "Patients",
   registration: "Registration",
   opd: "OPD",
@@ -152,7 +155,7 @@ export const ROLE_CAPABILITY_MAP: Record<RealmRole, MatrixCapability[]> = {
   hod: ["patients", "opd", "queue", "lab", "radiology", "pharmacy", "ipd", "ot"],
   auditor: ["audit", "consent", "billing"],
   patient: ["patients"],
-  superadmin: ["users", "audit"],
+  superadmin: ["facilities"],
 };
 
 export const APPROVAL_STATUS_LABELS: Record<"pending" | "approved" | "rejected", string> = {

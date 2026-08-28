@@ -35,6 +35,16 @@ const roles = [
       );
       if (!emptySearchDisabled) throw new Error("empty patient search was not blocked by validation");
       await page.type('form input', "Browser smoke patient");
+      await page.evaluate(() => {
+        const date = document.querySelector('form input[type="date"]');
+        const setter = Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype,
+          "value",
+        )?.set;
+        setter?.call(date, "1990-01-01");
+        date?.dispatchEvent(new Event("input", { bubbles: true }));
+        date?.dispatchEvent(new Event("change", { bubbles: true }));
+      });
       await page.click('form button[type="submit"]');
     },
   },
@@ -102,8 +112,8 @@ const roles = [
     forbiddenPath: "/doctor",
     api: { method: "GET", path: "/api/v1/users" },
     async startJourney(page) {
-      await page.waitForSelector('a[href="/admin/users"]', { timeout: 60_000 });
-      await page.click('a[href="/admin/users"]');
+      await page.waitForSelector('main a[href="/admin/users"]', { timeout: 60_000 });
+      await page.click('main a[href="/admin/users"]');
       await page.waitForFunction(() => window.location.pathname === "/admin/users", {
         timeout: 60_000,
       });

@@ -106,15 +106,13 @@ function ModuleCard({
           </Typography>
           <Switch
             checked={m.is_enabled}
-            disabled={busy}
+            disabled={busy || (m.is_enabled && !reason.trim())}
             onChange={(_, checked) => {
               // module_code, not m.id — a module with no stored row has no
               // id until somebody disables it for the first time.
               //
-              // No "Disabled by admin" fallback: the server rejects a blank
-              // reason, and a placeholder is the non-answer that requirement
-              // exists to prevent. An empty box now surfaces the 422 instead
-              // of quietly writing something meaningless.
+              // The switch is disabled until a real reason is present, so an
+              // invalid request never leaves the browser.
               void onToggle(
                 m.module_code,
                 checked,
@@ -126,27 +124,26 @@ function ModuleCard({
       </Stack>
 
       <Box sx={{ mt: 1.5 }}>
-        {!m.is_enabled ? (
-          <TextField
-            size="small"
-            fullWidth
-            label="Disabled reason"
-            value={reason}
-            disabled={busy}
-            onChange={(e) => setReason(e.target.value)}
-            onBlur={() => {
-              const next = reason.trim();
-              if (next && next !== (m.disabled_reason ?? "")) {
-                void onToggle(m.module_code, false, next);
-              }
-            }}
-            helperText="Saved on blur · facility_modules.disabled_reason"
-          />
-        ) : (
-          <Typography sx={{ m: 0, fontSize: "0.75rem", color: meridian.textSecondary }}>
-            config: {configPreview(m.config)}
-          </Typography>
-        )}
+        <TextField
+          size="small"
+          fullWidth
+          required={m.is_enabled}
+          label={m.is_enabled ? "Reason for disabling" : "Disabled reason"}
+          value={reason}
+          disabled={busy}
+          onChange={(e) => setReason(e.target.value)}
+          onBlur={() => {
+            const next = reason.trim();
+            if (!m.is_enabled && next && next !== (m.disabled_reason ?? "")) {
+              void onToggle(m.module_code, false, next);
+            }
+          }}
+          helperText={
+            m.is_enabled
+              ? `Required before switching off · current config: ${configPreview(m.config)}`
+              : "Saved on blur · facility_modules.disabled_reason"
+          }
+        />
       </Box>
     </Box>
   );
