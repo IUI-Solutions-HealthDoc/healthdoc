@@ -20,7 +20,7 @@ type PermTab = "modules" | "roles";
 
 export function PermissionsWorkspace() {
   const [tab, setTab] = useState<PermTab>("modules");
-  const { modules, capabilities, loading, busyCode, toggle } = useFacilityModules();
+  const { modules, capabilities, loading, error, busyCode, toggle } = useFacilityModules();
   const { user: currentUser } = useCurrentUser();
 
   const enabledCount = useMemo(
@@ -44,6 +44,7 @@ export function PermissionsWorkspace() {
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
       <AdminPageHeader
+        backHref="/admin"
         eyebrow="Admin"
         title="Permissions"
         subtitle="Facility module switchboard + Keycloak realm role reference matrix"
@@ -107,9 +108,15 @@ export function PermissionsWorkspace() {
           ))}
         </Stack>
         <Typography sx={{ m: 0, fontSize: "0.75rem", color: meridian.textSecondary }}>
-          Authz is Keycloak; capabilities from mock GET /facility/capabilities.
+          Authorization is enforced by Keycloak and the live facility capability API.
         </Typography>
       </Box>
+
+      {error ? (
+        <Typography role="alert" sx={{ color: meridian.danger, fontSize: "0.875rem" }}>
+          {error}
+        </Typography>
+      ) : null}
 
       {capsSummary ? (
         <Stack direction="row" useFlexGap sx={{ gap: 0.75, flexWrap: "wrap" }}>

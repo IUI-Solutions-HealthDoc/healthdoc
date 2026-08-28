@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import CurrentDbUser, require_roles
 from app.common.db import get_db
+from app.departments.models import Department
 from app.users.models import User
 from app.users.schemas import UserCreate, UserOut, UserUpdate
 from app.users.service import KeycloakAdmin
@@ -44,6 +45,28 @@ async def _get_scoped_user(
     if user is None or user.facility_id != caller_facility_id:
         raise HTTPException(404, "User not found")
     return user
+
+
+async def _validate_department(
+    db: AsyncSession,
+    department_id: uuid.UUID | None,
+    caller_facility_id: uuid.UUID,
+) -> None:
+    if department_id is None:
+        return
+    department = await db.get(Department, department_id)
+    if (
+        department is None
+        or department.facility_id != caller_facility_id
+        or not department.is_active
+    ):
+        raise HTTPException(
+            422,
+            {
+                "code": "invalid_department",
+                "message": "Select an active department in your facility.",
+            },
+        )
 
 
 @router.get("")
@@ -121,6 +144,8 @@ async def create_user(
             },
         )
 
+    await _validate_department(db, payload.department_id, current_db_user.facility_id)
+
     existing = await db.execute(select(User).where(User.username == payload.username))
     if existing.scalar_one_or_none():
         raise HTTPException(409, f"Username '{payload.username}' already exists")
@@ -150,6 +175,8 @@ async def update_user(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     user = await _get_scoped_user(db, user_id, current_db_user.facility_id)
+    if "department_id" in payload.model_fields_set:
+        await _validate_department(db, payload.department_id, current_db_user.facility_id)
     # facility_id is not updateable through this route even if the schema ever
     # gains it — moving a staff account between facilities is a transfer with
     # its own approval, not a field edit.

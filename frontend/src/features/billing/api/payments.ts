@@ -90,19 +90,3 @@ export function createRefund(
     idempotencyKey: newIdempotencyKey(),
   });
 }
-
-/**
- * Payments are immutable once saved.
- *
- * The fixture simulated a rejected mutation so the screen could demonstrate it.
- * There is nothing to call now — the absence of any update or delete endpoint
- * IS the property, and `trg_payments_block` enforces it at the database even if
- * one were added. Throws the shape the screen already handles.
- */
-export async function attemptMutatePayment(): Promise<never> {
-  throw new Error(
-    "payments are immutable once saved — no update or delete endpoint exists, " +
-      "and trg_payments_block rejects the write at the database. Correct a " +
-      "payment with a refund, which records the reversal rather than hiding it.",
-  );
-}

@@ -15,6 +15,12 @@ export function useKpis(initialPeriod: KpiPeriod = "7d") {
 
   const refresh = useCallback(async () => {
     if (period === "custom" && (!customFrom || !customTo)) return;
+    if (period === "custom" && customFrom > customTo) {
+      setError("The From date must be on or before the To date.");
+      setItems([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {

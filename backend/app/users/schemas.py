@@ -1,34 +1,64 @@
 import uuid
 from datetime import datetime
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
+StaffUsername = Annotated[
+    str,
+    Field(
+        min_length=3,
+        max_length=100,
+        pattern=r"^[A-Za-z0-9._-]+$",
+        description="Keycloak login id; spaces are not valid.",
+    ),
+]
+FacilityStaffRole = Literal[
+    "receptionist",
+    "doctor",
+    "nurse",
+    "lab_tech",
+    "radiology_tech",
+    "pharmacist",
+    "emergency",
+    "supervisor",
+    "admin",
+    "hod",
+    "auditor",
+]
+
+
 class UserCreate(BaseModel):
-    username: str = Field(min_length=3, max_length=100)
-    full_name: str
+    username: StaffUsername
+    full_name: str = Field(min_length=1)
     email: EmailStr | None = None
     mobile: str | None = Field(default=None, pattern=r"^\+91\d{10}$")
     designation: str | None = None
     employee_id: str | None = None
     registration_number: str | None = None
     qualification: str | None = None
+    department_id: uuid.UUID | None = None
     #: Ignored — the account is created at the authenticated admin's facility.
     #: Optional rather than removed so existing callers keep validating; the
     #: router refuses a value that disagrees with the caller's own facility.
     facility_id: uuid.UUID | None = None
-    roles: list[str] = Field(default_factory=list, description="Keycloak realm roles")
+    roles: list[FacilityStaffRole] = Field(
+        min_length=1,
+        description="One or more facility staff roles. Patient and platform-superadmin use separate flows.",
+    )
     temporary_password: str = Field(min_length=8)
 
 
 class UserUpdate(BaseModel):
-    full_name: str | None = None
+    full_name: Annotated[str, Field(min_length=1)] | None = None
     email: EmailStr | None = None
     mobile: str | None = Field(default=None, pattern=r"^\+91\d{10}$")
     designation: str | None = None
     employee_id: str | None = None
     registration_number: str | None = None
     qualification: str | None = None
+    department_id: uuid.UUID | None = None
 
 
 class UserOut(BaseModel):
@@ -45,6 +75,7 @@ class UserOut(BaseModel):
     registration_number: str | None
     qualification: str | None
     facility_id: uuid.UUID
+    department_id: uuid.UUID | None
     is_active: bool
     created_at: datetime
     updated_at: datetime
@@ -56,8 +87,11 @@ class AccountRequestCreate(BaseModel):
     """Ask for a staff account. Creates nothing until an approver acts."""
 
     requested_for_full_name: str = Field(min_length=1)
-    requested_username: str = Field(min_length=3, max_length=100)
-    requested_roles: list[str] = Field(min_length=1, description="Keycloak realm roles")
+    requested_username: StaffUsername
+    requested_roles: list[FacilityStaffRole] = Field(
+        min_length=1,
+        description="One or more facility staff roles. Patient and platform-superadmin use separate flows.",
+    )
     designation: str | None = None
     employee_id: str | None = None
     registration_number: str | None = None

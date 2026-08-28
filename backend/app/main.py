@@ -26,7 +26,7 @@ MODULES = [
     "allergies", "audit", "billing", "blood_bank", "consent", "departments",
     "diagnoses", "dpdp", "emergency", "encounters", "files", "inventory", "ipd", "notifications",
     "maintenance", "nursing", "opd", "orders", "ot", "outbox", "pathology", "patients", "procedures",
-    "pharmacy", "queue", "radiology", "registration", "reports",
+    "pharmacy", "platform", "queue", "radiology", "registration", "reports",
     "security_audit", "users", "wards",
 ]
 # NB: "ipd" re-exports app.admissions.router — admissions is intentionally absent

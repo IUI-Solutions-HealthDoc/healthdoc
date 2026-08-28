@@ -33,7 +33,6 @@ type Props = {
   canCollect: boolean;
   onCollect: (body: CollectPaymentInput) => Promise<void>;
   onRefund: (paymentId: string, body: CreateRefundInput) => Promise<void>;
-  onDemoImmutable?: () => void;
 };
 
 export function PaymentsPanel({
@@ -47,7 +46,6 @@ export function PaymentsPanel({
   canCollect,
   onCollect,
   onRefund,
-  onDemoImmutable,
 }: Props) {
   const [collectOpen, setCollectOpen] = useState(false);
   const [selected, setSelected] = useState<PaymentWithRefunds | null>(null);
@@ -77,16 +75,6 @@ export function PaymentsPanel({
           </Typography>
         </Box>
         <Stack direction="row" useFlexGap sx={{ gap: 1, flexWrap: "wrap" }}>
-          {onDemoImmutable ? (
-            <Button
-              size="small"
-              variant="outlined"
-              onClick={onDemoImmutable}
-              sx={{ textTransform: "none", fontWeight: 600, borderRadius: "10px" }}
-            >
-              Try edit (demo)
-            </Button>
-          ) : null}
           <Button
             size="small"
             variant="contained"

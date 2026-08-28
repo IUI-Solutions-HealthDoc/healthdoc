@@ -5,13 +5,16 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "@/components/ui/toast";
 import { activateUser, deactivateUser, updateUser } from "../api";
 import type { User, UserUpdateInput } from "../types";
+import { type FieldErrors, validateUserProfile } from "../validation";
 
 export function useUserEditor(user: User | null, onSaved?: (next: User) => void) {
   const [draft, setDraft] = useState<User | null>(null);
   const [busy, setBusy] = useState(false);
+  const [errors, setErrors] = useState<FieldErrors>({});
 
   useEffect(() => {
     setDraft(user ? structuredClone(user) : null);
+    setErrors({});
   }, [user]);
 
   const isDirty = useMemo(() => {
@@ -23,12 +26,24 @@ export function useUserEditor(user: User | null, onSaved?: (next: User) => void)
     <K extends keyof UserUpdateInput>(key: K, value: UserUpdateInput[K]) => {
       if (!draft) return;
       setDraft({ ...draft, [key]: value } as User);
+      setErrors((current) => {
+        if (!current[key]) return current;
+        const next = { ...current };
+        delete next[key];
+        return next;
+      });
     },
     [draft],
   );
 
   const save = useCallback(async () => {
     if (!draft) return;
+    const validationErrors = validateUserProfile(draft);
+    setErrors(validationErrors);
+    if (Object.keys(validationErrors).length > 0) {
+      toast.error("Please correct the highlighted profile fields before saving.");
+      return;
+    }
     setBusy(true);
     try {
       const next = await updateUser(draft.id, {
@@ -75,5 +90,5 @@ export function useUserEditor(user: User | null, onSaved?: (next: User) => void)
     }
   }, [draft, onSaved]);
 
-  return { draft, busy, isDirty, patchField, save, toggleActive };
+  return { draft, busy, isDirty, errors, patchField, save, toggleActive };
 }

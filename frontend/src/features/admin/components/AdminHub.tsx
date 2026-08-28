@@ -27,6 +27,26 @@ const LINKS = [
     subtitle: "facility_modules toggles + Keycloak role matrix",
   },
   {
+    href: "/admin/departments",
+    title: "Departments & rooms",
+    subtitle: "Facility departments, active status and room configuration",
+  },
+  {
+    href: "/admin/abdm-sync",
+    title: "ABDM identity links",
+    subtitle: "Inspect and unlink verified ABHA records",
+  },
+  {
+    href: "/admin/data-protection",
+    title: "Data protection",
+    subtitle: "DPO, grievances and consent-manager governance",
+  },
+  {
+    href: "/admin/maintenance",
+    title: "Equipment maintenance",
+    subtitle: "Machine service and maintenance register",
+  },
+  {
     href: "/audit-viewer",
     title: "Audit trail",
     subtitle: "Opens the auditor workplace (admin may view; not an admin-only module)",

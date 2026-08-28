@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
+import Link from "next/link";
 
 import { meridian } from "@/styles/theme";
 import { adminPageStripSx } from "../panelSx";
@@ -13,9 +14,10 @@ type Props = {
   title: string;
   subtitle?: string;
   actions?: ReactNode;
+  backHref?: string;
 };
 
-export function AdminPageHeader({ eyebrow, title, subtitle, actions }: Props) {
+export function AdminPageHeader({ eyebrow, title, subtitle, actions, backHref }: Props) {
   return (
     <Box sx={adminPageStripSx}>
       <Stack
@@ -29,6 +31,23 @@ export function AdminPageHeader({ eyebrow, title, subtitle, actions }: Props) {
         }}
       >
         <Box sx={{ minWidth: 0 }}>
+          {backHref ? (
+            <Box
+              component={Link}
+              href={backHref}
+              sx={{
+                display: "inline-block",
+                mb: 1,
+                color: meridian.brandPrimary,
+                fontSize: "0.8125rem",
+                fontWeight: 700,
+                textDecoration: "underline",
+                textUnderlineOffset: 2,
+              }}
+            >
+              ← Back to administration
+            </Box>
+          ) : null}
           {eyebrow ? (
             <Typography
               sx={{

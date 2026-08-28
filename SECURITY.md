@@ -26,7 +26,7 @@ public issue or pull request.**
 
 * **GitHub Security Advisory:** submit a private report via the
   [Security Advisory tab](https://github.com/IUI-Solutions-HealthDoc/healthdoc/security/advisories/new).
-* **Security Team Email:** `security@iuisolutions.com`.
+* **Security Team Email:** `manan0015@iuis.in`.
 
 ### What to Include
 
