@@ -99,3 +99,8 @@ export function signOffRadiologyReport(
     }),
   });
 }
+
+/** FHIR DiagnosticReport bundle for the current signed report on this item. */
+export function getRadiologyFhirBundle(itemId: string): Promise<Record<string, unknown>> {
+  return api<Record<string, unknown>>(`/radiology/order-items/${itemId}/fhir-bundle`);
+}

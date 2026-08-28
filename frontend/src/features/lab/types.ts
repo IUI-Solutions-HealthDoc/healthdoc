@@ -42,3 +42,38 @@ export interface CriticalLabAlert {
   lab_order_item_id: string;
   accession_number: string;
 }
+
+export interface LabWorklistParams {
+  page?: number;
+  page_size?: number;
+  status?: string;
+}
+
+export interface LabTatByTest {
+  test_name: string;
+  sample_count: number;
+  avg_tat_minutes: number | null;
+  median_tat_minutes: number | null;
+}
+
+export interface LabStatusCount {
+  status: string;
+  count: number;
+}
+
+export interface LabPanicFrequency {
+  test_name: string;
+  critical_count: number;
+  total_count: number;
+  panic_rate_pct: number;
+}
+
+export interface LabMisSummary {
+  date_from: string;
+  date_to: string;
+  tat_by_test: LabTatByTest[];
+  order_counts_by_status: LabStatusCount[];
+  total_orders: number;
+  total_results: number;
+  panic_frequency: LabPanicFrequency[];
+}
