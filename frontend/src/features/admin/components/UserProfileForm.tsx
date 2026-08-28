@@ -5,6 +5,7 @@ import Button from "@mui/material/Button";
 import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
+import MenuItem from "@mui/material/MenuItem";
 
 import { meridian } from "@/styles/theme";
 import {
@@ -13,12 +14,16 @@ import {
   adminStickyActionsSx,
 } from "../panelSx";
 import type { User } from "../types";
+import type { FieldErrors } from "../validation";
+import type { Department } from "../api/departments";
 import { UserHeader } from "./UserHeader";
 
 type Props = {
   draft: User;
   busy: boolean;
   isDirty: boolean;
+  errors: FieldErrors;
+  departments: Department[];
   onChange: (key: keyof User, value: string) => void;
   onSave: () => void;
   onToggleActive: () => void;
@@ -32,13 +37,14 @@ const FIELDS: { key: keyof User; label: string }[] = [
   { key: "employee_id", label: "Employee ID" },
   { key: "registration_number", label: "Registration number" },
   { key: "qualification", label: "Qualification" },
-  { key: "department_id", label: "Department ID" },
 ];
 
 export function UserProfileForm({
   draft,
   busy,
   isDirty,
+  errors,
+  departments,
   onChange,
   onSave,
   onToggleActive,
@@ -86,8 +92,27 @@ export function UserProfileForm({
               value={(draft[key] as string | null) ?? ""}
               onChange={(e) => onChange(key, e.target.value)}
               disabled={busy}
+              error={Boolean(errors[key])}
+              helperText={errors[key]}
             />
           ))}
+          <TextField
+            select
+            label="Department"
+            size="small"
+            sx={{ width: { xs: "100%", sm: "calc(50% - 6px)" } }}
+            value={draft.department_id ?? ""}
+            onChange={(event) => onChange("department_id", event.target.value)}
+            disabled={busy}
+            helperText="Optional for facility-wide roles"
+          >
+            <MenuItem value="">No department</MenuItem>
+            {departments.filter((department) => department.is_active).map((department) => (
+              <MenuItem key={department.id} value={department.id}>
+                {department.name} ({department.code})
+              </MenuItem>
+            ))}
+          </TextField>
         </Stack>
 
         <Typography sx={{ mt: 2, mb: 0, fontSize: "0.75rem", color: meridian.textSecondary }}>

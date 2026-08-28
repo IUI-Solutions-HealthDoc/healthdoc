@@ -21,6 +21,7 @@ from app.users import router as users_router
 from app.users.models import User
 from app.users.schemas import UserUpdate
 from app.users.models import Facility
+from app.departments.models import Department
 
 pytestmark = pytest.mark.asyncio
 
@@ -100,6 +101,32 @@ async def test_another_facilitys_user_cannot_be_updated(db):
     assert stranger.full_name == "Staff Member", "the write must not have landed"
 
 
+async def test_user_cannot_be_assigned_to_another_facilitys_department(db):
+    ours, theirs = await _facility(db), await _facility(db)
+    colleague = await _user(db, ours.id)
+    foreign_department = Department(
+        id=uuid.uuid4(),
+        facility_id=theirs.id,
+        name="Foreign Medicine",
+        code="FMED",
+        is_active=True,
+    )
+    db.add(foreign_department)
+    await db.flush()
+
+    with pytest.raises(HTTPException) as caught:
+        await users_router.update_user(
+            colleague.id,
+            UserUpdate(department_id=foreign_department.id),
+            _Caller(ours.id),
+            db=db,
+        )
+
+    assert caught.value.status_code == 422
+    await db.refresh(colleague)
+    assert colleague.department_id is None
+
+
 async def test_another_facilitys_user_cannot_be_deactivated(db):
     """Disabling someone else's clinician is a denial-of-service on their ward,
     and it reaches Keycloak, so it is not undone by a database rollback."""
@@ -138,7 +165,7 @@ async def test_create_refuses_a_foreign_facility_before_touching_keycloak(db):
 
     payload = UserCreate(
         username=f"u{uuid.uuid4().hex[:8]}", full_name="Intruder",
-        facility_id=theirs.id, temporary_password="temp-password-1",
+        facility_id=theirs.id, roles=["nurse"], temporary_password="temp-password-1",
     )
 
     with pytest.raises(HTTPException) as caught:

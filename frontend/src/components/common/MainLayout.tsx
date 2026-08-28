@@ -20,6 +20,14 @@ export default function MainLayout({
   const allowed = pathname === "/" || canRoleAccessPath(user?.role ?? null, pathname);
 
   useEffect(() => {
+    const desktop = window.matchMedia("(min-width: 768px)");
+    const sync = () => setOpen(desktop.matches);
+    sync();
+    desktop.addEventListener("change", sync);
+    return () => desktop.removeEventListener("change", sync);
+  }, []);
+
+  useEffect(() => {
     if (isLoading) return;
     if (isPublic) {
       // Only /login bounces an authenticated user onward. The wall display is
@@ -75,7 +83,11 @@ export default function MainLayout({
 
       <Sidebar open={open} setOpen={setOpen} />
 
-      <main id="main-content" tabIndex={-1} className="pt-16 p-6">
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className={`p-6 pt-20 transition-[margin] duration-300 ${open ? "md:ml-[260px]" : "md:ml-0"}`}
+      >
         {children}
       </main>
     </div>

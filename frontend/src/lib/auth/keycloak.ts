@@ -11,7 +11,7 @@ import { setAccessToken } from "@/lib/api";
 const url =
   process.env.NEXT_PUBLIC_KEYCLOAK_URL ??
   process.env.NEXT_PUBLIC_KEYCLOAK_PUBLIC_URL ??
-  "https://localhost/auth";
+  "";
 const realm = process.env.NEXT_PUBLIC_KEYCLOAK_REALM ?? "healthdoc";
 const clientId =
   process.env.NEXT_PUBLIC_OIDC_CLIENT_ID ?? "healthdoc-frontend";
@@ -78,9 +78,13 @@ const ROLE_PRECEDENCE: readonly Role[] = [
 
 export function mapKeycloakRolesToAppRole(roles: string[]): Role | null {
   const held = new Set(roles.map((r) => r.toLowerCase()));
-  // Keycloak's own realm-management role, not one of ours.
+  const healthDocRole = ROLE_PRECEDENCE.find((role) => held.has(role));
+  if (healthDocRole) return healthDocRole;
+  // Keycloak's own realm-management role is only a compatibility fallback.
+  // A platform superadmin commonly holds realm-admin too; checking it first
+  // downgraded that user into the facility-admin workspace.
   if (held.has("realm-admin")) return ROLES.ADMIN;
-  return ROLE_PRECEDENCE.find((role) => held.has(role)) ?? null;
+  return null;
 }
 
 export function sessionUserFromKeycloak(kc: Keycloak): SessionUser | null {

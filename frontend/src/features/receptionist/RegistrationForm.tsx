@@ -36,11 +36,21 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
   const idempotencyKey = useMemo(() => newIdempotencyKey(), []);
 
   const ageProvided = ageMode === "dob" ? dob !== "" : ageYears !== "";
-  const canSubmit = fullName.trim() !== "" && sex !== "" && ageProvided && !busy;
+  const fullNameValid = fullName.trim().length >= 2;
+  const mobileValid = !mobile.trim() || /^\d{10}$/.test(mobile.trim());
+  const abhaValid = !abha.trim() || /^\d{14}$/.test(abha.trim());
+  const ageValid =
+    ageMode === "dob"
+      ? Boolean(dob && dob <= new Date().toISOString().slice(0, 10))
+      : Boolean(ageYears && Number.isInteger(Number(ageYears)) && Number(ageYears) >= 0 && Number(ageYears) <= 130);
+  const canSubmit = fullNameValid && sex !== "" && ageProvided && ageValid && mobileValid && abhaValid && !busy;
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (!canSubmit) return;
+    if (!canSubmit) {
+      setError("Please correct the highlighted registration fields before submitting.");
+      return;
+    }
 
     const payload: PatientCreate = {
       full_name: fullName.trim(),
@@ -114,6 +124,7 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
             className="w-full rounded-md border border-border px-3 py-2"
             value={fullName}
             onChange={(e) => setFullName(e.target.value)}
+            minLength={2}
           />
         </label>
 
@@ -156,6 +167,8 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
                 className="flex-1 rounded-md border border-border px-3 py-2"
                 value={dob}
                 onChange={(e) => setDob(e.target.value)}
+                max={new Date().toISOString().slice(0, 10)}
+                required
               />
             ) : (
               <input
@@ -165,6 +178,7 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
                 className="flex-1 rounded-md border border-border px-3 py-2"
                 value={ageYears}
                 onChange={(e) => setAgeYears(e.target.value)}
+                required
               />
             )}
           </div>
@@ -177,7 +191,13 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
             value={mobile}
             onChange={(e) => setMobile(e.target.value)}
             inputMode="numeric"
+            pattern="[0-9]{10}"
+            maxLength={10}
+            placeholder="10-digit mobile number"
           />
+          {!mobileValid ? (
+            <span className="text-xs text-danger">Enter a 10-digit mobile number.</span>
+          ) : null}
         </label>
 
         <label className="space-y-1 text-sm">
@@ -186,7 +206,13 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
             className="w-full rounded-md border border-border px-3 py-2"
             value={abha}
             onChange={(e) => setAbha(e.target.value)}
+            inputMode="numeric"
+            pattern="[0-9]{14}"
+            maxLength={14}
           />
+          {!abhaValid ? (
+            <span className="text-xs text-danger">ABHA number must contain 14 digits.</span>
+          ) : null}
         </label>
       </div>
 

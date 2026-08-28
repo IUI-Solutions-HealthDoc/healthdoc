@@ -130,23 +130,6 @@ export async function exportAuditLogsCsv(
 
 
 /**
- * Audit rows are append-only: there is no update or delete endpoint, and the
- * database enforces it with a trigger regardless.
- *
- * The fixture simulated a rejected mutation so the screen could demonstrate
- * immutability. Nothing to call now — the absence of the endpoint IS the
- * property. This throws the same shape the screen already handles, so the
- * demonstration still works and says something true.
- */
-export async function attemptMutateAuditLog(): Promise<never> {
-  throw new ApiError(
-    405,
-    "audit_logs is append-only — no update or delete endpoint exists, and a " +
-      "database trigger blocks the write even if one were added.",
-  );
-}
-
-/**
  * GET /audit/data-access — the DPDP ledger.
  *
  * `unattributed_in_page` counts rows whose patient_id is null. data_access_log

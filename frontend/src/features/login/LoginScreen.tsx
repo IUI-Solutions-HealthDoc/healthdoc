@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/Button";
 import { FieldSelect } from "@/components/ui/mui-field";
 import { type AuthUser, setAuthSession } from "@/lib/auth";
 import { isDevAuthEnabled } from "@/lib/auth/mode";
-import { loginWithKeycloak } from "@/lib/auth/keycloak";
+import { isKeycloakConfigured, loginWithKeycloak } from "@/lib/auth/keycloak";
 import { getDefaultRouteForRole } from "@/lib/auth/routes";
 import { useAuth } from "@/providers/auth-provider";
 
@@ -30,8 +30,13 @@ const DEV_ROLE_CHOICES: readonly { role: Role; label: string; name: string }[] =
   { role: ROLES.PHARMACIST, label: "Pharmacist", name: "Ravi Kumar" },
   { role: ROLES.LAB_TECH, label: "Lab technician", name: "Lab Tech" },
   { role: ROLES.RADIOLOGY_TECH, label: "Radiology technician", name: "Radiology Tech" },
+  { role: ROLES.EMERGENCY, label: "Emergency clinician", name: "Emergency Clinician" },
+  { role: ROLES.SUPERVISOR, label: "Records supervisor", name: "Records Supervisor" },
+  { role: ROLES.HOD, label: "Head of department", name: "Department Head" },
   { role: ROLES.AUDITOR, label: "Auditor", name: "Auditor" },
   { role: ROLES.ADMIN, label: "Admin", name: "Admin User" },
+  { role: ROLES.PATIENT, label: "Patient", name: "Patient User" },
+  { role: ROLES.SUPERADMIN, label: "Platform superadmin", name: "Platform Admin" },
 ];
 
 function devUserFor(role: Role): AuthUser {
@@ -53,6 +58,7 @@ export function LoginScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const devAuth = isDevAuthEnabled();
+  const keycloakConfigured = isKeycloakConfigured();
   const sessionExpired = searchParams.get("reason") === "session-expired";
 
   useEffect(() => {
@@ -117,7 +123,7 @@ export function LoginScreen() {
               type="button"
               onClick={() => void handleKeycloakLogin()}
               className="w-full"
-              disabled={busy || isLoading}
+              disabled={busy || isLoading || !keycloakConfigured}
             >
               {isLoading
                 ? "Preparing sign-in…"
@@ -130,6 +136,11 @@ export function LoginScreen() {
                 {error}
               </p>
             )}
+            {!keycloakConfigured ? (
+              <p className="text-sm text-red-600" role="alert">
+                Sign-in is not configured. Set NEXT_PUBLIC_KEYCLOAK_URL for this deployment.
+              </p>
+            ) : null}
             <p className="text-xs text-muted-foreground">
               Identity is Keycloak OIDC. Middleware only gates navigation; API
               calls use a Bearer access token held in memory.

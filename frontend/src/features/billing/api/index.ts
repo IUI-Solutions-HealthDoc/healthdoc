@@ -12,7 +12,6 @@ export {
   getInvoiceBalance,
   collectPayment,
   createRefund,
-  attemptMutatePayment,
 } from "./payments";
 
 export { listChargeMaster, getChargeMaster } from "./chargeMaster";
