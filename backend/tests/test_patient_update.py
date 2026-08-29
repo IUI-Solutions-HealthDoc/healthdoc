@@ -180,16 +180,27 @@ async def test_update_patient_applies_fields_and_writes_audit():
             reason="Patient corrected own name",
         )
 
-    # Fields applied to the patient object
+    # Fields applied to the patient object.
+    #
+    # The mobile arrives as ten digits and is stored as +919999999999.
+    # PatientUpdate normalises it — the front desk types what it reads off a
+    # form and the country code is added internally, so one stored format comes
+    # out of many typed ones. This assertion carries the +91 deliberately: it
+    # is the contract, and a test asserting the raw digits would pass only
+    # while normalisation was absent.
     assert patient.full_name == "New Name"
-    assert patient.mobile == "9999999999"
+    assert patient.mobile == "+919999999999"
     assert patient.updated_by == uid
 
-    # Audit capture populated
+    # Audit capture populated.
+    #
+    # new_value records what was STORED, not what was typed. An audit trail
+    # that logged the pre-normalisation string would disagree with the row it
+    # describes, which is the one thing an audit trail may never do.
     assert capture.resource_id == patient.id
     assert capture.reason == "Patient corrected own name"
     assert capture.old_value == {"full_name": "Old Name", "mobile": "1111111111"}
-    assert capture.new_value == {"full_name": "New Name", "mobile": "9999999999"}
+    assert capture.new_value == {"full_name": "New Name", "mobile": "+919999999999"}
 
 
 @pytest.mark.asyncio
