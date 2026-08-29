@@ -73,6 +73,7 @@ export interface GrnItemDraft {
 
 export interface CreateGrnInput {
   supplier_id: string;
+  purchase_order_id?: string | null;
   invoice_number: string | null;
   received_date: string;
   items: Array<{

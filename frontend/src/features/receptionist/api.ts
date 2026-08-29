@@ -6,6 +6,9 @@ import type {
   PatientSearchRequest,
   PatientSearchResponse,
   QueueSummary,
+  QueueCreate,
+  QueueCreated,
+  QueueOpeningOptions,
   QueueToken,
   QueueTokenCreate,
   QueueTokenList,
@@ -104,6 +107,19 @@ export function createVisit(
 /** Today's queues at the caller's facility, shortest first. */
 export function listQueues(): Promise<QueueSummary[]> {
   return api<QueueSummary[]>("/queue/queues");
+}
+
+/** Available named roster rows reception can use to open today's queue. */
+export function listQueueOpeningOptions(): Promise<QueueOpeningOptions> {
+  return api<QueueOpeningOptions>("/queue/opening-options");
+}
+
+/** Open one clinic queue from a roster option. */
+export function createQueue(payload: QueueCreate): Promise<QueueCreated> {
+  return api<QueueCreated>("/queue/queues", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 /** Tokens for one queue, with the current now_serving. */

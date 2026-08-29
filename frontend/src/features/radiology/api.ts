@@ -40,6 +40,27 @@ export function scheduleScan(
   });
 }
 
+/** Move a scheduled scan; the server records both slots and the reason. */
+export function rescheduleScan(
+  itemId: string,
+  scheduledAt: string,
+  machineId: string,
+  reason: string,
+): Promise<RadiologyOrderItem> {
+  return api<RadiologyOrderItem>(`/radiology/order-items/${itemId}/reschedule`, {
+    method: "PUT",
+    body: JSON.stringify({ scheduled_at: scheduledAt, machine_id: machineId, reason }),
+  });
+}
+
+/** Cancel an unperformed scan. Completed/reporting scans cannot be cancelled. */
+export function cancelScan(itemId: string, reason: string): Promise<RadiologyOrderItem> {
+  return api<RadiologyOrderItem>(`/radiology/order-items/${itemId}/cancel`, {
+    method: "PUT",
+    body: JSON.stringify({ reason }),
+  });
+}
+
 /**
  * Mark the scan performed. `completed_at` defaults to now server-side.
  *
@@ -98,4 +119,9 @@ export function signOffRadiologyReport(
       impression: impression?.trim() || null,
     }),
   });
+}
+
+/** FHIR DiagnosticReport bundle for the current signed report on this item. */
+export function getRadiologyFhirBundle(itemId: string): Promise<Record<string, unknown>> {
+  return api<Record<string, unknown>>(`/radiology/order-items/${itemId}/fhir-bundle`);
 }

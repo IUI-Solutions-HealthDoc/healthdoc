@@ -241,3 +241,66 @@ def test_only_a_placed_scan_can_be_scheduled(client_as, seeded_order_id):
 
     again = tech.put(f"/api/v1/radiology/order-items/{item['id']}/schedule", json=slot)
     assert again.status_code == 409, again.text
+
+
+def test_scheduled_scan_can_be_rescheduled_with_a_reason(client_as, seeded_order_id):
+    doc = client_as(DOCTOR)
+    item = _new_scan(doc, _new_order(doc), scan_type="CT Chest")
+    tech = client_as(RADIOLOGY_TECH)
+    assert tech.put(
+        f"/api/v1/radiology/order-items/{item['id']}/schedule",
+        json={"scheduled_at": "2099-01-05T11:00:00Z", "machine_id": "CT-01"},
+    ).status_code == 200
+
+    response = tech.put(
+        f"/api/v1/radiology/order-items/{item['id']}/reschedule",
+        json={
+            "scheduled_at": "2099-01-06T12:30:00Z",
+            "machine_id": "CT-02",
+            "reason": "Machine CT-01 is under maintenance",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()["data"]
+    assert body["status"] == "scheduled"
+    assert body["machine_id"] == "CT-02"
+    assert body["scheduled_at"].startswith("2099-01-06T12:30:00")
+
+
+def test_unperformed_scan_can_be_cancelled_but_completed_work_cannot(
+    client_as, seeded_order_id
+):
+    doc = client_as(DOCTOR)
+    item = _new_scan(doc, _new_order(doc), scan_type="MRI Knee")
+    tech = client_as(RADIOLOGY_TECH)
+
+    cancelled = tech.put(
+        f"/api/v1/radiology/order-items/{item['id']}/cancel",
+        json={"reason": "Patient withdrew consent before imaging"},
+    )
+    assert cancelled.status_code == 200, cancelled.text
+    assert cancelled.json()["data"]["status"] == "cancelled"
+
+    complete = tech.put(
+        f"/api/v1/radiology/order-items/{item['id']}/scan-complete", json={}
+    )
+    assert complete.status_code == 409, complete.text
+
+
+def test_cancel_and_reschedule_reasons_are_validated(client_as, seeded_order_id):
+    doc = client_as(DOCTOR)
+    item = _new_scan(doc, _new_order(doc), scan_type="USG Renal")
+    tech = client_as(RADIOLOGY_TECH)
+
+    too_short = tech.put(
+        f"/api/v1/radiology/order-items/{item['id']}/cancel",
+        json={"reason": "no"},
+    )
+    assert too_short.status_code == 422, too_short.text
+
+    naive_time = tech.put(
+        f"/api/v1/radiology/order-items/{item['id']}/schedule",
+        json={"scheduled_at": "2099-01-05T11:00:00", "machine_id": "USG-01"},
+    )
+    assert naive_time.status_code == 422, naive_time.text

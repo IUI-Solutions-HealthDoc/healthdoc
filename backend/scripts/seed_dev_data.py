@@ -10,7 +10,9 @@ import argparse
 import asyncio
 import uuid
 from collections.abc import Mapping
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
 from sqlalchemy.sql.elements import TextClause
@@ -26,6 +28,7 @@ FACILITY_ID = uuid.UUID("00000000-0000-0000-0000-000000000101")
 #: a department" and the dashboard cannot be exercised at all — which is exactly
 #: where it stood until this seed existed.
 DEPARTMENT_ID = uuid.UUID("00000000-0000-0000-0000-000000000102")
+ROOM_ID = uuid.UUID("00000000-0000-0000-0000-000000000103")
 
 #: Users given DEPARTMENT_ID. Clinical roles belong to a department; admin and
 #: auditor deliberately do not, which is why /users/me's join is OUTER.
@@ -142,6 +145,16 @@ async def seed(users: list[tuple[str, str]]) -> None:
             {"id": FACILITY_ID},
         )
 
+        # This facility is inserted with raw SQL, so Facility.after_insert does
+        # not run. Pre-create the sequence that normal patient registration
+        # advances; otherwise the first POST /patients sees an undefined
+        # relation and the transaction is already aborted before its fallback
+        # can execute DDL.
+        local_year = datetime.now(ZoneInfo("Asia/Kolkata")).year
+        await session.execute(
+            text(f'CREATE SEQUENCE IF NOT EXISTS "seq_uhid_dev001_{local_year}"')
+        )
+
         await session.execute(
             text(
                 """
@@ -151,6 +164,20 @@ async def seed(users: list[tuple[str, str]]) -> None:
                 """
             ),
             {"id": DEPARTMENT_ID, "facility_id": FACILITY_ID},
+        )
+
+        await session.execute(
+            text(
+                """
+                INSERT INTO rooms (id, department_id, room_number, is_active)
+                VALUES (:id, :department_id, '101', true)
+                ON CONFLICT (id) DO UPDATE SET
+                    department_id = EXCLUDED.department_id,
+                    room_number = EXCLUDED.room_number,
+                    is_active = true
+                """
+            ),
+            {"id": ROOM_ID, "department_id": DEPARTMENT_ID},
         )
 
         for username, subject in users:
@@ -182,6 +209,43 @@ async def seed(users: list[tuple[str, str]]) -> None:
             # statement fail here and names both sides of the mismatch.
             _assert_exact_bind_parameters(statement, parameters)
             await session.execute(statement, parameters)
+
+        # Reception can open today's queue from the real roster picker. A
+        # deterministic doctor without a roster still leaves the OPD journey
+        # at a dead end on every fresh development stack.
+        doctor_user_id = (
+            await session.execute(
+                text("SELECT id FROM users WHERE username = 'dev.doctor'")
+            )
+        ).scalar_one()
+        roster_date = datetime.now(ZoneInfo("Asia/Kolkata")).date()
+        roster_id = uuid.uuid5(
+            uuid.NAMESPACE_URL, f"healthdoc:dev.doctor:roster:{roster_date.isoformat()}"
+        )
+        await session.execute(
+            text(
+                """
+                INSERT INTO rosters
+                    (id, staff_user_id, department_id, room_id, shift,
+                     roster_date, is_available)
+                VALUES
+                    (:id, :staff_user_id, :department_id, :room_id, 'morning',
+                     :roster_date, true)
+                ON CONFLICT (staff_user_id, roster_date, shift) DO UPDATE SET
+                    department_id = EXCLUDED.department_id,
+                    room_id = EXCLUDED.room_id,
+                    is_available = true,
+                    updated_at = now()
+                """
+            ),
+            {
+                "id": roster_id,
+                "staff_user_id": doctor_user_id,
+                "department_id": DEPARTMENT_ID,
+                "room_id": ROOM_ID,
+                "roster_date": roster_date,
+            },
+        )
 
         patient_user_id = (
             await session.execute(

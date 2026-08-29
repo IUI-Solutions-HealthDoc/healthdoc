@@ -1,7 +1,16 @@
 """B2-W1-02: UHID generation — Luhn check digit, Postgres sequence naming."""
-import pytest
+from unittest.mock import AsyncMock
 
-from app.patients.service import compute_check_digit, _sequence_name, _extract_digits, validate_uhid
+import pytest
+from sqlalchemy.exc import ProgrammingError
+
+from app.patients.service import (
+    _extract_digits,
+    _next_sequence,
+    _sequence_name,
+    compute_check_digit,
+    validate_uhid,
+)
 
 
 def test_check_digit_is_single_digit():
@@ -73,3 +82,47 @@ def test_validate_uhid_rejects_wrong_check_digit():
 def test_validate_uhid_rejects_malformed_string():
     assert validate_uhid("not-a-uhid-at-all") is False
     assert validate_uhid("") is False
+
+
+class _NestedTransaction:
+    def __init__(self):
+        self.rolled_back = False
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback):
+        self.rolled_back = exc is not None
+        return False
+
+
+class _ScalarResult:
+    def __init__(self, value):
+        self.value = value
+
+    def scalar(self):
+        return self.value
+
+
+@pytest.mark.asyncio
+async def test_missing_sequence_fallback_rolls_back_savepoint_before_create():
+    class UndefinedRelation(Exception):
+        pgcode = "42P01"
+
+    missing = ProgrammingError(
+        "SELECT nextval(:seq_name)",
+        {"seq_name": "seq_uhid_dev001_2026"},
+        UndefinedRelation("relation does not exist"),
+    )
+    nested = _NestedTransaction()
+    db = type("FakeSession", (), {})()
+    db.begin_nested = lambda: nested
+    db.execute = AsyncMock(
+        side_effect=[missing, _ScalarResult(None), _ScalarResult(17)]
+    )
+
+    value = await _next_sequence(db, "DEV001", 2026)
+
+    assert value == 17
+    assert nested.rolled_back is True
+    assert "CREATE SEQUENCE IF NOT EXISTS" in str(db.execute.await_args_list[1].args[0])

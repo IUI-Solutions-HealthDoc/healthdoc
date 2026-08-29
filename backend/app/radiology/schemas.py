@@ -4,14 +4,27 @@ Mirrors pathology/schemas.py pattern - snake_case, id + accession_number both re
 """
 import uuid
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict
+from typing import Annotated
+
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints
+
+
+MachineId = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50)
+]
+RecordedReason = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=5, max_length=500)
+]
+ClinicalNarrative = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=20_000)
+]
 
 
 class RadiologyOrderItemCreate(BaseModel):
     """Body for POST /radiology/order-items"""
-    modality: str
-    scan_type: str
-    machine_id: str | None = None
+    modality: str = Field(min_length=1, max_length=30)
+    scan_type: str = Field(min_length=1, max_length=500)
+    machine_id: MachineId | None = None
 
 
 class RadiologyOrderItemOut(BaseModel):
@@ -32,13 +45,23 @@ class RadiologyOrderItemOut(BaseModel):
 
 class ScheduleRequest(BaseModel):
     """Body for PUT /radiology/order-items/{item_id}/schedule"""
-    scheduled_at: datetime
-    machine_id: str
+    scheduled_at: AwareDatetime
+    machine_id: MachineId
+
+
+class RescheduleRequest(ScheduleRequest):
+    """Move a booked scan while retaining the reason in the audit trail."""
+    reason: RecordedReason
+
+
+class CancelScanRequest(BaseModel):
+    """Cancel an unperformed scan; completed clinical work is immutable."""
+    reason: RecordedReason
 
 
 class ScanCompletionRequest(BaseModel):
     """Body for PUT /radiology/order-items/{item_id}/scan-complete"""
-    completed_at: datetime | None = None
+    completed_at: AwareDatetime | None = None
 
 
 class RadiologyOrderItemListOut(BaseModel):
@@ -50,15 +73,15 @@ class RadiologyOrderItemListOut(BaseModel):
 
 class RadiologyReportCreate(BaseModel):
     """Body for POST /radiology/order-items/{item_id}/reports (radiologist draft)."""
-    findings: str
-    impression: str
+    findings: ClinicalNarrative
+    impression: ClinicalNarrative
     pacs_study_uid: str | None = None
 
 
 class RadiologyReportSignOff(BaseModel):
     """Body for PUT /radiology/order-items/{item_id}/reports/sign-off"""
-    findings: str | None = None
-    impression: str | None = None
+    findings: ClinicalNarrative | None = None
+    impression: ClinicalNarrative | None = None
 
 
 class RadiologyReportHistoryOut(BaseModel):

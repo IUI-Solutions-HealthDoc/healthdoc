@@ -21,8 +21,8 @@ import { searchMedicines } from "@/features/pharmacy/api";
 import type { MedicineSearchResult } from "@/features/pharmacy/types";
 import { ApiError } from "@/lib/api";
 
-import { createGrn, listGrns, listStockLocations, listSuppliers, verifyGrn } from "./api";
-import type { GrnItemDraft, GrnListRow, StockLocation, Supplier } from "./types";
+import { createGrn, listGrns, listPurchaseOrders, listStockLocations, listSuppliers, verifyGrn } from "./api";
+import type { GrnItemDraft, GrnListRow, PurchaseOrder, StockLocation, Supplier } from "./types";
 
 const EMPTY_LINE: GrnItemDraft = {
   item_id: "",
@@ -43,10 +43,12 @@ function statusTone(status: string): string {
 export function GrnWorkspace() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [locations, setLocations] = useState<StockLocation[]>([]);
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
   const [rows, setRows] = useState<GrnListRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  const [purchaseOrderId, setPurchaseOrderId] = useState("");
   const [supplierId, setSupplierId] = useState("");
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [receivedDate, setReceivedDate] = useState("");
@@ -58,14 +60,20 @@ export function GrnWorkspace() {
 
   const reload = useCallback(async () => {
     try {
-      const [supplierList, locationList, grnList] = await Promise.all([
+      const [supplierList, locationList, grnList, poList] = await Promise.all([
         listSuppliers(),
         listStockLocations(),
         listGrns(),
+        listPurchaseOrders(),
       ]);
       setSuppliers(supplierList);
       setLocations(locationList);
       setRows(grnList);
+      setPurchaseOrders(
+        poList.filter((po) =>
+          ["sent", "partially_received", "approved"].includes(po.status),
+        ),
+      );
       setError(null);
     } catch (reason) {
       setError(reason instanceof ApiError ? reason.message : "Could not load goods receipts");
@@ -118,11 +126,23 @@ export function GrnWorkspace() {
   const canSubmit =
     Boolean(supplierId) && Boolean(receivedDate) && readyLines.length > 0 && !busy;
 
+  const linkableOrders = useMemo(() => {
+    if (!supplierId) return purchaseOrders;
+    return purchaseOrders.filter((po) => po.supplier_id === supplierId);
+  }, [purchaseOrders, supplierId]);
+
+  const selectPurchaseOrder = (poId: string) => {
+    setPurchaseOrderId(poId);
+    const po = purchaseOrders.find((entry) => entry.id === poId);
+    if (po) setSupplierId(po.supplier_id);
+  };
+
   const submit = async () => {
     setBusy(true);
     try {
       await createGrn({
         supplier_id: supplierId,
+        purchase_order_id: purchaseOrderId || null,
         invoice_number: invoiceNumber.trim() || null,
         received_date: receivedDate,
         items: readyLines.map((line) => ({
@@ -133,6 +153,7 @@ export function GrnWorkspace() {
           unit_price: line.unit_price.trim() || null,
         })),
       });
+      setPurchaseOrderId("");
       setSupplierId("");
       setInvoiceNumber("");
       setReceivedDate("");
@@ -175,13 +196,41 @@ export function GrnWorkspace() {
           is verified into a store, below.
         </p>
 
-        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <label className="text-sm sm:col-span-2">
+            <span className="block text-gray-700">Link to purchase order (optional)</span>
+            <select
+              className="mt-1 w-full rounded border border-gray-300 p-2"
+              value={purchaseOrderId}
+              onChange={(event) => selectPurchaseOrder(event.target.value)}
+            >
+              <option value="">No purchase order — ad hoc receipt</option>
+              {linkableOrders.map((po) => (
+                <option key={po.id} value={po.id}>
+                  {po.po_number} · {po.supplier_name} · {po.status}
+                </option>
+              ))}
+            </select>
+            {purchaseOrderId ? (
+              <p className="mt-1 text-xs text-gray-600">
+                Supplier and line quantities are checked against this order on verify.
+              </p>
+            ) : null}
+          </label>
           <label className="text-sm">
             <span className="block text-gray-700">Supplier</span>
             <select
               className="mt-1 w-full rounded border border-gray-300 p-2"
               value={supplierId}
-              onChange={(event) => setSupplierId(event.target.value)}
+              onChange={(event) => {
+                setSupplierId(event.target.value);
+                if (purchaseOrderId) {
+                  const linked = purchaseOrders.find((po) => po.id === purchaseOrderId);
+                  if (linked && linked.supplier_id !== event.target.value) {
+                    setPurchaseOrderId("");
+                  }
+                }
+              }}
             >
               <option value="">Select…</option>
               {suppliers.map((supplier) => (

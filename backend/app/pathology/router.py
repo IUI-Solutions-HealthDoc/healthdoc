@@ -59,7 +59,9 @@ from app.pathology.schemas import (
 )
 
 router = APIRouter(prefix="/pathology", tags=["pathology"])
-DoctorUser = Annotated[AuthUser, Depends(require_roles("doctor"))]
+CriticalAlertUser = Annotated[
+    AuthUser, Depends(require_roles("doctor", "lab_tech"))
+]
 
 
 async def _get_scoped_lab_item(
@@ -577,6 +579,18 @@ async def lab_mis_summary(
 _critical_alert_subscribers: dict[str, list[asyncio.Queue]] = {}
 
 
+def _critical_alert_subscriber_key(current_db_user) -> str:
+    """Doctors receive their orders; lab professionals receive their facility.
+
+    The original registry used only users.id, which is correct for an ordering
+    doctor but makes a lab-tech subscription permanently silent: alerts are
+    published to the doctor's id, never to the technician who entered them.
+    """
+    if "doctor" in current_db_user.roles:
+        return f"doctor:{current_db_user.id}"
+    return f"facility:{current_db_user.facility_id}:lab"
+
+
 async def _resolve_ordering_doctor_id(db: AsyncSession, item: LabOrderItem) -> uuid.UUID | None:
     try:
         from app.opd.models import Encounter
@@ -595,8 +609,6 @@ async def _resolve_ordering_doctor_id(db: AsyncSession, item: LabOrderItem) -> u
 async def _publish_critical_alert(db: AsyncSession, item: LabOrderItem,
                                    flagged_fields: list[str]) -> None:
     doctor_id = await _resolve_ordering_doctor_id(db, item)
-    if doctor_id is None:
-        return
 
     try:
         from app.notifications.models import NotificationHistory
@@ -609,6 +621,8 @@ async def _publish_critical_alert(db: AsyncSession, item: LabOrderItem,
     # test, whoever happens to be entering the result.
     from app.orders.models import Order
     order = await db.get(Order, item.order_id)
+    if order is None:
+        return
 
     notification = NotificationHistory(
         event_type="lab_critical_result",
@@ -627,13 +641,22 @@ async def _publish_critical_alert(db: AsyncSession, item: LabOrderItem,
         "lab_order_item_id": str(item.id),
         "accession_number": item.accession_number,
     })
-    for queue in _critical_alert_subscribers.get(str(doctor_id), []):
-        await queue.put(live_message)
+    subscriber_keys = [f"facility:{order.facility_id}:lab"]
+    if doctor_id is not None:
+        subscriber_keys.append(f"doctor:{doctor_id}")
+    # A dual-role account can be connected through only one key, but guard
+    # against delivering twice if that changes later.
+    delivered: set[int] = set()
+    for subscriber_key in subscriber_keys:
+        for queue in _critical_alert_subscribers.get(subscriber_key, []):
+            if id(queue) not in delivered:
+                await queue.put(live_message)
+                delivered.add(id(queue))
 
 
 @router.get("/critical-alerts/stream")
 async def critical_alerts_stream(
-    current_user: DoctorUser,
+    current_user: CriticalAlertUser,
 ):
     # Do not inject CurrentDbUser here. It depends on get_db(), and a yielded
     # FastAPI dependency stays alive for the lifetime of a StreamingResponse.
@@ -644,10 +667,7 @@ async def critical_alerts_stream(
     async with SessionLocal() as db:
         current_db_user = await get_current_db_user(current_user, db)
 
-    # NOTE: key must be str(users.id) to match _publish_critical_alert's
-    # str(doctor_id) lookup - doctor_id there comes from
-    # encounter.provider_user_id, which is a users.id, not a Keycloak sub.
-    subscriber_key = str(current_db_user.id)
+    subscriber_key = _critical_alert_subscriber_key(current_db_user)
     queue: asyncio.Queue = asyncio.Queue()
     _critical_alert_subscribers.setdefault(subscriber_key, []).append(queue)
 
