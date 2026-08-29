@@ -42,6 +42,38 @@ FORBIDDEN = [
 ]
 
 
+def _mounted_routes():
+    """Every mounted route, on either of FastAPI's two routing models.
+
+    Up to FastAPI 0.115 / Starlette 0.46, include_router() copied each APIRoute
+    into app.routes, so a flat walk saw everything. FastAPI 0.141 / Starlette
+    1.6 stopped flattening: each include_router() leaves ONE _IncludedRouter in
+    app.routes and the real APIRoutes hang off its .original_router. Requests
+    still resolve identically — only introspection changed — which is exactly
+    why this surfaced as four red tests and zero broken endpoints, and why a
+    flat walk reported "no mounted route matches '/queue/worklist'" for a route
+    that was being served correctly at the time.
+
+    Walking both shapes matters more than picking the current one: the host venv
+    and CI were on opposite sides of that upgrade, so a version-specific walk
+    passes for whoever runs it locally and fails for everyone else. Recursive
+    because a router may include another router.
+    """
+    seen: set[int] = set()
+
+    def walk(routes):
+        for route in routes:
+            if id(route) in seen:
+                continue
+            seen.add(id(route))
+            yield route
+            nested = getattr(route, "original_router", None)
+            if nested is not None:
+                yield from walk(getattr(nested, "routes", ()))
+
+    return list(walk(app.routes))
+
+
 def _roles_for(path_fragment: str) -> list[tuple[str, set[str]]]:
     """Every mounted route matching the fragment, with its required roles.
 
@@ -50,7 +82,7 @@ def _roles_for(path_fragment: str) -> list[tuple[str, set[str]]]:
     expected roles in its own literal proves only that two lists match.
     """
     found = []
-    for route in app.routes:
+    for route in _mounted_routes():
         path = getattr(route, "path", "")
         if path_fragment not in path:
             continue
