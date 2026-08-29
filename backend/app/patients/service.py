@@ -146,9 +146,15 @@ async def _next_sequence(db: AsyncSession, facility_code: str, year: int) -> int
 
     seq_name = _sequence_name(facility_code, year)
     try:
-        result = await db.execute(
-            text("SELECT nextval(:seq_name)"), {"seq_name": seq_name}
-        )
+        # A missing relation aborts the current PostgreSQL transaction. Keep
+        # the optimistic nextval inside a savepoint so the dev/test fallback
+        # below can still execute CREATE SEQUENCE in a usable outer
+        # transaction. Catching ProgrammingError without the savepoint leaves
+        # the session in InFailedSQLTransaction until the request rolls back.
+        async with db.begin_nested():
+            result = await db.execute(
+                text("SELECT nextval(:seq_name)"), {"seq_name": seq_name}
+            )
         return result.scalar()
     except ProgrammingError as exc:
         pgcode = getattr(getattr(exc, "orig", None), "pgcode", None)

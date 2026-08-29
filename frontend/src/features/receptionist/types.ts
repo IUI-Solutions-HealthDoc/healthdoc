@@ -134,6 +134,35 @@ export interface QueueSummary {
   now_serving: string | null;
 }
 
+export interface QueueOpeningOption {
+  roster_id: string;
+  staff_user_id: string;
+  staff_name: string;
+  department_id: string;
+  department_name: string;
+  room_id: string | null;
+  room_number: string | null;
+  shift: string;
+}
+
+export interface QueueOpeningOptions {
+  service_date: string;
+  items: QueueOpeningOption[];
+}
+
+export interface QueueCreate {
+  department_id: string;
+  doctor_user_id: string;
+  room_id: string | null;
+  display_label: string | null;
+  service_date: string;
+}
+
+export interface QueueCreated extends QueueCreate {
+  id: string;
+  is_open: boolean;
+}
+
 export interface QueueTokenCreate {
   queue_id: string;
   visit_id: string;

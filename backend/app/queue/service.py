@@ -9,7 +9,7 @@ import uuid
 from datetime import UTC, date, datetime, timedelta
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -203,6 +203,19 @@ async def create_queue(
         raise HTTPException(404, "Department not found")
     if department.facility_id != caller_facility_id:
         raise HTTPException(404, "Department not found")
+
+    doctor = await db.get(User, doctor_user_id)
+    if (
+        doctor is None
+        or doctor.facility_id != caller_facility_id
+        or not doctor.is_active
+    ):
+        raise HTTPException(404, "Doctor not found")
+
+    if room_id is not None:
+        room = await db.get(Room, room_id)
+        if room is None or room.department_id != department_id or not room.is_active:
+            raise HTTPException(422, "Select an active room in this department")
     
     existing = (
         await db.execute(
@@ -229,6 +242,75 @@ async def create_queue(
     await db.flush()
     await db.refresh(queue)
     return queue
+
+
+async def list_queue_opening_options(
+    db: AsyncSession,
+    caller_facility_id: uuid.UUID,
+    service_date: date,
+) -> list[dict]:
+    """Available roster rows that do not already have a queue that day.
+
+    Reception cannot list `/users` (correctly: it is an admin endpoint), and a
+    UUID-only roster is not a usable doctor picker. This join exposes only the
+    names and locations required to open a queue, scoped to the caller's
+    facility and today's available roster.
+    """
+    rows = (
+        await db.execute(
+            select(
+                Roster.id,
+                Roster.staff_user_id,
+                User.full_name,
+                Roster.department_id,
+                Department.name,
+                Roster.room_id,
+                Room.room_number,
+                Roster.shift,
+            )
+            .join(User, User.id == Roster.staff_user_id)
+            .join(Department, Department.id == Roster.department_id)
+            .outerjoin(Room, Room.id == Roster.room_id)
+            .outerjoin(
+                Queue,
+                and_(
+                    Queue.doctor_user_id == Roster.staff_user_id,
+                    Queue.department_id == Roster.department_id,
+                    Queue.service_date == Roster.roster_date,
+                ),
+            )
+            .where(
+                Department.facility_id == caller_facility_id,
+                Roster.roster_date == service_date,
+                Roster.is_available.is_(True),
+                User.is_active.is_(True),
+                Queue.id.is_(None),
+            )
+            .order_by(Department.name, User.full_name, Roster.shift)
+        )
+    ).all()
+    return [
+        {
+            "roster_id": roster_id,
+            "staff_user_id": staff_user_id,
+            "staff_name": staff_name,
+            "department_id": department_id,
+            "department_name": department_name,
+            "room_id": room_id,
+            "room_number": room_number,
+            "shift": shift,
+        }
+        for (
+            roster_id,
+            staff_user_id,
+            staff_name,
+            department_id,
+            department_name,
+            room_id,
+            room_number,
+            shift,
+        ) in rows
+    ]
 
 
 async def _allocate_token_number(db: AsyncSession, department_id: uuid.UUID, business_date: date) -> int:

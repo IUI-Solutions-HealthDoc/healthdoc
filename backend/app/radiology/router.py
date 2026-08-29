@@ -18,6 +18,7 @@ from app.common.idempotency import check_idempotency, hash_request_body, record_
 from app.radiology.fhir import build_diagnostic_report_bundle
 from app.radiology.models import RadiologyOrderItem, RadiologyReport
 from app.radiology.schemas import (
+    CancelScanRequest,
     RadiologyOrderItemCreate,
     RadiologyOrderItemListOut,
     RadiologyOrderItemOut,
@@ -25,6 +26,7 @@ from app.radiology.schemas import (
     RadiologyReportHistoryOut,
     RadiologyReportOut,
     RadiologyReportSignOff,
+    RescheduleRequest,
     ScanCompletionRequest,
     ScheduleRequest,
 )
@@ -206,6 +208,95 @@ async def schedule_scan(
     return item
 
 
+@router.put("/order-items/{item_id}/reschedule", response_model=RadiologyOrderItemOut)
+async def reschedule_scan(
+    current_db_user: CurrentDbUser,
+    item_id: uuid.UUID,
+    payload: RescheduleRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_roles("radiology_tech", "admin")),
+):
+    item = await _scoped_item(db, item_id, current_db_user.facility_id)
+    if item.status != "scheduled":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "not_reschedulable",
+                "message": "Only a scheduled, unperformed scan can be rescheduled.",
+            },
+        )
+    if payload.scheduled_at < datetime.now(timezone.utc):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "scheduled_in_the_past",
+                "message": "A scan cannot be booked into the past.",
+            },
+        )
+
+    previous = {
+        "scheduled_at": item.scheduled_at.isoformat() if item.scheduled_at else None,
+        "machine_id": item.machine_id,
+        "status": item.status,
+    }
+    item.scheduled_at = payload.scheduled_at
+    item.machine_id = payload.machine_id.strip()
+    await _write_audit_log(
+        db,
+        table_name="radiology_order_items",
+        row_id=item.id,
+        action="reschedule",
+        actor_id=current_db_user.id,
+        facility_id=current_db_user.facility_id,
+        old_value=previous,
+        new_value={
+            "scheduled_at": item.scheduled_at.isoformat(),
+            "machine_id": item.machine_id,
+            "status": item.status,
+        },
+        reason=payload.reason.strip(),
+    )
+    await db.flush()
+    await db.refresh(item)
+    return item
+
+
+@router.put("/order-items/{item_id}/cancel", response_model=RadiologyOrderItemOut)
+async def cancel_scan(
+    current_db_user: CurrentDbUser,
+    item_id: uuid.UUID,
+    payload: CancelScanRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_roles("radiology_tech", "admin")),
+):
+    item = await _scoped_item(db, item_id, current_db_user.facility_id)
+    if item.status not in {"placed", "scheduled"}:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "not_cancellable",
+                "message": "A scan cannot be cancelled after imaging has started.",
+            },
+        )
+
+    previous_status = item.status
+    item.status = "cancelled"
+    await _write_audit_log(
+        db,
+        table_name="radiology_order_items",
+        row_id=item.id,
+        action="cancel",
+        actor_id=current_db_user.id,
+        facility_id=current_db_user.facility_id,
+        old_value={"status": previous_status},
+        new_value={"status": "cancelled"},
+        reason=payload.reason.strip(),
+    )
+    await db.flush()
+    await db.refresh(item)
+    return item
+
+
 @router.put("/order-items/{item_id}/scan-complete", response_model=RadiologyOrderItemOut)
 async def mark_scan_complete(
     current_db_user: CurrentDbUser,
@@ -225,6 +316,7 @@ async def mark_scan_complete(
     await _write_audit_log(db, table_name="radiology_order_items", row_id=item.id,
                             action="update", actor_id=current_db_user.id,
                             facility_id=current_db_user.facility_id)
+    await db.flush()
     await db.refresh(item)
     return item
 
@@ -429,7 +521,10 @@ async def get_fhir_bundle(
 
 async def _write_audit_log(db: AsyncSession, *, table_name: str, row_id: uuid.UUID,
                             action: str, actor_id: uuid.UUID,
-                            facility_id: uuid.UUID) -> None:
+                            facility_id: uuid.UUID,
+                            old_value: dict | None = None,
+                            new_value: dict | None = None,
+                            reason: str | None = None) -> None:
     """Manual audit write, delegating to app.audit.service.
 
     Was a stub raising under AUDIT_LOG_ENFORCED, on the grounds that
@@ -454,4 +549,7 @@ async def _write_audit_log(db: AsyncSession, *, table_name: str, row_id: uuid.UU
         resource_type=table_name,
         resource_id=row_id,
         user_id=actor_id,
+        old_value=old_value,
+        new_value=new_value,
+        reason=reason,
     )

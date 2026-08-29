@@ -12,7 +12,7 @@
  * server refuse. A user who is shown an action they cannot take learns to
  * distrust the screen.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { listDepartments } from "@/features/admin/api/departments";
 import type { Department } from "@/features/admin/api/departments";
@@ -113,6 +113,19 @@ export function IndentWorkspace() {
     }
   };
 
+  const canRaise =
+    !isHod &&
+    (roles.includes("pharmacist") ||
+      roles.includes("admin") ||
+      roles.includes("nurse") ||
+      roles.includes("doctor"));
+
+  const visibleRows = useMemo(() => {
+    if (!rows) return null;
+    if (isHod) return rows.filter((row) => row.status === "requested");
+    return rows;
+  }, [isHod, rows]);
+
   return (
     <div className="space-y-8">
       {error ? (
@@ -124,6 +137,7 @@ export function IndentWorkspace() {
         </p>
       ) : null}
 
+      {canRaise ? (
       <section className="rounded border border-gray-200 p-4">
         <h3 className="text-base font-semibold">Raise an indent</h3>
         <p className="mt-1 text-sm text-gray-600">
@@ -229,16 +243,19 @@ export function IndentWorkspace() {
           Raise indent
         </button>
       </section>
+      ) : null}
 
       <section>
-        <h3 className="text-base font-semibold">Indents</h3>
-        {rows === null ? (
+        <h3 className="text-base font-semibold">{isHod ? "Pending approvals" : "Indents"}</h3>
+        {visibleRows === null ? (
           <p className="mt-2 text-sm text-gray-600">Loading…</p>
-        ) : rows.length === 0 ? (
-          <p className="mt-2 text-sm text-gray-600">No indents raised.</p>
+        ) : visibleRows.length === 0 ? (
+          <p className="mt-2 text-sm text-gray-600">
+            {isHod ? "No indents awaiting your approval." : "No indents raised."}
+          </p>
         ) : (
           <ul className="mt-3 space-y-2">
-            {rows.map((row) => (
+            {visibleRows.map((row) => (
               <li key={row.id} className="rounded border border-gray-200 p-3 text-sm">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>

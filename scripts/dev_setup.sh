@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 # HealthDoc one-command dev setup. Prerequisites: docker + docker compose v2, openssl.
 set -euo pipefail
+
+# Git Bash/MSYS rewrites POSIX-looking arguments before invoking Windows
+# executables. That turns Keycloak's in-container path
+# /opt/keycloak/bin/kcadm.sh into C:/Program Files/Git/opt/... and makes user
+# provisioning fail even though Docker and Keycloak are healthy. The variable
+# is ignored on macOS/Linux and keeps Docker arguments byte-for-byte on
+# Windows.
+export MSYS_NO_PATHCONV=1
 cd "$(dirname "$0")/.."
 
 command -v docker >/dev/null || { echo "docker not found — install Docker Desktop first"; exit 1; }
@@ -212,6 +220,24 @@ HOD_SUB=$(ensure_keycloak_user dev.hod Dev "Head of Department" hod)
 EMERGENCY_SUB=$(ensure_keycloak_user dev.emergency Dev "Emergency Registrar" emergency)
 SUPERVISOR_SUB=$(ensure_keycloak_user dev.supervisor Dev "Records Supervisor" supervisor)
 SUPERADMIN_SUB=$(ensure_keycloak_user dev.superadmin Dev "Platform Superadmin" superadmin)
+
+# Do not print a successful setup banner if even one advertised login was not
+# created. This explicit postcondition catches partial Keycloak bootstrap on
+# every shell, including environments where `errexit` behaves unexpectedly
+# inside command substitutions.
+DEV_USERNAMES=(
+  dev.receptionist dev.doctor dev.nurse dev.labtech dev.radiology
+  dev.pharmacist dev.admin dev.auditor dev.patient dev.hod dev.emergency
+  dev.supervisor dev.superadmin
+)
+for username in "${DEV_USERNAMES[@]}"; do
+  subject=$(kc get users -r healthdoc -q exact=true -q username="$username" \
+    --fields id --format csv --noquotes | tail -n 1)
+  if [[ -z "$subject" ]]; then
+    echo "Keycloak bootstrap incomplete: $username was not created."
+    exit 1
+  fi
+done
 
 docker compose -f infra/docker-compose.yml --env-file .env exec -T backend \
   python -m scripts.seed_dev_data \

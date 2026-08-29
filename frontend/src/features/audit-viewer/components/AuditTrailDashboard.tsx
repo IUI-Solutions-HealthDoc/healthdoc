@@ -6,7 +6,10 @@ import Tab from "@mui/material/Tab";
 import Tabs from "@mui/material/Tabs";
 import Typography from "@mui/material/Typography";
 
+import { ExportButton } from "@/components/ui/ExportButton";
+import { toast } from "@/components/ui/toast";
 import { meridian } from "@/styles/theme";
+import { exportAuditLogsCsv } from "../api";
 import { useAuditEntry } from "../hooks/useAuditEntry";
 import { useAuditLogs } from "../hooks/useAuditLogs";
 import { useDataAccessLogs } from "../hooks/useDataAccessLogs";
@@ -25,6 +28,7 @@ type TabKey = "audit" | "data_access" | "files" | "integrity";
 export function AuditTrailDashboard() {
   const [tab, setTab] = useState<TabKey>("audit");
   const [selected, setSelected] = useState<{ id: string; created_at: string } | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   const logs = useAuditLogs({ action: "all", resource_type: "all" });
   const detail = useAuditEntry(selected?.id ?? null, selected?.created_at ?? null);
@@ -38,25 +42,52 @@ export function AuditTrailDashboard() {
     setSelected({ id: row.id, created_at: row.created_at });
   };
 
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const csv = await exportAuditLogsCsv(logs.filters);
+      const blobUrl = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = `audit_logs_${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(blobUrl);
+      toast.success("Audit CSV downloaded");
+    } catch (reason) {
+      toast.error(reason instanceof Error ? reason.message : "Audit export failed");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
-      <Box>
-        <Typography
-          component="h1"
-          sx={{
-            m: 0,
-            fontSize: "1.5rem",
-            fontWeight: 700,
-            letterSpacing: "-0.03em",
-            color: meridian.textPrimary,
-          }}
-        >
-          Audit trail
-        </Typography>
-        <Typography sx={{ m: 0, mt: 0.5, fontSize: "0.875rem", color: meridian.textSecondary }}>
-          Live: GET /audit/logs (+ CSV export). Access / file / integrity tabs are
-          schema-ahead until BE routes land.
-        </Typography>
+      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 2 }}>
+        <Box>
+          <Typography
+            component="h1"
+            sx={{
+              m: 0,
+              fontSize: "1.5rem",
+              fontWeight: 700,
+              letterSpacing: "-0.03em",
+              color: meridian.textPrimary,
+            }}
+          >
+            Audit trail
+          </Typography>
+          <Typography sx={{ m: 0, mt: 0.5, fontSize: "0.875rem", color: meridian.textSecondary }}>
+            Facility-scoped audit, data-access, file-access and integrity records from the live APIs.
+          </Typography>
+        </Box>
+        <ExportButton
+          formats={["csv"]}
+          label="Export audit CSV"
+          loading={exporting}
+          onExport={handleExport}
+        />
       </Box>
 
       <Box
@@ -87,9 +118,9 @@ export function AuditTrailDashboard() {
         }}
       >
         <Tab value="audit" label="Audit logs" />
-        <Tab value="data_access" label="Access log (schema)" />
-        <Tab value="files" label="File access (schema)" />
-        <Tab value="integrity" label="Integrity (schema)" />
+        <Tab value="data_access" label="Access log" />
+        <Tab value="files" label="File access" />
+        <Tab value="integrity" label="Integrity" />
       </Tabs>
 
       {tab === "audit" ? (
