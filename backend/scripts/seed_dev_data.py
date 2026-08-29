@@ -325,6 +325,61 @@ async def seed(users: list[tuple[str, str]]) -> None:
                 },
             )
 
+        # ------------------------------------------------------------------
+        # A small medicine catalogue.
+        #
+        # Without it the pharmacist cannot raise an indent, and without an
+        # indent the HOD has nothing to approve — so the one action only a
+        # department head can perform was untestable.
+        #
+        # The report read "the Raise Indent button remained disabled", which
+        # looks like a broken control. It is not: the button requires at least
+        # one line, a line is added by picking a search result, and searching
+        # an empty catalogue returns nothing. Three correct behaviours compose
+        # into a dead end, which is why the tester could not tell a missing
+        # prerequisite from a bug.
+        #
+        # Five items, chosen to exercise different paths rather than to look
+        # realistic: a controlled drug (is_controlled_drug), two sharing an
+        # ingredient_code so the allergy matcher has something to catch, and
+        # two non-medicine item_types so the form/item_type CHECK constraints
+        # are actually exercised by the seed.
+        # ------------------------------------------------------------------
+        catalogue = [
+            # (name, generic, strength, form, item_type, controlled, ingredient_code, reorder)
+            ("Paracetamol 500mg", "Paracetamol", "500mg", "tablet", "medicine", False, "N02BE01", 100),
+            ("Amoxicillin 250mg", "Amoxicillin", "250mg", "capsule", "medicine", False, "J01CA04", 50),
+            ("Amoxicillin Syrup", "Amoxicillin", "125mg/5ml", "syrup", "medicine", False, "J01CA04", 20),
+            ("Morphine 10mg/ml", "Morphine", "10mg/ml", "injection", "medicine", True, "N02AA01", 10),
+            ("Nitrile Gloves (M)", None, None, "consumable", "consumable", False, None, 500),
+        ]
+        for name, generic, strength, form, item_type, controlled, code, reorder in catalogue:
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO inventory_items
+                        (id, name, generic_name, strength, form, item_type,
+                         is_controlled_drug, ingredient_code, reorder_level, is_active)
+                    SELECT :id, :name, :generic, :strength, :form, :item_type,
+                           :controlled, :code, :reorder, true
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM inventory_items WHERE id = :id
+                    )
+                    """
+                ),
+                {
+                    "id": uuid.uuid5(uuid.NAMESPACE_URL, f"healthdoc:item:{name}"),
+                    "name": name,
+                    "generic": generic,
+                    "strength": strength,
+                    "form": form,
+                    "item_type": item_type,
+                    "controlled": controlled,
+                    "code": code,
+                    "reorder": reorder,
+                },
+            )
+
         # Prove it landed. The seed's whole job is to leave an environment where
         # a visit can be created; asserting that here turns a silent seed failure
         # into a `make setup` error, instead of a 409 the first tester meets on

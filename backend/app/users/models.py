@@ -33,6 +33,27 @@ class Facility(Base, UUIDPk, Timestamps):
 
 class User(Base, UUIDPk, Timestamps):
     __tablename__ = "users"
+
+    #: Staff administration is audited. See app/audit/listeners.py for the
+    #: mechanism; these two attributes are the whole opt-in.
+    #:
+    #: Reported as BUG-005: after creating, editing and deactivating staff,
+    #: GET /audit/logs?resource_type=users returned zero items. Nothing was
+    #: broken — this model had simply never opted in, and audit is opt-out by
+    #: default, so the absence was silent.
+    #:
+    #: Who created an account, who deactivated one, and when, is exactly what
+    #: DPDP and NABH ask for, and the first thing an assessor checks after
+    #: being told the system has an audit trail. A trail that covers invoices
+    #: and encounters but not the accounts that touched them answers the
+    #: easier half of the question.
+    #:
+    #: NB: `Facility` in this same module deliberately does NOT opt in — it has
+    #: no facility_id of its own to record, which is why the rollout in
+    #: issue #290 is per-model rather than per-module.
+    __audit_resource_type__ = "users"
+    __audit_facility_id_field__ = "facility_id"
+
     __table_args__ = (
         UniqueConstraint("facility_id", "employee_id", name="uq_users_facility_id_employee_id"),
     )
