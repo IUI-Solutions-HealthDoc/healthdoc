@@ -29,7 +29,7 @@ import sqlalchemy as sa
 
 from tests._lab_seed import TEST_DATABASE_URL
 
-from .conftest import RECEPTIONIST, NURSE
+from .conftest import NURSE, RECEPTIONIST
 
 
 def _audit_rows_for(patient_id):
