@@ -4,11 +4,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { ModuleCapabilityGate } from "@/components/common/ModuleCapabilityGate";
 import {
+  cancelScan,
   draftRadiologyReport,
   getRadiologyFhirBundle,
   getRadiologyReports,
   listRadiologyWork,
   markScanComplete,
+  rescheduleScan,
   scheduleScan,
   signOffRadiologyReport,
 } from "@/features/radiology/api";
@@ -24,6 +26,7 @@ const WORKFLOW: { status: string; label: string; hint: string }[] = [
   { status: "scanned", label: "To report", hint: "Imaged, awaiting a radiologist" },
   { status: "reporting", label: "Preliminary", hint: "Drafted, not signed off" },
   { status: "released", label: "Released", hint: "Signed and available to the ordering doctor" },
+  { status: "cancelled", label: "Cancelled", hint: "Cancelled before imaging" },
 ];
 
 function StatusChip({ status }: { status: string }) {
@@ -53,6 +56,10 @@ function RadiologyPageContent() {
   const [findings, setFindings] = useState("");
   const [impression, setImpression] = useState("");
   const [pacsStudyUid, setPacsStudyUid] = useState("");
+  const [rescheduleReason, setRescheduleReason] = useState("");
+  const [cancelReason, setCancelReason] = useState("");
+  const [rescheduleSlot, setRescheduleSlot] = useState("");
+  const [rescheduleMachine, setRescheduleMachine] = useState("");
 
   const [fhirBundle, setFhirBundle] = useState<Record<string, unknown> | null>(null);
   const [fhirError, setFhirError] = useState<string | null>(null);
@@ -92,7 +99,6 @@ function RadiologyPageContent() {
       if (current) {
         setFindings(current.findings);
         setImpression(current.impression);
-        setPacsStudyUid(current.pacs_study_uid ?? "");
       }
       return history.items;
     } catch {
@@ -108,7 +114,11 @@ function RadiologyPageContent() {
       setMachine(item.machine_id ?? "");
       setFindings("");
       setImpression("");
-      setPacsStudyUid("");
+      setPacsStudyUid(item.pacs_study_uid ?? "");
+      setRescheduleReason("");
+      setCancelReason("");
+      setRescheduleSlot("");
+      setRescheduleMachine(item.machine_id ?? "");
       setFhirBundle(null);
       setFhirError(null);
       await loadReports(item.id);
@@ -322,7 +332,7 @@ function RadiologyPageContent() {
               )}
 
               {selected.status === "scheduled" && (
-                <div className="space-y-2">
+                <div className="space-y-3">
                   <p className="text-sm">
                     Booked for {selected.scheduled_at ? formatDateTime(selected.scheduled_at) : "—"}
                     {selected.machine_id ? ` on ${selected.machine_id}` : ""}.
@@ -336,6 +346,91 @@ function RadiologyPageContent() {
                     }
                   >
                     Mark scan complete
+                  </button>
+                  <div className="space-y-3 border-t border-border pt-3">
+                    <p className="text-sm font-medium">Reschedule</p>
+                    <label className="block space-y-1 text-sm">
+                      <span className="text-muted-foreground">New slot</span>
+                      <input
+                        type="datetime-local"
+                        className="w-full rounded-md border border-border px-3 py-2"
+                        value={rescheduleSlot}
+                        onChange={(event) => setRescheduleSlot(event.target.value)}
+                      />
+                    </label>
+                    <label className="block space-y-1 text-sm">
+                      <span className="text-muted-foreground">Machine</span>
+                      <input
+                        maxLength={50}
+                        className="w-full rounded-md border border-border px-3 py-2"
+                        value={rescheduleMachine}
+                        onChange={(event) => setRescheduleMachine(event.target.value)}
+                      />
+                    </label>
+                    <label className="block space-y-1 text-sm">
+                      <span className="text-muted-foreground">Reason</span>
+                      <input
+                        minLength={5}
+                        maxLength={500}
+                        className="w-full rounded-md border border-border px-3 py-2"
+                        value={rescheduleReason}
+                        onChange={(event) => setRescheduleReason(event.target.value)}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      disabled={
+                        busy ||
+                        !rescheduleSlot ||
+                        !rescheduleMachine.trim() ||
+                        rescheduleReason.trim().length < 5
+                      }
+                      className="rounded-md border border-primary px-4 py-2 text-sm text-primary disabled:opacity-50"
+                      onClick={() =>
+                        void run(
+                          () =>
+                            rescheduleScan(
+                              selected.id,
+                              new Date(rescheduleSlot).toISOString(),
+                              rescheduleMachine.trim(),
+                              rescheduleReason.trim(),
+                            ),
+                          "Could not reschedule",
+                        )
+                      }
+                    >
+                      Save new slot
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {(selected.status === "placed" || selected.status === "scheduled") && (
+                <div className="space-y-3 border-t border-border pt-4">
+                  <p className="text-sm font-medium text-danger">Cancel scan</p>
+                  <label className="block space-y-1 text-sm">
+                    <span className="text-muted-foreground">Cancellation reason</span>
+                    <textarea
+                      minLength={5}
+                      maxLength={500}
+                      rows={2}
+                      className="w-full rounded-md border border-border px-3 py-2"
+                      value={cancelReason}
+                      onChange={(event) => setCancelReason(event.target.value)}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    disabled={busy || cancelReason.trim().length < 5}
+                    className="rounded-md border border-danger px-4 py-2 text-sm text-danger disabled:opacity-50"
+                    onClick={() =>
+                      void run(
+                        () => cancelScan(selected.id, cancelReason.trim()),
+                        "Could not cancel",
+                      )
+                    }
+                  >
+                    Cancel scan
                   </button>
                 </div>
               )}
@@ -426,7 +521,6 @@ function RadiologyPageContent() {
                       <li key={report.id} className="text-xs text-muted-foreground">
                         v{report.version} · {report.status}
                         {report.is_current ? " · current" : " · superseded"}
-                        {report.pacs_study_uid ? ` · PACS ${report.pacs_study_uid}` : ""}
                         {report.tat_minutes != null ? ` · TAT ${report.tat_minutes}m` : ""}
                       </li>
                     ))}
@@ -462,6 +556,12 @@ function RadiologyPageContent() {
                     <p className="mt-2 text-xs text-muted-foreground">Loading FHIR bundle…</p>
                   ) : null}
                 </div>
+              )}
+
+              {selected.pacs_study_uid && (
+                <p className="border-t border-border pt-4 font-mono text-xs text-muted-foreground">
+                  PACS study UID: {selected.pacs_study_uid}
+                </p>
               )}
             </>
           )}

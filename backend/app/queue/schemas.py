@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.common.enums import QueuePriority, Shift
 from decimal import Decimal
@@ -10,8 +10,8 @@ from decimal import Decimal
 class QueueCreate(BaseModel):
     department_id: uuid.UUID
     doctor_user_id: uuid.UUID
-    room_id: uuid.UUID | None
-    display_label: str | None
+    room_id: uuid.UUID | None = None
+    display_label: str | None = Field(default=None, max_length=50)
     service_date: date
 
 
@@ -82,6 +82,24 @@ class QueueSummaryOut(BaseModel):
     is_open: bool
     waiting_count: int
     now_serving: str | None
+
+
+class QueueOpeningOptionOut(BaseModel):
+    """An available roster entry reception can turn into today's queue."""
+
+    roster_id: uuid.UUID
+    staff_user_id: uuid.UUID
+    staff_name: str
+    department_id: uuid.UUID
+    department_name: str
+    room_id: uuid.UUID | None
+    room_number: str | None
+    shift: str
+
+
+class QueueOpeningOptionsOut(BaseModel):
+    service_date: date
+    items: list[QueueOpeningOptionOut]
 
 
 class QueueTokenListItemOut(QueueTokenOut):

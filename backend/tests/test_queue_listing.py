@@ -19,6 +19,7 @@ import pytest
 from app.common.enums import QueuePriority
 from app.departments.models import Department
 from app.queue import service
+from app.queue.models import Roster
 from app.users.models import Facility, User
 
 pytestmark = pytest.mark.asyncio
@@ -116,6 +117,39 @@ async def test_closed_queues_are_hidden_by_default_but_reachable(db, seed, queue
     all_rows = await service.list_queues(db, queue.facility_id, TODAY, open_only=False)
     assert [r["id"] for r in all_rows] == [queue.id]
     assert all_rows[0]["is_open"] is False
+
+
+async def test_opening_options_are_named_facility_scoped_available_roster_rows(db, seed):
+    dept, room, doctor = seed
+    roster = Roster(
+        id=uuid.uuid4(),
+        staff_user_id=doctor.id,
+        department_id=dept.id,
+        room_id=room.id,
+        shift="morning",
+        roster_date=TODAY,
+        is_available=True,
+    )
+    db.add(roster)
+    await db.flush()
+
+    options = await service.list_queue_opening_options(db, dept.facility_id, TODAY)
+
+    assert options == [{
+        "roster_id": roster.id,
+        "staff_user_id": doctor.id,
+        "staff_name": doctor.full_name,
+        "department_id": dept.id,
+        "department_name": dept.name,
+        "room_id": room.id,
+        "room_number": room.room_number,
+        "shift": "morning",
+    }]
+
+    await service.create_queue(
+        db, dept.id, doctor.id, room.id, None, TODAY, dept.facility_id
+    )
+    assert await service.list_queue_opening_options(db, dept.facility_id, TODAY) == []
 
 
 async def test_shortest_queue_first(db, seed, queue):

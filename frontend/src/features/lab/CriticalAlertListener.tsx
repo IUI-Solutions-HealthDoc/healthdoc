@@ -71,7 +71,7 @@ export function CriticalAlertListener() {
   const { user, isLoading } = useAuth();
 
   useEffect(() => {
-    if (isLoading || user?.role !== "doctor") return;
+    if (isLoading || !user?.role || !["doctor", "lab_tech"].includes(user.role)) return;
     const controller = new AbortController();
 
     async function connect() {

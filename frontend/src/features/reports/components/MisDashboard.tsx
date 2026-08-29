@@ -193,9 +193,8 @@ export function MisDashboard() {
                 color: "rgba(255, 255, 255, 0.88)",
               }}
             >
-              Daily kpi_snapshots for OPD wait and sharp injuries (schema
-              examples · GET /reports/kpis when BE lands). Billing finance MIS
-              uses /billing/mis/* below.
+              Live facility KPI snapshots for OPD wait and sharp injuries from
+              /reports/kpis. Billing finance MIS uses /billing/mis/* below.
             </Typography>
           </Box>
 

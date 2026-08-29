@@ -29,6 +29,8 @@ from app.queue.schemas import (
     PendingApprovalOut,
     PendingLabOrderOut,
     QueueCreate,
+    QueueOpeningOptionOut,
+    QueueOpeningOptionsOut,
     QueueOut,
     QueueSummaryOut,
     QueueTokenGenerateRequest,
@@ -162,6 +164,27 @@ async def list_queues(
         db, current_db_user.facility_id, business_date, open_only=open_only
     )
     return [QueueSummaryOut(**row).model_dump(mode="json") for row in rows]
+
+
+@router.get(
+    "/opening-options",
+    dependencies=[Depends(require_roles("receptionist", "admin"))],
+)
+async def list_queue_opening_options(
+    current_db_user: CurrentDbUser,
+    service_date: date | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    business_date = service_date or await get_business_date(
+        db, current_db_user.facility_id
+    )
+    rows = await service.list_queue_opening_options(
+        db, current_db_user.facility_id, business_date
+    )
+    return QueueOpeningOptionsOut(
+        service_date=business_date,
+        items=[QueueOpeningOptionOut(**row) for row in rows],
+    ).model_dump(mode="json")
 
 
 # ---------------- CREATE TOKEN ----------------

@@ -40,7 +40,6 @@ export interface RadiologyReport {
   is_current: boolean;
   findings: string;
   impression: string;
-  pacs_study_uid: string | null;
   status: string;
   created_by: string;
   created_at: string;
