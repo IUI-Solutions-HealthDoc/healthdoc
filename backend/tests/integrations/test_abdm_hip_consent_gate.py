@@ -191,3 +191,104 @@ async def test_an_unrecognised_status_is_refused(hip_db):
             expires_at=None, raw={},
         )
     assert caught.value.code == "unknown_status"
+
+
+# ---------------------------------------------------------------------------
+# Callback replay safety.
+#
+# The gateway does not send our Idempotency-Key — it identifies a retry by its
+# own REQUEST-ID — so these routes cannot require the header the rest of the
+# app does. They have to be replay-safe by construction instead, and this is
+# where that is checked.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def hip_client(hip_db):
+    """TestClient with the callback gate opened and the fixture session bound."""
+    from fastapi.testclient import TestClient
+
+    from app.common.db import get_db
+    from app.integrations.abdm.callback_auth import verify_callback
+    from app.main import app
+
+    async def _db():
+        yield hip_db
+
+    app.dependency_overrides[get_db] = _db
+    app.dependency_overrides[verify_callback] = lambda: None
+    with TestClient(app) as client:
+        yield client
+    app.dependency_overrides.pop(get_db, None)
+    app.dependency_overrides.pop(verify_callback, None)
+
+
+async def _facility_with_hfr(db, hfr_id="HFR-1"):
+    await db.execute(
+        text("UPDATE facilities SET hfr_facility_id = :h WHERE id = :i"),
+        {"h": hfr_id, "i": str(FACILITY)},
+    )
+    await db.flush()
+
+
+def _hi_request_body(**over):
+    return {
+        "hip_id": "HFR-1",
+        "transaction_id": "TXN-REPLAY-1",
+        "consent_artefact_id": "ART-1",
+        "abha_address": "someone@sbx",
+        "hi_types": ["OPConsultation"],
+        "data_push_url": "https://hiu.example/transfer",
+        "key_material": {"dhPublicKey": {"keyValue": "k"}, "nonce": "n"},
+        **over,
+    }
+
+
+async def test_a_retried_health_information_request_replays_instead_of_500ing(
+    hip_db, hip_client
+):
+    """transaction_id is UNIQUE. Without this guard a gateway retry hits an
+    integrity error, comes back 500, and the gateway reads that as 'try again'
+    — a retry loop against a request already accepted."""
+    await _facility_with_hfr(hip_db)
+    await _artefact(hip_db)
+
+    first = hip_client.post(
+        "/api/v1/abdm/hip/callbacks/health-information/request", json=_hi_request_body()
+    )
+    assert first.status_code == 202, first.text
+    assert first.json()["data"].get("replayed") is None
+
+    second = hip_client.post(
+        "/api/v1/abdm/hip/callbacks/health-information/request", json=_hi_request_body()
+    )
+    assert second.status_code == 202, second.text
+    assert second.json()["data"]["replayed"] is True
+    assert second.json()["data"]["accepted"] == first.json()["data"]["accepted"]
+
+
+async def test_a_retried_request_that_was_refused_stays_refused(hip_db, hip_client):
+    """A replay must not become a second chance at the consent gate."""
+    await _facility_with_hfr(hip_db)
+    await _artefact(hip_db, status="revoked")
+
+    first = hip_client.post(
+        "/api/v1/abdm/hip/callbacks/health-information/request", json=_hi_request_body()
+    )
+    assert first.status_code == 403
+
+    second = hip_client.post(
+        "/api/v1/abdm/hip/callbacks/health-information/request", json=_hi_request_body()
+    )
+    assert second.status_code == 403
+
+
+async def test_a_callback_for_an_unknown_hfr_id_is_refused(hip_db, hip_client):
+    """Otherwise another organisation's callback is attributed to whichever
+    facility happens to be first in the table."""
+    await _facility_with_hfr(hip_db)
+    response = hip_client.post(
+        "/api/v1/abdm/hip/callbacks/health-information/request",
+        json=_hi_request_body(hip_id="SOMEONE-ELSE"),
+    )
+    assert response.status_code == 404

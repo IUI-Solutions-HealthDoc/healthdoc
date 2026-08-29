@@ -51,7 +51,7 @@ class AbdmCareContext(Base, UUIDPk, Timestamps, Blame):
     #: ABDM's HI type vocabulary. Constrained because a value outside this set
     #: is silently dropped by the gateway rather than rejected, which presents
     #: later as "the record was shared but the HIU cannot see it".
-    hi_type = Column(String(40), nullable=False)
+    hi_type = Column(String(50), nullable=False)
 
     __audit_resource_type__ = "abdm_care_contexts"
     __audit_facility_id_field__ = "facility_id"
@@ -100,7 +100,7 @@ class AbdmCareContextLink(Base, UUIDPk, Timestamps):
     abha_address = Column(String(120), nullable=False)
     link_ref_number = Column(String(120), nullable=True)
     gateway_request_id = Column(String(100), nullable=True)
-    status = Column(String(20), nullable=False, server_default="pending")
+    status = Column(String(50), nullable=False, server_default="pending")
     #: Why a link failed, for the desk. Never carries a gateway body verbatim —
     #: those echo identifiers we just sent.
     failure_reason = Column(Text, nullable=True)
@@ -139,7 +139,7 @@ class AbdmHipConsentArtefact(Base, UUIDPk, Timestamps):
     facility_id = Column(UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False)
     consent_artefact_id = Column(String(120), nullable=False)
     abha_address = Column(String(120), nullable=False)
-    status = Column(String(20), nullable=False, server_default="granted")
+    status = Column(String(50), nullable=False, server_default="granted")
 
     hi_types = Column(JSONB, nullable=False)
     date_range_from = Column(DateTime(timezone=True), nullable=True)
@@ -175,7 +175,7 @@ class AbdmHipHealthInformationRequest(Base, UUIDPk, Timestamps):
 
     hiu_key_material = Column(JSONB, nullable=False)
     data_push_url = Column(Text, nullable=False)
-    status = Column(String(20), nullable=False, server_default="received")
+    status = Column(String(50), nullable=False, server_default="received")
     bundles_sent = Column(String(10), nullable=True)
     failure_reason = Column(Text, nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)

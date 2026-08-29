@@ -24,7 +24,7 @@ import logging
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,12 +33,34 @@ from app.auth.deps import CurrentDbUser, require_roles
 from app.common.db import get_db
 from app.integrations.abdm.callback_auth import verify_callback
 from app.integrations.abdm.hip import service
-from app.integrations.abdm.hip.models import AbdmCareContext, AbdmCareContextLink
+from app.integrations.abdm.hip.models import (
+    AbdmCareContext,
+    AbdmCareContextLink,
+    AbdmHipHealthInformationRequest,
+)
 from app.users.models import Facility
 
 log = logging.getLogger("healthdoc.abdm.hip")
 
 router = APIRouter(prefix="/abdm/hip", tags=["abdm-hip"])
+
+
+def _require_idempotency_key(
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> str:
+    """Staff mutations carry one, per the house rule.
+
+    Deliberately NOT applied to the gateway callbacks below. ABDM does not send
+    our header — it identifies a retry by its own REQUEST-ID — so requiring it
+    there would reject every real callback. Those two are made replay-safe by
+    construction instead; see the note on each.
+    """
+    if not idempotency_key:
+        raise HTTPException(400, {
+            "code": "idempotency_key_required",
+            "message": "Idempotency-Key header is required for this request",
+        })
+    return idempotency_key
 
 
 def _refusal(exc: service.HipError, status: int = 409) -> HTTPException:
@@ -86,6 +108,7 @@ class CareContextOut(BaseModel):
 async def create_care_context(
     payload: CareContextIn,
     current_db_user: CurrentDbUser,
+    idempotency_key: str = Depends(_require_idempotency_key),
     db: AsyncSession = Depends(get_db),
 ) -> CareContextOut:
     """Register a unit of care as offerable to an ABHA address.
@@ -173,6 +196,13 @@ async def consent_notify(
 
     202, not 200: we have durably recorded the notification, which is all the
     gateway needs to stop retrying. Acting on it is our business.
+
+    Replay-safe without an Idempotency-Key: consent_artefact_id is UNIQUE and
+    record_consent_notification() upserts on it, so a repeated notification
+    updates the row it already wrote rather than creating a second one. The one
+    replay it refuses is granted-after-revoked, which is not a retry — ABDM
+    issues a new artefact on re-grant, so that shape is a stale message and
+    honouring it would undo a revocation.
     """
     facility_id = await _facility_for_hfr_id(db, payload.hip_id)
     try:
@@ -223,6 +253,30 @@ async def hi_request(
     successful release.
     """
     facility_id = await _facility_for_hfr_id(db, payload.hip_id)
+
+    # Replay safety without our Idempotency-Key header. transaction_id is
+    # UNIQUE, so a gateway retry would otherwise hit an integrity error and
+    # come back as a 500 — which the gateway reads as "try again", producing a
+    # retry loop against a request we already accepted. Answering with the
+    # recorded outcome is both correct and what stops the loop.
+    already = (
+        await db.execute(
+            select(AbdmHipHealthInformationRequest).where(
+                AbdmHipHealthInformationRequest.transaction_id == payload.transaction_id
+            )
+        )
+    ).scalar_one_or_none()
+    if already is not None:
+        if already.status == "refused":
+            raise HTTPException(403, {
+                "code": already.failure_reason or "consent_not_valid",
+                "message": "This request was already refused",
+            })
+        return {
+            "accepted": already.transaction_id,
+            "care_contexts": int(already.bundles_sent or 0),
+            "replayed": True,
+        }
 
     try:
         authorisation = await service.authorise_hi_request(

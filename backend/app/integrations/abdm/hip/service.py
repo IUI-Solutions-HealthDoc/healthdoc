@@ -276,7 +276,14 @@ async def record_hi_request(
     gateway_request_id: str | None,
 ) -> AbdmHipHealthInformationRequest:
     """Durable record that a request arrived, written before any data moves."""
+    # Explicit id, for the same reason hiu/service.py gives: the caller updates
+    # this row again in the same flush (status, bundles_sent), and a row whose
+    # id came from the column's server default cannot be updated afterwards
+    # under the SQLite test fixture — it stores the generated id as a string
+    # while the ORM holds a UUID, so the UPDATE matches nothing. Postgres is
+    # unaffected either way; choosing the id here makes the path testable.
     row = AbdmHipHealthInformationRequest(
+        id=uuid.uuid4(),
         facility_id=facility_id,
         transaction_id=transaction_id,
         consent_artefact_id=consent_artefact_id,

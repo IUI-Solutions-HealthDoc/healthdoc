@@ -35,7 +35,7 @@ class AbdmConsentRequest(Base, UUIDPk, Timestamps, Blame):
     patient_id = Column(UUID(as_uuid=True), ForeignKey("patients.id", ondelete="RESTRICT"), nullable=True)
 
     abha_address = Column(String(120), nullable=False)
-    purpose_code = Column(String(40), nullable=False)
+    purpose_code = Column(String(50), nullable=False)
     hi_types = Column(JSONB, nullable=False)
     date_range_from = Column(DateTime(timezone=True), nullable=False)
     date_range_to = Column(DateTime(timezone=True), nullable=False)
@@ -45,7 +45,7 @@ class AbdmConsentRequest(Base, UUIDPk, Timestamps, Blame):
 
     consent_request_id = Column(String(120), nullable=True)
     gateway_request_id = Column(String(100), nullable=True)
-    status = Column(String(20), nullable=False, server_default="requested")
+    status = Column(String(50), nullable=False, server_default="requested")
     failure_reason = Column(Text, nullable=True)
 
     __audit_resource_type__ = "abdm_consent_requests"
@@ -81,7 +81,7 @@ class AbdmHiuConsentArtefact(Base, UUIDPk, Timestamps):
     )
 
     consent_artefact_id = Column(String(120), nullable=False)
-    status = Column(String(20), nullable=False, server_default="granted")
+    status = Column(String(50), nullable=False, server_default="granted")
     hi_types = Column(JSONB, nullable=False)
     date_range_from = Column(DateTime(timezone=True), nullable=True)
     date_range_to = Column(DateTime(timezone=True), nullable=True)
@@ -127,7 +127,7 @@ class AbdmHiuHealthInformationRequest(Base, UUIDPk, Timestamps, Blame):
 
     transaction_id = Column(String(120), nullable=True)
     gateway_request_id = Column(String(100), nullable=True)
-    status = Column(String(20), nullable=False, server_default="requested")
+    status = Column(String(50), nullable=False, server_default="requested")
     failure_reason = Column(Text, nullable=True)
 
     #: OUR half. Public parts are sent to the gateway; the private key is
@@ -191,7 +191,7 @@ class AbdmReceivedBundle(Base, UUIDPk, Timestamps):
     #: they are looking at is the one that arrived, without this table holding
     #: the clinical content itself.
     content_sha256 = Column(String(64), nullable=False)
-    status = Column(String(20), nullable=False, server_default="stored")
+    status = Column(String(50), nullable=False, server_default="stored")
     failure_reason = Column(Text, nullable=True)
 
     __audit_resource_type__ = "abdm_received_bundles"

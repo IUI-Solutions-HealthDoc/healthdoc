@@ -30,7 +30,7 @@ controls, and both are now in place.
 
 | Track | State |
 |---|---|
-| Cybersecurity (VAPT) | ✅ blockers closed · **all minors closed** · **1035 tests pass on the upgraded stack** |
+| Cybersecurity (VAPT) | ✅ blockers closed · **all minors closed** · **1038 tests pass on the upgraded stack** |
 | ABDM functional | ⚠️ **Partially assessable** — M1/M2/M3 built and tested; no sandbox round trip yet |
 
 > **A naming collision, because it has already caused confusion.** M1/M2/M3 in
@@ -245,7 +245,7 @@ Re-run before booking:
 
 ```bash
 make setup                                      # must end with the 13-user banner
-make test-pg                                    # 1035 passing
+make test-pg                                    # 1038 passing
 make audit-deps                                 # both ecosystems zero
 cd frontend && npm run test:e2e                 # 9 roles, WCAG + silent SSO
 ```
