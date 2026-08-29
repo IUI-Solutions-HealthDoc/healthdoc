@@ -98,7 +98,16 @@ async def get_doctor_worklist(
 
 @router.get(
     "/worklist/{token_id}",
-    dependencies=[Depends(require_roles("doctor", "admin"))],
+    # Doctor only, for the same reason as the list route above — and this one
+    # is worth its own note. The first pass at this fix narrowed only
+    # GET /worklist and left this sibling open, which is precisely the mistake
+    # that commit's own message warned about: "narrowing just the reported
+    # route leaves siblings open and the finding half-closed".
+    #
+    # tests/test_role_boundaries.py caught it, because it asserts over every
+    # route matching the path fragment rather than the one endpoint a report
+    # happened to name. That is the whole argument for testing the family.
+    dependencies=[Depends(require_roles("doctor"))],
 )
 async def get_doctor_worklist_token(
     token_id: uuid.UUID,
