@@ -1,0 +1,280 @@
+"""HIP (M2) endpoints.
+
+TWO KINDS OF ROUTE LIVE IN THIS FILE AND THEY ARE NOT THE SAME THING
+--------------------------------------------------------------------
+Staff routes are ordinary: a bearer token, `require_roles(...)`, and a facility
+that comes from `CurrentDbUser` rather than the request body, exactly like the
+rest of the app.
+
+Gateway routes are the opposite and are grouped separately below so nobody
+edits one thinking it is the other. They carry no user, they are reachable from
+outside, and they create consent artefacts and move patient data. Every one of
+them depends on `verify_callback`, which REFUSES when this server has no shared
+secret configured. There is no development shortcut around that dependency; if
+you are tempted to add one, read callback_auth.py's docstring first.
+
+Facility attribution on inbound routes comes from `facilities.hfr_facility_id`
+matched against the HIP id ABDM addressed. An unknown HFR id is refused — the
+alternative is attributing another organisation's callback to whichever
+facility happens to be first in the table.
+"""
+from __future__ import annotations
+
+import logging
+import uuid
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.auth.deps import CurrentDbUser, require_roles
+from app.common.db import get_db
+from app.integrations.abdm.callback_auth import verify_callback
+from app.integrations.abdm.hip import service
+from app.integrations.abdm.hip.models import AbdmCareContext, AbdmCareContextLink
+from app.users.models import Facility
+
+log = logging.getLogger("healthdoc.abdm.hip")
+
+router = APIRouter(prefix="/abdm/hip", tags=["abdm-hip"])
+
+
+def _refusal(exc: service.HipError, status: int = 409) -> HTTPException:
+    return HTTPException(status, {"code": exc.code, "message": exc.message})
+
+
+async def _facility_for_hfr_id(db: AsyncSession, hfr_id: str) -> uuid.UUID:
+    facility = (
+        await db.execute(select(Facility).where(Facility.hfr_facility_id == hfr_id))
+    ).scalar_one_or_none()
+    if facility is None:
+        # 404 rather than 403, the same rule the rest of this codebase follows
+        # for a record that is not yours: a 403 would confirm which HFR ids
+        # this deployment serves.
+        log.warning("ABDM callback for an HFR id this deployment does not serve")
+        raise HTTPException(404, {"code": "unknown_hip", "message": "Unknown HIP"})
+    return facility.id
+
+
+# =============================================================================
+# Staff routes — bearer token, role-gated, facility from the token
+# =============================================================================
+
+class CareContextIn(BaseModel):
+    patient_id: uuid.UUID
+    visit_id: uuid.UUID | None = None
+    reference: str = Field(min_length=1, max_length=100)
+    display: str = Field(min_length=1, max_length=200)
+    hi_type: str
+
+
+class CareContextOut(BaseModel):
+    id: uuid.UUID
+    reference: str
+    display: str
+    hi_type: str
+
+
+@router.post(
+    "/care-contexts",
+    status_code=201,
+    response_model=CareContextOut,
+    dependencies=[Depends(require_roles("doctor", "receptionist", "admin"))],
+)
+async def create_care_context(
+    payload: CareContextIn,
+    current_db_user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+) -> CareContextOut:
+    """Register a unit of care as offerable to an ABHA address.
+
+    Creating the context does not share anything. Sharing needs a confirmed
+    link AND a consent artefact — see service.authorise_hi_request.
+    """
+    context = AbdmCareContext(
+        facility_id=current_db_user.facility_id,
+        patient_id=payload.patient_id,
+        visit_id=payload.visit_id,
+        reference=payload.reference,
+        display=payload.display,
+        hi_type=payload.hi_type,
+        created_by=current_db_user.id,
+    )
+    db.add(context)
+    await db.flush()
+    return CareContextOut(
+        id=context.id, reference=context.reference,
+        display=context.display, hi_type=context.hi_type,
+    )
+
+
+class LinkOut(BaseModel):
+    id: uuid.UUID
+    abha_address: str
+    status: str
+    failure_reason: str | None
+
+
+@router.get(
+    "/patients/{patient_id}/links",
+    response_model=list[LinkOut],
+    dependencies=[Depends(require_roles("doctor", "receptionist", "admin"))],
+)
+async def list_links(
+    patient_id: uuid.UUID,
+    current_db_user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+) -> list[LinkOut]:
+    """Which ABHA addresses may see this patient's records here."""
+    rows = (
+        await db.execute(
+            select(AbdmCareContextLink).where(
+                AbdmCareContextLink.patient_id == patient_id,
+                # Scoped by the token's facility, never the path.
+                AbdmCareContextLink.facility_id == current_db_user.facility_id,
+            )
+        )
+    ).scalars().all()
+    return [
+        LinkOut(id=r.id, abha_address=r.abha_address, status=r.status,
+                failure_reason=r.failure_reason)
+        for r in rows
+    ]
+
+
+# =============================================================================
+# Gateway callbacks — NO user, authenticated by shared secret, fail closed
+# =============================================================================
+
+class ConsentNotification(BaseModel):
+    hip_id: str
+    consent_artefact_id: str
+    abha_address: str
+    status: str
+    hi_types: list[str] = Field(default_factory=list)
+    date_range_from: datetime | None = None
+    date_range_to: datetime | None = None
+    expires_at: datetime | None = None
+    raw: dict = Field(default_factory=dict)
+
+
+@router.post(
+    "/callbacks/consent-notify",
+    status_code=202,
+    dependencies=[Depends(verify_callback)],
+)
+async def consent_notify(
+    payload: ConsentNotification,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """The consent manager tells us a consent was granted, revoked or expired.
+
+    202, not 200: we have durably recorded the notification, which is all the
+    gateway needs to stop retrying. Acting on it is our business.
+    """
+    facility_id = await _facility_for_hfr_id(db, payload.hip_id)
+    try:
+        artefact = await service.record_consent_notification(
+            db,
+            facility_id=facility_id,
+            artefact_id=payload.consent_artefact_id,
+            abha_address=payload.abha_address,
+            status=payload.status,
+            hi_types=payload.hi_types,
+            date_range_from=payload.date_range_from,
+            date_range_to=payload.date_range_to,
+            expires_at=payload.expires_at,
+            raw=payload.raw or payload.model_dump(mode="json"),
+        )
+    except service.HipError as exc:
+        raise _refusal(exc) from exc
+    return {"recorded": str(artefact.id), "status": artefact.status}
+
+
+class HiRequestIn(BaseModel):
+    hip_id: str
+    transaction_id: str
+    consent_artefact_id: str
+    abha_address: str
+    hi_types: list[str]
+    date_range_from: datetime | None = None
+    date_range_to: datetime | None = None
+    data_push_url: str
+    key_material: dict
+    gateway_request_id: str | None = None
+
+
+@router.post(
+    "/callbacks/health-information/request",
+    status_code=202,
+    dependencies=[Depends(verify_callback)],
+)
+async def hi_request(
+    payload: HiRequestIn,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """A HIU is asking for data under a consent artefact.
+
+    Authorised BEFORE anything is recorded as transferable, and refused with a
+    named reason when the artefact does not cover the ask. The refusal is
+    persisted too: "we declined and why" is as much a part of the trail as a
+    successful release.
+    """
+    facility_id = await _facility_for_hfr_id(db, payload.hip_id)
+
+    try:
+        authorisation = await service.authorise_hi_request(
+            db,
+            facility_id=facility_id,
+            consent_artefact_id=payload.consent_artefact_id,
+            requested_hi_types=payload.hi_types,
+            requested_from=payload.date_range_from,
+            requested_to=payload.date_range_to,
+        )
+    except service.HipError as exc:
+        row = await service.record_hi_request(
+            db,
+            facility_id=facility_id,
+            transaction_id=payload.transaction_id,
+            consent_artefact_id=payload.consent_artefact_id,
+            hiu_key_material=payload.key_material,
+            data_push_url=payload.data_push_url,
+            gateway_request_id=payload.gateway_request_id,
+        )
+        row.status = "refused"
+        row.failure_reason = exc.code
+        await db.flush()
+        raise _refusal(exc, status=403) from exc
+
+    row = await service.record_hi_request(
+        db,
+        facility_id=facility_id,
+        transaction_id=payload.transaction_id,
+        consent_artefact_id=payload.consent_artefact_id,
+        hiu_key_material=payload.key_material,
+        data_push_url=payload.data_push_url,
+        gateway_request_id=payload.gateway_request_id,
+    )
+
+    contexts = await service.list_care_contexts_for_transfer(
+        db,
+        facility_id=facility_id,
+        abha_address=payload.abha_address,
+        authorisation=authorisation,
+    )
+    row.bundles_sent = str(len(contexts))
+    await db.flush()
+
+    # The push itself is not done inline. It is an outbound HTTP call to a URL
+    # the gateway supplied, and doing it inside this request would hold the
+    # gateway's connection open for as long as it takes — the exact shape of
+    # the SSE/buffering problem already documented in infra/nginx. The transfer
+    # worker picks these up; this endpoint's job is to accept, authorise and
+    # record.
+    return {
+        "accepted": row.transaction_id,
+        "care_contexts": len(contexts),
+        "hi_types": authorisation.hi_types,
+    }
