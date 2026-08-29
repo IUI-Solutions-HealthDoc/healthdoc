@@ -98,7 +98,18 @@ def _user_parameters(
         "subject": subject,
         "username": username,
         "full_name": DISPLAY_NAMES.get(username, username),
-        "email": f"{username}@healthdoc.local",
+        # @healthdoc.example, NOT @healthdoc.local.
+        #
+        # `.local` is RFC 6761 special-use, and email-validator — which backs
+        # pydantic's EmailStr — refuses it: "the part after the @-sign is a
+        # special-use or reserved name". So every seeded account carried an
+        # address the system's OWN API rejects with 422, and editing a seeded
+        # user through /admin/users failed on a field nothing had ever typed.
+        #
+        # `.example` is RFC 2606, reserved for exactly this purpose, and
+        # validates. Fixing the seed rather than loosening EmailStr: the
+        # validation is right, the data was wrong.
+        "email": f"{username}@healthdoc.example",
         "facility_id": FACILITY_ID,
         "department_id": department_id,
     }
@@ -246,6 +257,155 @@ async def seed(users: list[tuple[str, str]]) -> None:
                 "roster_date": roster_date,
             },
         )
+
+        # ------------------------------------------------------------------
+        # The REGISTRATION tariff.
+        #
+        # WITHOUT THIS ROW NOBODY CAN CREATE AN OPD VISIT.
+        #
+        # opd.create_visit calls billing.create_registration_invoice inside the
+        # registration transaction, and that raises 409
+        # `registration_tariff_not_configured` when the facility has no active
+        # REGISTRATION row in charge_master. The 409 is deliberate and correct —
+        # the alternative is a zero-rupee invoice that looks legitimate and is
+        # discovered at month-end reconciliation — but the dev seed never
+        # created the row, so every fresh environment hit it.
+        #
+        # The blast radius is the whole product: no visit means no queue token,
+        # which means doctor, nurse, pharmacist, lab and radiology cannot reach
+        # their primary workflows at all. Registration is the first step of
+        # every clinical journey, so a missing seed row reads as "the entire
+        # application is broken".
+        #
+        # WHY NOT ON CONFLICT
+        #
+        # uq_charge_master_version is (facility_id, charge_code, scheme_code,
+        # effective_from) and scheme_code is NULL for a general tariff. In
+        # Postgres NULL <> NULL, so the unique index does not dedupe these rows
+        # and ON CONFLICT would never fire — re-running the seed would insert a
+        # second identical tariff every time. charge_for() takes the newest and
+        # would still work, which is exactly why the duplicates would go
+        # unnoticed until someone debugged a pricing question. WHERE NOT EXISTS
+        # is NULL-safe and actually idempotent.
+        #
+        # effective_from is deliberately far in the past: charge_for() filters
+        # `effective_from <= business_date`, and a row dated today is invisible
+        # to any test that bills a backdated visit.
+        # ------------------------------------------------------------------
+        tariff_author = (
+            await session.execute(
+                text("SELECT id FROM users WHERE username = 'dev.admin'")
+            )
+        ).scalar_one_or_none()
+        if tariff_author is not None:
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO charge_master
+                        (id, facility_id, charge_code, description, charge_category,
+                         unit_price, scheme_code, effective_from, effective_to,
+                         is_active, created_by)
+                    SELECT
+                        :id, :facility_id, 'REGISTRATION',
+                        'OPD registration fee', 'registration',
+                        50.00, NULL, DATE '2020-01-01', NULL, true, :created_by
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM charge_master
+                         WHERE facility_id = :facility_id
+                           AND charge_code = 'REGISTRATION'
+                           AND scheme_code IS NULL
+                           AND is_active
+                    )
+                    """
+                ),
+                {
+                    "id": uuid.uuid5(uuid.NAMESPACE_URL, "healthdoc:tariff:registration"),
+                    "facility_id": FACILITY_ID,
+                    "created_by": tariff_author,
+                },
+            )
+
+        # ------------------------------------------------------------------
+        # A small medicine catalogue.
+        #
+        # Without it the pharmacist cannot raise an indent, and without an
+        # indent the HOD has nothing to approve — so the one action only a
+        # department head can perform was untestable.
+        #
+        # The report read "the Raise Indent button remained disabled", which
+        # looks like a broken control. It is not: the button requires at least
+        # one line, a line is added by picking a search result, and searching
+        # an empty catalogue returns nothing. Three correct behaviours compose
+        # into a dead end, which is why the tester could not tell a missing
+        # prerequisite from a bug.
+        #
+        # Five items, chosen to exercise different paths rather than to look
+        # realistic: a controlled drug (is_controlled_drug), two sharing an
+        # ingredient_code so the allergy matcher has something to catch, and
+        # two non-medicine item_types so the form/item_type CHECK constraints
+        # are actually exercised by the seed.
+        # ------------------------------------------------------------------
+        catalogue = [
+            # (name, generic, strength, form, item_type, controlled, ingredient_code, reorder)
+            ("Paracetamol 500mg", "Paracetamol", "500mg", "tablet", "medicine", False, "N02BE01", 100),
+            ("Amoxicillin 250mg", "Amoxicillin", "250mg", "capsule", "medicine", False, "J01CA04", 50),
+            ("Amoxicillin Syrup", "Amoxicillin", "125mg/5ml", "syrup", "medicine", False, "J01CA04", 20),
+            ("Morphine 10mg/ml", "Morphine", "10mg/ml", "injection", "medicine", True, "N02AA01", 10),
+            ("Nitrile Gloves (M)", None, None, "consumable", "consumable", False, None, 500),
+        ]
+        for name, generic, strength, form, item_type, controlled, code, reorder in catalogue:
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO inventory_items
+                        (id, name, generic_name, strength, form, item_type,
+                         is_controlled_drug, ingredient_code, reorder_level, is_active)
+                    SELECT :id, :name, :generic, :strength, :form, :item_type,
+                           :controlled, :code, :reorder, true
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM inventory_items WHERE id = :id
+                    )
+                    """
+                ),
+                {
+                    "id": uuid.uuid5(uuid.NAMESPACE_URL, f"healthdoc:item:{name}"),
+                    "name": name,
+                    "generic": generic,
+                    "strength": strength,
+                    "form": form,
+                    "item_type": item_type,
+                    "controlled": controlled,
+                    "code": code,
+                    "reorder": reorder,
+                },
+            )
+
+        # Prove it landed. The seed's whole job is to leave an environment where
+        # a visit can be created; asserting that here turns a silent seed failure
+        # into a `make setup` error, instead of a 409 the first tester meets on
+        # the registration screen and reports as "the application is broken".
+        resolved = (
+            await session.execute(
+                text(
+                    """
+                    SELECT count(*) FROM charge_master
+                     WHERE facility_id = :facility_id
+                       AND charge_code = 'REGISTRATION'
+                       AND is_active
+                       AND effective_from <= CURRENT_DATE
+                       AND (effective_to IS NULL OR effective_to >= CURRENT_DATE)
+                    """
+                ),
+                {"facility_id": FACILITY_ID},
+            )
+        ).scalar_one()
+        if resolved != 1:
+            raise RuntimeError(
+                f"expected exactly 1 active REGISTRATION tariff for the dev facility, "
+                f"found {resolved}. Zero means OPD visits will 409 with "
+                f"registration_tariff_not_configured; more than one means charge_for() "
+                f"picks by ordering and the effective price is ambiguous."
+            )
 
         patient_user_id = (
             await session.execute(

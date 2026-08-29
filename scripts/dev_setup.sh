@@ -182,7 +182,7 @@ ensure_keycloak_user() {
   if [[ -z "$subject" ]]; then
     kc create users -r healthdoc -s username="$username" -s enabled=true \
       -s firstName="$first_name" -s lastName="$last_name" \
-      -s email="$username@healthdoc.local" >/dev/null
+      -s email="$username@healthdoc.example" >/dev/null
   fi
   kc set-password -r healthdoc --username "$username" --new-password devpass >/dev/null
   # These are deterministic test identities, so their HealthDoc realm roles
@@ -254,6 +254,49 @@ docker compose -f infra/docker-compose.yml --env-file .env exec -T backend \
     --user "dev.emergency=$EMERGENCY_SUB" \
     --user "dev.supervisor=$SUPERVISOR_SUB" \
     --user "dev.superadmin=$SUPERADMIN_SUB"
+
+# ---------------------------------------------------------------------------
+# Verify the OUTCOME, not just the absence of an error.
+#
+# A tester on Windows once finished this script with exit code 0 and seven of
+# thirteen accounts. Git Bash was rewriting /opt/keycloak/bin/kcadm.sh into a
+# Windows path, every kcadm call failed, and nothing checked. MSYS_NO_PATHCONV
+# at the top of this file stops that particular cause, but the class of failure
+# is what matters: any kcadm call that fails inside a command substitution or a
+# pipeline can still leave a partial realm behind a successful exit.
+#
+# The cost of not checking is paid by the next person, and paid badly: a
+# missing account presents at the login screen as a wrong password, so the
+# tester blames themselves long before they suspect the setup script. Six roles
+# silently absent is a day lost across a team.
+#
+# So count them. The banner below promises thirteen usable logins; this is what
+# earns the right to print it.
+# ---------------------------------------------------------------------------
+expected_users="dev.receptionist dev.doctor dev.nurse dev.labtech dev.radiology \
+dev.pharmacist dev.admin dev.auditor dev.patient dev.hod dev.emergency \
+dev.supervisor dev.superadmin"
+
+missing_users=""
+for username in $expected_users; do
+  found=$(kc get users -r healthdoc -q exact=true -q username="$username" \
+    --fields username --format csv --noquotes 2>/dev/null | tail -n 1 || true)
+  if [[ "$found" != "$username" ]]; then
+    missing_users="$missing_users $username"
+  fi
+done
+
+if [[ -n "$missing_users" ]]; then
+  echo
+  echo "SETUP FAILED: Keycloak is missing these accounts:$missing_users"
+  echo
+  echo "Every login for those roles will fail, and it will look like a wrong"
+  echo "password rather than a broken setup. Do not start testing."
+  echo
+  echo "On Windows this is usually Git Bash path rewriting. Re-run with:"
+  echo "  MSYS_NO_PATHCONV=1 bash ./scripts/dev_setup.sh"
+  exit 1
+fi
 
 cat <<DONE
 

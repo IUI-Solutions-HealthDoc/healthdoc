@@ -23,6 +23,76 @@ def _normalise_aadhaar(value: str | None) -> str | None:
         raise ValueError("aadhaar_number must contain exactly 12 digits")
     return digits
 
+
+def _normalise_mobile(value: str | None) -> str | None:
+    """Return a mobile as +91XXXXXXXXXX, or reject it.
+
+    The field had NO validation at all, so a patient could be registered with
+    a mobile of "00", "abc" or "!!!" — reported by manual testing, and worse
+    than cosmetic: a mobile is how a hospital reaches a patient about a
+    critical result, and an unreachable number discovered at that moment is
+    the whole cost of not checking here.
+
+    THE +91 IS ADDED, NOT DEMANDED. Front-desk staff type the ten digits they
+    read off a form; requiring a country code is a rule the counter will lose
+    to every time. Spaces, hyphens and a leading 0 or +91 are all accepted and
+    normalised away, so one stored format comes out of many typed ones.
+
+    What is NOT accepted: anything that is not an Indian mobile. The first
+    digit must be 6-9 — Indian mobile numbering does not issue below that, so
+    "0000000000" and "1234567890" are not numbers anyone can be called on.
+    """
+    if value is None:
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+
+    if any(ch not in "0123456789+- " for ch in raw):
+        raise ValueError(
+            "mobile may contain only digits, spaces, hyphens and a leading +"
+        )
+
+    digits = "".join(ch for ch in raw if ch.isdigit())
+    # Strip the country code or a trunk prefix if the caller supplied one.
+    if len(digits) == 12 and digits.startswith("91"):
+        digits = digits[2:]
+    elif len(digits) == 11 and digits.startswith("0"):
+        digits = digits[1:]
+
+    if len(digits) != 10:
+        raise ValueError("mobile must be a 10-digit Indian mobile number")
+    if digits[0] not in "6789":
+        raise ValueError("an Indian mobile number starts with 6, 7, 8 or 9")
+    return f"+91{digits}"
+
+
+def _validate_full_name(value: str | None) -> str | None:
+    """A person's name, not a free-text field.
+
+    Reported: full names containing digits were accepted and saved. A name is
+    matched against government identity documents during ABHA linking and
+    printed on discharge paperwork, so "Ram7" is not a harmless typo — it is a
+    record that will fail to match later, at a point where nobody remembers
+    typing it.
+
+    Deliberately permissive about SHAPE while strict about digits: apostrophes,
+    hyphens, full stops and non-Latin scripts are all real in Indian names, and
+    a stricter pattern would reject more real patients than bad data. Digits
+    and the characters used in injection payloads are what this refuses.
+    """
+    if value is None:
+        return None
+    name = " ".join(value.split())
+    if not name:
+        raise ValueError("full_name is required")
+    if any(ch.isdigit() for ch in name):
+        raise ValueError("full_name may not contain digits")
+    if any(ch in "<>{}[]|\\^~`@#$%*_=+;" for ch in name):
+        raise ValueError("full_name contains characters that are not part of a name")
+    return name
+
+
 class PatientCreate(BaseModel):
     full_name: str
     sex: str
@@ -33,6 +103,8 @@ class PatientCreate(BaseModel):
     aadhaar_number: str | None = None
 
     _validate_aadhaar = field_validator("aadhaar_number")(_normalise_aadhaar)
+    _validate_mobile = field_validator("mobile")(_normalise_mobile)
+    _validate_name = field_validator("full_name")(_validate_full_name)
 
     @model_validator(mode="after")
     def _dob_or_age_required(self) -> PatientCreate:
@@ -62,6 +134,13 @@ class PatientUpdate(BaseModel):
     state_code: str | None = None
     pincode: str | None = None
     reason: str | None = None  # audit reason, not stored on patient row
+
+    # PATCH must enforce the same rules as POST. A validator on create
+    # alone is a rule you can walk around by registering cleanly and then
+    # editing — which is the more likely path for bad data anyway, since
+    # corrections are where people paste.
+    _validate_mobile = field_validator("mobile")(_normalise_mobile)
+    _validate_name = field_validator("full_name")(_validate_full_name)
 
     @model_validator(mode="after")
     def _at_least_one_field(self) -> PatientUpdate:
