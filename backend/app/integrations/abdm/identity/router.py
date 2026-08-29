@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import AuthUser, CurrentDbUser, get_current_user, require_roles
 from app.common.db import get_db
-from app.common.security import encrypt_pii
+from app.common.security import current_aes_key_version, encrypt_pii
 from app.integrations.abdm.client import (
     AbdmAuthError,
     AbdmNotConfigured,
@@ -199,7 +199,20 @@ async def link_abha(payload: AbhaCapture,
     gateway_result = await _verify_with_gateway(payload.abha_number)
     gateway_verified = gateway_result is not None
 
-    blob, key_version = encrypt_pii(payload.linking_token)
+    # encrypt_pii returns BYTES, not a (blob, version) pair.
+    #
+    # This was `blob, key_version = encrypt_pii(...)`, which asks Python to
+    # unpack a bytes object into two names. That iterates the bytes and raises
+    # "too many values to unpack" for any blob longer than two bytes — which is
+    # every blob, since the layout is 1-byte version + 12-byte nonce +
+    # ciphertext. So POST /abdm/abha/link returned 500 on every single call and
+    # no ABHA could ever be linked.
+    #
+    # The version is embedded in byte 0 of the blob, but patients.
+    # abha_linking_key_version stores it separately so a rotation can be audited
+    # without decrypting anything. Read it from the same source encrypt_pii used.
+    key_version = current_aes_key_version()
+    blob = encrypt_pii(payload.linking_token, key_version=key_version)
     result = await db.execute(text("""
         UPDATE patients
         SET abha_number = :abha,

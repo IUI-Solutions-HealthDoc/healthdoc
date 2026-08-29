@@ -71,7 +71,15 @@ def _require_hod_dashboard_department(
 
 @router.get(
     "/worklist",
-    dependencies=[Depends(require_roles("doctor", "admin"))],
+    # DOCTOR ONLY. `admin` was here and the API answered 200 for dev.admin while
+    # the frontend redirected admins away from /doctor — UI containment without
+    # matching authorization. An assessor tests the endpoint, not the menu, and
+    # "the screen is hidden" is not an answer to "the token was accepted".
+    #
+    # Nothing calls this as admin: features/doctor owns the only call site and
+    # ROLES.ADMIN's route prefixes are /admin, /billing, /reports, /audit-viewer.
+    # The grant was unused and load-bearing only for a finding.
+    dependencies=[Depends(require_roles("doctor"))],
 )
 async def get_doctor_worklist(
     current_db_user: CurrentDbUser,
@@ -372,7 +380,7 @@ async def queue_display_stream(department_id: uuid.UUID, request: Request) -> St
 @router.post(
     "/rosters",
     status_code=201,
-    dependencies=[Depends(require_roles("hod", "admin"))],
+    dependencies=[Depends(require_roles("hod"))],
 )
 async def create_roster_entry(
     payload: RosterCreate,
@@ -416,7 +424,7 @@ async def list_roster(
 # ---------------- ROSTER: AVAILABILITY (hod/admin only) ----------------
 @router.patch(
     "/rosters/{roster_id}/availability",
-    dependencies=[Depends(require_roles("hod", "admin"))],
+    dependencies=[Depends(require_roles("hod"))],
 )
 async def update_roster_availability(
     roster_id: uuid.UUID,
@@ -448,7 +456,7 @@ async def update_roster_availability(
 # ---------------- QUEUE: PAUSE (hod/admin only) ----------------
 @router.post(
     "/queues/{queue_id}/pause",
-    dependencies=[Depends(require_roles("hod", "admin"))],
+    dependencies=[Depends(require_roles("hod"))],
 )
 async def pause_queue(
     queue_id: uuid.UUID,
@@ -474,7 +482,7 @@ async def pause_queue(
 # ---------------- QUEUE: RESUME (hod/admin only) ----------------
 @router.post(
     "/queues/{queue_id}/resume",
-    dependencies=[Depends(require_roles("hod", "admin"))],
+    dependencies=[Depends(require_roles("hod"))],
 )
 async def resume_queue(
     queue_id: uuid.UUID,
@@ -500,7 +508,7 @@ async def resume_queue(
 # ---------------- HOD DASHBOARD: OVERVIEW ----------------
 @router.get(
     "/hod-dashboard/{department_id}",
-    dependencies=[Depends(require_roles("hod", "admin"))],
+    dependencies=[Depends(require_roles("hod"))],
 )
 async def get_hod_dashboard_overview(
     department_id: uuid.UUID,
@@ -518,7 +526,7 @@ async def get_hod_dashboard_overview(
 # ---------------- HOD DASHBOARD: PENDING LAB ORDERS ----------------
 @router.get(
     "/hod-dashboard/{department_id}/pending-lab-orders",
-    dependencies=[Depends(require_roles("hod", "admin"))],
+    dependencies=[Depends(require_roles("hod"))],
 )
 async def get_pending_lab_orders(
     department_id: uuid.UUID,
@@ -533,7 +541,7 @@ async def get_pending_lab_orders(
 # ---------------- HOD DASHBOARD: REASSIGN TOKEN (hod/admin only) ----------------
 @router.post(
     "/tokens/{token_id}/reassign",
-    dependencies=[Depends(require_roles("hod", "admin"))],
+    dependencies=[Depends(require_roles("hod"))],
 )
 async def reassign_token(
     token_id: uuid.UUID,
@@ -560,7 +568,7 @@ async def reassign_token(
 # ---------------- HOD DASHBOARD: DEPARTMENT WORKLOAD ----------------
 @router.get(
     "/hod-dashboard/{department_id}/workload",
-    dependencies=[Depends(require_roles("hod", "admin"))],
+    dependencies=[Depends(require_roles("hod"))],
 )
 async def get_department_workload(
     department_id: uuid.UUID,
@@ -578,7 +586,7 @@ async def get_department_workload(
 # ---------------- HOD DASHBOARD: EMERGENCY ESCALATIONS ----------------
 @router.get(
     "/hod-dashboard/{department_id}/emergency-escalations",
-    dependencies=[Depends(require_roles("hod", "admin"))],
+    dependencies=[Depends(require_roles("hod"))],
 )
 async def get_emergency_escalations(
     department_id: uuid.UUID,
@@ -593,7 +601,7 @@ async def get_emergency_escalations(
 # ---------------- HOD DASHBOARD: PENDING APPROVALS ----------------
 @router.get(
     "/hod-dashboard/{department_id}/pending-approvals",
-    dependencies=[Depends(require_roles("hod", "admin"))],
+    dependencies=[Depends(require_roles("hod"))],
 )
 async def get_pending_approvals(
     department_id: uuid.UUID,

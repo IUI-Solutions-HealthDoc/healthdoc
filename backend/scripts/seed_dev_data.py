@@ -98,7 +98,18 @@ def _user_parameters(
         "subject": subject,
         "username": username,
         "full_name": DISPLAY_NAMES.get(username, username),
-        "email": f"{username}@healthdoc.local",
+        # @healthdoc.example, NOT @healthdoc.local.
+        #
+        # `.local` is RFC 6761 special-use, and email-validator — which backs
+        # pydantic's EmailStr — refuses it: "the part after the @-sign is a
+        # special-use or reserved name". So every seeded account carried an
+        # address the system's OWN API rejects with 422, and editing a seeded
+        # user through /admin/users failed on a field nothing had ever typed.
+        #
+        # `.example` is RFC 2606, reserved for exactly this purpose, and
+        # validates. Fixing the seed rather than loosening EmailStr: the
+        # validation is right, the data was wrong.
+        "email": f"{username}@healthdoc.example",
         "facility_id": FACILITY_ID,
         "department_id": department_id,
     }
