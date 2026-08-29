@@ -212,6 +212,13 @@ _B1_ROUTERS = [
     # gating was configurable only by direct SQL. See app/common/facility_modules.py.
     "app.common.facility_modules",
     "app.integrations.abdm.identity.router",  # ABHA capture (W6-01)
+    # ABDM M2/M3. Mounted even though the gateway credentials are absent:
+    # the staff routes work locally, and the callback routes must EXIST and
+    # refuse (503, callback_auth.py) rather than 404. A 404 tells the gateway
+    # this HIP does not implement the callback; a 503 tells it we are not
+    # ready, which is the true statement and the one it retries against.
+    "app.integrations.abdm.hip.router",
+    "app.integrations.abdm.hiu.router",
     "app.patients.portal_router",  # verified account-to-patient identity boundary (#228)
     "app.patients.portal_self_router",  # bound patient self-service reads (#228)
     # Break-glass (#391). This sat unregistered behind a note saying

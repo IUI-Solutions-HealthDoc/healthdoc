@@ -71,6 +71,58 @@ class Settings(BaseSettings):
     abdm_path_enrol_by_aadhaar: str = "/v3/enrollment/enrol/byAadhaar"
     abdm_path_login_request_otp: str = "/v3/profile/login/request/otp"
     abdm_path_login_verify: str = "/v3/profile/login/verify"
+
+    # ------------------------------------------------------------------
+    # M2 (HIP) and M3 (HIU) gateway paths, relative to abdm_gateway_base_url.
+    #
+    # UNVERIFIED, exactly like the M1 paths above, and for the same reason:
+    # nobody here has run them against the sandbox. They are the documented
+    # v3 shapes and they are SETTINGS so a wrong one is an env change rather
+    # than a release. Do not promote any of them to a constant until a real
+    # sandbox call has returned something other than 404.
+    #
+    # The trap this repo already fell into once is worth restating: the old
+    # ABHA call used `/v3/hip/token/on-generate`, which is a callback the
+    # gateway invokes ON a HIP, not an endpoint a HIP posts TO. The two
+    # directions are easy to confuse in ABDM's documentation, so each path
+    # below records which way it points.
+    # ------------------------------------------------------------------
+
+    #: HIP -> gateway. Link care contexts we already hold to an ABHA address.
+    abdm_path_hip_link_add_contexts: str = "/api/hiecm/v3/link/carecontext"
+    #: HIP -> gateway. Answer a discovery request the gateway sent us.
+    abdm_path_hip_on_discover: str = "/api/hiecm/v3/hip/patient/care-context/on-discover"
+    #: HIP -> gateway. Answer a link-init request.
+    abdm_path_hip_on_link_init: str = "/api/hiecm/v3/link/on-init"
+    #: HIP -> gateway. Answer a link-confirm request.
+    abdm_path_hip_on_link_confirm: str = "/api/hiecm/v3/link/on-confirm"
+    #: HIP -> gateway. Acknowledge a consent notification.
+    abdm_path_hip_on_consent_notify: str = "/api/hiecm/v3/consent/hip/on-notify"
+    #: HIP -> gateway. Acknowledge a health-information request.
+    abdm_path_hip_on_hi_request: str = "/api/hiecm/v3/health-information/hip/on-request"
+    #: HIP -> gateway. Report the outcome of a data push.
+    abdm_path_hip_hi_notify: str = "/api/hiecm/v3/health-information/notify"
+
+    #: HIU -> gateway. Ask the consent manager for a new consent.
+    abdm_path_hiu_consent_request_init: str = "/api/hiecm/v3/consent-requests/init"
+    #: HIU -> gateway. Fetch a granted consent artefact by id.
+    abdm_path_hiu_consent_fetch: str = "/api/hiecm/v3/consents/fetch"
+    #: HIU -> gateway. Ask for the data a consent artefact permits.
+    abdm_path_hiu_hi_request: str = "/api/hiecm/v3/health-information/hiu/request"
+
+    #: Shared secret the gateway is expected to present on inbound callbacks.
+    #:
+    #: None means callbacks are REFUSED, not accepted. See
+    #: integrations/abdm/callback_auth.py — an unauthenticated inbound endpoint
+    #: that writes consent artefacts and patient data is the single most
+    #: dangerous thing in an HIP/HIU integration, and "we could not verify it
+    #: yet, so we let it through" is how it gets shipped.
+    abdm_callback_shared_secret: str | None = None
+
+    #: Our own base URL, given to the gateway so HIPs know where to push data.
+    #: Placeholder means HIU data-transfer requests are refused rather than
+    #: sent with an address nobody can reach.
+    abdm_hiu_callback_base_url: str = "change-me"
     
     aadhaar_hmac_key: str = "change-me-in-env"
     aadhaar_encryption_key: str = "change-me-in-env"

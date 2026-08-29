@@ -168,6 +168,22 @@ def _json_safe(value: Any) -> Any:
         return value.isoformat()
     if isinstance(value, Decimal):
         return str(value)
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        # Binary columns on audited models are, in this codebase, without
+        # exception encrypted material — PII blobs and ABDM transfer keys.
+        # Two reasons this is a redaction and not a base64 encoding:
+        #
+        # 1. audit_logs is APPEND-ONLY (0004's trigger). Anything written here
+        #    cannot be erased, so copying a ciphertext in creates an indelible
+        #    second copy of something the primary table can rotate or delete.
+        # 2. It used to be neither — json.dumps raised TypeError on bytes and
+        #    took the whole flush down with it, so the first audited model with
+        #    a binary column failed at write time rather than leaking. That is
+        #    a crash pretending to be a control; this is the control.
+        #
+        # The length is kept because "the key changed" is a real audit fact and
+        # the bytes are not.
+        return f"<{len(value)} bytes, redacted>"
     return value
 
 
@@ -181,8 +197,15 @@ def _column_snapshot(obj: Any, *, want_old: bool) -> dict[str, Any]:
     actually be written to their JSONB columns.
     """
     mapper = inspect(type(obj))
+    # Columns a model declares as never-auditable. Distinct from the redaction
+    # in _json_safe(): that stops a value being readable, this stops the column
+    # being mentioned at all. Use it where even "this field changed" is more
+    # than the trail should carry.
+    excluded = set(getattr(type(obj), "__audit_exclude_fields__", ()) or ())
     snapshot: dict[str, Any] = {}
     for column_attr in mapper.column_attrs:
+        if column_attr.key in excluded:
+            continue
         history = attributes.get_history(obj, column_attr.key)
         if want_old:
             if history.deleted:

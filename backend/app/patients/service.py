@@ -519,6 +519,13 @@ REPOINTED_ON_MERGE: frozenset[str] = frozenset(
         "clinical_incidents",
         "patient_grievances",
         "patient_portal_bindings",
+        # ABDM M2/M3. A merged-away chart that keeps its care contexts and
+        # links means the surviving patient's ABHA no longer reaches records
+        # that are theirs — and the dead chart still offers them to the
+        # gateway, which is the worse half.
+        "abdm_care_contexts",
+        "abdm_care_context_links",
+        "abdm_consent_requests",
     }
 )
 
@@ -624,6 +631,7 @@ async def approve_merge(
     await _repoint_admissions(db, source=source, target=target)
     await _repoint_files(db, source=source, target=target)
     await _repoint_fhir_bundle_transactions(db, source=source, target=target)
+    await _repoint_abdm_records(db, source=source, target=target)
     await _reconcile_patient_portal_bindings(
         db, source=source, target=target, approved_by=approved_by
     )
@@ -938,6 +946,47 @@ async def _repoint_vitals(db: AsyncSession, *, source: Patient, target: Patient)
         ),
         {"target_id": target.id, "source_id": source.id},
     )
+    await db.flush()
+
+
+async def _repoint_abdm_records(db: AsyncSession, *, source: Patient, target: Patient) -> None:
+    """Moves source's ABDM care contexts, links and consent requests onto target.
+
+    WHY THIS IS NOT THREE PLAIN UPDATES
+
+    abdm_care_contexts carries UNIQUE (patient_id, reference), so if both
+    charts hold a context with the same reference the naive UPDATE violates it
+    and takes the whole merge down. Same shape of problem as
+    _repoint_identifiers, and handled the same way: move what does not
+    collide, drop what does.
+
+    Dropping is safe HERE and would not be for an identifier. A care context
+    reference is our own generated pointer at a unit of care, not evidence
+    about who someone is — two rows with the same reference under one patient
+    describe the same care, so the surviving chart loses nothing. If that ever
+    stops being true, this becomes a refusal like the identifier case.
+
+    Raw SQL rather than importing the models, for the reason the neighbouring
+    repointers give: importing would register them on Base.metadata as a side
+    effect and change which tables the merge guard sees.
+    """
+    await db.execute(
+        text(
+            """
+            DELETE FROM abdm_care_contexts
+             WHERE patient_id = :source_id
+               AND reference IN (
+                   SELECT reference FROM abdm_care_contexts WHERE patient_id = :target_id
+               )
+            """
+        ),
+        {"target_id": target.id, "source_id": source.id},
+    )
+    for table in ("abdm_care_contexts", "abdm_care_context_links", "abdm_consent_requests"):
+        await db.execute(
+            text(f"UPDATE {table} SET patient_id = :target_id WHERE patient_id = :source_id"),
+            {"target_id": target.id, "source_id": source.id},
+        )
     await db.flush()
 
 

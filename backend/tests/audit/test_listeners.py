@@ -9,6 +9,7 @@ Repo path: backend/tests/audit/test_listeners.py
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy import text
@@ -145,3 +146,79 @@ async def test_two_mutations_in_one_transaction_produce_two_audit_rows(
             {"fid": facility_id},
         )
         assert result.scalar_one() == 2
+
+
+# ---------------------------------------------------------------------------
+# Binary columns and per-model exclusions (added with ABDM M2/M3, which brought
+# the first audited models carrying encrypted key material).
+# ---------------------------------------------------------------------------
+
+
+def test_bytes_are_redacted_rather_than_serialised():
+    """audit_logs is append-only, so a ciphertext written into it can never be
+    removed — while the row it came from can be rotated or cleared. Copying one
+    in would outlive the thing it describes.
+
+    This also used to be a crash: json.dumps raised TypeError on bytes and took
+    the whole flush down. A crash is not a control.
+    """
+    from app.audit.listeners import _json_safe
+
+    redacted = _json_safe(b"\x00\x01secret-key-material")
+
+    assert redacted == "<21 bytes, redacted>"
+    assert "secret" not in redacted
+    # The length survives because "the key changed" is a real audit fact.
+    assert "21" in redacted
+
+
+def test_memoryview_and_bytearray_are_redacted_too():
+    """psycopg hands back memoryview for bytea, not bytes. A check that only
+    caught `bytes` would pass in tests and leak in production."""
+    from app.audit.listeners import _json_safe
+
+    assert _json_safe(bytearray(b"abc")) == "<3 bytes, redacted>"
+    assert _json_safe(memoryview(b"abcd")) == "<4 bytes, redacted>"
+
+
+def test_excluded_fields_are_absent_from_the_snapshot_entirely():
+    """Distinct from redaction: for key material even 'this field changed' is
+    more than the trail should carry."""
+    from app.audit.listeners import _column_snapshot
+    from app.integrations.abdm.hiu.models import AbdmHiuHealthInformationRequest
+
+    assert "private_key_encrypted" in AbdmHiuHealthInformationRequest.__audit_exclude_fields__
+    assert "key_version" in AbdmHiuHealthInformationRequest.__audit_exclude_fields__
+
+    row = AbdmHiuHealthInformationRequest(
+        facility_id=uuid.uuid4(),
+        artefact_id=uuid.uuid4(),
+        status="requested",
+        public_key_b64="cHVibGlj",
+        nonce_b64="bm9uY2U=",
+        key_expires_at=datetime.now(timezone.utc),
+        created_by=uuid.uuid4(),
+        private_key_encrypted=b"\x01ciphertext",
+        key_version=1,
+    )
+
+    snapshot = _column_snapshot(row, want_old=False)
+
+    assert "private_key_encrypted" not in snapshot
+    assert "key_version" not in snapshot
+    # The public half stays: which key we published is legitimately auditable.
+    assert snapshot.get("public_key_b64") == "cHVibGlj"
+
+
+def test_a_model_without_the_attribute_is_unaffected():
+    """The exclusion is opt-in; every existing audited model must behave as before."""
+    from app.audit.listeners import _column_snapshot
+    from app.integrations.abdm.hip.models import AbdmCareContext
+
+    row = AbdmCareContext(
+        facility_id=uuid.uuid4(), patient_id=uuid.uuid4(),
+        reference="visit-1", display="OPD visit", hi_type="OPConsultation",
+        created_by=uuid.uuid4(),
+    )
+    snapshot = _column_snapshot(row, want_old=False)
+    assert snapshot["reference"] == "visit-1"
