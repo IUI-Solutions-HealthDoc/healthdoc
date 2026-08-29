@@ -234,11 +234,26 @@ export function IndentWorkspace() {
           </ul>
         ) : null}
 
+        {/* A disabled button with no reason is indistinguishable from a broken
+            one. A tester reported "the Raise Indent button remained disabled"
+            as a defect; the button was correct and the catalogue was empty, so
+            the search returned nothing and no line could be added. Three
+            correct behaviours composed into a dead end with no explanation.
+            Saying which precondition is unmet costs one line and turns a bug
+            report into a next step. */}
+        {!departmentId || lines.length === 0 ? (
+          <p className="mt-5 text-sm text-muted-foreground">
+            {!departmentId
+              ? "Choose the requesting department to continue."
+              : "Search for an item above and select it to add a line."}
+          </p>
+        ) : null}
+
         <button
           type="button"
           disabled={busy || !departmentId || lines.length === 0}
           onClick={() => void submit()}
-          className="mt-5 rounded bg-blue-700 px-4 py-2 text-sm text-white disabled:bg-gray-300"
+          className="mt-3 rounded bg-blue-700 px-4 py-2 text-sm text-white disabled:bg-gray-300"
         >
           Raise indent
         </button>

@@ -106,7 +106,15 @@ export function AuditTrailDashboard() {
           flexWrap: "wrap",
         }}
       >
-        <span>UPDATE/DELETE are blocked by trg_audit_logs_block_update — viewer is read-only.</span>
+        {/* Was: "UPDATE/DELETE are blocked by trg_audit_logs_block_update —
+            viewer is read-only." A database trigger name shown to an auditor.
+            The fact is worth stating — an assessor specifically wants to know
+            the trail cannot be edited — but it has to be stated in a way the
+            reader can act on. The trigger name belongs in the schema docs. */}
+        <span>
+          This record cannot be edited or deleted by anyone, including
+          administrators. The database rejects any attempt to change it.
+        </span>
       </Box>
 
       <Tabs
