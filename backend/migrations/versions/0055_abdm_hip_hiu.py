@@ -33,47 +33,27 @@ _HI_TYPES = (
 )
 
 
-def _pk():
-    return sa.Column(
-        "id",
-        postgresql.UUID(as_uuid=True),
-        primary_key=True,
-        server_default=sa.text("uuid_generate_v4()"),
-    )
-
-
-def _timestamps():
-    return (
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False,
-                  server_default=sa.text("now()")),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False,
-                  server_default=sa.text("now()")),
-    )
-
-
-def _blame():
-    return (
-        # NOT NULL, matching common/models.py Blame. Declaring it nullable
-        # here would let a row exist that the ORM insists cannot.
-        sa.Column("created_by", postgresql.UUID(as_uuid=True),
-                  sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False),
-        sa.Column("updated_by", postgresql.UUID(as_uuid=True),
-                  sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=True),
-    )
-
-
-def _facility():
-    return sa.Column(
-        "facility_id", postgresql.UUID(as_uuid=True),
-        sa.ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False,
-    )
+# Columns are written out in full rather than built by helpers.
+#
+# The first draft of this file used _pk()/_facility()/_timestamps()/_blame()
+# helpers. It applied correctly and scripts/schema_drift_check.py reported
+# eight missing facility_id columns, because that checker reads the migration
+# for literal column names and a helper hides them. The checker is a control
+# and the helpers were only tidiness, so the helpers lost.
+#
+# The same reasoning applies to any future migration here: if a tool that
+# guards the schema cannot see what a migration does, the migration is written
+# wrong, however elegant it reads.
 
 
 def upgrade() -> None:
     # ---------------------------------------------------------------- HIP (M2)
     op.create_table(
         "abdm_care_contexts",
-        _pk(), _facility(),
+        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True,
+                  server_default=sa.text("uuid_generate_v4()")),
+        sa.Column("facility_id", postgresql.UUID(as_uuid=True),
+                  sa.ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False),
         sa.Column("patient_id", postgresql.UUID(as_uuid=True),
                   sa.ForeignKey("patients.id", ondelete="RESTRICT"), nullable=False),
         sa.Column("visit_id", postgresql.UUID(as_uuid=True),
@@ -81,7 +61,14 @@ def upgrade() -> None:
         sa.Column("reference", sa.String(100), nullable=False),
         sa.Column("display", sa.String(200), nullable=False),
         sa.Column("hi_type", sa.String(50), nullable=False),
-        *_timestamps(), *_blame(),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.text("now()")),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.text("now()")),
+        sa.Column("created_by", postgresql.UUID(as_uuid=True),
+                  sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False),
+        sa.Column("updated_by", postgresql.UUID(as_uuid=True),
+                  sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=True),
         sa.UniqueConstraint("patient_id", "reference",
                             name="uq_abdm_care_context_patient_reference"),
         sa.CheckConstraint(f"hi_type IN ({_HI_TYPES})", name="abdm_care_context_hi_type"),
@@ -96,7 +83,10 @@ def upgrade() -> None:
 
     op.create_table(
         "abdm_care_context_links",
-        _pk(), _facility(),
+        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True,
+                  server_default=sa.text("uuid_generate_v4()")),
+        sa.Column("facility_id", postgresql.UUID(as_uuid=True),
+                  sa.ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False),
         sa.Column("patient_id", postgresql.UUID(as_uuid=True),
                   sa.ForeignKey("patients.id", ondelete="RESTRICT"), nullable=False),
         sa.Column("abha_address", sa.String(120), nullable=False),
@@ -106,7 +96,10 @@ def upgrade() -> None:
         sa.Column("failure_reason", sa.Text(), nullable=True),
         sa.Column("confirmed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=True),
-        *_timestamps(),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.text("now()")),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.text("now()")),
         sa.CheckConstraint("status IN ('pending','confirmed','failed','expired')",
                            name="abdm_link_status"),
     )
@@ -117,7 +110,10 @@ def upgrade() -> None:
 
     op.create_table(
         "abdm_hip_consent_artefacts",
-        _pk(), _facility(),
+        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True,
+                  server_default=sa.text("uuid_generate_v4()")),
+        sa.Column("facility_id", postgresql.UUID(as_uuid=True),
+                  sa.ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False),
         sa.Column("consent_artefact_id", sa.String(120), nullable=False),
         sa.Column("abha_address", sa.String(120), nullable=False),
         sa.Column("status", sa.String(50), nullable=False, server_default="granted"),
@@ -126,7 +122,10 @@ def upgrade() -> None:
         sa.Column("date_range_to", sa.DateTime(timezone=True), nullable=True),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("raw_artefact", postgresql.JSONB(), nullable=False),
-        *_timestamps(),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.text("now()")),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.text("now()")),
         sa.UniqueConstraint("consent_artefact_id", name="uq_abdm_hip_artefact_id"),
         sa.CheckConstraint("status IN ('granted','revoked','expired')",
                            name="abdm_hip_artefact_status"),
@@ -136,7 +135,10 @@ def upgrade() -> None:
 
     op.create_table(
         "abdm_hip_hi_requests",
-        _pk(), _facility(),
+        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True,
+                  server_default=sa.text("uuid_generate_v4()")),
+        sa.Column("facility_id", postgresql.UUID(as_uuid=True),
+                  sa.ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False),
         sa.Column("consent_artefact_id", sa.String(120), nullable=False),
         sa.Column("transaction_id", sa.String(120), nullable=False),
         sa.Column("gateway_request_id", sa.String(100), nullable=True),
@@ -146,7 +148,10 @@ def upgrade() -> None:
         sa.Column("bundles_sent", sa.String(10), nullable=True),
         sa.Column("failure_reason", sa.Text(), nullable=True),
         sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
-        *_timestamps(),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.text("now()")),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.text("now()")),
         sa.UniqueConstraint("transaction_id", name="uq_abdm_hip_hi_transaction"),
         sa.CheckConstraint(
             "status IN ('received','refused','transferring','delivered','failed')",
@@ -158,7 +163,10 @@ def upgrade() -> None:
     # ---------------------------------------------------------------- HIU (M3)
     op.create_table(
         "abdm_consent_requests",
-        _pk(), _facility(),
+        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True,
+                  server_default=sa.text("uuid_generate_v4()")),
+        sa.Column("facility_id", postgresql.UUID(as_uuid=True),
+                  sa.ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False),
         sa.Column("patient_id", postgresql.UUID(as_uuid=True),
                   sa.ForeignKey("patients.id", ondelete="RESTRICT"), nullable=True),
         sa.Column("abha_address", sa.String(120), nullable=False),
@@ -171,7 +179,14 @@ def upgrade() -> None:
         sa.Column("gateway_request_id", sa.String(100), nullable=True),
         sa.Column("status", sa.String(50), nullable=False, server_default="requested"),
         sa.Column("failure_reason", sa.Text(), nullable=True),
-        *_timestamps(), *_blame(),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.text("now()")),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.text("now()")),
+        sa.Column("created_by", postgresql.UUID(as_uuid=True),
+                  sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False),
+        sa.Column("updated_by", postgresql.UUID(as_uuid=True),
+                  sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=True),
         sa.CheckConstraint(
             "status IN ('requested','granted','denied','expired','revoked','failed')",
             name="abdm_consent_request_status",
@@ -186,7 +201,10 @@ def upgrade() -> None:
 
     op.create_table(
         "abdm_hiu_consent_artefacts",
-        _pk(), _facility(),
+        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True,
+                  server_default=sa.text("uuid_generate_v4()")),
+        sa.Column("facility_id", postgresql.UUID(as_uuid=True),
+                  sa.ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False),
         sa.Column("consent_request_id", postgresql.UUID(as_uuid=True),
                   sa.ForeignKey("abdm_consent_requests.id", ondelete="RESTRICT"), nullable=False),
         sa.Column("consent_artefact_id", sa.String(120), nullable=False),
@@ -196,7 +214,10 @@ def upgrade() -> None:
         sa.Column("date_range_to", sa.DateTime(timezone=True), nullable=True),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("raw_artefact", postgresql.JSONB(), nullable=False),
-        *_timestamps(),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.text("now()")),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.text("now()")),
         sa.UniqueConstraint("consent_artefact_id", name="uq_abdm_hiu_artefact_id"),
         sa.CheckConstraint("status IN ('granted','revoked','expired')",
                            name="abdm_hiu_artefact_status"),
@@ -206,7 +227,10 @@ def upgrade() -> None:
 
     op.create_table(
         "abdm_hiu_hi_requests",
-        _pk(), _facility(),
+        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True,
+                  server_default=sa.text("uuid_generate_v4()")),
+        sa.Column("facility_id", postgresql.UUID(as_uuid=True),
+                  sa.ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False),
         sa.Column("artefact_id", postgresql.UUID(as_uuid=True),
                   sa.ForeignKey("abdm_hiu_consent_artefacts.id", ondelete="RESTRICT"), nullable=False),
         sa.Column("transaction_id", sa.String(120), nullable=True),
@@ -218,7 +242,14 @@ def upgrade() -> None:
         sa.Column("private_key_encrypted", sa.LargeBinary(), nullable=True),
         sa.Column("key_version", sa.SmallInteger(), nullable=True),
         sa.Column("key_expires_at", sa.DateTime(timezone=True), nullable=False),
-        *_timestamps(), *_blame(),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.text("now()")),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.text("now()")),
+        sa.Column("created_by", postgresql.UUID(as_uuid=True),
+                  sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False),
+        sa.Column("updated_by", postgresql.UUID(as_uuid=True),
+                  sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=True),
         sa.CheckConstraint(
             "status IN ('requested','acknowledged','received','partial','failed','expired')",
             name="abdm_hiu_hi_status",
@@ -236,14 +267,20 @@ def upgrade() -> None:
 
     op.create_table(
         "abdm_received_bundles",
-        _pk(), _facility(),
+        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True,
+                  server_default=sa.text("uuid_generate_v4()")),
+        sa.Column("facility_id", postgresql.UUID(as_uuid=True),
+                  sa.ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False),
         sa.Column("hi_request_id", postgresql.UUID(as_uuid=True),
                   sa.ForeignKey("abdm_hiu_hi_requests.id", ondelete="RESTRICT"), nullable=False),
         sa.Column("care_context_reference", sa.String(120), nullable=True),
         sa.Column("content_sha256", sa.String(64), nullable=False),
         sa.Column("status", sa.String(50), nullable=False, server_default="stored"),
         sa.Column("failure_reason", sa.Text(), nullable=True),
-        *_timestamps(),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.text("now()")),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.text("now()")),
         sa.CheckConstraint("status IN ('stored','undecipherable','rejected')",
                            name="abdm_received_bundle_status"),
     )
