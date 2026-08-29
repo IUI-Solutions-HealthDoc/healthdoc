@@ -60,15 +60,102 @@ function roleHintFrom(request: NextRequest): Role | null {
   return raw && KNOWN_ROLES.has(raw) ? (raw as Role) : null;
 }
 
+/**
+ * Content-Security-Policy, per request (WASA M3).
+ *
+ * WHY THIS MOVED OFF NGINX
+ * ------------------------
+ * nginx can only send one fixed policy, so the script-src had to carry
+ * 'unsafe-inline' to admit Next's inline bootstrap — and 'unsafe-inline' is the
+ * finding. A nonce has to be minted per response, which means it has to be
+ * minted where the response is made. nginx no longer sets CSP for application
+ * documents; it still owns the policies for /auth/ (Keycloak, not Next) and for
+ * /silent-check-sso.html, which is deliberately different and is excluded below.
+ *
+ * WHY THE REQUEST HEADER, NOT JUST THE RESPONSE
+ * ---------------------------------------------
+ * Setting CSP only on the response would ship a policy that forbids the very
+ * scripts Next is about to emit. Next reads the nonce back off the
+ * Content-Security-Policy REQUEST header and stamps it onto its own script
+ * tags; that read is the only reason the emitted HTML and the enforced policy
+ * agree. Removing the request header white-screens the app.
+ *
+ * WHY 'unsafe-inline' SURVIVES ON style-src AND NOT script-src
+ * -----------------------------------------------------------
+ * Emotion/MUI inject styles at runtime with no nonce hook. An injected
+ * stylesheet is not the finding and not the same risk class as injected script,
+ * so it is stated here rather than quietly carried.
+ */
+const DEV_ONLY = process.env.NODE_ENV === "development";
+
+function buildCsp(nonce: string): string {
+  // 'unsafe-eval' is what `next dev --webpack` needs for react-refresh, and
+  // dev's inline scripts are emitted before this nonce exists. The comparison
+  // above is against "development" rather than for "production" on purpose: an
+  // unset NODE_ENV must land on the STRICT policy, not the permissive one. A
+  // loose default is how a control ends up switched off in the environment it
+  // was written for.
+  const scriptSrc = DEV_ONLY
+    ? `'self' 'unsafe-inline' 'unsafe-eval'`
+    : `'self' 'nonce-${nonce}'`;
+  return [
+    `default-src 'self'`,
+    `script-src ${scriptSrc}`,
+    `style-src 'self' 'unsafe-inline'`,
+    `img-src 'self' data: blob:`,
+    `font-src 'self'`,
+    `connect-src 'self' wss:`,
+    `frame-ancestors 'none'`,
+    `base-uri 'self'`,
+    `form-action 'self'`,
+    `object-src 'none'`,
+  ].join("; ");
+}
+
+/**
+ * nginx sets this file's policy at the location level and it must stay
+ * different: Keycloak embeds it in a hidden iframe, so it needs
+ * frame-ancestors 'self' where every application screen needs 'none'. Emitting
+ * a second CSP header here would not relax that — two CSP headers are enforced
+ * as their intersection — it would break silent SSO for every signed-in user.
+ */
+function ownsItsOwnCsp(pathname: string): boolean {
+  return pathname === "/silent-check-sso.html";
+}
+
+/** Carries the nonce to the renderer and the policy to the browser. */
+function withCsp(
+  response: NextResponse,
+  nonce: string,
+  pathname: string,
+): NextResponse {
+  if (ownsItsOwnCsp(pathname)) return response;
+  response.headers.set("Content-Security-Policy", buildCsp(nonce));
+  return response;
+}
+
 export function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
 
-  if (needsNoSession(pathname)) return NextResponse.next();
+  // One nonce per request, minted before any branch returns, because every
+  // branch below has to carry the same policy — a redirect that omits CSP is a
+  // hole the size of whichever screen the user was being sent to.
+  const nonce = btoa(crypto.randomUUID());
+
+  // Next reads the nonce back off this request header when it renders. Forward
+  // it on the request as well as the response, or the emitted script tags carry
+  // no nonce and the policy blocks them.
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-nonce", nonce);
+  requestHeaders.set("Content-Security-Policy", buildCsp(nonce));
+  const forward = () => NextResponse.next({ request: { headers: requestHeaders } });
+
+  if (needsNoSession(pathname)) return withCsp(forward(), nonce, pathname);
 
   if (request.cookies.get(SESSION_PRESENCE_COOKIE)?.value !== "1") {
     const login = new URL("/login", request.url);
     login.searchParams.set("redirect", `${pathname}${search}`);
-    return NextResponse.redirect(login);
+    return withCsp(NextResponse.redirect(login), nonce, pathname);
   }
 
   const role = roleHintFrom(request);
@@ -77,15 +164,17 @@ export function proxy(request: NextRequest) {
   // real token and MainLayout makes the final call. Redirecting on a missing
   // hint would bounce a legitimately signed-in user whose hint cookie expired
   // slightly ahead of their Keycloak session.
-  if (!role) return NextResponse.next();
+  if (!role) return withCsp(forward(), nonce, pathname);
 
   if (!canRoleAccessPath(role, pathname)) {
-    return NextResponse.redirect(
-      new URL(getDefaultRouteForRole(role), request.url),
+    return withCsp(
+      NextResponse.redirect(new URL(getDefaultRouteForRole(role), request.url)),
+      nonce,
+      pathname,
     );
   }
 
-  return NextResponse.next();
+  return withCsp(forward(), nonce, pathname);
 }
 
 export const config = {
