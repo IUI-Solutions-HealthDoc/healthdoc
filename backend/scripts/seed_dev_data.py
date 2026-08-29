@@ -247,6 +247,100 @@ async def seed(users: list[tuple[str, str]]) -> None:
             },
         )
 
+        # ------------------------------------------------------------------
+        # The REGISTRATION tariff.
+        #
+        # WITHOUT THIS ROW NOBODY CAN CREATE AN OPD VISIT.
+        #
+        # opd.create_visit calls billing.create_registration_invoice inside the
+        # registration transaction, and that raises 409
+        # `registration_tariff_not_configured` when the facility has no active
+        # REGISTRATION row in charge_master. The 409 is deliberate and correct —
+        # the alternative is a zero-rupee invoice that looks legitimate and is
+        # discovered at month-end reconciliation — but the dev seed never
+        # created the row, so every fresh environment hit it.
+        #
+        # The blast radius is the whole product: no visit means no queue token,
+        # which means doctor, nurse, pharmacist, lab and radiology cannot reach
+        # their primary workflows at all. Registration is the first step of
+        # every clinical journey, so a missing seed row reads as "the entire
+        # application is broken".
+        #
+        # WHY NOT ON CONFLICT
+        #
+        # uq_charge_master_version is (facility_id, charge_code, scheme_code,
+        # effective_from) and scheme_code is NULL for a general tariff. In
+        # Postgres NULL <> NULL, so the unique index does not dedupe these rows
+        # and ON CONFLICT would never fire — re-running the seed would insert a
+        # second identical tariff every time. charge_for() takes the newest and
+        # would still work, which is exactly why the duplicates would go
+        # unnoticed until someone debugged a pricing question. WHERE NOT EXISTS
+        # is NULL-safe and actually idempotent.
+        #
+        # effective_from is deliberately far in the past: charge_for() filters
+        # `effective_from <= business_date`, and a row dated today is invisible
+        # to any test that bills a backdated visit.
+        # ------------------------------------------------------------------
+        tariff_author = (
+            await session.execute(
+                text("SELECT id FROM users WHERE username = 'dev.admin'")
+            )
+        ).scalar_one_or_none()
+        if tariff_author is not None:
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO charge_master
+                        (id, facility_id, charge_code, description, charge_category,
+                         unit_price, scheme_code, effective_from, effective_to,
+                         is_active, created_by)
+                    SELECT
+                        :id, :facility_id, 'REGISTRATION',
+                        'OPD registration fee', 'registration',
+                        50.00, NULL, DATE '2020-01-01', NULL, true, :created_by
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM charge_master
+                         WHERE facility_id = :facility_id
+                           AND charge_code = 'REGISTRATION'
+                           AND scheme_code IS NULL
+                           AND is_active
+                    )
+                    """
+                ),
+                {
+                    "id": uuid.uuid5(uuid.NAMESPACE_URL, "healthdoc:tariff:registration"),
+                    "facility_id": FACILITY_ID,
+                    "created_by": tariff_author,
+                },
+            )
+
+        # Prove it landed. The seed's whole job is to leave an environment where
+        # a visit can be created; asserting that here turns a silent seed failure
+        # into a `make setup` error, instead of a 409 the first tester meets on
+        # the registration screen and reports as "the application is broken".
+        resolved = (
+            await session.execute(
+                text(
+                    """
+                    SELECT count(*) FROM charge_master
+                     WHERE facility_id = :facility_id
+                       AND charge_code = 'REGISTRATION'
+                       AND is_active
+                       AND effective_from <= CURRENT_DATE
+                       AND (effective_to IS NULL OR effective_to >= CURRENT_DATE)
+                    """
+                ),
+                {"facility_id": FACILITY_ID},
+            )
+        ).scalar_one()
+        if resolved != 1:
+            raise RuntimeError(
+                f"expected exactly 1 active REGISTRATION tariff for the dev facility, "
+                f"found {resolved}. Zero means OPD visits will 409 with "
+                f"registration_tariff_not_configured; more than one means charge_for() "
+                f"picks by ordering and the effective price is ambiguous."
+            )
+
         patient_user_id = (
             await session.execute(
                 text("SELECT id FROM users WHERE username = 'dev.patient'")
