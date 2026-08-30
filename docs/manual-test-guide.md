@@ -271,10 +271,30 @@ data is *correct* — that an invoice totals right, that a stock ledger
 reconciles, that an audit chain is unbroken. Those live in `make test-pg`, and a
 green manual pass with a red suite means the suite is right.
 
-Two things in this build are deliberately inert and will look broken:
+Four things in this build are deliberately inert and will look broken. All of
+them answer with a reason rather than failing obscurely, and all of them are
+waiting on ABDM sandbox credentials rather than on code:
 
 - **ABHA verification** — `_VERIFY_PATH` is `None` until the v3 path is
   confirmed against the sandbox, so every ABHA records as unverified.
 - **ABDM M1 enrolment** — needs `ABDM_PUBLIC_KEY_PEM` and real sandbox
   credentials. Without them the endpoints answer 503 with a clear reason rather
   than sending an Aadhaar number in the clear.
+- **ABDM M2/M3 gateway callbacks** — `/abdm/hip/callbacks/*` and
+  `/abdm/hiu/callbacks/*` answer **503** while `ABDM_CALLBACK_SHARED_SECRET` is
+  unset. That is deliberate and is the safe direction: an unauthenticated
+  inbound route that writes consent artefacts and moves patient data is the
+  worst thing in this integration, so not-configured means refuse. Do not file
+  the 503 as a bug.
+- **The `/superadmin` workspace** shows facility metadata only. It is supposed
+  to: `dev.superadmin` is denied every facility and clinical route by design,
+  and `e2e/superadmin-isolation.smoke.mjs` proves it.
+
+Two reports from the earlier manual round were re-tested in a real browser and
+closed as **not defects** — do not re-file them:
+
+- `dev.emergency` 403 on `POST /patients`. The `/emergency` screen calls
+  `POST /emergency/patients`, which grants the role and returns 201. The 403 is
+  real, correct and unreachable: `/emergency` is the only route that role has.
+- Every API call firing twice. React StrictMode double-invoke, dev only —
+  1x per call on a production build, verified on the same three screens.

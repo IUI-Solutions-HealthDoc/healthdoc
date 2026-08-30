@@ -30,7 +30,7 @@ controls, and both are now in place.
 
 | Track | State |
 |---|---|
-| Cybersecurity (VAPT) | ✅ blockers closed · **all minors closed** · **1038 tests pass on the upgraded stack** |
+| Cybersecurity (VAPT) | ✅ blockers closed · **all minors closed** · **1049 tests pass on the upgraded stack** |
 | ABDM functional | ⚠️ **Partially assessable** — M1/M2/M3 built and tested; no sandbox round trip yet |
 
 > **A naming collision, because it has already caused confusion.** M1/M2/M3 in
@@ -129,7 +129,7 @@ open in production. `ENVIRONMENT=production` added there.
 | M1 | ✅ Starlette → 1.6.0 via FastAPI 0.141.1 |
 | M2 | ✅ python-multipart → 0.0.32 |
 | M3 | ✅ CSP `'unsafe-inline'` removed — per-request nonce in `frontend/src/proxy.ts`, CSP moved off nginx. Needed `force-dynamic` in the root layout: every route prerendered as static, and a nonce cannot be baked into static HTML, so without it the policy blocked Next's own inline bootstrap and every screen rendered blank. Verified in a browser across 7 screens and all 13 roles — zero violations |
-| M4 | ✅ Five `/ping` stubs now require `admin` |
+| M4 | ✅ **All twenty** `/ping` stubs require `admin`. This line previously read "Five `/ping` stubs now require `admin`" — true, and incomplete: twenty existed, so fourteen stayed public and the ✅ told everyone the finding was closed. Unauthenticated routes are now 8, all deliberate: OpenAPI docs (off outside dev), health, metrics, and the waiting-room queue display. Guarded by `test_role_boundaries.py` |
 | M5 | ✅ Session cookie gets `Secure` on HTTPS |
 | M6 | ✅ Password policy: 12 chars, mixed case, digit, symbol, history 5, pbkdf2-sha512 — imposed by the production realm renderer, absent from the dev realm by design |
 | M7 | ✅ `Facility.timezone` de-duplicated 3 → 1 |
@@ -152,6 +152,9 @@ open in production. `ENVIRONMENT=production` added there.
 | Data at rest | AES-GCM via `cryptography`; key **versioning** with multi-version read and rotation support; Aadhaar stored as HMAC blind index, never plaintext. |
 | Error leakage | 401s return a flat `"Invalid token"`; the reason goes to the log. **This line previously claimed no handler leaked exception text and was wrong** — `app/auth/deps.py` raised `f"Invalid token: {exc}"`, which the originating grep missed because it was positional. Fixed and covered by `tests/test_jwt_verification.py::test_the_401_body_does_not_say_WHY`. |
 | Frontend deps | `npm audit --omit=dev` → **0 vulnerabilities**. |
+| Access tiers | Of 266 mounted routes: **247 role-gated**, 11 authenticated without a role restriction, **8 unauthenticated** — the OpenAPI docs (disabled outside dev by `ENVIRONMENT`), health, metrics and the queue display, which is public by design. Counted from FastAPI's resolved dependency tree, so router-level and parameter-level `require_roles` both register. |
+| Frontend auth | The `NEXT_PUBLIC_AUTH_MODE=dev` role picker — a second sign-in path that fabricated a user and entered any role workspace without a bearer token — is deleted, not merely disabled. |
+| Contract gate | `make contract` verifies every frontend API call against the OpenAPI schema. Its extractor was blind to any call whose generic type argument contained a `;` or newline (six real calls); fixed, now 179 checked. |
 | Audit trail | Append-only `audit_logs` with per-facility hash chaining, enforced by DB triggers (update/delete raise). |
 
 ---
@@ -245,7 +248,7 @@ Re-run before booking:
 
 ```bash
 make setup                                      # must end with the 13-user banner
-make test-pg                                    # 1038 passing
+make test-pg                                    # 1049 passing
 make audit-deps                                 # both ecosystems zero
 cd frontend && npm run test:e2e                 # 9 roles, WCAG + silent SSO
 ```
