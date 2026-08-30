@@ -78,27 +78,15 @@ export function getAuthRole(): Role | null {
   return getRoleHint();
 }
 
-const DEV_USER_KEY = "hd_dev_user";
-
-/** Dev-mode UI user only (sessionStorage). Never used when Keycloak is the IdP. */
-export function getAuthUser(): AuthUser | null {
-  if (typeof window === "undefined") return null;
-  if (process.env.NEXT_PUBLIC_AUTH_MODE !== "dev") return null;
-  const raw = sessionStorage.getItem(DEV_USER_KEY);
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as AuthUser;
-  } catch {
-    return null;
-  }
-}
-
-/** Mark UX session after Keycloak login, or store mock user in explicit-dev mode only. */
+/**
+ * Mark the UX session after a Keycloak login.
+ *
+ * Presence and role hint only, both non-secret and both forgeable by design —
+ * the access token stays in memory and never reaches a cookie or storage. See
+ * src/proxy.ts for why forging these buys a rendered shell and nothing else.
+ */
 export function setAuthSession(user: AuthUser, _token?: string) {
   setSessionPresence(user.role ?? undefined);
-  if (typeof window !== "undefined" && process.env.NEXT_PUBLIC_AUTH_MODE === "dev") {
-    sessionStorage.setItem(DEV_USER_KEY, JSON.stringify(user));
-  }
 }
 
 export function setAuthToken(_token: string) {
@@ -107,9 +95,4 @@ export function setAuthToken(_token: string) {
 
 export function clearAuthToken() {
   clearSessionPresence();
-  if (typeof window !== "undefined") {
-    sessionStorage.removeItem(DEV_USER_KEY);
-  }
 }
-
-export { isDevAuthEnabled } from "./mode";
