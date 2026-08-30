@@ -5,12 +5,9 @@ import type { Role } from "@/config/roles";
 import {
   type AuthUser,
   clearAuthToken,
-  getAuthUser,
-  hasSessionPresence,
   setAuthSession,
   setSessionPresence,
 } from "@/lib/auth";
-import { isDevAuthEnabled } from "@/lib/auth/mode";
 import {
   getKeycloakSessionUser,
   initKeycloak,
@@ -55,15 +52,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     async function hydrate() {
       try {
-        // Explicit-dev UI scaffolding only — not production identity.
-        if (isDevAuthEnabled()) {
-          const stored = getAuthUser();
-          if (stored && hasSessionPresence()) {
-            setUser(stored);
-          }
-          return;
-        }
-
         if (isKeycloakConfigured()) {
           const ok = await initKeycloak();
           if (cancelled) return;
@@ -126,7 +114,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(null);
       setAccessToken(null);
       clearAuthToken();
-      if (isKeycloakConfigured() && !isDevAuthEnabled()) {
+      if (isKeycloakConfigured()) {
         void logoutFromKeycloak(`${window.location.origin}${destination}`).catch(() => {
           window.location.replace(destination);
         });
@@ -169,7 +157,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     setAccessToken(null);
     clearAuthToken();
-    if (isKeycloakConfigured() && !isDevAuthEnabled()) {
+    if (isKeycloakConfigured()) {
       await logoutFromKeycloak();
     } else {
       // A full document load, not router.push — on sign-out the point is to

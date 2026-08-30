@@ -79,7 +79,12 @@ function Metric({ label, value, detail }: { label: string; value: number; detail
 }
 
 export default function Page() {
-  const [wards, setWards] = useState<Ward[]>([]);
+  // `null` means "not loaded yet", which is NOT the same as "loaded, and
+  // there are none" (#488). While this was `Ward[]` starting at `[]`, the two
+  // were indistinguishable and the panel rendered "Loading wards…" forever on
+  // a perfectly successful 200 that happened to return an empty list — the
+  // exact symptom reported, with the request succeeding every time.
+  const [wards, setWards] = useState<Ward[] | null>(null);
   const [allBeds, setAllBeds] = useState<Bed[]>([]);
   const [selectedWard, setSelectedWard] = useState("");
   const [selectedBedId, setSelectedBedId] = useState<string | null>(null);
@@ -249,7 +254,7 @@ export default function Page() {
     : [];
 
   const wardName = (wardId: string | null) =>
-    wards.find((ward) => ward.id === wardId)?.name ?? (wardId ? wardId.slice(0, 8) : "—");
+    (wards ?? []).find((ward) => ward.id === wardId)?.name ?? (wardId ? wardId.slice(0, 8) : "—");
   const bedName = (bedId: string | null) =>
     allBeds.find((bed) => bed.bed_id === bedId)?.bed_number ?? (bedId ? bedId.slice(0, 8) : "—");
 
@@ -289,10 +294,17 @@ export default function Page() {
         />
       ) : null}
 
-      {wards.length > 0 ? (
+      {wards === null ? (
+        <div className="surface-card p-6 text-sm text-muted-foreground">Loading wards…</div>
+      ) : wards.length > 0 ? (
         <WardSelector wards={wards} selectedWard={selectedWard} onChange={changeWard} />
       ) : (
-        <div className="surface-card p-6 text-sm text-muted-foreground">Loading wards…</div>
+        // Phrased like the other empty states on this screen ("No beds
+        // available", "No pending orders") so a ward-less facility reads as a
+        // fact about the data rather than a page that never finished.
+        <div className="surface-card p-6 text-sm text-muted-foreground">
+          No wards found for this facility.
+        </div>
       )}
 
       <section className="grid gap-4 sm:grid-cols-3">
@@ -491,7 +503,7 @@ export default function Page() {
             {activeAction === "transfer" ? (
               <AddPatientMovementForm
                 admissionId={occupant.admission_id}
-                wards={wards}
+                wards={wards ?? []}
                 beds={allBeds}
                 isSubmitting={isSubmittingTransfer}
                 onSubmit={async (data) => {
