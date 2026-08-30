@@ -15,7 +15,20 @@ from pathlib import Path
 
 from app.main import app
 
-API_CALL = re.compile(r"\bapi(?:<[^;\n]*?>)?\(")
+#: Locates the identifier only. The optional generic that may follow is NOT
+#: matched here — see _api_call_paren().
+#:
+#: This was `\bapi(?:<[^;\n]*?>)?\(`, and the `[^;\n]` silently excluded every
+#: call whose generic type argument contained a semicolon or a newline. That is
+#: not an edge case: it is any inline object type with more than one field, so
+#:
+#:     api<{ id: string; is_active: false }>(`/users/${id}/deactivate`, …)
+#:
+#: was invisible to this checker. Six real call sites were, and the gate still
+#: reported success — a frontend call to an endpoint that does not exist,
+#: written that way, passed. A checker that silently skips what it cannot parse
+#: is worse than no checker, because the green result is believed.
+API_IDENT = re.compile(r"\bapi(?=\s*[<(])")
 STRING_ARG = re.compile(r"\s*([\"'`])(.+?)\1", re.DOTALL)
 METHOD = re.compile(r"\bmethod\s*:\s*[\"']([A-Za-z]+)[\"']")
 TEMPLATE_PARAM = re.compile(r"\$\{[^}]+\}")
@@ -95,12 +108,66 @@ def _call_body(source: str, opening_paren: int) -> str:
     raise ValueError("unterminated api() call")
 
 
+def _api_call_paren(source: str, ident_end: int) -> int | None:
+    """Index of the `(` that opens this `api` call, or None if this is not one.
+
+    Skips a generic type argument of any shape by counting angle brackets,
+    rather than trying to describe one with a character class. `Map<string,
+    Set<number>>` and a type spread over six lines are both just balanced
+    depth, and neither needs a special case.
+
+    Returns None when the identifier is not followed by a call — `apiClient`,
+    a bare `api` reference, an unterminated generic — so the caller skips it
+    instead of guessing at an offset.
+    """
+    index = ident_end
+    while index < len(source) and source[index].isspace():
+        index += 1
+    if index >= len(source):
+        return None
+    if source[index] == "(":
+        return index
+    if source[index] != "<":
+        return None
+
+    angle = 0
+    brace = 0
+    limit = index + 2000  # a generic this long is a runaway match, not a type
+    while index < len(source) and index < limit:
+        char = source[index]
+        if char == "<":
+            angle += 1
+        elif char == ">":
+            angle -= 1
+            if angle == 0:
+                index += 1
+                while index < len(source) and source[index].isspace():
+                    index += 1
+                return index if index < len(source) and source[index] == "(" else None
+        elif char == "{":
+            brace += 1
+        elif char == "}":
+            brace -= 1
+        elif char == ";" and brace == 0:
+            # A semicolon OUTSIDE an inline object type ends the statement, so
+            # the `<` was a comparison rather than a generic. Inside braces it
+            # is just a field separator — `api<{ id: string; ok: true }>(...)` —
+            # and treating it as a terminator is precisely the bug this
+            # function replaced.
+            return None
+        index += 1
+    return None
+
+
 def frontend_calls(frontend_root: Path) -> list[FrontendCall]:
     calls: list[FrontendCall] = []
     for file in sorted((*frontend_root.rglob("*.ts"), *frontend_root.rglob("*.tsx"))):
         source = file.read_text(encoding="utf-8-sig")
-        for match in API_CALL.finditer(source):
-            body = _call_body(source, match.end() - 1)
+        for match in API_IDENT.finditer(source):
+            opening = _api_call_paren(source, match.end())
+            if opening is None:
+                continue
+            body = _call_body(source, opening)
             path_match = STRING_ARG.match(body)
             if path_match is None:
                 continue
