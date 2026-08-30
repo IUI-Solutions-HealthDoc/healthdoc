@@ -173,6 +173,7 @@ do not merge out of order.**
 | 0052 | external_results_append_only | order_external_results | B3 (#450) — trigger only; outside-result corrections append a new row and UPDATE/DELETE cannot rewrite history. |
 | 0053 | grievance_counters | grievance_counters; ALTER patient_grievances: grievance_number varchar(50) | B7 (#451) — atomic per-facility/day server numbering without truncating a permitted 20-character facility code. |
 | 0054 | inventory_reservations | ALTER inventory_batches: reserved_quantity numeric(12,2) | B6 (#452) — durable source-batch reservation between transfer dispatch and receipt; every stock-out path uses quantity minus reservations. |
+| 0055 | abdm_hip_hiu | abdm_care_contexts; abdm_care_context_links; abdm_hip_consent_artefacts; abdm_hip_hi_requests; abdm_consent_requests; abdm_hiu_consent_artefacts; abdm_hiu_hi_requests; abdm_received_bundles | ABDM M2 (HIP) and M3 (HIU). Four HIP tables record what we hold, who may see it and what we handed over; four HIU tables record what we asked for, on whose authority and what came back. `abdm_hiu_hi_requests.private_key_encrypted` is the one persisted private key in the integration — AES-GCM, bound to its own row, cleared on completion — because the HIU half of the ECDH exchange is asynchronous and must outlive the request that opened it. |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -1666,6 +1667,118 @@ INDEX ix_idempotency_keys_expires_at (expires_at)   -- expiry sweep
 > idempotency for unauthenticated POSTs (ABDM callbacks, webhooks) — revisit when
 > the first such endpoint lands; and `response_body` should become `jsonb`, since
 > every response we store is JSON and `text` gives up querying it.
+
+### 0055 — ABDM M2 (HIP) and M3 (HIU)
+
+Four HIP tables record what we hold, who may see it and what we handed over;
+four HIU tables record what we asked for, on whose authority and what came
+back. Breaking any link in that chain is what an ABDM assessor looks for, so
+each stage is its own row with its own timestamps rather than a status flag on
+one wide table.
+
+Every gateway path these use is UNVERIFIED against the sandbox — see
+`app/common/config.py` and `docs/wasa-readiness.md`.
+
+**abdm_care_contexts** (0055) — a unit of care that can be offered to an ABHA
+```
+patient_id UUID NOT NULL → patients · visit_id UUID → visits
+reference varchar(100) NOT NULL                   -- quoted back by ABDM forever; never recomputed
+display varchar(200) NOT NULL
+hi_type varchar(50) NOT NULL                      -- OPConsultation|Prescription|DiagnosticReport|DischargeSummary|ImmunizationRecord|HealthDocumentRecord|WellnessRecord
+facility_id UUID NOT NULL → facilities
+UNIQUE (patient_id, reference)                    -- two facilities may both hold a context for one person
+```
+
+**abdm_care_context_links** (0055) — an ABHA address's claim on those contexts
+```
+patient_id UUID NOT NULL → patients · abha_address varchar(120) NOT NULL
+link_ref_number varchar(120) · gateway_request_id varchar(100)
+status varchar(50) NOT NULL DEFAULT 'pending'     -- pending|confirmed|failed|expired
+failure_reason text · confirmed_at timestamptz · expires_at timestamptz
+facility_id UUID NOT NULL → facilities
+```
+No `created_by`: a link is created either by staff or by the patient's ABHA app
+arriving as a gateway callback with no local user. Who initiated it is answered
+by `audit_logs`, not by inventing a system user.
+
+**abdm_hip_consent_artefacts** (0055) — what the consent manager told us
+```
+consent_artefact_id varchar(120) UNIQUE NOT NULL · abha_address varchar(120) NOT NULL
+status varchar(50) NOT NULL DEFAULT 'granted'     -- granted|revoked|expired
+hi_types jsonb NOT NULL · date_range_from timestamptz · date_range_to timestamptz
+expires_at timestamptz · raw_artefact jsonb NOT NULL
+facility_id UUID NOT NULL → facilities
+```
+`raw_artefact` duplicates the parsed columns beside it on purpose: asked "on
+what basis did you release this record", the answer must be the document we
+were given, not our reading of it.
+
+**abdm_hip_hi_requests** (0055) — a request for data and what we did about it
+```
+consent_artefact_id varchar(120) NOT NULL · transaction_id varchar(120) UNIQUE NOT NULL
+gateway_request_id varchar(100) · hiu_key_material jsonb NOT NULL   -- HIU's PUBLIC half only
+data_push_url text NOT NULL
+status varchar(50) NOT NULL DEFAULT 'received'    -- received|refused|transferring|delivered|failed
+bundles_sent varchar(10) · failure_reason text · completed_at timestamptz
+facility_id UUID NOT NULL → facilities
+```
+There is no private-key column here and there must never be one: the HIP
+generates its keypair inside the push and discards it.
+
+**abdm_consent_requests** (0055) — what we asked the consent manager for
+```
+patient_id UUID → patients · abha_address varchar(120) NOT NULL
+purpose_code varchar(50) NOT NULL                 -- CAREMGT|BTG|PUBHLTH|HPAYMT|DSRCH|PATRQT
+hi_types jsonb NOT NULL
+date_range_from timestamptz NOT NULL · date_range_to timestamptz NOT NULL
+requested_expiry timestamptz NOT NULL             -- what we asked for; the artefact is what binds
+consent_request_id varchar(120) · gateway_request_id varchar(100)
+status varchar(50) NOT NULL DEFAULT 'requested'   -- requested|granted|denied|expired|revoked|failed
+failure_reason text · facility_id UUID NOT NULL → facilities
+CHECK (date_range_to >= date_range_from)
+```
+
+**abdm_hiu_consent_artefacts** (0055) — a granted artefact we hold
+```
+consent_request_id UUID NOT NULL → abdm_consent_requests
+consent_artefact_id varchar(120) UNIQUE NOT NULL
+status varchar(50) NOT NULL DEFAULT 'granted'     -- granted|revoked|expired
+hi_types jsonb NOT NULL · date_range_from timestamptz · date_range_to timestamptz
+expires_at timestamptz · raw_artefact jsonb NOT NULL
+facility_id UUID NOT NULL → facilities
+```
+
+**abdm_hiu_hi_requests** (0055) — a data request and the key that opens the reply
+```
+artefact_id UUID NOT NULL → abdm_hiu_consent_artefacts
+transaction_id varchar(120) · gateway_request_id varchar(100)
+status varchar(50) NOT NULL DEFAULT 'requested'   -- requested|acknowledged|received|partial|failed|expired
+failure_reason text
+public_key_b64 text NOT NULL · nonce_b64 text NOT NULL
+private_key_encrypted bytea · key_version smallint
+key_expires_at timestamptz NOT NULL
+facility_id UUID NOT NULL → facilities
+CHECK ((private_key_encrypted IS NULL) = (key_version IS NULL))
+```
+The only persisted private key in this integration, because the HIU half of the
+ECDH exchange is asynchronous: we publish a public key and a HIP pushes against
+it minutes or hours later, possibly into a different process. AES-GCM encrypted
+via `common/security.py`, bound by associated-data to this row's id so a blob
+copied into another row will not open, expired by `key_expires_at`, and cleared
+on completion or revocation. Excluded from `audit_logs` — that table is
+append-only, so a copy there would outlive the clearing.
+
+**abdm_received_bundles** (0055) — a bundle that arrived from a HIP
+```
+hi_request_id UUID NOT NULL → abdm_hiu_hi_requests
+care_context_reference varchar(120)
+content_sha256 varchar(64) NOT NULL               -- of the DECRYPTED bundle
+status varchar(50) NOT NULL DEFAULT 'stored'      -- stored|undecipherable|rejected
+failure_reason text · facility_id UUID NOT NULL → facilities
+```
+The decrypted bundle is not stored here; it takes the outbox path every other
+clinical document takes, and this row is the durable fact that it arrived —
+the same rule `fhir_bundle_transactions` follows.
 
 ### 0029–0031 — B1 auth / ABDM / sync tables
 
