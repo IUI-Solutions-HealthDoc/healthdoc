@@ -25,7 +25,7 @@ App at https://localhost (self-signed cert). All thirteen dev accounts use
 ### Tests
 
 ```bash
-make test-pg                       # THE GATE — host venv, real Postgres, ~984
+make test-pg                       # THE GATE — host venv, real Postgres, ~1049
 make test p=tests/foo.py k=name    # in-container, quick, skips DB tests
 make contract                      # every frontend API call exists in OpenAPI
 make audit-deps                    # pip-audit + npm audit, must be zero
@@ -95,6 +95,37 @@ exact field set or a parsed AST is both simpler and stricter.
 **`git fetch` fails but exits 0 in some sandboxes.** Always check ref dates
 before claiming a branch is behind.
 
+**A gate that passes vacuously is worse than no gate.** Three of these have now
+been found, all reporting success while checking nothing. `make contract`'s
+extractor used `\bapi(?:<[^;\n]*?>)?\(`, whose character class excluded every
+generic containing a `;` or a newline — six real calls were invisible while it
+printed "172 calls match". CI's `PR convention check` runs `pr_check.py` with
+`working-directory: backend`, where every repo-root-relative path from
+`git diff` fails an `exists()` test, so it prints "no python files to check"
+and exits 0. And `assert_audit_coverage()` is never called at all. When a
+check's output is a number, make something change that number and confirm the
+number moves.
+
+**A ✅ against a partial fix reads as a closed finding.** `wasa-readiness.md`
+said "M4 ✅ Five `/ping` stubs now require `admin`". True — and twenty existed,
+so fourteen stayed public for months because the tick told everyone to stop
+looking. Say what was fixed AND what was left.
+
+**Under the SQLite fixture, a row whose id came from the column's server
+default cannot be updated afterwards.** `uuid_generate_v4()` is registered as a
+Python function returning a STRING, so the row is stored under a string key
+while the ORM holds a `UUID` and the later UPDATE matches zero rows —
+`StaleDataError`. Postgres is unaffected. Assign the id explicitly when a
+service inserts a row and then mutates it in the same flush.
+
+**Editing a backend file can hang the dev container.** WatchFiles triggers a
+reload, the reload waits on a background task that never drains, and the
+backend stops serving while still reporting `Up`. It presents as nginx 502 or
+a hanging request. `docker compose restart backend` recovers it; if uvicorn
+then fails with `ModuleNotFoundError: No module named 'app'`, that is a mount
+race on restart — `up -d --force-recreate backend` fixes it, and nginx needs a
+restart afterwards to pick up the new container IP.
+
 **Postgres `NULL <> NULL`, so `ON CONFLICT` does not fire on a nullable
 column.** The seed's tariff uses `WHERE NOT EXISTS` for this reason.
 
@@ -107,33 +138,45 @@ depends on them.
 
 ## Current state
 
-- 984 tests passing; `pip-audit` and `npm audit` both clean.
-- WASA cybersecurity track: blockers closed. One Medium open — CSP
-  `'unsafe-inline'`, needs Next.js nonces in `src/proxy.ts`.
-- WASA ABDM track: **not assessable**. `integrations/abdm/hip/`, `hiu/`,
-  `consent/` and `nhcx/` are empty. M1 (ABHA enrolment and login) is built but
-  its gateway paths are unconfirmed defaults — see below.
-- See `docs/wasa-readiness.md` for the full assessment and
-  `docs/manual-test-guide.md` for per-role testing.
+- 1049 tests passing; `pip-audit` and `npm audit` both clean.
+- WASA cybersecurity track: **all findings closed**, including M3 — the CSP now
+  carries a per-request nonce from `frontend/src/proxy.ts` instead of
+  `'unsafe-inline'`, and every route renders `force-dynamic` because a nonce
+  cannot be baked into prerendered HTML.
+- WASA ABDM track: M1 (ABHA identity), M2 (HIP) and M3 (HIU) are **built and
+  tested** — 8 tables, ECDH/AES-GCM transfer crypto, fail-closed callback auth.
+  `integrations/abdm/consent/` and `nhcx/` remain empty; the consent artefact
+  handling lives in `hip/` and `hiu/`, and NHCX is out of scope for this audit.
+- Frontend is production-ready: the `NEXT_PUBLIC_AUTH_MODE=dev` role picker is
+  deleted, and `.env.production.example` carries the `NEXT_PUBLIC_*` build args
+  the image needs.
+- See `docs/wasa-readiness.md` for the full assessment,
+  `docs/manual-test-guide.md` for per-role testing, and the Endpoint Atlas for
+  every route with its access tier.
 
 ### Known gaps, stated plainly
 
-**ABDM M1 paths are unverified.** `abdm_path_enrol_*` and `abdm_path_login_*`
-in `app/common/config.py` are the documented v3 shapes and have NOT been
-confirmed against the sandbox. They are settings precisely so a wrong one is an
-env change. `_VERIFY_PATH` in `identity/router.py` is deliberately `None`.
+**No ABDM call has ever reached the sandbox.** M1/M2/M3 are self-consistent —
+our HIP encrypts, our HIU decrypts, 102 tests across eight files — and that is
+not the same as ABDM agreeing. All fourteen `abdm_path_*` settings in
+`app/common/config.py` are documented v3 shapes, unconfirmed. `_VERIFY_PATH` in `identity/router.py` is still
+deliberately `None`. Callback authentication is a shared secret, not ABDM's
+signature scheme, because the scheme needs the sandbox to confirm before it can
+be written without guessing. Credentials must never be committed and CI must
+never hold them; the client tests are fully mocked and stay that way.
 
-**Audit coverage is 8 of ~90 models.** `app.patients`, `app.consent` and
-`app.files` have zero. `assert_audit_coverage()` exists to catch this and is
-never called, with `AUDITABLE_MODULE_PREFIXES` empty. For DPDP this is a
-data-access-logging exposure. Tracked as issue #290; needs an owner, not a
-drive-by fix — each model needs a real decision about its facility/patient id
-fields, and a wrong one fails at flush time.
+**Audit coverage is 17 of 98 models**, up from 8. `assert_audit_coverage()`
+still exists and is still never called, with `AUDITABLE_MODULE_PREFIXES` empty
+— so the guard checks nothing. Patient creation is now audited explicitly on
+both routes (`POST /patients` and `POST /emergency/patients`) rather than
+through the listener, because `update_patient()` already writes its own row and
+flipping the opt-in would double-write. Of the 12 models in `app.patients`,
+`app.consent` and `app.files`, only three carry a `facility_id` column, and
+`audit_logs.facility_id` is NOT NULL — so the other nine need a migration each
+before they can opt in. Tracked as #290.
 
-**Two manual-test reports could not be reproduced** and were deliberately not
-"fixed": `dev.emergency` 403 on `POST /patients` (that screen calls
-`/emergency/patients`, which grants the role), and every API call firing twice
-(likely React StrictMode in dev — confirm against a production build first).
+**`release-readiness` holds one unmerged commit** (`scripts/close_verified_issues.sh`).
+Every other branch of ours is merged; the teammates' branches are not ours to judge.
 
 ---
 
