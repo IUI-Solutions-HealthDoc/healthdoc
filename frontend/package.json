@@ -13,7 +13,8 @@
     "test:dashboards": "node e2e/dashboards.smoke.mjs",
     "test:print": "node e2e/print-pdf.smoke.mjs",
     "demo:record": "node e2e/demo-recordings.mjs",
-    "electron:dev": "tsc -p electron/tsconfig.json && electron dist/electron/main.js"
+    "electron:dev": "tsc -p electron/tsconfig.json && electron dist/electron/main.js",
+    "test:superadmin": "node e2e/superadmin-isolation.smoke.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",

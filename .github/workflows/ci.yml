@@ -264,6 +264,15 @@ jobs:
         working-directory: frontend
         run: npm run test:dashboards
 
+      # #464's acceptance criterion: a real browser journey proving the
+      # superadmin workspace is isolated. Checks the API layer as well as the
+      # redirect, because a route that redirects the UI and still answers 200
+      # to a bearer token is the exact defect CLAUDE.md records this project
+      # already shipping six times.
+      - name: Superadmin isolation journey
+        working-directory: frontend
+        run: npm run test:superadmin
+
       - name: Show service logs on failure
         if: failure()
         run: docker compose -f infra/docker-compose.yml --env-file .env logs --tail=200
