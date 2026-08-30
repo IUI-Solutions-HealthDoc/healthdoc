@@ -5,7 +5,6 @@ import { useCallback, useEffect, useState } from "react";
 import { toast } from "@/components/ui/toast";
 import { ApiError } from "@/lib/api";
 import { hasKeycloakMfaSession, stepUpWithKeycloak } from "@/lib/auth/keycloak";
-import { isDevAuthEnabled } from "@/lib/auth/mode";
 import {
   checkRecordAccess,
   requestBreakGlassGrant,
@@ -76,10 +75,6 @@ export function useBreakGlass(patientId: string | null) {
 
   const beginStepUp = useCallback(async (): Promise<void> => {
     setStepUpError(null);
-    if (isDevAuthEnabled()) {
-      setStepUpError("Emergency access requires a real Keycloak MFA session.");
-      return;
-    }
     setSubmitting(true);
     try {
       await stepUpWithKeycloak(window.location.href);
