@@ -26,7 +26,18 @@ def _extract_ip(request: Request) -> str | None:
     return request.client.host if request.client else None
 
 
-@router.get("/ping")
+# Module-liveness stub. Gated on `admin` for the same reason ot/, outbox/,
+# blood_bank/, registration/ and security_audit/ already are: an
+# unauthenticated endpoint on a health system is a finding regardless of
+# payload, and the response still discloses which modules exist — useful
+# reconnaissance, useless to a legitimate caller.
+#
+# Fourteen of these were still public after the WASA M4 pass closed five of
+# them, so `make contract`-style module enumeration remained available to
+# anyone who could reach the host. Nothing consumes them: no frontend call, no
+# e2e script, no compose healthcheck (those probe Mongo and Redis directly),
+# no Grafana panel.
+@router.get("/ping", dependencies=[Depends(require_roles("admin"))])
 async def ping() -> dict:
     return {"module": "files", "status": "stub"}
 

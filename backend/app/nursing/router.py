@@ -129,7 +129,18 @@ async def _require_order_scope(
         raise HTTPException(http_status.HTTP_404_NOT_FOUND, "order_not_found")
 
 
-@router.get("/ping")
+# Module-liveness stub. Gated on `admin` for the same reason ot/, outbox/,
+# blood_bank/, registration/ and security_audit/ already are: an
+# unauthenticated endpoint on a health system is a finding regardless of
+# payload, and the response still discloses which modules exist — useful
+# reconnaissance, useless to a legitimate caller.
+#
+# Fourteen of these were still public after the WASA M4 pass closed five of
+# them, so `make contract`-style module enumeration remained available to
+# anyone who could reach the host. Nothing consumes them: no frontend call, no
+# e2e script, no compose healthcheck (those probe Mongo and Redis directly),
+# no Grafana panel.
+@router.get("/ping", dependencies=[Depends(require_roles("admin"))])
 async def ping() -> dict:
     return {"module": "nursing", "status": "ok"}
 
