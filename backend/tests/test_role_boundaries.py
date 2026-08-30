@@ -132,3 +132,38 @@ def test_every_hod_dashboard_endpoint_is_hod_only():
     assert len(routes) >= 5, f"expected at least 5 hod-dashboard routes, found {len(routes)}"
     for path, roles in routes:
         assert roles == {"hod"}, f"{path} expected exactly {{hod}}, got {sorted(roles)}"
+
+
+def test_no_module_stub_is_publicly_reachable():
+    """Every /ping is gated, and stays that way.
+
+    WASA finding M4 gated five of these. Fourteen more were left public, and
+    the ✅ beside M4 in docs/wasa-readiness.md read as though the finding were
+    closed — so nothing was looking. Module enumeration stayed available to
+    anyone who could reach the host for months afterwards.
+
+    The payload is only {"module": …, "status": …}, so this was reconnaissance
+    rather than data. It is still an unauthenticated endpoint on a hospital
+    system, which is a finding on its own terms, and the cheapest moment to
+    notice the next one is a failing test rather than an assessor's report.
+    """
+    def gate(route) -> set[str]:
+        # _roles_for() above takes a path fragment; this needs one route's own
+        # roles, so it reads the same closures directly.
+        roles: set[str] = set()
+        for dep in getattr(route, "dependencies", []):
+            call = getattr(dep, "dependency", None)
+            for cell in getattr(call, "__closure__", None) or ():
+                contents = cell.cell_contents
+                if isinstance(contents, tuple) and all(isinstance(x, str) for x in contents):
+                    roles.update(contents)
+        return roles
+
+    unguarded = sorted(
+        route.path
+        for route in _mounted_routes()
+        if getattr(route, "path", "").endswith("/ping") and not gate(route)
+    )
+    assert not unguarded, (
+        "these module stubs answer without a role gate: " + ", ".join(unguarded)
+    )
