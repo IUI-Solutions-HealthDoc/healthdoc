@@ -8,6 +8,7 @@
 #   ./scripts/abdm_sandbox.sh add-hiu  SERVICE_ID "Facility Name" https://your-public-host
 #   ./scripts/abdm_sandbox.sh services
 #   ./scripts/abdm_sandbox.sh doctor  https://your-public-host
+#   ./scripts/abdm_sandbox.sh cert
 #
 # Reads ABDM_CLIENT_ID / ABDM_CLIENT_SECRET / ABDM_X_CM_ID from .env. The secret
 # is never echoed, never passed on a command line (where `ps` would show it),
@@ -145,6 +146,39 @@ case "${1:-}" in
       echo "✗ Not ready to register. ABDM would call this URL and get nothing usable."
       exit 1
     fi
+    ;;
+  cert)
+    require_credentials
+    # ABDM's PUBLIC certificate, used to RSA-encrypt Aadhaar numbers and OTPs.
+    # Public key material, not a secret — but ABDM rotates it, which is why
+    # this is a command rather than a value someone pasted once and forgot.
+    #
+    # VERIFIED 2026-08-31: this endpoint returns {"publicKey": "<base64 SPKI>"}
+    # — a bare key, NOT a PEM block, so it is wrapped here. Feeding the raw
+    # field to load_pem_public_key fails with an unhelpful parse error.
+    tok=$(token)
+    [[ -n "$tok" ]] || { echo "✗ no token" >&2; exit 1; }
+    curl -s --max-time 25 "https://abhasbx.abdm.gov.in/abha/api/v3/profile/public/certificate" \
+      -H "Authorization: Bearer $tok" -H "REQUEST-ID: $(uuidgen)" \
+      -H "TIMESTAMP: $(_now)" -H "X-CM-ID: $CM_ID" > /tmp/abdm_cert.$$
+    python3 - "$$" <<'PYEOF'
+import json, sys, textwrap
+raw = json.load(open(f"/tmp/abdm_cert.{sys.argv[1]}"))
+key = (raw.get("publicKey") or "").strip()
+if not key:
+    print("✗ no publicKey in the response:", list(raw)[:4]); sys.exit(1)
+pem = key if "BEGIN" in key else (
+    "-----BEGIN PUBLIC KEY-----\n" + "\n".join(textwrap.wrap(key, 64)) + "\n-----END PUBLIC KEY-----")
+print("Paste this line into .env (public key material, not a secret):\n")
+# QUOTED. The PEM header contains spaces ("BEGIN PUBLIC KEY"), and an
+# unquoted value breaks `source .env` — which the Makefile and this script
+# both do, so an unquoted paste takes the whole toolchain down with
+# "PUBLIC: command not found".
+print('ABDM_PUBLIC_KEY_PEM="' + pem.replace("\n", "\\n") + '"')
+print("\nThen: docker compose -f infra/docker-compose.yml --env-file .env up -d --force-recreate backend")
+print("(`restart` reuses the old environment and will not pick this up.)")
+PYEOF
+    rm -f /tmp/abdm_cert.$$
     ;;
   services)
     require_credentials
