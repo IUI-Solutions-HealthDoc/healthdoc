@@ -63,6 +63,14 @@ _KNOWN_HEADERS = {
     "content-type", "content-length", CALLBACK_SECRET_HEADER.lower(),
     "x-forwarded-for", "x-forwarded-proto", "x-forwarded-host",
     "x-forwarded-port", "x-real-ip",
+    # Cloudflare adds these to every request that passes through a tunnel, and
+    # the sandbox deployment reaches ABDM through one. Found by running the
+    # reachability probe against the public hostname and reading what this very
+    # function logged: "cdn-loop, cf-connecting-ip, cf-ipcountry, cf-ray,
+    # cf-visitor, cf-warp-tag-id" — six lines of noise that would sit directly
+    # on top of the one header this log exists to surface.
+    "cdn-loop", "cf-connecting-ip", "cf-ipcountry", "cf-ray", "cf-visitor",
+    "cf-warp-tag-id", "cf-worker", "cf-ew-via", "cf-request-id",
 }
 
 
