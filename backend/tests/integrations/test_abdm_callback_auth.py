@@ -173,3 +173,42 @@ async def test_ordinary_proxy_headers_are_not_reported_as_a_scheme(monkeypatch, 
 
     logged = " ".join(r.getMessage() for r in caplog.records)
     assert "unrecognised headers" not in logged
+
+
+async def test_cloudflare_tunnel_headers_are_not_reported_as_a_scheme(monkeypatch, caplog):
+    """The sandbox reaches ABDM through a Cloudflare tunnel.
+
+    Found by running the reachability probe against the public hostname and
+    reading what verify_callback logged: six cf-* headers, which would sit
+    directly on top of the one header this log exists to surface. Same failure
+    mode as X-Forwarded-* — noise that buries the signal — but only visible
+    once the thing was deployed behind a real tunnel.
+    """
+    _set_secret(monkeypatch, "the-real-secret")
+
+    cloudflare = {
+        "CDN-Loop": "cloudflare", "CF-Connecting-IP": "1.2.3.4",
+        "CF-IPCountry": "IN", "CF-RAY": "abc123-DEL",
+        "CF-Visitor": '{"scheme":"https"}', "CF-Warp-Tag-Id": "x",
+    }
+    with caplog.at_level("WARNING"):
+        with pytest.raises(HTTPException):
+            await callback_auth.verify_callback(
+                _request(**cloudflare), x_healthdoc_callback_secret="wrong"
+            )
+    assert "unrecognised headers" not in " ".join(r.getMessage() for r in caplog.records)
+
+
+async def test_a_real_signature_header_still_surfaces_through_the_tunnel(monkeypatch, caplog):
+    """Filtering the noise must not filter the signal."""
+    _set_secret(monkeypatch, "the-real-secret")
+
+    with caplog.at_level("WARNING"):
+        with pytest.raises(HTTPException):
+            await callback_auth.verify_callback(
+                _request(**{"CF-RAY": "abc123-DEL", "X-Hmac-Signature": "sig"}),
+                x_healthdoc_callback_secret="wrong",
+            )
+    logged = " ".join(r.getMessage() for r in caplog.records)
+    assert "x-hmac-signature" in logged.lower()
+    assert "cf-ray" not in logged.lower()
