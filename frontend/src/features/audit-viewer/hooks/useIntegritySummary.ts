@@ -12,14 +12,21 @@ export function useIntegritySummary() {
    *  over the whole history — a chain that broke months ago is still broken. */
   const [anyChainInvalid, setAnyChainInvalid] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const [c, a] = await Promise.all([listIntegrityChecks(), listArchives()]);
       setChecks(c.items);
       setAnyChainInvalid(c.any_chain_invalid);
       setArchives(a);
+    } catch (reason) {
+      setChecks([]);
+      setArchives([]);
+      setAnyChainInvalid(false);
+      setError(reason instanceof Error ? reason.message : "Failed to load integrity records");
     } finally {
       setLoading(false);
     }
@@ -29,5 +36,5 @@ export function useIntegritySummary() {
     void refresh();
   }, [refresh]);
 
-  return { checks, archives, anyChainInvalid, loading, refresh };
+  return { checks, archives, anyChainInvalid, loading, error, refresh };
 }

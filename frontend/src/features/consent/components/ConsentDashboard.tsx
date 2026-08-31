@@ -11,6 +11,7 @@ import { useConsentRecords } from "../hooks/useConsentRecords";
 import { useDataAccessLogs } from "../hooks/useDataAccessLogs";
 import { ConsentListPanel } from "./ConsentListPanel";
 import { ConsentRecordDetail } from "./ConsentRecordDetail";
+import { ConsentGrantForm } from "./ConsentGrantForm";
 
 export function ConsentDashboard() {
   /**
@@ -49,7 +50,7 @@ export function ConsentDashboard() {
           Consent records
         </Typography>
         <Typography sx={{ m: 0, mt: 0.5, fontSize: "0.875rem", color: meridian.textSecondary }}>
-          Consent artifacts + linked data_access_log (migration 0004)
+          Record consent decisions and review the patient&apos;s consent history.
         </Typography>
       </Box>
 
@@ -64,7 +65,7 @@ export function ConsentDashboard() {
           fontWeight: 600,
         }}
       >
-        Read ledger is append-only. Break-glass rows show emergency_access without verified consent.
+        Consent decisions remain in the audit history. Revoked consent is recorded, not erased.
       </Box>
 
       {!patient ? (
@@ -99,9 +100,22 @@ export function ConsentDashboard() {
               </button>
             </Typography>
           </Box>
+          <ConsentGrantForm
+            key={patient.id}
+            patientId={patient.id}
+            onCreated={(record) => {
+              setSelectedId(record.id);
+              void list.refresh();
+            }}
+          />
           {list.error ? (
             <Typography role="alert" sx={{ color: meridian.danger, fontSize: "0.875rem" }}>
               {list.error}
+            </Typography>
+          ) : null}
+          {detail.error || access.error ? (
+            <Typography role="alert" sx={{ color: meridian.danger, fontSize: "0.875rem" }}>
+              {detail.error ?? access.error}
             </Typography>
           ) : null}
           <Box

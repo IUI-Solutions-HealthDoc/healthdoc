@@ -12,9 +12,15 @@ import type {
   QueueToken,
   QueueTokenCreate,
   QueueTokenList,
+  TokenPriorityUpdate,
   Visit,
   VisitCreate,
 } from "./types";
+import {
+  digitsOnly,
+  normaliseIndianMobileInput,
+  normaliseUhidInput,
+} from "./patientValidation";
 
 /**
  * Register a patient.
@@ -50,11 +56,10 @@ export function registerPatient(
  * legitimately contain it.
  */
 function normaliseCriteria(criteria: PatientSearchRequest): PatientSearchRequest {
-  const digitsOnly = (v: string) => v.replace(/\D/g, "");
   const out: PatientSearchRequest = { ...criteria };
 
-  if (out.uhid) out.uhid = out.uhid.trim().toUpperCase().replace(/[\s\-_/]/g, "");
-  if (out.mobile) out.mobile = digitsOnly(out.mobile);
+  if (out.uhid) out.uhid = normaliseUhidInput(out.uhid);
+  if (out.mobile) out.mobile = normaliseIndianMobileInput(out.mobile) ?? out.mobile.trim();
   if (out.abha_number) out.abha_number = digitsOnly(out.abha_number);
   if (out.full_name) out.full_name = out.full_name.trim();
 
@@ -115,16 +120,31 @@ export function listQueueOpeningOptions(): Promise<QueueOpeningOptions> {
 }
 
 /** Open one clinic queue from a roster option. */
-export function createQueue(payload: QueueCreate): Promise<QueueCreated> {
+export function createQueue(
+  payload: QueueCreate,
+  idempotencyKey: string,
+): Promise<QueueCreated> {
   return api<QueueCreated>("/queue/queues", {
     method: "POST",
     body: JSON.stringify(payload),
+    idempotencyKey,
   });
 }
 
 /** Tokens for one queue, with the current now_serving. */
 export function listQueueTokens(queueId: string): Promise<QueueTokenList> {
   return api<QueueTokenList>(`/queue/queues/${queueId}/tokens`);
+}
+
+/** Raise a waiting token to a receptionist-authorised priority tier. */
+export function updateTokenPriority(
+  tokenId: string,
+  payload: TokenPriorityUpdate,
+): Promise<QueueToken> {
+  return api<QueueToken>(`/queue/tokens/${tokenId}/priority`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
 }
 
 /** Issue a token against a visit. Retry-safe for the same reason as the visit. */

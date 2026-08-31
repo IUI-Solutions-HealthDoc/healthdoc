@@ -11,6 +11,12 @@ import {
   type PatientSearchRequest,
   type PatientSearchResult,
 } from "./types";
+import {
+  isValidAbhaInput,
+  isValidPatientName,
+  isValidUhidInput,
+  normaliseIndianMobileInput,
+} from "./patientValidation";
 
 type Props = {
   /** Rendered on each row when present — used by registration to offer a merge. */
@@ -60,13 +66,17 @@ export function PatientSearch({ onSelect, selectLabel = "Select" }: Props) {
       criteria.abha_number?.trim(),
   );
   const mobileInvalid = Boolean(
-    criteria.mobile?.trim() && !/^\d{10}$/.test(criteria.mobile.trim()),
+    criteria.mobile?.trim() && !normaliseIndianMobileInput(criteria.mobile),
   );
   const abhaInvalid = Boolean(
-    criteria.abha_number?.trim() && !/^\d{14}$/.test(criteria.abha_number.trim()),
+    criteria.abha_number?.trim() && !isValidAbhaInput(criteria.abha_number),
   );
+  const uhidInvalid = Boolean(criteria.uhid?.trim() && !isValidUhidInput(criteria.uhid));
+  const nameInvalid = Boolean(criteria.full_name?.trim() && !isValidPatientName(criteria.full_name));
   const nameNeedsDob = Boolean(criteria.full_name?.trim() && !criteria.dob);
-  const formInvalid = mobileInvalid || abhaInvalid || nameNeedsDob;
+  const formInvalid = mobileInvalid || abhaInvalid || uhidInvalid || nameInvalid || nameNeedsDob;
+  const inputClass = (invalid: boolean) =>
+    `w-full rounded-md border px-3 py-2 ${invalid ? "border-danger" : "border-border"}`;
 
   function set(field: keyof PatientSearchRequest, value: string) {
     setCriteria((current) => ({ ...current, [field]: value }));
@@ -77,7 +87,7 @@ export function PatientSearch({ onSelect, selectLabel = "Select" }: Props) {
       setError(
         nameNeedsDob
           ? "Date of birth is required for a name search."
-          : "Correct the mobile or ABHA number before searching.",
+          : "Correct the highlighted search fields before searching.",
       );
       return;
     }
@@ -123,7 +133,8 @@ export function PatientSearch({ onSelect, selectLabel = "Select" }: Props) {
           <label className="space-y-1 text-sm">
             <span className="text-muted-foreground">Name</span>
             <input
-              className="w-full rounded-md border border-border px-3 py-2"
+              className={inputClass(nameInvalid)}
+              aria-invalid={nameInvalid}
               value={criteria.full_name ?? ""}
               onChange={(e) => set("full_name", e.target.value)}
               autoComplete="off"
@@ -134,7 +145,8 @@ export function PatientSearch({ onSelect, selectLabel = "Select" }: Props) {
             <span className="text-muted-foreground">Date of birth</span>
             <input
               type="date"
-              className="w-full rounded-md border border-border px-3 py-2"
+              className={inputClass(nameNeedsDob)}
+              aria-invalid={nameNeedsDob}
               value={criteria.dob ?? ""}
               max={new Date().toISOString().slice(0, 10)}
               onChange={(e) => set("dob", e.target.value)}
@@ -145,13 +157,13 @@ export function PatientSearch({ onSelect, selectLabel = "Select" }: Props) {
           <label className="space-y-1 text-sm">
             <span className="text-muted-foreground">Mobile</span>
             <input
-              className="w-full rounded-md border border-border px-3 py-2"
+              className={inputClass(mobileInvalid)}
+              aria-invalid={mobileInvalid}
               value={criteria.mobile ?? ""}
               onChange={(e) => set("mobile", e.target.value)}
-              inputMode="numeric"
-              pattern="[0-9]{10}"
-              maxLength={10}
-              placeholder="10-digit mobile number"
+              inputMode="tel"
+              maxLength={18}
+              placeholder="10 digits or +91"
               autoComplete="off"
             />
           </label>
@@ -159,22 +171,24 @@ export function PatientSearch({ onSelect, selectLabel = "Select" }: Props) {
           <label className="space-y-1 text-sm">
             <span className="text-muted-foreground">UHID</span>
             <input
-              className="w-full rounded-md border border-border px-3 py-2"
+              className={inputClass(uhidInvalid)}
+              aria-invalid={uhidInvalid}
               value={criteria.uhid ?? ""}
               onChange={(e) => set("uhid", e.target.value)}
               autoComplete="off"
+              placeholder="IN-DL-DEV001-2026-000001-4"
             />
           </label>
 
           <label className="space-y-1 text-sm">
             <span className="text-muted-foreground">ABHA number</span>
             <input
-              className="w-full rounded-md border border-border px-3 py-2"
+              className={inputClass(abhaInvalid)}
+              aria-invalid={abhaInvalid}
               value={criteria.abha_number ?? ""}
               onChange={(e) => set("abha_number", e.target.value)}
               inputMode="numeric"
-              pattern="[0-9]{14}"
-              maxLength={14}
+              maxLength={20}
               autoComplete="off"
             />
           </label>
@@ -198,6 +212,7 @@ export function PatientSearch({ onSelect, selectLabel = "Select" }: Props) {
               setCriteria(EMPTY);
               setResults(null);
               setError(null);
+              setPage(1);
             }}
             className="text-sm underline"
           >
@@ -210,8 +225,8 @@ export function PatientSearch({ onSelect, selectLabel = "Select" }: Props) {
           )}
           {nameNeedsDob ? (
             <span className="text-sm text-danger">Date of birth is required with name.</span>
-          ) : mobileInvalid || abhaInvalid ? (
-            <span className="text-sm text-danger">Check the mobile or ABHA format.</span>
+          ) : formInvalid ? (
+            <span className="text-sm text-danger">Check the highlighted field formats.</span>
           ) : null}
         </div>
       </form>

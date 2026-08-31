@@ -77,10 +77,11 @@ export async function getConsent(
 export function createConsentRecord(
   patientId: string,
   body: ConsentRecordCreate,
+  idempotencyKey: string,
 ): Promise<ConsentRecord> {
   return api<ConsentRecord>(`/consent/patients/${patientId}/records`, {
     method: "POST",
-    idempotencyKey: null,
+    idempotencyKey,
     body: JSON.stringify(body),
   });
 }

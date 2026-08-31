@@ -1,10 +1,10 @@
 import uuid
 from datetime import date, datetime
+from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.common.enums import QueuePriority, Shift
-from decimal import Decimal
 
 
 class QueueCreate(BaseModel):
@@ -105,6 +105,8 @@ class QueueOpeningOptionsOut(BaseModel):
 class QueueTokenListItemOut(QueueTokenOut):
     doctor_name: str
     room_number: str | None
+    patient_name: str | None
+    patient_identifier: str | None
 
     model_config = ConfigDict(from_attributes=True)
  

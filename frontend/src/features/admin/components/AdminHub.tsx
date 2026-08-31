@@ -14,17 +14,17 @@ const LINKS = [
   {
     href: "/admin/users",
     title: "Users",
-    subtitle: "Staff profiles · activate / deactivate · bootstrap create",
+    subtitle: "Create staff accounts and manage active access",
   },
   {
     href: "/admin/account-requests",
     title: "Account requests",
-    subtitle: "user_account_requests maker-checker (0028)",
+    subtitle: "Review staff account requests with two-person approval",
   },
   {
     href: "/admin/permissions",
     title: "Permissions",
-    subtitle: "facility_modules toggles + Keycloak role matrix",
+    subtitle: "Manage facility modules and role access",
   },
   {
     href: "/admin/departments",
@@ -49,7 +49,7 @@ const LINKS = [
   {
     href: "/audit-viewer",
     title: "Audit trail",
-    subtitle: "Opens the auditor workplace (admin may view; not an admin-only module)",
+    subtitle: "Review facility activity and integrity records",
   },
 ] as const;
 
@@ -59,7 +59,7 @@ export function AdminHub() {
       <AdminPageHeader
         eyebrow="Governance"
         title="Admin"
-        subtitle="User management · account governance · facility modules. Audit trail is a separate auditor workplace."
+        subtitle="Manage staff accounts, facility access, departments, and governance."
       />
 
       <Stack spacing={1.5}>

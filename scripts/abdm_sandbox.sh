@@ -7,6 +7,8 @@
 #   ./scripts/abdm_sandbox.sh add-hip  SERVICE_ID "Facility Name" https://your-public-host
 #   ./scripts/abdm_sandbox.sh add-hiu  SERVICE_ID "Facility Name" https://your-public-host
 #   ./scripts/abdm_sandbox.sh services
+#   ./scripts/abdm_sandbox.sh doctor  https://your-public-host
+#   ./scripts/abdm_sandbox.sh cert
 #
 # Reads ABDM_CLIENT_ID / ABDM_CLIENT_SECRET / ABDM_X_CM_ID from .env. The secret
 # is never echoed, never passed on a command line (where `ps` would show it),
@@ -29,14 +31,20 @@ CM_ID="${ABDM_X_CM_ID:-sbx}"
 SESSION_PATH="${ABDM_SESSION_PATH:-/api/hiecm/gateway/v3/sessions}"
 BRIDGE="$GATEWAY/gateway/v1/bridges"
 
-for v in ABDM_CLIENT_ID ABDM_CLIENT_SECRET; do
-  val="${!v:-}"
-  if [[ -z "$val" || "$val" == "change-me" ]]; then
-    echo "✗ $v is not set in .env."
-    echo "  Set it from the NHA onboarding email, then re-run. Do not commit .env."
-    exit 1
-  fi
-done
+# Credentials are checked per command, not up front: `doctor` is a pure
+# reachability probe and is the thing you want to run BEFORE putting a secret
+# on the machine. Requiring credentials for it would invert that order.
+require_credentials() {
+  local v val
+  for v in ABDM_CLIENT_ID ABDM_CLIENT_SECRET; do
+    val="${!v:-}"
+    if [[ -z "$val" || "$val" == "change-me" ]]; then
+      echo "✗ $v is not set in .env."
+      echo "  Set it from the NHA onboarding email, then re-run. Do not commit .env."
+      exit 1
+    fi
+  done
+}
 
 _now() { date -u +"%Y-%m-%dT%H:%M:%S.000Z"; }
 
@@ -77,6 +85,7 @@ _auth_call() {  # method path json
 
 case "${1:-}" in
   token)
+    require_credentials
     t=$(token)
     if [[ -n "$t" ]]; then
       echo "✓ session token obtained (${#t} chars). Credentials work."
@@ -85,19 +94,94 @@ case "${1:-}" in
     fi
     ;;
   set-url)
+    require_credentials
     [[ -n "${2:-}" ]] || { echo "usage: $0 set-url https://your-public-host"; exit 1; }
     [[ "$2" == https://* ]] || { echo "✗ ABDM requires https with a valid certificate"; exit 1; }
     echo "PATCH $BRIDGE  url=$2"
     _auth_call PATCH "$BRIDGE" "{\"url\":\"$2\"}"
     ;;
   add-hip|add-hiu)
+    require_credentials
     kind=$([[ "$1" == "add-hip" ]] && echo HIP || echo HIU)
     [[ -n "${4:-}" ]] || { echo "usage: $0 $1 SERVICE_ID \"Facility Name\" https://your-public-host"; exit 1; }
     echo "POST $BRIDGE/addUpdateServices  type=$kind id=$2"
     _auth_call POST "$BRIDGE/addUpdateServices" \
       "[{\"id\":\"$2\",\"name\":\"$3\",\"type\":\"$kind\",\"active\":true,\"alias\":[\"$2\"],\"endpoints\":[{\"address\":\"$4\",\"connectionType\":\"https\",\"use\":\"registration\"}]}]"
     ;;
+  doctor)
+    # Pre-flight: does this public URL actually reach OUR callback routes?
+    # Registering a URL that does not is a wasted round-trip with NHA support,
+    # and the failure shows up later as "the gateway says it called you" with
+    # nothing in your logs.
+    [[ -n "${2:-}" ]] || { echo "usage: $0 doctor https://your-public-host"; exit 1; }
+    [[ "$2" == https://* ]] || { echo "✗ ABDM requires https"; exit 1; }
+    base="${2%/}"
+    fail=0
+    for path in /api/v1/abdm/hip/callbacks/consent-notify \
+                /api/v1/abdm/hip/callbacks/health-information/request \
+                /api/v1/abdm/hiu/callbacks/health-information/transfer; do
+      # No `|| echo 000` — curl already writes 000 to stdout when it cannot
+      # connect, and the fallback appended a second one, producing "000000"
+      # which then fell through to the "unexpected" branch and hid the real
+      # diagnosis from the person reading it.
+      code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 \
+             -X POST "$base$path" -H 'Content-Type: application/json' -d '{}') || true
+      [[ -n "$code" ]] || code=000
+      case "$code" in
+        503) verdict="reachable — refusing because ABDM_CALLBACK_SHARED_SECRET is unset (expected before setup)";;
+        401) verdict="reachable — authenticating (secret is set)";;
+        404) verdict="ROUTED SOMEWHERE ELSE — this host is not serving this app"; fail=1;;
+        000) verdict="NO RESPONSE — tunnel down, or origin unreachable"; fail=1;;
+        50*) verdict="origin error $code — check the backend logs"; fail=1;;
+        200|202) verdict="ACCEPTED WITHOUT AUTH — investigate before registering this URL"; fail=1;;
+        *)   verdict="unexpected $code"; fail=1;;
+      esac
+      printf '  %-58s %s\n' "${path#/api/v1}" "$verdict"
+    done
+    echo
+    if [[ "$fail" == "0" ]]; then
+      echo "✓ ABDM can reach every callback on $base"
+      echo "  Register it:  $0 set-url $base"
+    else
+      echo "✗ Not ready to register. ABDM would call this URL and get nothing usable."
+      exit 1
+    fi
+    ;;
+  cert)
+    require_credentials
+    # ABDM's PUBLIC certificate, used to RSA-encrypt Aadhaar numbers and OTPs.
+    # Public key material, not a secret — but ABDM rotates it, which is why
+    # this is a command rather than a value someone pasted once and forgot.
+    #
+    # VERIFIED 2026-08-31: this endpoint returns {"publicKey": "<base64 SPKI>"}
+    # — a bare key, NOT a PEM block, so it is wrapped here. Feeding the raw
+    # field to load_pem_public_key fails with an unhelpful parse error.
+    tok=$(token)
+    [[ -n "$tok" ]] || { echo "✗ no token" >&2; exit 1; }
+    curl -s --max-time 25 "https://abhasbx.abdm.gov.in/abha/api/v3/profile/public/certificate" \
+      -H "Authorization: Bearer $tok" -H "REQUEST-ID: $(uuidgen)" \
+      -H "TIMESTAMP: $(_now)" -H "X-CM-ID: $CM_ID" > /tmp/abdm_cert.$$
+    python3 - "$$" <<'PYEOF'
+import json, sys, textwrap
+raw = json.load(open(f"/tmp/abdm_cert.{sys.argv[1]}"))
+key = (raw.get("publicKey") or "").strip()
+if not key:
+    print("✗ no publicKey in the response:", list(raw)[:4]); sys.exit(1)
+pem = key if "BEGIN" in key else (
+    "-----BEGIN PUBLIC KEY-----\n" + "\n".join(textwrap.wrap(key, 64)) + "\n-----END PUBLIC KEY-----")
+print("Paste this line into .env (public key material, not a secret):\n")
+# QUOTED. The PEM header contains spaces ("BEGIN PUBLIC KEY"), and an
+# unquoted value breaks `source .env` — which the Makefile and this script
+# both do, so an unquoted paste takes the whole toolchain down with
+# "PUBLIC: command not found".
+print('ABDM_PUBLIC_KEY_PEM="' + pem.replace("\n", "\\n") + '"')
+print("\nThen: docker compose -f infra/docker-compose.yml --env-file .env up -d --force-recreate backend")
+print("(`restart` reuses the old environment and will not pick this up.)")
+PYEOF
+    rm -f /tmp/abdm_cert.$$
+    ;;
   services)
+    require_credentials
     echo "GET $BRIDGE/getServices"
     _auth_call GET "$BRIDGE/getServices"
     ;;

@@ -9,7 +9,7 @@ Repo path: backend/tests/audit/test_listeners.py
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import text
@@ -154,7 +154,7 @@ async def test_two_mutations_in_one_transaction_produce_two_audit_rows(
 # ---------------------------------------------------------------------------
 
 
-def test_bytes_are_redacted_rather_than_serialised():
+async def test_bytes_are_redacted_rather_than_serialised():
     """audit_logs is append-only, so a ciphertext written into it can never be
     removed — while the row it came from can be rotated or cleared. Copying one
     in would outlive the thing it describes.
@@ -172,7 +172,7 @@ def test_bytes_are_redacted_rather_than_serialised():
     assert "21" in redacted
 
 
-def test_memoryview_and_bytearray_are_redacted_too():
+async def test_memoryview_and_bytearray_are_redacted_too():
     """psycopg hands back memoryview for bytea, not bytes. A check that only
     caught `bytes` would pass in tests and leak in production."""
     from app.audit.listeners import _json_safe
@@ -181,7 +181,7 @@ def test_memoryview_and_bytearray_are_redacted_too():
     assert _json_safe(memoryview(b"abcd")) == "<4 bytes, redacted>"
 
 
-def test_excluded_fields_are_absent_from_the_snapshot_entirely():
+async def test_excluded_fields_are_absent_from_the_snapshot_entirely():
     """Distinct from redaction: for key material even 'this field changed' is
     more than the trail should carry."""
     from app.audit.listeners import _column_snapshot
@@ -196,7 +196,7 @@ def test_excluded_fields_are_absent_from_the_snapshot_entirely():
         status="requested",
         public_key_b64="cHVibGlj",
         nonce_b64="bm9uY2U=",
-        key_expires_at=datetime.now(timezone.utc),
+        key_expires_at=datetime.now(UTC),
         created_by=uuid.uuid4(),
         private_key_encrypted=b"\x01ciphertext",
         key_version=1,
@@ -210,7 +210,7 @@ def test_excluded_fields_are_absent_from_the_snapshot_entirely():
     assert snapshot.get("public_key_b64") == "cHVibGlj"
 
 
-def test_a_model_without_the_attribute_is_unaffected():
+async def test_a_model_without_the_attribute_is_unaffected():
     """The exclusion is opt-in; every existing audited model must behave as before."""
     from app.audit.listeners import _column_snapshot
     from app.integrations.abdm.hip.models import AbdmCareContext

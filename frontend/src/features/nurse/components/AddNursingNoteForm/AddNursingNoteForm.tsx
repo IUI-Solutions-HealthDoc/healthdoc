@@ -23,11 +23,9 @@ export default function AddNursingNoteForm({
   encounterId,
   patientId,
   isSubmitting = false,
-  onSubmit,
 }: AddNursingNoteFormProps) {
   const {
     register,
-    handleSubmit,
     reset,
     setValue,
     formState: { errors },
@@ -54,22 +52,13 @@ export default function AddNursingNoteForm({
     });
   };
 
-  const submitHandler = async (data: AddNursingNoteSchema) => {
-    const success = await onSubmit(data);
-
-    if (success) {
-      handleReset();
-    }
-  };
-
   return (
     <FormSection
       title="Add Nursing Note"
-      description="Not available — clinical notes write path is not published for nursing UI."
+      description="Nursing notes are not available in this release."
     >
       <p className="mb-4 rounded-md border border-border bg-muted p-3 text-sm text-muted-foreground">
-        Disabled in this build. Free-text nursing notes require the Mongo clinical_notes
-        contract before they can be filed from this screen.
+        Use the approved patient record workflow for clinical documentation.
       </p>
       <form onSubmit={(e) => e.preventDefault()} className="pointer-events-none space-y-6 opacity-50">
         <div className="grid gap-5 md:grid-cols-2">

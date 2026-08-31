@@ -63,8 +63,8 @@ export default function MainLayout({
         <div className="surface-card max-w-lg p-8 text-center">
           <h1 className="text-xl font-semibold">No HealthDoc role assigned</h1>
           <p className="mt-3 text-sm text-muted-foreground">
-            Your Keycloak account is valid, but it has no supported workspace role.
-            Ask an administrator to assign one.
+            Your sign-in is valid, but no HealthDoc workspace has been assigned.
+            Ask a facility administrator to assign your role.
           </p>
           <button className="mt-6 underline" type="button" onClick={() => void logout()}>
             Sign out

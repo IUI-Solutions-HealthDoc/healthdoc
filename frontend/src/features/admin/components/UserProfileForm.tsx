@@ -79,7 +79,7 @@ export function UserProfileForm({
           Profile
         </Typography>
         <Typography sx={{ m: 0, mb: 2, fontSize: "0.8125rem", color: meridian.textSecondary }}>
-          Schema columns only — username / keycloak_sub are identity keys (not edited here)
+          Update the staff member&apos;s editable profile details and department assignment.
         </Typography>
 
         <Stack direction="row" useFlexGap spacing={1.5} sx={{ flexWrap: "wrap" }}>
@@ -115,9 +115,6 @@ export function UserProfileForm({
           </TextField>
         </Stack>
 
-        <Typography sx={{ mt: 2, mb: 0, fontSize: "0.75rem", color: meridian.textSecondary }}>
-          facility_id {draft.facility_id} · keycloak_sub {draft.keycloak_sub}
-        </Typography>
       </Box>
 
       <Box sx={adminStickyActionsSx}>

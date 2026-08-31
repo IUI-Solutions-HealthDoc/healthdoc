@@ -12,12 +12,14 @@ staying out by default.
 from __future__ import annotations
 
 import uuid
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
 from app.common.enums import QueuePriority
 from app.departments.models import Department
+from app.opd.models import Visit
+from app.patients.models import Patient
 from app.queue import service
 from app.queue.models import Roster
 from app.users.models import Facility, User
@@ -60,6 +62,39 @@ async def test_waiting_count_is_the_number_a_walk_in_is_routed_by(db, seed, queu
 
     (row,) = await service.list_queues(db, queue.facility_id, TODAY)
     assert row["waiting_count"] == 2
+
+
+async def test_reception_queue_identifies_the_patient_attached_to_each_token(db, seed, queue):
+    """A token number alone is not enough at a busy counter; reception must
+    confirm the chart before changing its priority or answering a query."""
+    dept, _room, doctor = seed
+    patient = Patient(
+        id=uuid.uuid4(),
+        uhid="IN-TS-TST01-2026-000001-0",
+        full_name="Asha Menon",
+        sex="female",
+        age_years=36,
+        identity_path="demographics_only",
+        facility_id=dept.facility_id,
+        created_by=doctor.id,
+    )
+    visit = Visit(
+        id=uuid.uuid4(),
+        visit_number=f"V-{uuid.uuid4().hex[:8]}",
+        patient_id=patient.id,
+        facility_id=dept.facility_id,
+        visit_type="opd",
+        visit_date=datetime.now(UTC),
+        created_by=doctor.id,
+    )
+    db.add_all([patient, visit])
+    await db.flush()
+    await _token(db, queue, visit.id)
+
+    result = await service.list_queue_tokens(db, queue.id, dept.facility_id)
+
+    assert result["items"][0]["patient_name"] == "Asha Menon"
+    assert result["items"][0]["patient_identifier"] == patient.uhid
 
 
 async def test_another_facilitys_queues_are_not_listed(db, seed, queue):

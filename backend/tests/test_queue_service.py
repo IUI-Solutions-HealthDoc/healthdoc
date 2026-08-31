@@ -102,6 +102,19 @@ async def test_create_token_wrong_facility_404(db, queue):
     assert exc.value.status_code == 404
 
 
+async def test_initial_token_priority_uses_the_same_role_boundary_as_elevation():
+    service.require_initial_priority_allowed("senior_citizen", ["receptionist"])
+    service.require_initial_priority_allowed("emergency", ["emergency"])
+
+    with pytest.raises(HTTPException) as exc:
+        service.require_initial_priority_allowed("emergency", ["receptionist"])
+    assert exc.value.status_code == 403
+
+    with pytest.raises(HTTPException) as exc:
+        service.require_initial_priority_allowed("invented", ["receptionist"])
+    assert exc.value.status_code == 422
+
+
 async def test_list_queue_tokens_wrong_facility_404(db, queue):
     other_facility_id = uuid.uuid4()
     with pytest.raises(HTTPException) as exc:

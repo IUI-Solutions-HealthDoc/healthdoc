@@ -74,7 +74,7 @@ export function AuditLogListPanel({
           Audit logs
         </Typography>
         <Typography sx={{ m: 0, mt: 0.4, fontSize: "0.8125rem", color: meridian.textSecondary }}>
-          PK (id, created_at) · partitioned monthly
+          Search and filter activity recorded for this facility.
         </Typography>
       </Box>
 

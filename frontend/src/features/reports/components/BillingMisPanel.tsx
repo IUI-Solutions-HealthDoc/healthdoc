@@ -98,7 +98,7 @@ export function BillingMisPanel() {
           Revenue &amp; receivables
         </Typography>
         <Typography sx={{ m: 0, mt: 0.5, fontSize: "0.8125rem", color: meridian.textSecondary }}>
-          Live BE contract (date_from / date_to business dates). Not kpi_snapshots.
+          Billing activity for the selected business-date range.
         </Typography>
       </Box>
 
