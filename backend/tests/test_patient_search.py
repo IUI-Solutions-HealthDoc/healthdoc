@@ -6,7 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.patients.schemas import PatientSearchRequest
-from app.patients.service import mask_mobile
+from app.patients.service import compute_check_digit, mask_mobile
 
 
 def test_mask_mobile_keeps_last_four_digits():
@@ -26,19 +26,39 @@ def test_search_request_requires_at_least_one_criterion():
         PatientSearchRequest()
 
 
-def test_search_request_accepts_name_only():
-    req = PatientSearchRequest(full_name="Ramesh Kumar")
+def test_search_request_requires_dob_with_name():
+    with pytest.raises(ValidationError):
+        PatientSearchRequest(full_name="Ramesh Kumar")
+
+
+def test_search_request_accepts_name_with_dob():
+    req = PatientSearchRequest(full_name="Ramesh Kumar", dob="1990-01-01")
     assert req.full_name == "Ramesh Kumar"
 
 
 def test_search_request_page_size_capped_at_100():
     with pytest.raises(ValidationError):
-        PatientSearchRequest(full_name="test", page_size=101)
+        PatientSearchRequest(full_name="test", dob="1990-01-01", page_size=101)
 
 
 def test_search_request_page_must_be_positive():
     with pytest.raises(ValidationError):
-        PatientSearchRequest(full_name="test", page=0)
+        PatientSearchRequest(full_name="test", dob="1990-01-01", page=0)
+
+
+def test_search_mobile_is_normalised_to_stored_format():
+    request = PatientSearchRequest(mobile="99999 99999")
+    assert request.mobile == "+919999999999"
+
+
+def test_search_uhid_preserves_canonical_separators_and_checks_the_digit():
+    body = "IN-TS-TST01-2026-000001"
+    valid = f"{body}-{compute_check_digit(body)}"
+    assert PatientSearchRequest(uhid=valid.lower()).uhid == valid
+
+    wrong_digit = "0" if valid[-1] != "0" else "1"
+    with pytest.raises(ValidationError):
+        PatientSearchRequest(uhid=f"{body}-{wrong_digit}")
 
 
 # --- Not yet covered: search_patients() itself ---

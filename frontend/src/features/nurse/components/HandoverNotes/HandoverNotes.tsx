@@ -28,7 +28,7 @@ export default function HandoverNotes({
     return (
       <div className="surface-card p-6">
         <p className="text-sm text-muted-foreground">
-          Handover notes unavailable — no published backend read contract yet.
+          Handover notes are not available for this ward yet.
         </p>
       </div>
     );

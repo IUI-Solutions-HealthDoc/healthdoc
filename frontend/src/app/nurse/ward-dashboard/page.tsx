@@ -21,21 +21,16 @@ import {
   getDischarges,
   getWards,
 } from "@/features/ipd/api/ipd";
-import AddHandoverForm from "@/features/nurse/components/AddHandoverForm";
 import AddIntakeOutputForm from "@/features/nurse/components/AddIntakeOutputForm";
 import AddVitalsForm from "@/features/nurse/components/AddVitalsForm";
-import HandoverNotes from "@/features/nurse/components/HandoverNotes";
-import type { HandoverNote } from "@/features/nurse/components/HandoverNotes/HandoverNotes.types";
 import IncidentReportForm from "@/features/nurse/components/IncidentReportForm";
 import { IncidentListPanel } from "@/features/nurse/components/IncidentListPanel";
 import TaskQueue, { type Order } from "@/features/nurse/components/TaskQueue";
 import WardSelector from "@/features/nurse/components/WardSelector";
 import type { Ward } from "@/features/nurse/components/WardSelector/WardSelector.types";
-import { useAddHandover } from "@/features/nurse/hooks/useAddHandover";
 import { useAddIntakeOutput } from "@/features/nurse/hooks/useAddIntakeOutput";
 import { useAddVitals } from "@/features/nurse/hooks/useAddVitals";
 import { useIncidents } from "@/features/nurse/hooks/useIncidents";
-import type { HandoverRecipientOption } from "@/features/nurse/types";
 import {
   acceptNursingTask,
   completeNursingTask,
@@ -49,7 +44,7 @@ import {
 } from "@/features/nurse/api/nursing";
 import { formatDateTime } from "@/lib/api";
 
-type PatientAction = "vitals" | "fluid" | "transfer" | "handover" | "incident" | null;
+type PatientAction = "vitals" | "fluid" | "transfer" | "incident" | null;
 
 function toOrder(task: NursingTask): Order {
   return {
@@ -98,7 +93,6 @@ export default function Page() {
   const [vitals, setVitals] = useState<VitalRecord[]>([]);
   const [fluidBalance, setFluidBalance] = useState<FluidBalance | null>(null);
   const [medications, setMedications] = useState<MedicationRecord[]>([]);
-  const [handoverNotes, setHandoverNotes] = useState<HandoverNote[]>([]);
   const [summary, setSummary] = useState<DischargeSummary | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
@@ -108,7 +102,6 @@ export default function Page() {
   const { submitIntakeOutput, isSubmitting: isSubmittingFluid } = useAddIntakeOutput();
   const { submitPatientMovement, isSubmitting: isSubmittingTransfer } =
     useAddPatientMovement();
-  const { submitHandover, isSubmitting: isSubmittingHandover } = useAddHandover();
 
   const selectedPatientId = useMemo(
     () =>
@@ -121,18 +114,6 @@ export default function Page() {
     error: incidentsError,
     refresh: refreshIncidents,
   } = useIncidents(selectedPatientId);
-
-  const handoverRecipients = useMemo<HandoverRecipientOption[]>(() => {
-    const seen = new Map<string, HandoverRecipientOption>();
-    for (const note of handoverNotes) {
-      if (!note.handed_over_to || seen.has(note.handed_over_to)) continue;
-      seen.set(note.handed_over_to, {
-        value: note.handed_over_to,
-        label: `Prior recipient · ${note.handed_over_to.slice(0, 8)}`,
-      });
-    }
-    return [...seen.values()];
-  }, [handoverNotes]);
 
   const loadBase = useCallback(async () => {
     setLoadError(null);
@@ -177,14 +158,12 @@ export default function Page() {
       setVitals([]);
       setFluidBalance(null);
       setMedications([]);
-      setHandoverNotes([]);
       setSummary(null);
       setDetailError(null);
       return;
     }
     setDetailLoading(true);
     setDetailError(null);
-    setHandoverNotes([]);
     const [vitalsResult, fluidResult, emarResult, summaryResult] =
       await Promise.allSettled([
         getPatientVitals(bed.occupant.patient_id),
@@ -264,7 +243,7 @@ export default function Page() {
         <div>
           <h1 className="text-3xl font-bold text-primary">Nurse ward dashboard</h1>
           <p className="mt-2 text-muted-foreground">
-            Live bed occupancy, observations, fluid balance, eMAR, handover, incidents and orders.
+            Live bed occupancy, observations, fluid balance, eMAR, incidents and doctor orders.
           </p>
         </div>
         <div className="flex flex-wrap gap-3">
@@ -325,8 +304,7 @@ export default function Page() {
         <div>
           <h2 className="text-xl font-semibold">Pending doctor orders</h2>
           <p className="text-sm text-muted-foreground">
-            Accept records ownership (`accepted_at` / `accepted_by`). Complete records
-            check-off (`completed_at` / `completed_by`).
+            Accept a task when work begins, then mark it complete with the required clinical note.
           </p>
         </div>
         <p
@@ -522,36 +500,9 @@ export default function Page() {
           <section className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 className="text-xl font-semibold">Shift handover (SBAR)</h2>
-                <p className="text-sm text-muted-foreground">
-                  Disabled until FastAPI publishes handover-notes read/write contracts.
-                </p>
-              </div>
-              <button
-                type="button"
-                className="rounded-md border border-border px-3 py-2 text-sm"
-                onClick={() => setActiveAction(activeAction === "handover" ? null : "handover")}
-              >
-                View handover form
-              </button>
-            </div>
-            <HandoverNotes admissionId={occupant.admission_id} notes={handoverNotes} />
-            {activeAction === "handover" ? (
-              <AddHandoverForm
-                admissionId={occupant.admission_id}
-                recipientOptions={handoverRecipients}
-                isSubmitting={isSubmittingHandover}
-                onSubmit={submitHandover}
-              />
-            ) : null}
-          </section>
-
-          <section className="space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
                 <h2 className="text-xl font-semibold">Clinical incident</h2>
                 <p className="text-sm text-muted-foreground">
-                  File against this patient/admission on `clinical_incidents` (0046).
+                  Record a patient-safety incident for review and follow-up.
                 </p>
               </div>
               <button

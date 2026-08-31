@@ -75,7 +75,7 @@ export function FileAccessLogPanel({
           File access log
         </Typography>
         <Typography sx={{ m: 0, mt: 0.4, fontSize: "0.8125rem", color: meridian.textSecondary }}>
-          Migration 0019 · append-only
+          Review uploads, views, downloads, and blocked deletion attempts.
         </Typography>
       </Box>
 

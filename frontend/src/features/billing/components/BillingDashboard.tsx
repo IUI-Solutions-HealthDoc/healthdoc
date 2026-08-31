@@ -29,6 +29,7 @@ export function BillingDashboard() {
   const {
     invoices,
     loading: listLoading,
+    error: listError,
     filters,
     setQuery,
     setStatus,
@@ -38,7 +39,7 @@ export function BillingDashboard() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [refundBusy, setRefundBusy] = useState(false);
 
-  const { invoice, setInvoice, loading: detailLoading } = useInvoiceDetail(selectedId);
+  const { invoice, setInvoice, loading: detailLoading, error: detailError } = useInvoiceDetail(selectedId);
 
   const onSaved = useCallback(
     (next: InvoiceWithItems) => {
@@ -92,9 +93,15 @@ export function BillingDashboard() {
           Billing
         </Typography>
         <Typography sx={{ m: 0, mt: 0.5, fontSize: "0.875rem", color: meridian.textSecondary }}>
-          Invoice builder · payments · immutable receipts (migration 0014)
+          Create invoices, collect payments, print receipts, and record reversals.
         </Typography>
       </Box>
+
+      {listError ? (
+        <Typography role="alert" sx={{ color: meridian.danger, fontSize: "0.875rem" }}>
+          {listError}
+        </Typography>
+      ) : null}
 
       <Box
         sx={{
@@ -128,6 +135,10 @@ export function BillingDashboard() {
             >
               Select an invoice from the list to open the builder.
             </Box>
+          ) : detailError ? (
+            <Typography role="alert" sx={{ color: meridian.danger }}>
+              {detailError}
+            </Typography>
           ) : detailLoading || !editor.draft ? (
             <Typography sx={{ color: meridian.textSecondary }}>Loading invoice…</Typography>
           ) : (
@@ -218,6 +229,12 @@ export function BillingDashboard() {
               ) : null}
 
               {showPayments ? (
+                <>
+                {paymentsHook.error ? (
+                  <Typography role="alert" sx={{ color: meridian.danger, fontSize: "0.875rem" }}>
+                    {paymentsHook.error}
+                  </Typography>
+                ) : null}
                 <PaymentsPanel
                   invoice={editor.draft}
                   payments={paymentsHook.payments}
@@ -246,6 +263,7 @@ export function BillingDashboard() {
                     }
                   }}
                 />
+                </>
               ) : null}
 
               <InvoicePreviewModal

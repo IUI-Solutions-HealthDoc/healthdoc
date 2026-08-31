@@ -48,11 +48,10 @@ export function RealmRolesMatrixPanel() {
       <Typography
         sx={{ m: 0, fontSize: "1.0625rem", fontWeight: 700, color: meridian.textPrimary }}
       >
-        Realm roles matrix
+        Role permissions
       </Typography>
       <Typography sx={{ m: 0, mt: 0.5, mb: 2, fontSize: "0.8125rem", color: meridian.textSecondary }}>
-        Authz is Keycloak — this is a read-only reference display of realm roles from the schema
-        (not a database ACL table).
+        Review what each application role is allowed to access. Assignments are managed from staff accounts.
       </Typography>
 
       <Stack
@@ -78,7 +77,7 @@ export function RealmRolesMatrixPanel() {
           }}
         >
           <Typography sx={{ m: 0, fontSize: "0.75rem", color: meridian.warning, fontWeight: 600 }}>
-            Governance: superadmin is cloud / platform only — no clinical access (schema note).
+            Platform administrators manage facilities only and cannot access clinical records.
           </Typography>
         </Box>
       </Stack>
@@ -325,7 +324,7 @@ export function RealmRolesMatrixPanel() {
                 ))}
               </Stack>
               <Typography sx={{ m: 0, fontSize: "0.75rem", color: meridian.textSecondary, lineHeight: 1.45 }}>
-                Reference display — not assigned here; Keycloak holds authz.
+                This is a read-only permission reference. Assign roles from the staff account workflow.
               </Typography>
             </>
           ) : (

@@ -1,10 +1,13 @@
 """Patient request/response schemas — POST /patients (§4.4)."""
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from app.common.enums import Sex
 
 
 def _normalise_aadhaar(value: str | None) -> str | None:
@@ -67,6 +70,40 @@ def _normalise_mobile(value: str | None) -> str | None:
     return f"+91{digits}"
 
 
+def _normalise_abha(value: str | None) -> str | None:
+    if value is None:
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    if any(not (character.isdigit() or character in " -") for character in raw):
+        raise ValueError("abha_number may contain only digits, spaces and hyphens")
+    digits = "".join(character for character in raw if character.isdigit())
+    if len(digits) != 14:
+        raise ValueError("abha_number must contain exactly 14 digits")
+    return digits
+
+
+_UHID_SHAPE = re.compile(r"^IN-[A-Z]{2}-[A-Z0-9_]{1,20}-\d{4}-\d{6,}-\d$")
+
+
+def _normalise_uhid(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalised = value.strip().upper()
+    if not normalised:
+        return None
+    if not _UHID_SHAPE.fullmatch(normalised):
+        raise ValueError("uhid must use the format IN-STATE-FACILITY-YEAR-SEQUENCE-CHECKDIGIT")
+    # Local import avoids making schemas and service import each other while
+    # still applying the same check-digit algorithm used by the generator.
+    from app.patients.service import validate_uhid
+
+    if not validate_uhid(normalised):
+        raise ValueError("uhid check digit is invalid")
+    return normalised
+
+
 def _validate_full_name(value: str | None) -> str | None:
     """A person's name, not a free-text field.
 
@@ -95,7 +132,7 @@ def _validate_full_name(value: str | None) -> str | None:
 
 class PatientCreate(BaseModel):
     full_name: str
-    sex: str
+    sex: Sex
     dob: date | None = None
     age_years: int | None = None
     mobile: str | None = None
@@ -104,12 +141,13 @@ class PatientCreate(BaseModel):
 
     _validate_aadhaar = field_validator("aadhaar_number")(_normalise_aadhaar)
     _validate_mobile = field_validator("mobile")(_normalise_mobile)
+    _validate_abha = field_validator("abha_number")(_normalise_abha)
     _validate_name = field_validator("full_name")(_validate_full_name)
 
     @model_validator(mode="after")
     def _dob_or_age_required(self) -> PatientCreate:
-        if self.dob is None and self.age_years is None:
-            raise ValueError("Either dob or age_years is required")
+        if (self.dob is None) == (self.age_years is None):
+            raise ValueError("Exactly one of dob or age_years is required")
         return self
 
 
@@ -121,7 +159,7 @@ class PatientUpdate(BaseModel):
     not just what changed (schema doc §26.1 Audit Events).
     """
     full_name: str | None = None
-    sex: str | None = None
+    sex: Sex | None = None
     dob: date | None = None
     age_years: int | None = None
     mobile: str | None = None
@@ -140,6 +178,7 @@ class PatientUpdate(BaseModel):
     # editing — which is the more likely path for bad data anyway, since
     # corrections are where people paste.
     _validate_mobile = field_validator("mobile")(_normalise_mobile)
+    _validate_abha = field_validator("abha_number")(_normalise_abha)
     _validate_name = field_validator("full_name")(_validate_full_name)
 
     @model_validator(mode="after")
@@ -151,6 +190,8 @@ class PatientUpdate(BaseModel):
         )
         if not any(getattr(self, f) is not None for f in updateable):
             raise ValueError("At least one patient field must be supplied for update")
+        if self.dob is not None and self.age_years is not None:
+            raise ValueError("dob and age_years cannot both be supplied")
         return self
 
 
@@ -208,11 +249,17 @@ class PatientSearchRequest(BaseModel):
     page_size: int = Field(default=20, ge=1, le=100)
 
     _validate_aadhaar = field_validator("aadhaar_number")(_normalise_aadhaar)
+    _validate_mobile = field_validator("mobile")(_normalise_mobile)
+    _validate_abha = field_validator("abha_number")(_normalise_abha)
+    _validate_uhid = field_validator("uhid")(_normalise_uhid)
+    _validate_name = field_validator("full_name")(_validate_full_name)
 
     @model_validator(mode="after")
     def _at_least_one_criterion(self) -> PatientSearchRequest:
         if not any([self.full_name, self.mobile, self.uhid, self.aadhaar_number, self.abha_number]):
             raise ValueError("At least one search criterion is required")
+        if self.full_name and self.dob is None:
+            raise ValueError("dob is required when searching by full_name")
         return self
 
 

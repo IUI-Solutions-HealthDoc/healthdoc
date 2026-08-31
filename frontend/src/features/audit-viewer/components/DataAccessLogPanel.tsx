@@ -95,7 +95,7 @@ export function DataAccessLogPanel({
           Data access log
         </Typography>
         <Typography sx={{ m: 0, mt: 0.4, fontSize: "0.8125rem", color: meridian.textSecondary }}>
-          Schema §4.4 · purpose / channel / emergency / consent
+          Review who accessed patient data, why, and whether consent was verified.
         </Typography>
       </Box>
 

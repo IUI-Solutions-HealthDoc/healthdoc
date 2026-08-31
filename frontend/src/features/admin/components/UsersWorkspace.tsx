@@ -64,7 +64,7 @@ export function UsersWorkspace() {
         backHref="/admin"
         eyebrow="Admin"
         title="Users"
-        subtitle="Staff profiles (users) · activate / deactivate · bootstrap create"
+        subtitle="Create staff accounts and manage profiles and active access."
         actions={
           <>
             <Button
@@ -88,7 +88,7 @@ export function UsersWorkspace() {
                 "&:hover": { bgcolor: meridian.brandDeep },
               }}
             >
-              New user (bootstrap)
+              Add staff member
             </Button>
           </>
         }
@@ -141,7 +141,7 @@ export function UsersWorkspace() {
               No user selected
             </Typography>
             <Typography sx={{ m: 0, fontSize: "0.875rem", color: meridian.textSecondary, maxWidth: 320 }}>
-              Pick someone from the list to view and edit their profile, or create a bootstrap user.
+              Pick someone from the list to view and edit their profile, or add a staff member.
             </Typography>
           </Box>
         ) : detailError ? (

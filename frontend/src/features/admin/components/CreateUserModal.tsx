@@ -134,7 +134,7 @@ export function CreateUserModal({ open, onClose, onCreated }: Props) {
         roles,
         temporary_password,
       });
-      toast.success("User created", "Keycloak account + users row (bootstrap)");
+      toast.success("Staff account created", "The temporary password must be changed at first sign-in.");
       onCreated(user);
       reset();
       onClose();
@@ -211,8 +211,8 @@ export function CreateUserModal({ open, onClose, onCreated }: Props) {
                 maxWidth: 520,
               }}
             >
-              Creates a Keycloak account (roles + temporary password) and a users profile
-              atomically. For day-to-day staffing, prefer{" "}
+              Creates the staff sign-in and profile together. The temporary password must
+              be changed at first sign-in. For day-to-day staffing, prefer{" "}
               <Box
                 component={Link}
                 href="/admin/account-requests"
@@ -271,7 +271,7 @@ export function CreateUserModal({ open, onClose, onCreated }: Props) {
             disabled={busy}
             sx={fieldSx}
             error={Boolean(errors.temporaryPassword)}
-            helperText={errors.temporaryPassword ?? "Min 8 chars · Keycloak only — never stored on users"}
+            helperText={errors.temporaryPassword ?? "At least 8 characters; the user changes it at first sign-in"}
           />
         </Stack>
 
@@ -351,7 +351,7 @@ export function CreateUserModal({ open, onClose, onCreated }: Props) {
           />
         </Stack>
 
-        <SectionLabel>Keycloak realm roles</SectionLabel>
+        <SectionLabel>Application roles</SectionLabel>
         <Box
           sx={{
             p: 1.75,

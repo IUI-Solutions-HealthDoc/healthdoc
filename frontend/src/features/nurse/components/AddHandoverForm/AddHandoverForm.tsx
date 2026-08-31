@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 
 import FormSection from "@/components/forms/FormSection";
@@ -26,7 +26,7 @@ export default function AddHandoverForm({
     register,
     reset,
     setValue,
-    watch,
+    control,
     formState: { errors },
   } = useForm<AddHandoverSchema>({
     resolver: zodResolver(addHandoverSchema),
@@ -44,7 +44,7 @@ export default function AddHandoverForm({
     if (recipientOptions.length === 0) setUseManualUuid(true);
   }, [recipientOptions.length]);
 
-  const selectedRecipient = watch("handed_over_to");
+  const selectedRecipient = useWatch({ control, name: "handed_over_to" });
 
   const pickerOptions = useMemo(
     () => [
@@ -66,11 +66,10 @@ export default function AddHandoverForm({
   return (
     <FormSection
       title="Patient Handover"
-      description="Not available — no published nurse handover read/write contract."
+      description="Shift handover entry is not available in this release."
     >
       <p className="mb-4 rounded-md border border-border bg-muted p-3 text-sm text-muted-foreground">
-        Disabled in this build. Shift handover (SBAR) needs FastAPI routes for
-        `nursing_handover_notes` before it can be filed from this screen.
+        Continue using the approved ward handover process for this release.
       </p>
       <form
         onSubmit={(e) => e.preventDefault()}

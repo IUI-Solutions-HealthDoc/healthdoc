@@ -14,7 +14,6 @@ import type {
   ClinicalIncident,
   FluidBalance,
   IntakeOutputRecord,
-  NursingHandoverNote,
   NursingTask,
   ReportIncidentPayload,
   Vitals,
@@ -33,7 +32,7 @@ export type {
 
 export class UnsupportedWorkflowError extends Error {
   constructor(workflow: string) {
-    super(`${workflow} is disabled until a backend contract is published`);
+    super(`${workflow} is not available yet.`);
     this.name = "UnsupportedWorkflowError";
   }
 }

@@ -46,6 +46,21 @@ TIER_ALLOWED_ROLES: dict[str, set[str]] = {
     QueuePriority.ADMIN_OVERRIDE.value: {"hod"},
 }
 
+
+def require_initial_priority_allowed(priority: str, caller_roles: list[str]) -> None:
+    """Apply the same role boundary when a token is issued as when it is changed.
+
+    Without this check, a receptionist correctly blocked from PATCHing a token
+    to emergency could simply POST the token as emergency in the first place.
+    """
+    if priority not in PRIORITY_RANK:
+        raise HTTPException(422, f"Invalid priority '{priority}'")
+    if priority == QueuePriority.NORMAL.value:
+        return
+    allowed_roles = TIER_ALLOWED_ROLES.get(priority, set())
+    if not allowed_roles & set(caller_roles):
+        raise HTTPException(403, f"Your role cannot issue priority '{priority}'")
+
 CALLABLE_STATUSES = (QueueTokenStatus.WAITING.value, QueueTokenStatus.RECALLED.value)
 
 _NOT_FOUND = HTTPException(404, "Queue not found")
@@ -731,25 +746,34 @@ async def list_queue_tokens(
     doctor_name = doctor.full_name if doctor else None
     room_number = room.room_number if room else None
 
-    tokens = (
-        (
-            await db.execute(
-                select(QueueToken).where(
-                    QueueToken.queue_id == queue_id,
-                    QueueToken.status != QueueTokenStatus.CANCELLED.value,
-                )
+    token_rows = (
+        await db.execute(
+            select(
+                QueueToken,
+                Patient.full_name,
+                Patient.uhid,
+                Patient.thid,
+            )
+            .outerjoin(Visit, Visit.id == QueueToken.visit_id)
+            .outerjoin(Patient, Patient.id == Visit.patient_id)
+            .where(
+                QueueToken.queue_id == queue_id,
+                QueueToken.status != QueueTokenStatus.CANCELLED.value,
             )
         )
-        .scalars()
-        .all()
+    ).all()
+    token_rows.sort(
+        key=lambda row: (row[0].priority_rank, row[0].created_at, row[0].sequence)
     )
-    tokens.sort(key=lambda t: (t.priority_rank, t.created_at, t.sequence))
     
-    waiting_count = sum(1 for t in tokens if t.status in CALLABLE_STATUSES)
+    waiting_count = sum(1 for token, *_identity in token_rows if token.status in CALLABLE_STATUSES)
 
     now_serving = None
     if queue.now_serving_token_id:
-        now_serving_token = next((t for t in tokens if t.id == queue.now_serving_token_id), None)
+        now_serving_token = next(
+            (token for token, *_identity in token_rows if token.id == queue.now_serving_token_id),
+            None,
+        )
         if now_serving_token:
             now_serving = now_serving_token.token_display
 
@@ -767,8 +791,10 @@ async def list_queue_tokens(
             "completed_at": t.completed_at,
             "doctor_name": doctor_name,
             "room_number": room_number,
+            "patient_name": patient_name,
+            "patient_identifier": uhid or thid,
         }
-        for t in tokens
+        for t, patient_name, uhid, thid in token_rows
     ]
 
     return {"waiting_count": waiting_count, "now_serving": now_serving, "items": items}

@@ -18,14 +18,17 @@ export function useInvoicePayments(invoiceId: string | null) {
   const [payments, setPayments] = useState<PaymentWithRefunds[]>([]);
   const [balance, setBalance] = useState<InvoiceBalance>(emptyBalance);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!invoiceId) {
       setPayments([]);
       setBalance(emptyBalance());
+      setError(null);
       return;
     }
     setLoading(true);
+    setError(null);
     try {
       const [rows, bal] = await Promise.all([
         listPayments(invoiceId),
@@ -33,6 +36,10 @@ export function useInvoicePayments(invoiceId: string | null) {
       ]);
       setPayments(rows);
       setBalance(bal);
+    } catch (reason) {
+      setPayments([]);
+      setBalance(emptyBalance());
+      setError(reason instanceof Error ? reason.message : "Failed to load payment history");
     } finally {
       setLoading(false);
     }
@@ -53,6 +60,7 @@ export function useInvoicePayments(invoiceId: string | null) {
   return {
     payments,
     loading,
+    error,
     balance,
     paid_total: balance.paid_total ?? derived.paid_total,
     balance_due: balance.balance_due ?? derived.balance_due,

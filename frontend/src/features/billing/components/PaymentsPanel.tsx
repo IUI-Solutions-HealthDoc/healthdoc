@@ -71,7 +71,7 @@ export function PaymentsPanel({
             Payments
           </Typography>
           <Typography sx={{ m: 0, mt: 0.4, fontSize: "0.8125rem", color: meridian.textSecondary }}>
-            Immutable receipts · print · reversal (migration 0014)
+            Receipts cannot be edited. Incorrect payments must be reversed with a reason.
           </Typography>
         </Box>
         <Stack direction="row" useFlexGap sx={{ gap: 1, flexWrap: "wrap" }}>

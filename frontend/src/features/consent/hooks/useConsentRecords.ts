@@ -29,6 +29,7 @@ export function useConsentRecords(initial: ConsentListFilters = { status: "all" 
     try {
       setRows(await listConsentRecords(filters));
     } catch (e) {
+      setRows([]);
       setError(e instanceof Error ? e.message : "Failed to load consents");
     } finally {
       setLoading(false);

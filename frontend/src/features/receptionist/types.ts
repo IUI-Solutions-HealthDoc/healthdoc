@@ -9,7 +9,7 @@
 /** POST /patients — `Idempotency-Key` header is mandatory. */
 export interface PatientCreate {
   full_name: string;
-  sex: string;
+  sex: "male" | "female" | "other" | "unknown";
   /** Exactly one of dob / age_years is required by the server. */
   dob?: string | null;
   age_years?: number | null;
@@ -185,6 +185,13 @@ export interface QueueToken {
 export interface QueueTokenListItem extends QueueToken {
   doctor_name: string;
   room_number: string | null;
+  patient_name: string | null;
+  patient_identifier: string | null;
+}
+
+export interface TokenPriorityUpdate {
+  priority: "senior_citizen" | "pregnant" | "follow_up_recall";
+  reason: string;
 }
 
 export interface QueueTokenList {
