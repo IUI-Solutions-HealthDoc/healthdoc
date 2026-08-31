@@ -127,6 +127,9 @@ async def get_doctor_worklist_token(
 
 
 # ---------------- CREATE QUEUE ----------------
+_CREATE_QUEUE_ENDPOINT = "POST /queue/queues"
+
+
 @router.post(
     "/queues",
     status_code=201,
@@ -136,8 +139,23 @@ async def create_queue(
     payload: QueueCreate,
     current_db_user: CurrentDbUser,
     db: AsyncSession = Depends(get_db),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
     actor: AuditActor = Depends(get_current_actor_dependency),
 ) -> dict:
+    if not idempotency_key:
+        raise HTTPException(400, "Idempotency-Key header is required")
+
+    request_hash = hash_request_body(payload)
+    existing = await check_idempotency(
+        db,
+        idempotency_key,
+        _CREATE_QUEUE_ENDPOINT,
+        request_hash,
+        current_db_user.id,
+    )
+    if existing is not None:
+        return existing.response_body
+
     caller_facility_id = current_db_user.facility_id
     queue = await service.create_queue(
         db,
@@ -148,7 +166,16 @@ async def create_queue(
         service_date=payload.service_date,
         caller_facility_id=caller_facility_id,
     )
-    return QueueOut.model_validate(queue).model_dump(mode="json")
+    response_body = QueueOut.model_validate(queue).model_dump(mode="json")
+    await record_idempotent_response(
+        db,
+        idempotency_key,
+        _CREATE_QUEUE_ENDPOINT,
+        201,
+        response_body,
+        user_id=current_db_user.id,
+    )
+    return response_body
 
 
 @router.get(
@@ -226,6 +253,7 @@ async def create_token(
     caller_user_id, caller_facility_id, _caller_department_id = await service.resolve_caller_full_context(
         db, user.sub
     )
+    service.require_initial_priority_allowed(payload.priority, user.roles)
  
     request_hash = hash_request_body(payload)
     existing = await check_idempotency(

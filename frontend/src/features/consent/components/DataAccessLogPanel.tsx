@@ -76,7 +76,7 @@ export function DataAccessLogPanel({ rows, loading, channels }: Props) {
           Data access log
         </Typography>
         <Typography sx={{ m: 0, mt: 0.4, fontSize: "0.8125rem", color: meridian.textSecondary }}>
-          Migration 0004 · append-only read ledger · break-glass highlighted
+          A permanent history of record access, with emergency access highlighted.
         </Typography>
       </Box>
 

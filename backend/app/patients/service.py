@@ -282,7 +282,7 @@ async def search_patients(
             if not existing or existing[1] < 1.0:
                 matches[patient.id] = (patient, 1.0, "mobile")
 
-    if full_name:
+    if full_name and dob:
         # Should-fix (PR review): use the native % (similarity) operator
         # instead of func.similarity() — faster in Postgres since it can use
         # pg_trgm index acceleration. The % operator returns boolean (match or
@@ -291,14 +291,16 @@ async def search_patients(
         similarity = func.similarity(Patient.full_name, full_name)
         stmt = (
             select(Patient, similarity.label("score"))
-            .where(Patient.full_name.op("%")(full_name), *base_filter)
+            .where(
+                Patient.full_name.op("%")(full_name),
+                Patient.dob == dob,
+                *base_filter,
+            )
             .order_by(similarity.desc())
             .limit(50)
         )
         for patient, score in (await db.execute(stmt)).all():
-            boosted = float(score)
-            if dob and patient.dob == dob:
-                boosted = min(1.0, boosted + 0.3)
+            boosted = min(1.0, float(score) + 0.3)
             existing = matches.get(patient.id)
             if not existing or existing[1] < boosted:
                 matches[patient.id] = (patient, boosted, "name_dob")

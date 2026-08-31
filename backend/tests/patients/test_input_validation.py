@@ -18,6 +18,8 @@ remembers typing it.
 """
 from __future__ import annotations
 
+from datetime import date
+
 import pytest
 from pydantic import ValidationError
 
@@ -75,6 +77,23 @@ def test_an_absent_mobile_is_still_allowed():
     a validator that forces one invents data at the worst moment."""
     assert _create(mobile=None).mobile is None
     assert _create(mobile="").mobile is None
+
+
+def test_create_requires_exactly_one_age_source():
+    with pytest.raises(ValidationError):
+        PatientCreate(full_name="Ram Kumar", sex="male")
+    with pytest.raises(ValidationError):
+        PatientCreate(
+            full_name="Ram Kumar", sex="male", dob=date(1990, 1, 1), age_years=36,
+        )
+
+
+def test_sex_and_abha_are_validated_at_the_api_boundary():
+    with pytest.raises(ValidationError):
+        _create(sex="not-recorded")
+    with pytest.raises(ValidationError):
+        _create(abha_number="123")
+    assert _create(abha_number="12-3456-7890-1234").abha_number == "12345678901234"
 
 
 # --------------------------------------------------------------------- name

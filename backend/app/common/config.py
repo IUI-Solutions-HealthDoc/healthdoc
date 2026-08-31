@@ -61,7 +61,13 @@ class Settings(BaseSettings):
 
     #: v3 enrolment/login paths, relative to abdm_abha_base_url.
     #:
-    #: CONFIRM THESE AGAINST THE SANDBOX BEFORE TRUSTING THEM. They are
+    #: VERIFIED against the sandbox on 2026-08-31 with a real session token.
+    #: All four returned HTTP 400 naming the fields they wanted — otpSystem,
+    #: scope, authData, consent — which is what a correct path looks like when
+    #: you post an empty body to it: the endpoint exists and the auth was
+    #: accepted. A wrong path returns 404, as the M2/M3 block below did.
+    #:
+    #: The original note is kept because it is still the right instinct. They are
     #: settings rather than constants precisely because they are the part of
     #: M1 most likely to be wrong: the previous ABHA call in this repo used
     #: `/v3/hip/token/on-generate`, which is a callback ABDM invokes on a HIP
@@ -75,11 +81,18 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # M2 (HIP) and M3 (HIU) gateway paths, relative to abdm_gateway_base_url.
     #
-    # UNVERIFIED, exactly like the M1 paths above, and for the same reason:
-    # nobody here has run them against the sandbox. They are the documented
-    # v3 shapes and they are SETTINGS so a wrong one is an env change rather
-    # than a release. Do not promote any of them to a constant until a real
-    # sandbox call has returned something other than 404.
+    # DISPROVEN on 2026-08-31. Every one of the ten returned 404 against a
+    # real session token — so did the same paths under an /api/hiecm/gateway/v3
+    # prefix, tried because the session endpoint uses it. These are not the
+    # M2/M3 paths, and the correct ones are not yet known.
+    #
+    # Being settings is what made this cheap: the discovery cost one probe and
+    # the fix is an env change, not a release. That was the whole reason for
+    # refusing to promote them to constants.
+    #
+    # DO NOT GUESS THE REPLACEMENTS. Two guesses have already been spent. The
+    # next move is the sandbox portal's API catalogue, which also shows which
+    # APIs this client is actually subscribed to — see the bridge note below.
     #
     # The trap this repo already fell into once is worth restating: the old
     # ABHA call used `/v3/hip/token/on-generate`, which is a callback the
@@ -110,6 +123,15 @@ class Settings(BaseSettings):
     #: HIU -> gateway. Ask for the data a consent artefact permits.
     abdm_path_hiu_hi_request: str = "/api/hiecm/v3/health-information/hiu/request"
 
+    #: NOTE (2026-08-31): bridge management — PATCH /gateway/v1/bridges and
+    #: /bridges/addUpdateServices, the steps in NHA's onboarding email — returns
+    #: 403 "900908 API Subscription validation failed" for this client id, with
+    #: tokens from BOTH /gateway/v0.5/sessions and /api/hiecm/gateway/v3/sessions
+    #: and with the full REQUEST-ID / TIMESTAMP / X-CM-ID header set. That is an
+    #: entitlement on the ABDM account, not something configuration can fix:
+    #: either register the bridge URL through the sandbox portal, or ask NHA to
+    #: add the subscription.
+    #:
     #: Shared secret the gateway is expected to present on inbound callbacks.
     #:
     #: None means callbacks are REFUSED, not accepted. See

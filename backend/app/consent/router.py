@@ -16,13 +16,14 @@ get_current_actor_dependency each do their own lookup).
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.deps import get_current_actor_dependency
 from app.auth.deps import CurrentDbUser, CurrentUser, require_roles
 from app.common.db import get_db
 from app.common.enums import AccessChannel
+from app.common.idempotency import check_idempotency, hash_request_body, record_idempotent_response
 from app.consent import service
 from app.consent.access_log import log_patient_data_access
 from app.consent.schemas import (
@@ -147,7 +148,21 @@ async def create_consent_record(
     payload: ConsentRecordCreate,
     user: CurrentDbUser,
     db: DbSession,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> ConsentRecordOut:
+    if not idempotency_key:
+        raise HTTPException(400, "Idempotency-Key header is required")
+    endpoint = f"POST /consent/patients/{patient_id}/records"
+    existing = await check_idempotency(
+        db,
+        idempotency_key,
+        endpoint,
+        hash_request_body(payload),
+        user.id,
+    )
+    if existing is not None:
+        return ConsentRecordOut.model_validate(existing.response_body)
+
     record = await service.create_consent_record(
         db,
         patient_id=patient_id,
@@ -155,7 +170,16 @@ async def create_consent_record(
         created_by=user.id,
         **payload.model_dump(),
     )
-    return ConsentRecordOut.model_validate(record)
+    response = ConsentRecordOut.model_validate(record)
+    await record_idempotent_response(
+        db,
+        idempotency_key,
+        endpoint,
+        201,
+        response.model_dump(mode="json"),
+        user_id=user.id,
+    )
+    return response
 
 
 @router.patch(

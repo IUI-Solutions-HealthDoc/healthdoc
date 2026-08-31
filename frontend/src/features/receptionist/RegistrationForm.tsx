@@ -7,6 +7,12 @@ import { ApiError, newIdempotencyKey } from "@/lib/api";
 import { registerPatient } from "./api";
 import { StartVisit } from "./StartVisit";
 import type { Patient, PatientCreate } from "./types";
+import {
+  digitsOnly,
+  isValidAbhaInput,
+  isValidPatientName,
+  normaliseIndianMobileInput,
+} from "./patientValidation";
 
 const SEXES = ["male", "female", "other"] as const;
 
@@ -14,7 +20,7 @@ type AgeMode = "dob" | "age";
 
 export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient) => void }) {
   const [fullName, setFullName] = useState("");
-  const [sex, setSex] = useState<string>("");
+  const [sex, setSex] = useState<PatientCreate["sex"] | "">("");
   const [ageMode, setAgeMode] = useState<AgeMode>("dob");
   const [dob, setDob] = useState("");
   const [ageYears, setAgeYears] = useState("");
@@ -36,14 +42,17 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
   const idempotencyKey = useMemo(() => newIdempotencyKey(), []);
 
   const ageProvided = ageMode === "dob" ? dob !== "" : ageYears !== "";
-  const fullNameValid = fullName.trim().length >= 2;
-  const mobileValid = !mobile.trim() || /^\d{10}$/.test(mobile.trim());
-  const abhaValid = !abha.trim() || /^\d{14}$/.test(abha.trim());
+  const fullNameValid = isValidPatientName(fullName);
+  const normalisedMobile = normaliseIndianMobileInput(mobile);
+  const mobileValid = !mobile.trim() || normalisedMobile !== null;
+  const abhaValid = !abha.trim() || isValidAbhaInput(abha);
   const ageValid =
     ageMode === "dob"
       ? Boolean(dob && dob <= new Date().toISOString().slice(0, 10))
       : Boolean(ageYears && Number.isInteger(Number(ageYears)) && Number(ageYears) >= 0 && Number(ageYears) <= 130);
   const canSubmit = fullNameValid && sex !== "" && ageProvided && ageValid && mobileValid && abhaValid && !busy;
+  const inputClass = (invalid: boolean) =>
+    `w-full rounded-md border px-3 py-2 ${invalid ? "border-danger" : "border-border"}`;
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -60,8 +69,8 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
       ...(ageMode === "dob"
         ? { dob, age_years: null }
         : { dob: null, age_years: Number(ageYears) }),
-      mobile: mobile.trim() || null,
-      abha_number: abha.trim() || null,
+      mobile: normalisedMobile,
+      abha_number: abha.trim() ? digitsOnly(abha) : null,
     };
 
     setBusy(true);
@@ -121,20 +130,24 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
           <span className="text-muted-foreground">Full name *</span>
           <input
             required
-            className="w-full rounded-md border border-border px-3 py-2"
+            className={inputClass(Boolean(fullName) && !fullNameValid)}
+            aria-invalid={Boolean(fullName) && !fullNameValid}
             value={fullName}
             onChange={(e) => setFullName(e.target.value)}
             minLength={2}
           />
+          {fullName && !fullNameValid ? (
+            <span className="text-xs text-danger">Enter a valid name without digits or markup characters.</span>
+          ) : null}
         </label>
 
         <label className="space-y-1 text-sm">
           <span className="text-muted-foreground">Sex *</span>
           <select
             required
-            className="w-full rounded-md border border-border px-3 py-2"
+            className={inputClass(false)}
             value={sex}
-            onChange={(e) => setSex(e.target.value)}
+            onChange={(e) => setSex(e.target.value as PatientCreate["sex"] | "")}
           >
             <option value="">Select…</option>
             {SEXES.map((value) => (
@@ -164,7 +177,8 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
             {ageMode === "dob" ? (
               <input
                 type="date"
-                className="flex-1 rounded-md border border-border px-3 py-2"
+                className={`flex-1 rounded-md border px-3 py-2 ${dob && !ageValid ? "border-danger" : "border-border"}`}
+                aria-invalid={Boolean(dob) && !ageValid}
                 value={dob}
                 onChange={(e) => setDob(e.target.value)}
                 max={new Date().toISOString().slice(0, 10)}
@@ -175,7 +189,8 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
                 type="number"
                 min={0}
                 max={130}
-                className="flex-1 rounded-md border border-border px-3 py-2"
+                className={`flex-1 rounded-md border px-3 py-2 ${ageYears && !ageValid ? "border-danger" : "border-border"}`}
+                aria-invalid={Boolean(ageYears) && !ageValid}
                 value={ageYears}
                 onChange={(e) => setAgeYears(e.target.value)}
                 required
@@ -187,28 +202,28 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
         <label className="space-y-1 text-sm">
           <span className="text-muted-foreground">Mobile</span>
           <input
-            className="w-full rounded-md border border-border px-3 py-2"
+            className={inputClass(!mobileValid)}
+            aria-invalid={!mobileValid}
             value={mobile}
             onChange={(e) => setMobile(e.target.value)}
-            inputMode="numeric"
-            pattern="[0-9]{10}"
-            maxLength={10}
-            placeholder="10-digit mobile number"
+            inputMode="tel"
+            maxLength={18}
+            placeholder="10 digits or +91"
           />
           {!mobileValid ? (
-            <span className="text-xs text-danger">Enter a 10-digit mobile number.</span>
+            <span className="text-xs text-danger">Enter a valid Indian mobile number.</span>
           ) : null}
         </label>
 
         <label className="space-y-1 text-sm">
           <span className="text-muted-foreground">ABHA number</span>
           <input
-            className="w-full rounded-md border border-border px-3 py-2"
+            className={inputClass(!abhaValid)}
+            aria-invalid={!abhaValid}
             value={abha}
             onChange={(e) => setAbha(e.target.value)}
             inputMode="numeric"
-            pattern="[0-9]{14}"
-            maxLength={14}
+            maxLength={20}
           />
           {!abhaValid ? (
             <span className="text-xs text-danger">ABHA number must contain 14 digits.</span>

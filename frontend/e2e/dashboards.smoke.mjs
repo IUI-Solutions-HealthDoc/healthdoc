@@ -310,7 +310,24 @@ async function signIn(page, role) {
   );
   // The pathname changes before silent SSO has restored the in-memory token.
   // #main-content exists only after MainLayout knows this role is authenticated.
-  await page.waitForSelector("#main-content", { timeout: 60_000 });
+  try {
+    await page.waitForSelector("#main-content", { timeout: 60_000 });
+  } catch (_error) {
+    // In the development stack, compiling many role routes back-to-back can
+    // restart Next after Keycloak has already completed the redirect. Reload
+    // the authenticated landing route once; a real auth/role defect still
+    // fails because the required content and sidebar remain mandatory.
+    console.warn(
+      `[${role.name}] landing page did not hydrate after login; reloading once`,
+    );
+    await page.reload({ waitUntil: "domcontentloaded", timeout: 60_000 });
+    await page.waitForFunction(
+      (expected) => window.location.pathname === expected,
+      { timeout: 60_000 },
+      role.landingPath,
+    );
+    await page.waitForSelector("#main-content", { timeout: 60_000 });
+  }
   await page.waitForSelector("#workspace-sidebar", { timeout: 30_000 });
 
   const visibleMenuPaths = await page.evaluate(() =>

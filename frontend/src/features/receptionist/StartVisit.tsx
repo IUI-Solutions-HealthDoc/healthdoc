@@ -1,11 +1,21 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import { ApiError, newIdempotencyKey } from "@/lib/api";
 
 import { createVisit, issueToken, listQueues } from "./api";
-import type { Patient, QueueSummary, QueueToken } from "./types";
+import type { Patient, QueueSummary, QueueToken, Visit } from "./types";
+
+type VisitPatient = Pick<Patient, "id" | "full_name" | "uhid" | "thid">;
+
+const RECEPTION_PRIORITIES = [
+  { value: "normal", label: "Normal" },
+  { value: "senior_citizen", label: "Senior citizen" },
+  { value: "pregnant", label: "Pregnant patient" },
+  { value: "follow_up_recall", label: "Follow-up recall" },
+] as const;
 
 /**
  * Register → visit → token, the rest of the OPD entry point.
@@ -15,13 +25,14 @@ import type { Patient, QueueSummary, QueueToken } from "./types";
  * in the same server transaction) and a token is what puts them in front of a
  * doctor.
  */
-export function StartVisit({ patient }: { patient: Patient }) {
+export function StartVisit({ patient }: { patient: VisitPatient }) {
   const [queues, setQueues] = useState<QueueSummary[] | null>(null);
   const [queueId, setQueueId] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [token, setToken] = useState<QueueToken | null>(null);
-  const [visitNumber, setVisitNumber] = useState<string | null>(null);
+  const [visit, setVisit] = useState<Visit | null>(null);
+  const [priority, setPriority] = useState("normal");
 
   // One key per patient, for the same reason the registration form holds one:
   // a retried click must replay the visit, not open a second one and bill a
@@ -51,26 +62,36 @@ export function StartVisit({ patient }: { patient: Patient }) {
 
   async function start() {
     if (!queueId) return;
+    let visitReady = Boolean(visit);
     setBusy(true);
     setError(null);
     try {
-      const visit = await createVisit(
-        {
-          patient_id: patient.id,
-          visit_type: "opd",
-          visit_date: new Date().toISOString(),
-        },
-        visitKey,
-      );
-      setVisitNumber(visit.visit_number);
+      let activeVisit = visit;
+      if (!activeVisit) {
+        activeVisit = await createVisit(
+          {
+            patient_id: patient.id,
+            visit_type: "opd",
+            visit_date: new Date().toISOString(),
+          },
+          visitKey,
+        );
+        setVisit(activeVisit);
+        visitReady = true;
+      }
 
-      const issued = await issueToken({ queue_id: queueId, visit_id: visit.id }, tokenKey);
+      const issued = await issueToken(
+        { queue_id: queueId, visit_id: activeVisit.id, priority },
+        tokenKey,
+      );
       setToken(issued);
     } catch (reason) {
       setError(
         reason instanceof ApiError
           ? reason.message
-          : "Could not start the visit. Reload before retrying.",
+          : visitReady
+            ? "The visit exists, but the token could not be issued. Retry the token; do not create another visit."
+            : "Could not start the visit. Retry from this screen so the same request is safely replayed.",
       );
     } finally {
       setBusy(false);
@@ -85,9 +106,14 @@ export function StartVisit({ patient }: { patient: Patient }) {
         <p className="text-sm text-muted-foreground">
           {patient.full_name} · {patient.uhid ?? patient.thid}
         </p>
-        {visitNumber && (
-          <p className="text-xs text-muted-foreground">Visit {visitNumber}</p>
+        {visit && (
+          <p className="text-xs text-muted-foreground">Visit {visit.visit_number}</p>
         )}
+        <div className="flex flex-wrap justify-center gap-4 pt-2 text-sm">
+          <Link href="/receptionist/queue" className="font-medium underline">View queue</Link>
+          <Link href="/consent" className="font-medium underline">Record consent</Link>
+          <Link href="/billing" className="font-medium underline">Open billing</Link>
+        </div>
       </div>
     );
   }
@@ -95,16 +121,30 @@ export function StartVisit({ patient }: { patient: Patient }) {
   return (
     <div className="surface-card space-y-4 p-6">
       <h3 className="text-base font-medium">Start OPD visit</h3>
+      <p className="text-sm text-muted-foreground">
+        This counter flow creates an OPD visit. Use the IPD workspace for admission after clinical review.
+      </p>
+
+      {visit ? (
+        <p className="rounded-md border border-warning/30 bg-warning-muted p-3 text-sm">
+          Visit {visit.visit_number} was created. Only token issue will be retried.
+        </p>
+      ) : null}
 
       {queues === null && !error && (
         <p className="text-sm text-muted-foreground">Loading today&apos;s queues…</p>
       )}
 
       {queues !== null && queues.length === 0 && (
-        <p className="text-sm text-muted-foreground">
-          No open queues today. A queue has to be opened for a doctor before
-          tokens can be issued.
-        </p>
+        <div className="space-y-2">
+          <p className="text-sm text-muted-foreground">
+            No open queues today. A queue has to be opened for a doctor before
+            tokens can be issued.
+          </p>
+          <Link href="/receptionist/queue" className="inline-block text-sm font-medium underline">
+            Open today&apos;s queue
+          </Link>
+        </div>
       )}
 
       {queues !== null && queues.length > 0 && (
@@ -115,6 +155,7 @@ export function StartVisit({ patient }: { patient: Patient }) {
               className="w-full rounded-md border border-border px-3 py-2"
               value={queueId}
               onChange={(e) => setQueueId(e.target.value)}
+              disabled={Boolean(visit)}
             >
               {queues.map((q) => (
                 <option key={q.id} value={q.id}>
@@ -126,13 +167,27 @@ export function StartVisit({ patient }: { patient: Patient }) {
             </select>
           </label>
 
+          <label className="block space-y-1 text-sm">
+            <span className="text-muted-foreground">Queue priority</span>
+            <select
+              className="w-full rounded-md border border-border px-3 py-2"
+              value={priority}
+              onChange={(event) => setPriority(event.target.value)}
+              disabled={Boolean(visit)}
+            >
+              {RECEPTION_PRIORITIES.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+
           <button
             type="button"
             onClick={() => void start()}
             disabled={busy || !queueId}
             className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
           >
-            {busy ? "Starting…" : "Create visit and issue token"}
+            {busy ? "Starting…" : visit ? "Retry token issue" : "Create visit and issue token"}
           </button>
         </>
       )}

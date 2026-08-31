@@ -60,7 +60,7 @@ export function UserListPanel({
           Directory
         </Typography>
         <Typography sx={{ m: 0, mt: 0.4, fontSize: "0.8125rem", color: meridian.textSecondary }}>
-          users table (0002) — credentials in Keycloak
+          Search and manage staff accounts for this facility.
         </Typography>
       </Box>
 

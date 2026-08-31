@@ -3,17 +3,19 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { toast } from "@/components/ui/toast";
-import { ApiError, formatDateTime } from "@/lib/api";
+import { ApiError, formatDateTime, newIdempotencyKey } from "@/lib/api";
 import {
   createQueue,
   listQueueOpeningOptions,
   listQueueTokens,
   listQueues,
+  updateTokenPriority,
 } from "@/features/receptionist/api";
 import type {
   QueueOpeningOptions,
   QueueSummary,
   QueueTokenList,
+  TokenPriorityUpdate,
 } from "@/features/receptionist/types";
 
 /**
@@ -33,6 +35,11 @@ export default function Page() {
   const [displayLabel, setDisplayLabel] = useState("");
   const [showOpenQueue, setShowOpenQueue] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [createKey, setCreateKey] = useState(() => newIdempotencyKey());
+  const [priorityTokenId, setPriorityTokenId] = useState<string | null>(null);
+  const [priority, setPriority] = useState<TokenPriorityUpdate["priority"]>("senior_citizen");
+  const [priorityReason, setPriorityReason] = useState("");
+  const [updatingPriority, setUpdatingPriority] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -52,6 +59,10 @@ export default function Page() {
       );
       setError(null);
     } catch (reason) {
+      setQueues(null);
+      setOpeningOptions(null);
+      setSelected(null);
+      setTokens(null);
       setError(reason instanceof ApiError ? reason.message : "Could not load queues");
     }
   }, []);
@@ -63,6 +74,7 @@ export default function Page() {
   useEffect(() => {
     if (!selected) return;
     let cancelled = false;
+    setTokens(null);
     listQueueTokens(selected)
       .then((list) => {
         if (!cancelled) setTokens(list);
@@ -79,18 +91,25 @@ export default function Page() {
 
   const handleCreateQueue = async () => {
     const option = openingOptions?.items.find((item) => item.roster_id === optionId);
-    if (!option || !openingOptions) return;
+    if (!option || !openingOptions) {
+      setError("Select an available rostered clinic before opening a queue.");
+      return;
+    }
     setCreating(true);
     setError(null);
     try {
-      await createQueue({
-        department_id: option.department_id,
-        doctor_user_id: option.staff_user_id,
-        room_id: option.room_id,
-        display_label: displayLabel.trim() || null,
-        service_date: openingOptions.service_date,
-      });
+      await createQueue(
+        {
+          department_id: option.department_id,
+          doctor_user_id: option.staff_user_id,
+          room_id: option.room_id,
+          display_label: displayLabel.trim() || null,
+          service_date: openingOptions.service_date,
+        },
+        createKey,
+      );
       toast.success("Queue opened", `${option.staff_name} · ${option.department_name}`);
+      setCreateKey(newIdempotencyKey());
       setDisplayLabel("");
       setShowOpenQueue(false);
       await load();
@@ -98,6 +117,33 @@ export default function Page() {
       setError(reason instanceof ApiError ? reason.message : "Could not open queue");
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handlePriorityUpdate = async () => {
+    if (!priorityTokenId || !selected) return;
+    if (priorityReason.trim().length < 10) {
+      setError("Priority change reason must be at least 10 characters.");
+      return;
+    }
+
+    setUpdatingPriority(true);
+    setError(null);
+    try {
+      await updateTokenPriority(priorityTokenId, {
+        priority,
+        reason: priorityReason.trim(),
+      });
+      const refreshed = await listQueueTokens(selected);
+      setTokens(refreshed);
+      setPriorityTokenId(null);
+      setPriorityReason("");
+      toast.success("Priority updated", "The queue order now reflects the new priority.");
+      await load();
+    } catch (reason) {
+      setError(reason instanceof ApiError ? reason.message : "Could not update token priority");
+    } finally {
+      setUpdatingPriority(false);
     }
   };
 
@@ -234,24 +280,99 @@ export default function Page() {
             <thead className="bg-muted">
               <tr>
                 <th className="px-4 py-3 text-left">Token</th>
+                <th className="px-4 py-3 text-left">Patient</th>
                 <th className="px-4 py-3 text-left">Status</th>
                 <th className="px-4 py-3 text-left">Priority</th>
                 <th className="px-4 py-3 text-left">Issued</th>
+                <th className="px-4 py-3 text-left">Action</th>
               </tr>
             </thead>
             <tbody>
               {tokens.items.map((t) => (
                 <tr key={t.id} className="border-b border-border last:border-none">
                   <td className="px-4 py-3 font-mono">{t.token_display}</td>
+                  <td className="px-4 py-3 text-sm">
+                    <span className="block font-medium">{t.patient_name ?? "Patient unavailable"}</span>
+                    <span className="font-mono text-xs text-muted-foreground">
+                      {t.patient_identifier ?? "No identifier"}
+                    </span>
+                  </td>
                   <td className="px-4 py-3 text-sm">{t.status.replaceAll("_", " ")}</td>
-                  <td className="px-4 py-3 text-sm">{t.priority}</td>
+                  <td className="px-4 py-3 text-sm">{t.priority.replaceAll("_", " ")}</td>
                   <td className="px-4 py-3 text-sm">{formatDateTime(t.created_at)}</td>
+                  <td className="px-4 py-3 text-sm">
+                    {t.status === "waiting" && t.priority === "normal" ? (
+                      <button
+                        type="button"
+                        className="font-medium underline"
+                        onClick={() => {
+                          setPriorityTokenId(t.id);
+                          setPriority("senior_citizen");
+                          setPriorityReason("");
+                        }}
+                      >
+                        Change priority
+                      </button>
+                    ) : "—"}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
+
+      {priorityTokenId ? (
+        <section className="surface-card space-y-4 p-5" aria-labelledby="priority-title">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 id="priority-title" className="text-lg font-semibold">Change queue priority</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Reception can record senior-citizen, pregnancy, or follow-up priority. Emergency escalation remains a clinical decision.
+              </p>
+            </div>
+            <button type="button" className="text-sm underline" onClick={() => setPriorityTokenId(null)}>
+              Cancel
+            </button>
+          </div>
+          <div className="grid gap-4 md:grid-cols-[1fr_2fr_auto] md:items-end">
+            <label className="space-y-1 text-sm">
+              <span className="text-muted-foreground">Priority *</span>
+              <select
+                value={priority}
+                onChange={(event) => setPriority(event.target.value as TokenPriorityUpdate["priority"])}
+                className="w-full rounded-md border border-border bg-background px-3 py-2"
+              >
+                <option value="senior_citizen">Senior citizen</option>
+                <option value="pregnant">Pregnant patient</option>
+                <option value="follow_up_recall">Follow-up recall</option>
+              </select>
+            </label>
+            <label className="space-y-1 text-sm">
+              <span className="text-muted-foreground">Reason *</span>
+              <input
+                required
+                minLength={10}
+                maxLength={250}
+                value={priorityReason}
+                onChange={(event) => setPriorityReason(event.target.value)}
+                className={`w-full rounded-md border px-3 py-2 ${
+                  priorityReason && priorityReason.trim().length < 10 ? "border-danger" : "border-border"
+                }`}
+                placeholder="Record why the priority applies"
+              />
+            </label>
+            <button
+              type="button"
+              disabled={updatingPriority || priorityReason.trim().length < 10}
+              onClick={() => void handlePriorityUpdate()}
+              className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            >
+              {updatingPriority ? "Updating…" : "Update"}
+            </button>
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }

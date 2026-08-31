@@ -12,11 +12,18 @@ export function useAuditLogs(initial: AuditLogFilters = { action: "all", resourc
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
+    if (filters.from && filters.to && filters.from > filters.to) {
+      setRows([]);
+      setError("The From date must be on or before the To date.");
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
       setRows((await listAuditLogs(filters)).items);
     } catch (e) {
+      setRows([]);
       setError(e instanceof Error ? e.message : "Failed to load audit logs");
     } finally {
       setLoading(false);

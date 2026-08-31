@@ -112,8 +112,7 @@ export function AuditTrailDashboard() {
             the trail cannot be edited — but it has to be stated in a way the
             reader can act on. The trigger name belongs in the schema docs. */}
         <span>
-          This record cannot be edited or deleted by anyone, including
-          administrators. The database rejects any attempt to change it.
+          Audit records cannot be edited or deleted, including by administrators.
         </span>
       </Box>
 
@@ -132,6 +131,12 @@ export function AuditTrailDashboard() {
       </Tabs>
 
       {tab === "audit" ? (
+        <>
+        {logs.error || detail.error ? (
+          <Typography role="alert" sx={{ color: meridian.danger, fontSize: "0.875rem" }}>
+            {logs.error ?? detail.error}
+          </Typography>
+        ) : null}
         <Box
           sx={{
             display: "grid",
@@ -158,9 +163,16 @@ export function AuditTrailDashboard() {
           />
           <AuditEntryDetail entry={detail.entry} loading={detail.loading} />
         </Box>
+        </>
       ) : null}
 
       {tab === "data_access" ? (
+        <>
+        {dataAccess.error ? (
+          <Typography role="alert" sx={{ color: meridian.danger, fontSize: "0.875rem" }}>
+            {dataAccess.error}
+          </Typography>
+        ) : null}
         <DataAccessLogPanel
           rows={dataAccess.rows}
           loading={dataAccess.loading}
@@ -169,9 +181,16 @@ export function AuditTrailDashboard() {
           onQueryChange={dataAccess.setQuery}
           onAccessChannelChange={dataAccess.setAccessChannel}
         />
+        </>
       ) : null}
 
       {tab === "files" ? (
+        <>
+        {files.error ? (
+          <Typography role="alert" sx={{ color: meridian.danger, fontSize: "0.875rem" }}>
+            {files.error}
+          </Typography>
+        ) : null}
         <FileAccessLogPanel
           rows={files.rows}
           loading={files.loading}
@@ -180,14 +199,22 @@ export function AuditTrailDashboard() {
           onQueryChange={files.setQuery}
           onActionChange={files.setAction}
         />
+        </>
       ) : null}
 
       {tab === "integrity" ? (
+        <>
+        {integrity.error ? (
+          <Typography role="alert" sx={{ color: meridian.danger, fontSize: "0.875rem" }}>
+            {integrity.error}
+          </Typography>
+        ) : null}
         <IntegrityArchivePanel
           checks={integrity.checks}
           archives={integrity.archives}
           loading={integrity.loading}
         />
+        </>
       ) : null}
     </Box>
   );

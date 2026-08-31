@@ -16,6 +16,7 @@ import type { ConsentRecord } from "../types";
 export function useConsentDetail(patientId: string | null, id: string | null) {
   const [record, setRecord] = useState<ConsentRecord | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const idRef = useRef(id);
   idRef.current = id;
 
@@ -23,13 +24,21 @@ export function useConsentDetail(patientId: string | null, id: string | null) {
     const current = idRef.current;
     if (!current || !patientId) {
       setRecord(null);
+      setError(null);
       return;
     }
     setLoading(true);
-    const row = await getConsent(patientId, current);
-    if (idRef.current === current) {
-      setRecord(row);
-      setLoading(false);
+    setError(null);
+    try {
+      const row = await getConsent(patientId, current);
+      if (idRef.current === current) setRecord(row);
+    } catch (reason) {
+      if (idRef.current === current) {
+        setRecord(null);
+        setError(reason instanceof Error ? reason.message : "Failed to load consent details");
+      }
+    } finally {
+      if (idRef.current === current) setLoading(false);
     }
   }, [patientId]);
 
@@ -37,5 +46,5 @@ export function useConsentDetail(patientId: string | null, id: string | null) {
     void load();
   }, [id, patientId, load]);
 
-  return { record, loading, refresh: load };
+  return { record, loading, error, refresh: load };
 }

@@ -54,7 +54,7 @@ export function AccountRequestsWorkspace() {
     setBusy(true);
     try {
       await approveAccountRequest(selected.id, temporaryPassword);
-      toast.success("Request approved", "Keycloak account + users row created");
+      toast.success("Request approved", "The staff account is ready for first sign-in.");
       setTemporaryPassword("");
       setDecision(null);
       setSelectedId(null);
@@ -69,7 +69,7 @@ export function AccountRequestsWorkspace() {
   const onReject = async () => {
     if (!selected) return;
     if (!rejection_reason.trim()) {
-      toast.error("rejection_reason is required");
+      toast.error("Enter a reason for rejecting this request.");
       return;
     }
     setBusy(true);
@@ -93,7 +93,7 @@ export function AccountRequestsWorkspace() {
         backHref="/admin"
         eyebrow="Admin"
         title="Account requests"
-        subtitle="user_account_requests (0028) — maker-checker staffing"
+        subtitle="Review staff access requests with independent approval."
         actions={
           <Button
             variant="contained"

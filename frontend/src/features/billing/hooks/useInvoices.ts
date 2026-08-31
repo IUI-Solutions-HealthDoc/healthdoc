@@ -18,6 +18,7 @@ export function useInvoices(initial: InvoiceListFilters = { status: "all" }) {
       const { items } = await listInvoices(filters);
       setInvoices(items);
     } catch (e) {
+      setInvoices([]);
       setError(e instanceof Error ? e.message : "Failed to load invoices");
     } finally {
       setLoading(false);

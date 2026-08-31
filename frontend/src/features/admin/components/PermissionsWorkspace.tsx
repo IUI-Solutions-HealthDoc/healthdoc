@@ -47,7 +47,7 @@ export function PermissionsWorkspace() {
         backHref="/admin"
         eyebrow="Admin"
         title="Permissions"
-        subtitle="Facility module switchboard + Keycloak realm role reference matrix"
+        subtitle="Manage facility modules and review the access assigned to each role."
       />
 
       <Box
@@ -108,7 +108,7 @@ export function PermissionsWorkspace() {
           ))}
         </Stack>
         <Typography sx={{ m: 0, fontSize: "0.75rem", color: meridian.textSecondary }}>
-          Authorization is enforced by Keycloak and the live facility capability API.
+          Changes apply to this facility. Role access is enforced at sign-in and on every request.
         </Typography>
       </Box>
 
