@@ -9,7 +9,7 @@ outcome in this integration, so "not configured" has to mean refuse.
 from __future__ import annotations
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 from app.common.config import get_settings
 from app.integrations.abdm import callback_auth
@@ -20,6 +20,12 @@ def _clear_settings_cache():
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
+
+
+def _request(**headers) -> Request:
+    """A minimal ASGI request. verify_callback reads only the header names."""
+    raw = [(k.lower().encode(), v.encode()) for k, v in headers.items()]
+    return Request({"type": "http", "method": "POST", "path": "/", "headers": raw})
 
 
 def _set_secret(monkeypatch, value):
@@ -37,7 +43,7 @@ async def test_an_unconfigured_server_refuses_every_callback(monkeypatch, unset)
     assert callback_auth.is_configured() is False
 
     with pytest.raises(HTTPException) as caught:
-        await callback_auth.verify_callback(x_healthdoc_callback_secret="anything")
+        await callback_auth.verify_callback(_request(), x_healthdoc_callback_secret="anything")
 
     assert caught.value.status_code == 503
     assert caught.value.detail["code"] == "abdm_callbacks_not_configured"
@@ -47,7 +53,7 @@ async def test_a_wrong_secret_is_rejected(monkeypatch):
     _set_secret(monkeypatch, "the-real-secret")
 
     with pytest.raises(HTTPException) as caught:
-        await callback_auth.verify_callback(x_healthdoc_callback_secret="not-it")
+        await callback_auth.verify_callback(_request(), x_healthdoc_callback_secret="not-it")
 
     assert caught.value.status_code == 401
 
@@ -57,7 +63,7 @@ async def test_a_missing_header_is_rejected_when_configured(monkeypatch):
     _set_secret(monkeypatch, "the-real-secret")
 
     with pytest.raises(HTTPException) as caught:
-        await callback_auth.verify_callback(x_healthdoc_callback_secret=None)
+        await callback_auth.verify_callback(_request(), x_healthdoc_callback_secret=None)
 
     assert caught.value.status_code == 401
 
@@ -70,7 +76,7 @@ async def test_the_rejection_says_nothing_about_why(monkeypatch):
     details = []
     for presented in (None, "", "x", "the-real-secre"):
         with pytest.raises(HTTPException) as caught:
-            await callback_auth.verify_callback(x_healthdoc_callback_secret=presented)
+            await callback_auth.verify_callback(_request(), x_healthdoc_callback_secret=presented)
         details.append(caught.value.detail)
 
     assert all(d == details[0] for d in details), "rejection detail varied by input"
@@ -78,7 +84,7 @@ async def test_the_rejection_says_nothing_about_why(monkeypatch):
 
 async def test_the_matching_secret_passes(monkeypatch):
     _set_secret(monkeypatch, "the-real-secret")
-    assert await callback_auth.verify_callback(x_healthdoc_callback_secret="the-real-secret") is None
+    assert await callback_auth.verify_callback(_request(), x_healthdoc_callback_secret="the-real-secret") is None
 
 
 def test_the_comparison_is_timing_safe():
@@ -113,3 +119,57 @@ def test_the_comparison_is_timing_safe():
             for operand in [node.left, *node.comparators]
         )
     ], "the secret is compared with == somewhere in verify_callback"
+
+
+async def test_a_refused_callback_names_the_headers_it_did_not_recognise(monkeypatch, caplog):
+    """The first real ABDM callback is how we learn its signature scheme.
+
+    The shared secret is a placeholder for ABDM's real scheme, and that scheme
+    cannot be implemented without seeing one. So a refusal names the headers it
+    did not recognise — whatever the gateway signs with shows up there instead
+    of vanishing into a silent 503.
+    """
+    _set_secret(monkeypatch, "the-real-secret")
+
+    with caplog.at_level("WARNING"):
+        with pytest.raises(HTTPException):
+            await callback_auth.verify_callback(
+                _request(**{"X-Hmac-Signature": "abc123", "X-Gateway-Id": "sbx"}),
+                x_healthdoc_callback_secret="wrong",
+            )
+
+    logged = " ".join(r.getMessage() for r in caplog.records)
+    assert "x-hmac-signature" in logged.lower()
+    assert "x-gateway-id" in logged.lower()
+
+
+async def test_the_header_values_are_never_logged(monkeypatch, caplog):
+    """Names only. A signature header carries key material, and this line is
+    written on a route reachable from the internet."""
+    _set_secret(monkeypatch, "the-real-secret")
+
+    with caplog.at_level("WARNING"):
+        with pytest.raises(HTTPException):
+            await callback_auth.verify_callback(
+                _request(**{"X-Hmac-Signature": "SUPER-SECRET-SIGNATURE-VALUE"}),
+                x_healthdoc_callback_secret="wrong",
+            )
+
+    logged = " ".join(r.getMessage() for r in caplog.records)
+    assert "SUPER-SECRET-SIGNATURE-VALUE" not in logged
+
+
+async def test_ordinary_proxy_headers_are_not_reported_as_a_scheme(monkeypatch, caplog):
+    """nginx adds X-Forwarded-*. Naming those every time would bury the one
+    header that actually matters."""
+    _set_secret(monkeypatch, "the-real-secret")
+
+    with caplog.at_level("WARNING"):
+        with pytest.raises(HTTPException):
+            await callback_auth.verify_callback(
+                _request(**{"X-Forwarded-For": "1.2.3.4", "Host": "example.org"}),
+                x_healthdoc_callback_secret="wrong",
+            )
+
+    logged = " ".join(r.getMessage() for r in caplog.records)
+    assert "unrecognised headers" not in logged

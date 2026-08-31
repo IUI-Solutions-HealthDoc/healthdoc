@@ -37,7 +37,7 @@ from __future__ import annotations
 import hmac
 import logging
 
-from fastapi import Header, HTTPException
+from fastapi import Header, HTTPException, Request
 
 from app.common.config import get_settings
 
@@ -56,7 +56,40 @@ def is_configured() -> bool:
     return bool(secret) and secret != _PLACEHOLDER
 
 
+#: Headers we already understand. Anything else arriving on a callback is worth
+#: naming in the log exactly once — see _log_unrecognised_scheme.
+_KNOWN_HEADERS = {
+    "host", "user-agent", "accept", "accept-encoding", "connection",
+    "content-type", "content-length", CALLBACK_SECRET_HEADER.lower(),
+    "x-forwarded-for", "x-forwarded-proto", "x-forwarded-host",
+    "x-forwarded-port", "x-real-ip",
+}
+
+
+def _log_unrecognised_scheme(request: Request) -> None:
+    """Name the headers a refused caller sent. NAMES ONLY, never values.
+
+    The shared secret below is a placeholder for ABDM's real scheme, which
+    signs its callbacks — and the exact scheme (header name, canonical string,
+    key source) cannot be implemented without seeing one. This turns the first
+    genuine sandbox callback into the answer instead of a silent 503: whatever
+    ABDM signs with will show up here as an unrecognised header name.
+
+    Values are deliberately excluded. A signature header carries key material,
+    and this line is written at WARNING on a route reachable from the internet.
+    """
+    unknown = sorted(k for k in request.headers.keys() if k.lower() not in _KNOWN_HEADERS)
+    if unknown:
+        log.warning(
+            "Refused ABDM callback carried unrecognised headers (names only): %s. "
+            "If this came from the gateway, that is the signature scheme to "
+            "implement in verify_callback.",
+            ", ".join(unknown),
+        )
+
+
 async def verify_callback(
+    request: Request,
     x_healthdoc_callback_secret: str | None = Header(default=None, alias=CALLBACK_SECRET_HEADER),
 ) -> None:
     """FastAPI dependency. Every inbound gateway route must depend on this.
@@ -74,6 +107,7 @@ async def verify_callback(
             "Inbound ABDM callback refused — ABDM_CALLBACK_SHARED_SECRET is not "
             "set, so this server cannot tell the gateway from anyone else."
         )
+        _log_unrecognised_scheme(request)
         raise HTTPException(503, {
             "code": "abdm_callbacks_not_configured",
             "message": "This server is not configured to accept ABDM callbacks.",
@@ -89,4 +123,5 @@ async def verify_callback(
         # information an attacker can use to steer, and an honest gateway never
         # needs it.
         log.warning("Inbound ABDM callback rejected — shared secret did not match")
+        _log_unrecognised_scheme(request)
         raise HTTPException(401, {"code": "unauthorised", "message": "Unauthorised"})
