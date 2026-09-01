@@ -34,7 +34,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.common.config import get_settings
+from app.common.config import allowed_jwt_issuers, get_settings
 from app.common.db import get_db
 
 log = logging.getLogger("healthdoc.auth")
@@ -110,7 +110,7 @@ async def get_current_user(
             token,
             _signing_key(token, jwks),
             algorithms=["RS256"],
-            issuer=settings.jwt_issuer,
+            issuer=allowed_jwt_issuers(settings),
             audience=audience,
             options={
                 "verify_aud": audience is not None,

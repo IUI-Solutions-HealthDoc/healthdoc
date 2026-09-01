@@ -6,7 +6,15 @@ import { useEffect, useMemo, useState } from "react";
 import { ApiError, newIdempotencyKey } from "@/lib/api";
 
 import { createVisit, issueToken, listQueues } from "./api";
-import type { Patient, QueueSummary, QueueToken, Visit } from "./types";
+import {
+  BED_OCCUPYING_VISIT_TYPES,
+  VISIT_TYPE_LABELS,
+  type Patient,
+  type QueueSummary,
+  type QueueToken,
+  type Visit,
+  type VisitType,
+} from "./types";
 
 type VisitPatient = Pick<Patient, "id" | "full_name" | "uhid" | "thid">;
 
@@ -33,6 +41,10 @@ export function StartVisit({ patient }: { patient: VisitPatient }) {
   const [token, setToken] = useState<QueueToken | null>(null);
   const [visit, setVisit] = useState<Visit | null>(null);
   const [priority, setPriority] = useState("normal");
+  // Was hardcoded to "opd", so a hospital with wards could not admit anyone
+  // from the desk (REC-03). OPD stays the default because it is the common
+  // case, not because it was the only one.
+  const [visitType, setVisitType] = useState<VisitType>("opd");
 
   // One key per patient, for the same reason the registration form holds one:
   // a retried click must replay the visit, not open a second one and bill a
@@ -71,7 +83,7 @@ export function StartVisit({ patient }: { patient: VisitPatient }) {
         activeVisit = await createVisit(
           {
             patient_id: patient.id,
-            visit_type: "opd",
+            visit_type: visitType,
             visit_date: new Date().toISOString(),
           },
           visitKey,
@@ -120,9 +132,30 @@ export function StartVisit({ patient }: { patient: VisitPatient }) {
 
   return (
     <div className="surface-card space-y-4 p-6">
-      <h3 className="text-base font-medium">Start OPD visit</h3>
+      <h3 className="text-base font-medium">Start visit</h3>
+
+      <label className="block space-y-1 text-sm">
+        <span className="text-muted-foreground">Visit type</span>
+        <select
+          className="w-full rounded-md border border-border px-3 py-2"
+          value={visitType}
+          onChange={(e) => setVisitType(e.target.value as VisitType)}
+          disabled={busy || Boolean(visit)}  /* locked once the visit exists */
+        >
+          {(Object.keys(VISIT_TYPE_LABELS) as VisitType[]).map((t) => (
+            <option key={t} value={t}>{VISIT_TYPE_LABELS[t]}</option>
+          ))}
+        </select>
+        {BED_OCCUPYING_VISIT_TYPES.includes(visitType) && (
+          <span className="block text-xs text-muted-foreground">
+            Takes a ward bed. The visit is created here; admitting the patient to a
+            specific bed is done by the ward from IPD.
+          </span>
+        )}
+      </label>
       <p className="text-sm text-muted-foreground">
-        This counter flow creates an OPD visit. Use the IPD workspace for admission after clinical review.
+        This counter flow creates the selected visit type. For IPD or day care,
+        use the IPD workspace after clinical review to assign a ward and bed.
       </p>
 
       {visit ? (

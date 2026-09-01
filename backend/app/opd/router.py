@@ -18,22 +18,28 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status as http_status
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import status as http_status
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.deps import CurrentDbUser, require_roles, get_current_user
+from app.audit.actions import AuditAction
+from app.audit.service import write_audit_log
+from app.auth.deps import CurrentDbUser, require_roles
 from app.common.db import get_db
+
 # check_idempotency / record_idempotent_response, NOT consume_/store_. This
 # branch carried its own app/common/idempotency.py with a different API;
 # staging's won the merge because it keys on (key, user_id, endpoint) per
 # 0003a, where this branch's keyed on (key, endpoint) — which would hand one
 # user another user's stored response.
 from app.common.idempotency import (
-    check_idempotency, hash_request_body, record_idempotent_response,
+    check_idempotency,
+    hash_request_body,
+    record_idempotent_response,
 )
 from app.opd import service
-from app.opd.schemas import VisitCreate, VisitOut, VisitStatusUpdate
+from app.opd.schemas import VisitCreate, VisitOut, VisitStatusUpdate, VisitTypeUpdate
 from app.users.models import Facility
 
 router = APIRouter(prefix="/visits", tags=["visits"])
@@ -132,6 +138,100 @@ async def get_visit(
 
 
 @router.patch(
+    "/{visit_id}/type",
+    response_model=VisitOut,
+    dependencies=[Depends(require_roles("receptionist", "doctor", "admin"))],
+    summary="Reclassify a visit (OPD / IPD / day care / emergency / teleconsult)",
+)
+async def update_visit_type(
+    visit_id: UUID,
+    payload: VisitTypeUpdate,
+    current_db_user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+    if_match: str | None = Header(default=None, alias="If-Match"),
+):
+    """Change what kind of episode of care this visit is.
+
+    Both the front desk and the clinician may do this: reception books what the
+    patient asked for, and the doctor is the one who discovers it should have
+    been an admission. Restricting it to either alone means the correction
+    waits for someone who is not in the room.
+
+    Same If-Match concurrency rule as the status transition beside it — two
+    people reclassifying the same visit must not silently overwrite each other.
+    """
+    visit = await service.get_visit(db, visit_id)
+    if visit is None or visit.facility_id != current_db_user.facility_id:
+        raise HTTPException(status_code=404, detail="Visit not found")
+
+    if if_match is None:
+        raise HTTPException(
+            status_code=428,
+            detail={"code": "if_match_required", "message": "If-Match header is required"},
+        )
+    try:
+        expected_version = int(if_match)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "invalid_if_match", "message": "If-Match must be an integer row_version"},
+        ) from exc
+    if expected_version != visit.row_version:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "stale_write",
+                "message": "Visit was modified by another user",
+                "current": VisitOut.model_validate(visit).model_dump(mode="json"),
+            },
+        )
+
+    try:
+        visit, previous = await service.change_visit_type(
+            db,
+            visit=visit,
+            new_type=payload.visit_type,
+            reason=payload.reason,
+            updated_by=current_db_user.id,
+        )
+    except service.InvalidVisitTypeChange as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "invalid_visit_type_change", "message": str(exc)},
+        ) from exc
+
+    # Reclassification moves money and bed counts, so it is audited explicitly
+    # rather than left to the listener — `reason` is request-level intent the
+    # column diff cannot see.
+    await write_audit_log(
+        db,
+        facility_id=visit.facility_id,
+        action=AuditAction.UPDATE,
+        resource_type="visits",
+        user_id=current_db_user.id,
+        resource_id=visit.id,
+        patient_id=visit.patient_id,
+        visit_id=visit.id,
+        old_value={"visit_type": previous},
+        new_value={"visit_type": visit.visit_type},
+        reason=payload.reason,
+    )
+    # The server-side updated_at expression is expired by the UPDATE flush;
+    # refresh it while async I/O is explicit, then build the response before
+    # ending the transaction. Pydantic touching an expired attribute later
+    # would otherwise attempt implicit async I/O and raise MissingGreenlet.
+    await db.refresh(visit)
+    response = VisitOut.model_validate(visit)
+
+    # change_visit_type() and write_audit_log() deliberately only flush. The
+    # request handler owns the transaction boundary, just like the adjacent
+    # visit-status mutation. Without this commit both the reclassification and
+    # its audit row are rolled back when the request-scoped session closes.
+    await db.commit()
+    return response
+
+
+@router.patch(
     "/{visit_id}/status",
     response_model=VisitOut,
     dependencies=[Depends(require_roles("doctor", "receptionist", "admin"))],
@@ -156,11 +256,11 @@ async def update_visit_status(
         )
     try:
         expected_version = int(if_match)
-    except ValueError:
+    except ValueError as exc:
         raise HTTPException(
             status_code=400,
             detail={"code": "invalid_if_match", "message": "If-Match must be an integer row_version"},
-        )
+        ) from exc
     if expected_version != visit.row_version:
         raise HTTPException(
             status_code=409,

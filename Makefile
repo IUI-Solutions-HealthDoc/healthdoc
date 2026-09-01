@@ -1,7 +1,7 @@
 # HealthDoc dev commands — run from repo root
 COMPOSE := docker compose -f infra/docker-compose.yml --env-file .env
 
-.PHONY: setup up down logs ps migrate revision test test-db test-pg lint audit-deps contract migration-rehearsal fe be certs
+.PHONY: setup up ensure-certs down logs ps migrate revision test test-db test-pg lint audit-deps contract migration-rehearsal fe be certs
 
 # Tests that need a real PostgreSQL read TEST_DATABASE_URL and are skipped
 # without it. Built from .env so it follows POSTGRES_PORT (55432 here, not the
@@ -40,7 +40,7 @@ TEST_ENV := TEST_DATABASE_URL="$(TEST_DATABASE_URL)" DATABASE_URL="$(TEST_DATABA
 setup:            ## First-time setup: .env, certs, build, start, migrate
 	./scripts/dev_setup.sh
 
-up:               ## Start the full stack
+up: ensure-certs  ## Start the full stack
 	$(COMPOSE) build
 	$(COMPOSE) up -d --renew-anon-volumes frontend
 	$(COMPOSE) up -d
@@ -98,3 +98,8 @@ migration-rehearsal: ## Upgrade a disposable main/0002 clone to 0046 and prove b
 
 certs:
 	./infra/nginx/generate-dev-certs.sh
+
+ensure-certs:
+	@if [ ! -f infra/nginx/certs/dev.crt ] || [ ! -f infra/nginx/certs/dev.key ]; then \
+		./infra/nginx/generate-dev-certs.sh; \
+	fi

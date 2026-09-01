@@ -18,6 +18,11 @@ minio-data/
 .vscode/
 .reviews/
 
+# Generated per developer/demo host. Committing a shared private key makes a
+# locally trusted certificate reusable by anyone with repository access.
+/infra/nginx/certs/dev.crt
+/infra/nginx/certs/dev.key
+
 # Local working material — PR dumps, issue exports, one-off notes. Kept next
 # to the project so it is not scattered across the filesystem, but never
 # committed: large, regenerable from `gh`, and stale within a day.

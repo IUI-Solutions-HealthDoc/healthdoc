@@ -79,11 +79,13 @@
       "protocol": "openid-connect",
       "redirectUris": [
         "https://localhost/*",
-        "http://localhost:3000/*"
+        "http://localhost:3000/*",
+        "https://192.168.7.106/*"
       ],
       "webOrigins": [
         "https://localhost",
-        "http://localhost:3000"
+        "http://localhost:3000",
+        "https://192.168.7.106"
       ],
       "protocolMappers": [
         {

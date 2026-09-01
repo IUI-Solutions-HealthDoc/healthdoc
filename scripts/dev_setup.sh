@@ -109,7 +109,7 @@ if [[ "$BUSY" == "1" ]]; then
 fi
 # -----------------------------------------------------------------------------
 
-if [[ ! -f infra/nginx/certs/dev.crt ]]; then
+if [[ ! -f infra/nginx/certs/dev.crt || ! -f infra/nginx/certs/dev.key ]]; then
   ./infra/nginx/generate-dev-certs.sh
 fi
 

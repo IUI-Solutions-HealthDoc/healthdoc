@@ -15,6 +15,21 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
 
     jwt_issuer: str = "https://localhost/auth/realms/healthdoc"
+    #: Additional issuers to accept, comma-separated. Empty by default.
+    #:
+    #: Keycloak derives `iss` from the Host header it was reached on, so the
+    #: SAME realm mints `https://localhost/...` for a developer and
+    #: `https://192.168.7.106/...` for a ward PC on the LAN. One pinned issuer
+    #: means whichever address is not pinned gets 401 on every call after a
+    #: successful login — the confusing failure this exists to prevent.
+    #:
+    #: This is not a weakening of token verification. Signatures are checked
+    #: against JWKS fetched from `jwt_jwks_url`, a fixed internal endpoint that
+    #: does not depend on the token, so an attacker cannot introduce an issuer
+    #: here by controlling a Host header. Entries must be listed explicitly;
+    #: there is no wildcard, and the empty default keeps single-host
+    #: deployments strict.
+    jwt_additional_issuers: str = ""
     jwt_jwks_url: str | None = None
     #: Expected `aud` on every access token. Unset disables the check.
     #:
@@ -175,6 +190,16 @@ class Settings(BaseSettings):
     # deployment — the whole point is surviving a Postgres outage, and a path
     # inside an ephemeral container filesystem doesn't.
     data_access_log_fallback_path: str = "/var/log/healthdoc/data_access_log_fallback.jsonl"
+
+
+def allowed_jwt_issuers(settings: "Settings") -> tuple[str, ...]:
+    """Every issuer string a token may legitimately carry.
+
+    Returns a tuple rather than a set because PyJWT accepts any Container[str]
+    and a tuple keeps the primary issuer first when this is logged.
+    """
+    extra = [i.strip() for i in settings.jwt_additional_issuers.split(",") if i.strip()]
+    return (settings.jwt_issuer, *[i for i in extra if i != settings.jwt_issuer])
 
 
 @lru_cache
