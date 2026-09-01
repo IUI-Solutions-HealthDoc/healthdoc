@@ -308,7 +308,7 @@ export function RosterManager({ departmentId, today }: RosterManagerProps) {
                     <td className="px-4 py-3 text-right">
                       <button
                         type="button"
-                        disabled={updatingId === entry.id}
+                        disabled={updatingId !== null}
                         onClick={() => void handleAvailability(entry)}
                         className="text-sm underline disabled:opacity-50"
                       >

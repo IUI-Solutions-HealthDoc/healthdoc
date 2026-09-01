@@ -70,6 +70,23 @@ def _require_hod_dashboard_department(
         )
 
 
+def _require_roster_list_department(
+    current_db_user: DbUser,
+    requested_department_id: uuid.UUID,
+) -> None:
+    """Apply HOD scope without removing permissions granted by another role.
+
+    Keycloak tokens may carry multiple roles. Doctor, nurse, receptionist and
+    admin are intentionally allowed to inspect facility rosters across
+    departments, so a clinician who also heads a department keeps that read.
+    A HOD-only token remains limited to its own department.
+    """
+    cross_department_roles = {"doctor", "nurse", "receptionist", "admin"}
+    if cross_department_roles & set(current_db_user.roles):
+        return
+    _require_hod_dashboard_department(current_db_user, requested_department_id)
+
+
 @router.get(
     "/worklist",
     # DOCTOR ONLY. `admin` was here and the API answered 200 for dev.admin while
@@ -488,7 +505,7 @@ async def list_roster(
     # within their facility for cross-department flow. A department-scoped HOD
     # may not use the same read to inspect a peer department.
     if "hod" in current_db_user.roles:
-        _require_hod_dashboard_department(current_db_user, department_id)
+        _require_roster_list_department(current_db_user, department_id)
     entries = await service.list_roster(db, department_id, roster_date, current_db_user.facility_id)
     return {"items": [RosterOut.model_validate(e).model_dump(mode="json") for e in entries]}
  
