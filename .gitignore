@@ -18,6 +18,11 @@ minio-data/
 .vscode/
 .reviews/
 
+# Generated per developer/demo host. Committing a shared private key makes a
+# locally trusted certificate reusable by anyone with repository access.
+/infra/nginx/certs/dev.crt
+/infra/nginx/certs/dev.key
+
 # Local working material — PR dumps, issue exports, one-off notes. Kept next
 # to the project so it is not scattered across the filesystem, but never
 # committed: large, regenerable from `gh`, and stale within a day.
@@ -44,3 +49,10 @@ AGENTS.md
 # Root-anchored: a bare `backups/` would also ignore any nested directory of
 # that name anywhere in the tree.
 /backups/
+
+# Vendor reference, not our source: the official ABDM v3 Postman collections
+# (~10 MB) downloaded from the NHA support ticket. They carry ABDM's own
+# placeholder client-id/secret fields, so they stay out of the repo. Re-download
+# from the sandbox portal if needed; the paths they confirmed are recorded in
+# app/common/config.py and pinned by tests/integrations/test_abdm_gateway_paths.py.
+Postman collections from ABDM/

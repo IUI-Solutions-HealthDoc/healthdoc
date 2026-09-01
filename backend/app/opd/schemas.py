@@ -25,9 +25,22 @@ class VisitCreate(BaseModel):
 
     department_id: UUID | None = None
     visit_type: str = Field(
-        ..., description="opd | ipd | emergency | teleconsult"
+        ..., description="opd | ipd | day_care | emergency | teleconsult"
     )
     visit_date: datetime
+
+
+class VisitTypeUpdate(BaseModel):
+    """Reclassify a visit — OPD escalated to IPD, IPD corrected to day care.
+
+    `reason` is required, not optional. Changing what kind of episode of care a
+    patient is having affects the bill, the bed count and the discharge
+    expectation, and "who changed this and why" is the first question asked
+    when a ward census does not reconcile.
+    """
+
+    visit_type: str = Field(..., description="opd | ipd | day_care | emergency | teleconsult")
+    reason: str = Field(..., min_length=3, max_length=500)
 
 
 class VisitOut(BaseModel):
@@ -57,4 +70,4 @@ class VisitStatusUpdate(BaseModel):
     reason: str | None = Field(
         default=None,
         description="Required when moving to lwbs or cancelled.",
-    )
+    )

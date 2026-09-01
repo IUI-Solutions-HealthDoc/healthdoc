@@ -15,6 +15,21 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
 
     jwt_issuer: str = "https://localhost/auth/realms/healthdoc"
+    #: Additional issuers to accept, comma-separated. Empty by default.
+    #:
+    #: Keycloak derives `iss` from the Host header it was reached on, so the
+    #: SAME realm mints `https://localhost/...` for a developer and
+    #: `https://192.168.7.106/...` for a ward PC on the LAN. One pinned issuer
+    #: means whichever address is not pinned gets 401 on every call after a
+    #: successful login — the confusing failure this exists to prevent.
+    #:
+    #: This is not a weakening of token verification. Signatures are checked
+    #: against JWKS fetched from `jwt_jwks_url`, a fixed internal endpoint that
+    #: does not depend on the token, so an attacker cannot introduce an issuer
+    #: here by controlling a Host header. Entries must be listed explicitly;
+    #: there is no wildcard, and the empty default keeps single-host
+    #: deployments strict.
+    jwt_additional_issuers: str = ""
     jwt_jwks_url: str | None = None
     #: Expected `aud` on every access token. Unset disables the check.
     #:
@@ -81,47 +96,86 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # M2 (HIP) and M3 (HIU) gateway paths, relative to abdm_gateway_base_url.
     #
-    # DISPROVEN on 2026-08-31. Every one of the ten returned 404 against a
-    # real session token — so did the same paths under an /api/hiecm/gateway/v3
-    # prefix, tried because the session endpoint uses it. These are not the
-    # M2/M3 paths, and the correct ones are not yet known.
+    # CONFIRMED 2026-09-01 against the sandbox with a real session token, using
+    # the official ABDM v3 Postman collection as the source.
     #
-    # Being settings is what made this cheap: the discovery cost one probe and
-    # the fix is an env change, not a release. That was the whole reason for
-    # refusing to promote them to constants.
+    # The probe was an EXISTENCE check, not a method check: GET each path and
+    # treat 404 as "no such route" and anything else as "route exists". It is
+    # deliberately non-destructive — none of these paths were actually invoked.
+    # What came back:
     #
-    # DO NOT GUESS THE REPLACEMENTS. Two guesses have already been spent. The
-    # next move is the sandbox portal's API catalogue, which also shows which
-    # APIs this client is actually subscribed to — see the bridge note below.
+    #   405  the POST-only paths (most of them) — route exists, wrong method
+    #   400  /consent/v3/request/init — routed, then rejected the empty request
+    #   200  the bridge and certs routes below, where GET IS the real method
     #
-    # The trap this repo already fell into once is worth restating: the old
-    # ABHA call used `/v3/hip/token/on-generate`, which is a callback the
-    # gateway invokes ON a HIP, not an endpoint a HIP posts TO. The two
-    # directions are easy to confuse in ABDM's documentation, so each path
-    # below records which way it points.
+    # The ten paths this file carried before all answered 404. A non-404 says a
+    # route is there; it does NOT prove the request shape is right, and none of
+    # these has yet completed a real exchange with the gateway.
+    #
+    # The mistake they encoded is worth keeping: we assumed ONE base,
+    # /api/hiecm/v3/..., because the session endpoint lives under
+    # /api/hiecm/gateway/v3/. ABDM does not work that way — it segments by
+    # capability, and the segment is part of the contract:
+    #
+    #   /api/hiecm/gateway/v3/...                 sessions, bridge, certs
+    #   /api/hiecm/hip/v3/...                     HIP-initiated linking
+    #   /api/hiecm/user-initiated-linking/v3/...  patient-initiated discovery
+    #   /api/hiecm/consent/v3/...                 consent requests and artefacts
+    #   /api/hiecm/data-flow/v3/...               health-information transfer
+    #   /api/hiecm/patient-share/v3/...           scan-and-share
+    #
+    # No amount of care on a single prefix would have found this, which is why
+    # two guesses were spent before the collection arrived. Do not extend this
+    # list by pattern-matching a sibling; check the collection.
+    #
+    # The trap this repo already fell into once still applies: the old ABHA call
+    # used `/v3/hip/token/on-generate`, a callback the gateway invokes ON a HIP,
+    # not an endpoint a HIP posts TO. Each path below records its direction.
     # ------------------------------------------------------------------
 
     #: HIP -> gateway. Link care contexts we already hold to an ABHA address.
-    abdm_path_hip_link_add_contexts: str = "/api/hiecm/v3/link/carecontext"
+    abdm_path_hip_link_add_contexts: str = "/api/hiecm/hip/v3/link/carecontext"
+    #: HIP -> gateway. Notify the CM that a care context was added.
+    abdm_path_hip_context_notify: str = "/api/hiecm/hip/v3/link/context/notify"
     #: HIP -> gateway. Answer a discovery request the gateway sent us.
-    abdm_path_hip_on_discover: str = "/api/hiecm/v3/hip/patient/care-context/on-discover"
+    abdm_path_hip_on_discover: str = (
+        "/api/hiecm/user-initiated-linking/v3/patient/care-context/on-discover"
+    )
     #: HIP -> gateway. Answer a link-init request.
-    abdm_path_hip_on_link_init: str = "/api/hiecm/v3/link/on-init"
+    abdm_path_hip_on_link_init: str = (
+        "/api/hiecm/user-initiated-linking/v3/link/care-context/on-init"
+    )
     #: HIP -> gateway. Answer a link-confirm request.
-    abdm_path_hip_on_link_confirm: str = "/api/hiecm/v3/link/on-confirm"
+    abdm_path_hip_on_link_confirm: str = (
+        "/api/hiecm/user-initiated-linking/v3/link/care-context/on-confirm"
+    )
     #: HIP -> gateway. Acknowledge a consent notification.
-    abdm_path_hip_on_consent_notify: str = "/api/hiecm/v3/consent/hip/on-notify"
+    abdm_path_hip_on_consent_notify: str = "/api/hiecm/consent/v3/request/hip/on-notify"
     #: HIP -> gateway. Acknowledge a health-information request.
-    abdm_path_hip_on_hi_request: str = "/api/hiecm/v3/health-information/hip/on-request"
+    abdm_path_hip_on_hi_request: str = (
+        "/api/hiecm/data-flow/v3/health-information/hip/on-request"
+    )
     #: HIP -> gateway. Report the outcome of a data push.
-    abdm_path_hip_hi_notify: str = "/api/hiecm/v3/health-information/notify"
+    abdm_path_hip_hi_notify: str = "/api/hiecm/data-flow/v3/health-information/notify"
+    #: HIP -> gateway. Exchange patient demographics for a link token.
+    abdm_path_hip_token_generate: str = "/api/hiecm/v3/token/generate-token"
 
     #: HIU -> gateway. Ask the consent manager for a new consent.
-    abdm_path_hiu_consent_request_init: str = "/api/hiecm/v3/consent-requests/init"
+    abdm_path_hiu_consent_request_init: str = "/api/hiecm/consent/v3/request/init"
     #: HIU -> gateway. Fetch a granted consent artefact by id.
-    abdm_path_hiu_consent_fetch: str = "/api/hiecm/v3/consents/fetch"
+    abdm_path_hiu_consent_fetch: str = "/api/hiecm/consent/v3/fetch"
     #: HIU -> gateway. Ask for the data a consent artefact permits.
-    abdm_path_hiu_hi_request: str = "/api/hiecm/v3/health-information/hiu/request"
+    abdm_path_hiu_hi_request: str = "/api/hiecm/data-flow/v3/health-information/request"
+
+    #: Bridge management. NOT /gateway/v1/bridges — that path answers 403
+    #: "900908 API Subscription validation failed" for a sandbox client, which
+    #: reads as a missing entitlement and is really a retired API version. The
+    #: v3 equivalents below answer 200 with the same credentials and headers.
+    abdm_path_bridge_services: str = "/api/hiecm/gateway/v3/bridge-services"
+    abdm_path_bridge_service: str = "/api/hiecm/gateway/v3/bridge-service"
+    abdm_path_bridge_url: str = "/api/hiecm/gateway/v3/bridge/url"
+    #: Gateway signing keys, for verifying callbacks ABDM sends us.
+    abdm_path_gateway_certs: str = "/api/hiecm/gateway/v3/certs"
 
     #: NOTE (2026-08-31): bridge management — PATCH /gateway/v1/bridges and
     #: /bridges/addUpdateServices, the steps in NHA's onboarding email — returns
@@ -175,6 +229,16 @@ class Settings(BaseSettings):
     # deployment — the whole point is surviving a Postgres outage, and a path
     # inside an ephemeral container filesystem doesn't.
     data_access_log_fallback_path: str = "/var/log/healthdoc/data_access_log_fallback.jsonl"
+
+
+def allowed_jwt_issuers(settings: "Settings") -> tuple[str, ...]:
+    """Every issuer string a token may legitimately carry.
+
+    Returns a tuple rather than a set because PyJWT accepts any Container[str]
+    and a tuple keeps the primary issuer first when this is logged.
+    """
+    extra = [i.strip() for i in settings.jwt_additional_issuers.split(",") if i.strip()]
+    return (settings.jwt_issuer, *[i for i in extra if i != settings.jwt_issuer])
 
 
 @lru_cache

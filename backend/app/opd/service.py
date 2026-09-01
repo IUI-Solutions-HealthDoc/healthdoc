@@ -182,3 +182,72 @@ async def transition_visit_status(
     await db.flush()
     await db.refresh(visit)
     return visit
+
+
+class InvalidVisitTypeChange(Exception):
+    """A reclassification the data will not support."""
+
+
+async def change_visit_type(
+    db: AsyncSession,
+    *,
+    visit,
+    new_type: str,
+    reason: str,
+    updated_by,
+):
+    """Reclassify a visit, refusing the changes that would strand a bed.
+
+    The one rule that matters: a visit currently occupying a bed cannot be
+    moved to a type that does not occupy one while that admission is still
+    open. Allowing it would leave an `admissions` row pointing at a bed for a
+    visit the ward census no longer counts — the bed reads occupied forever and
+    only a manual SQL fix clears it.
+
+    Moving INTO a bed-occupying type is allowed and deliberately does not
+    create an admission. Admitting is a separate clinical act with a ward, a
+    bed and a reason; silently allocating one here would put a patient in a bed
+    nobody chose.
+    """
+    from sqlalchemy import select
+
+    from app.admissions.models import Admission
+    from app.common.enums import AdmissionStatus, VisitType
+
+    valid = {t.value for t in VisitType}
+    if new_type not in valid:
+        raise InvalidVisitTypeChange(
+            f"{new_type!r} is not a visit type. Expected one of: {', '.join(sorted(valid))}"
+        )
+    if new_type == visit.visit_type:
+        raise InvalidVisitTypeChange(f"Visit is already {new_type!r}")
+
+    bed_types = VisitType.bed_occupying()
+    if visit.visit_type in bed_types and new_type not in bed_types:
+        open_admission = (
+            await db.execute(
+                select(Admission).where(
+                    Admission.visit_id == visit.id,
+                    # TRANSFERRED counts as occupying too — the patient moved
+                    # to a different bed, they did not leave. Checking only
+                    # ADMITTED would let a transferred patient be reclassified
+                    # out of IPD while still lying in a bed.
+                    Admission.status.in_(
+                        (AdmissionStatus.ADMITTED.value, AdmissionStatus.TRANSFERRED.value)
+                    ),
+                )
+            )
+        ).scalar_one_or_none()
+        if open_admission is not None:
+            raise InvalidVisitTypeChange(
+                f"This visit still occupies a bed. Discharge the admission before "
+                f"reclassifying it from {visit.visit_type!r} to {new_type!r}, or the "
+                f"bed stays allocated to a visit the ward no longer counts."
+            )
+
+    previous = visit.visit_type
+    visit.visit_type = new_type
+    visit.updated_by = updated_by
+    visit.row_version += 1
+    await db.flush()
+    return visit, previous

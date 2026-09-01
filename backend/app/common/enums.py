@@ -45,8 +45,21 @@ class IdentityStatus(CheckedEnum):
 class VisitType(CheckedEnum):
     OPD = "opd"
     IPD = "ipd"
+    #: Admitted to a bed and discharged the same day — endoscopy, dialysis,
+    #: chemotherapy, minor procedures. Occupies a real bed like an IPD stay, so
+    #: ward occupancy counts it; it is separate from IPD because length of stay,
+    #: tariff basis and discharge expectations all differ, and folding it into
+    #: IPD would make "how many inpatients do we have" unanswerable.
+    DAY_CARE = "day_care"
     EMERGENCY = "emergency"
     TELECONSULT = "teleconsult"
+
+    #: Visit types that take a ward bed. Admission and ward occupancy read this
+    #: rather than testing for a literal, so adding a fifth bed-occupying type
+    #: is one line here instead of a grep across the codebase.
+    @classmethod
+    def bed_occupying(cls) -> frozenset[str]:
+        return frozenset({cls.IPD.value, cls.DAY_CARE.value})
 
 
 class VisitStatus(CheckedEnum):

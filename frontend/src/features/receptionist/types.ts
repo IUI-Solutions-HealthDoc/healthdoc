@@ -97,9 +97,24 @@ export function isIdentityMatch(matchedOn: string): boolean {
  * from the token and refuses a body facility_id that disagrees. Sending them
  * would be sending values the server ignores at best and rejects at worst.
  */
+/** Mirrors backend VisitType (common/enums.py) and migration 0056's CHECK. */
+export type VisitType = "opd" | "ipd" | "day_care" | "emergency" | "teleconsult";
+
+/** Visit types that take a ward bed — kept beside the union so the two cannot
+ *  drift. Mirrors VisitType.bed_occupying() on the backend. */
+export const BED_OCCUPYING_VISIT_TYPES: readonly VisitType[] = ["ipd", "day_care"];
+
+export const VISIT_TYPE_LABELS: Record<VisitType, string> = {
+  opd: "OPD — outpatient",
+  ipd: "IPD — admitted",
+  day_care: "Day care — bed, same-day discharge",
+  emergency: "Emergency",
+  teleconsult: "Teleconsult",
+};
+
 export interface VisitCreate {
   patient_id: string;
-  visit_type: "opd" | "ipd" | "emergency" | "teleconsult";
+  visit_type: VisitType;
   visit_date: string;
   department_id?: string | null;
 }

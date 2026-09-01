@@ -49,10 +49,12 @@ def _install(monkeypatch, client, *, path="/v3/some/verify"):
 
 
 async def test_unset_path_makes_no_network_call(monkeypatch):
-    """The shipped state: no confirmed v3 path, so nothing is attempted.
+    """No path means no request — the guard, not the shipped state.
 
-    This is the test that would have caught the original bug's sibling — code
-    that fires a request built from a path nobody verified.
+    `_VERIFY_PATH` is set now (confirmed against the sandbox), but the guard
+    stays: it is what would catch a future path being blanked or a new
+    environment shipping without one, rather than firing a request built from
+    a path nobody verified.
     """
     client = _StubClient()
     mod = _install(monkeypatch, client, path=None)
@@ -156,4 +158,89 @@ async def test_verified_response_is_returned(monkeypatch):
     mod = _install(monkeypatch, client)
 
     assert await mod._verify_with_gateway("91123456789012") == {"status": "ACTIVE"}
-    assert client.calls == [("POST", "/v3/some/verify", {"abhaNumber": "91123456789012"})]
+    # Absolute ABHA-host URL, capitalised key, hyphenated value. All three were
+    # confirmed against the sandbox; each fails as a 400/503 if got wrong.
+    from app.common.config import get_settings
+
+    base = get_settings().abdm_abha_base_url.rstrip("/")
+    assert client.calls == [
+        ("POST", f"{base}/v3/some/verify", {"ABHANumber": "91-1234-5678-9012"})
+    ]
+
+
+async def test_the_abha_number_is_sent_hyphenated(monkeypatch):
+    """ABDM rejects the stored (stripped) form with 400 "Invalid ABHA Number".
+
+    We normalise to bare digits for storage, so every outbound call has to undo
+    it. Nothing else in the suite would notice, because the stub accepts
+    anything and the real 400 reads like bad user input rather than a bug here.
+    """
+    client = _StubClient(body={"status": "ACTIVE"})
+    mod = _install(monkeypatch, client)
+
+    await mod._verify_with_gateway("91123456789012")
+    sent = client.calls[0][2]["ABHANumber"]
+    assert sent == "91-1234-5678-9012"
+
+
+async def test_the_body_key_is_capitalised(monkeypatch):
+    """`abhaNumber` returns 400 "Invalid ABHA Number" — the key, not the value."""
+    client = _StubClient(body={"status": "ACTIVE"})
+    mod = _install(monkeypatch, client)
+
+    await mod._verify_with_gateway("91123456789012")
+    body = client.calls[0][2]
+    assert "ABHANumber" in body
+    assert "abhaNumber" not in body
+
+
+@pytest.mark.parametrize(
+    "stored", ["", "91", "9112345678901", "911234567890123", "91-abcd-5678-9012"]
+)
+async def test_a_number_that_cannot_be_hyphenated_is_sent_unchanged(monkeypatch, stored):
+    """Better ABDM rejects it and says so than we silently reshape a bad value.
+
+    Padding or truncating here would turn "this number is malformed" into
+    "this number does not exist", which is a different and much worse answer.
+    """
+    client = _StubClient(body={"status": "ACTIVE"})
+    mod = _install(monkeypatch, client)
+
+    await mod._verify_with_gateway(stored)
+    assert client.calls[0][2]["ABHANumber"] == stored
+
+
+async def test_a_404_is_no_such_abha_not_an_outage(monkeypatch, caplog):
+    """ABDM answers an absent ABHA with 404 ABDM-1114 "User not found".
+
+    That is a successful lookup with a negative result. Logging it at WARNING
+    beside a real decline is how a routine "this number is not registered"
+    becomes an integration alarm — the same conflation that let a broken
+    integration masquerade as a rural outage for months.
+    """
+    from app.integrations.abdm.client import AbdmRejected
+
+    client = _StubClient(raises=AbdmRejected(404, {"error": {"code": "ABDM-1114"}}, "test-request-id"))
+    mod = _install(monkeypatch, client)
+
+    with caplog.at_level(logging.DEBUG, logger="healthdoc.abdm"):
+        assert await mod._verify_with_gateway("91123456789012") is None
+
+    records = [r for r in caplog.records if "ABHA" in r.getMessage()]
+    assert records, "the 404 was not logged at all"
+    assert all(r.levelno <= logging.INFO for r in records), (
+        "an absent ABHA was logged as a warning; it is a normal answer"
+    )
+
+
+async def test_a_non_404_decline_is_still_a_warning(monkeypatch, caplog):
+    """The distinction only helps if the other side of it survives."""
+    from app.integrations.abdm.client import AbdmRejected
+
+    client = _StubClient(raises=AbdmRejected(422, {"error": {"code": "ABDM-9999"}}, "test-request-id"))
+    mod = _install(monkeypatch, client)
+
+    with caplog.at_level(logging.DEBUG, logger="healthdoc.abdm"):
+        assert await mod._verify_with_gateway("91123456789012") is None
+
+    assert any(r.levelno >= logging.WARNING for r in caplog.records)
