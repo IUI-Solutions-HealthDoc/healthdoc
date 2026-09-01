@@ -155,6 +155,19 @@ class RosterOut(BaseModel):
     is_available: bool
  
     model_config = ConfigDict(from_attributes=True)
+
+
+class RosterCandidateOut(BaseModel):
+    """Minimum staff identity an HOD needs to build a department roster.
+
+    Roles remain authoritative in Keycloak and are deliberately not copied into
+    the application database.  This list therefore represents active staff in
+    the HOD's department, not a guessed "doctor" list based on designation.
+    """
+
+    staff_user_id: uuid.UUID
+    staff_name: str
+    designation: str | None
  
  
 class RosterAvailabilityUpdate(BaseModel):
