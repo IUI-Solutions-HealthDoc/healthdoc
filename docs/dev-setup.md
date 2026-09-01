@@ -26,6 +26,13 @@ Dev users (realm `healthdoc`, password `devpass`): `dev.receptionist`,
 `dev.doctor`, `dev.nurse`, `dev.labtech`, `dev.radiology`, `dev.pharmacist`
 and `dev.admin`.
 
+The development seed supplies a ready-made morning roster for faster demos; it
+is not required by the OPD workflow. On an empty database, an administrator
+first attaches active staff to a department, then that department's HOD opens
+**Department dashboard → Department roster** and adds today's staff. Reception
+can then open the queue from **Today's queues**. Do not add roster rows directly
+in PostgreSQL to recover an empty day.
+
 ## Daily commands
 
 ```bash

@@ -184,9 +184,20 @@ const ROLE_DASHBOARDS = [
     username: "dev.hod",
     landingPath: "/hod",
     dashboards: [
-      // Five parallel reads. Before this screen existed the role had no
-      // landing page at all and every one of these endpoints was unreachable.
-      { path: "/hod", expectCalls: true },
+      // Dashboard summary reads plus the roster manager. Before this screen
+      // existed the role had no landing page and these endpoints were unreachable.
+      {
+        path: "/hod",
+        expectCalls: true,
+        // These three reads prove the roster manager is mounted against live
+        // staff, room and roster APIs. The create itself remains a deliberate
+        // manual workflow — dashboard smoke tests do not mutate shared data.
+        requiredRequests: [
+          { method: "GET", path: "/api/v1/queue/roster-candidates" },
+          { method: "GET", path: "/api/v1/departments/rooms" },
+          { method: "GET", path: "/api/v1/queue/rosters" },
+        ],
+      },
       // HOD-only indent approval lives here. Reachable only because
       // ROLES.HOD gained the /inventory prefix — without it the one action
       // only a department head can perform had no route.
