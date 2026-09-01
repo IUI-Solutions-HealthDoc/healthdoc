@@ -25,7 +25,7 @@ App at https://localhost (self-signed cert). All thirteen dev accounts use
 ### Tests
 
 ```bash
-make test-pg                       # THE GATE — host venv, real Postgres, ~1119
+make test-pg                       # THE GATE — host venv, real Postgres, ~1128
 make test p=tests/foo.py k=name    # in-container, quick, skips DB tests
 make contract                      # every frontend API call exists in OpenAPI
 make audit-deps                    # pip-audit + npm audit, must be zero
@@ -168,7 +168,7 @@ the console shows `[HMR] connected`.
 
 ## Current state
 
-- 1119 tests passing; `pip-audit` and `npm audit` both clean.
+- 1128 tests passing; `pip-audit` and `npm audit` both clean.
 - WASA cybersecurity track: **all findings closed**, including M3 — the CSP now
   carries a per-request nonce from `frontend/src/proxy.ts` instead of
   `'unsafe-inline'`, and every route renders `force-dynamic` because a nonce
@@ -232,7 +232,15 @@ can call us, and a shared secret ABDM does not know means every real callback
 would be rejected. The secret is a stand-in for signature verification, not an
 alternative to it.
 
-Still open: `_VERIFY_PATH` in `identity/router.py` is deliberately `None`.
+**M1 ABHA verification is on.** `_VERIFY_PATH` is
+`/v3/profile/login/search`, relative to `abdm_abha_base_url` — the ABHA host,
+not the gateway, where the same path answers 503. Three details are not
+guessable and each fails quietly if got wrong, so all three are pinned by tests:
+the body key is `ABHANumber` (capitalised — `abhaNumber` returns 400 "Invalid
+ABHA Number", which reads like bad input rather than a bad key); the value must
+be hyphenated `91-0000-0000-0001` while we store it stripped; and an absent
+ABHA is 404 `ABDM-1114`, a real answer that must not be logged as an outage.
+
 Credentials must never be committed and CI must never hold them; the client
 tests are fully mocked and stay that way.
 
