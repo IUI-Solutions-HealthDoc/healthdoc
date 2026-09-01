@@ -212,13 +212,25 @@ documented-and-hoped:
 either wrong form fails the suite — nothing in the suite noticed when all ten
 paths were wrong, which is exactly how they stayed wrong.
 
-Still open: the bridge has **no services registered** (`services: []`), so no
-HIP or HIU identity exists yet on the gateway;
-`PUT /api/hiecm/gateway/v3/bridge-service` is the route and needs a serviceId
-decision. `_VERIFY_PATH` in `identity/router.py` is still deliberately `None`.
-Callback authentication remains a shared secret rather than ABDM's signature
-scheme. Credentials must never be committed and CI must never hold them; the
-client tests are fully mocked and stay that way.
+The bridge is now fully provisioned: URL `https://abdm.healthdoc.world`, and
+two services registered via `PUT /api/hiecm/gateway/v3/bridge-service` —
+`SBXID_053401_HIP` and `SBXID_053401_HIU`, both active. `facilities.hfr_facility_id`
+must equal the HIP service id or inbound callbacks 404 at `_facility_for_hfr_id`;
+DEV001 is set to `SBXID_053401_HIP`.
+
+**Callback signature verification is now unblocked and should be built.**
+`GET /api/hiecm/gateway/v3/certs` returns a JWKS — two RSA keys, `use=sig`,
+RS256 and RS512 — and `/.well-known/openid-configuration` points at it. The
+shared secret was only ever a placeholder because the scheme "needs the sandbox
+to confirm before it can be written without guessing"; the sandbox has now
+confirmed it. This matters more than it looks: the bridge URL is live, so ABDM
+can call us, and a shared secret ABDM does not know means every real callback
+would be rejected. The secret is a stand-in for signature verification, not an
+alternative to it.
+
+Still open: `_VERIFY_PATH` in `identity/router.py` is deliberately `None`.
+Credentials must never be committed and CI must never hold them; the client
+tests are fully mocked and stay that way.
 
 **Audit coverage is 17 of 98 models**, up from 8. `assert_audit_coverage()`
 still exists and is still never called, with `AUDITABLE_MODULE_PREFIXES` empty
