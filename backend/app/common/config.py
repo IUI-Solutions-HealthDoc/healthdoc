@@ -55,6 +55,14 @@ class Settings(BaseSettings):
     # origin here so joining a path cannot silently produce /gateway/v3/*.
     abdm_gateway_base_url: str = "https://dev.abdm.gov.in"
     abdm_client_id: str = "change-me"
+    #: Our identities ON the gateway, registered with
+    #: PUT /api/hiecm/gateway/v3/bridge-service. These are NOT the client id:
+    #: one bridge carries many services, and every M2/M3 call has to say which
+    #: one is speaking (X-HIP-ID / X-HIU-ID). They also have to match
+    #: facilities.hfr_facility_id, or an inbound callback resolves to no
+    #: facility and 404s.
+    abdm_hip_id: str = "change-me"
+    abdm_hiu_id: str = "change-me"
     abdm_client_secret: str = "change-me"
     abdm_hfr_facility_id: str = "change-me"
     # Consent-manager id sent as X-CM-ID on every gateway call. 'sbx' is the
@@ -166,6 +174,14 @@ class Settings(BaseSettings):
     abdm_path_hiu_consent_fetch: str = "/api/hiecm/consent/v3/fetch"
     #: HIU -> gateway. Ask for the data a consent artefact permits.
     abdm_path_hiu_hi_request: str = "/api/hiecm/data-flow/v3/health-information/request"
+    #: HIU -> gateway. Poll a consent request. A backstop for a callback that
+    #: never lands, which is otherwise indistinguishable from a patient who has
+    #: simply not answered yet.
+    abdm_path_hiu_consent_request_status: str = "/api/hiecm/consent/v3/request/status"
+    #: HIU -> gateway. Acknowledge a consent notification. Note this is the HIU
+    #: sibling of abdm_path_hip_on_consent_notify and takes a LIST where the HIP
+    #: one takes an object — ABDM's asymmetry, not ours.
+    abdm_path_hiu_on_consent_notify: str = "/api/hiecm/consent/v3/request/hiu/on-notify"
 
     #: Bridge management. NOT /gateway/v1/bridges — that path answers 403
     #: "900908 API Subscription validation failed" for a sandbox client, which
