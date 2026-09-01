@@ -29,7 +29,13 @@ set -a; source .env; set +a
 GATEWAY="${ABDM_GATEWAY_BASE_URL:-https://dev.abdm.gov.in}"
 CM_ID="${ABDM_X_CM_ID:-sbx}"
 SESSION_PATH="${ABDM_SESSION_PATH:-/api/hiecm/gateway/v3/sessions}"
-BRIDGE="$GATEWAY/gateway/v1/bridges"
+# Bridge management moved to v3. The old /gateway/v1/bridges answers 403
+# "900908 API Subscription validation failed" for a sandbox client, which reads
+# as a missing entitlement and cost a support round-trip to disprove — the v3
+# routes below answer 200 with the SAME credentials and the same header set.
+BRIDGE_SERVICES="$GATEWAY/api/hiecm/gateway/v3/bridge-services"
+BRIDGE_SERVICE="$GATEWAY/api/hiecm/gateway/v3/bridge-service"
+BRIDGE_URL="$GATEWAY/api/hiecm/gateway/v3/bridge/url"
 
 # Credentials are checked per command, not up front: `doctor` is a pure
 # reachability probe and is the thing you want to run BEFORE putting a secret
@@ -71,6 +77,32 @@ token() {
   rm -f /tmp/abdm_session.$$
 }
 
+# JSON payloads are built here, never by interpolating into a quoted literal.
+# Values reach python3 as argv, so quotes, backslashes and newlines in a URL or
+# a facility name are encoded rather than escaping the string and producing a
+# malformed body.
+_json_url() {  # url
+  python3 -c 'import json,sys; print(json.dumps({"url": sys.argv[1]}))' "$1"
+}
+
+_json_service() {  # bridge_id service_id name is_hip is_hiu
+  python3 -c '
+import json, sys
+bridge_id, service_id, name, is_hip, is_hiu = sys.argv[1:6]
+print(json.dumps({
+    "bridgeId": bridge_id,
+    "serviceId": service_id,
+    "name": name,
+    "isHip": is_hip == "true",
+    "isHiu": is_hiu == "true",
+    "isHealthLocker": None,
+    "isPhr": False,
+    "endpoints": {},
+    "attributes": None,
+    "active": True,
+}))' "$1" "$2" "$3" "$4" "$5"
+}
+
 _auth_call() {  # method path json
   local tok rid
   tok=$(token)
@@ -97,16 +129,35 @@ case "${1:-}" in
     require_credentials
     [[ -n "${2:-}" ]] || { echo "usage: $0 set-url https://your-public-host"; exit 1; }
     [[ "$2" == https://* ]] || { echo "✗ ABDM requires https with a valid certificate"; exit 1; }
-    echo "PATCH $BRIDGE  url=$2"
-    _auth_call PATCH "$BRIDGE" "{\"url\":\"$2\"}"
+    echo "PATCH $BRIDGE_URL  url=$2"
+    # Payload built by python3 rather than string interpolation: a URL
+    # containing a quote or backslash would otherwise emit invalid JSON and the
+    # gateway's error would point at the wrong thing.
+    _auth_call PATCH "$BRIDGE_URL" "$(_json_url "$2")"
+    # 202 is returned with an EMPTY body, so the PATCH alone tells you nothing
+    # about what was stored. Read it back — the comment used to claim this
+    # happened without doing it.
+    echo
+    echo "GET $BRIDGE_SERVICES  (read-back)"
+    _auth_call GET "$BRIDGE_SERVICES"
     ;;
   add-hip|add-hiu)
     require_credentials
     kind=$([[ "$1" == "add-hip" ]] && echo HIP || echo HIU)
     [[ -n "${4:-}" ]] || { echo "usage: $0 $1 SERVICE_ID \"Facility Name\" https://your-public-host"; exit 1; }
-    echo "POST $BRIDGE/addUpdateServices  type=$kind id=$2"
-    _auth_call POST "$BRIDGE/addUpdateServices" \
-      "[{\"id\":\"$2\",\"name\":\"$3\",\"type\":\"$kind\",\"active\":true,\"alias\":[\"$2\"],\"endpoints\":[{\"address\":\"$4\",\"connectionType\":\"https\",\"use\":\"registration\"}]}]"
+    # v3 registers ONE service that may be HIP, HIU or both, rather than the
+    # v1 array of typed entries. isHip/isHiu are booleans on a single record.
+    is_hip=$([[ "$kind" == HIP ]] && echo true || echo false)
+    is_hiu=$([[ "$kind" == HIU ]] && echo true || echo false)
+    echo "PUT $BRIDGE_SERVICE  serviceId=$2 isHip=$is_hip isHiu=$is_hiu"
+    # A facility name is free text — "St. Mary's" or a stray backslash breaks a
+    # hand-interpolated JSON literal, and the gateway then rejects the request
+    # for a reason that has nothing to do with the real problem.
+    _auth_call PUT "$BRIDGE_SERVICE" \
+      "$(_json_service "$ABDM_CLIENT_ID" "$2" "$3" "$is_hip" "$is_hiu")"
+    echo
+    echo "GET $BRIDGE_SERVICES  (read-back)"
+    _auth_call GET "$BRIDGE_SERVICES"
     ;;
   doctor)
     # Pre-flight: does this public URL actually reach OUR callback routes?
@@ -182,8 +233,8 @@ PYEOF
     ;;
   services)
     require_credentials
-    echo "GET $BRIDGE/getServices"
-    _auth_call GET "$BRIDGE/getServices"
+    echo "GET $BRIDGE_SERVICES"
+    _auth_call GET "$BRIDGE_SERVICES"
     ;;
   *)
     sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'

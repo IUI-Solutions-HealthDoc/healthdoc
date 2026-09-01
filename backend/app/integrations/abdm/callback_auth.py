@@ -71,6 +71,12 @@ _KNOWN_HEADERS = {
     # on top of the one header this log exists to surface.
     "cdn-loop", "cf-connecting-ip", "cf-ipcountry", "cf-ray", "cf-visitor",
     "cf-warp-tag-id", "cf-worker", "cf-ew-via", "cf-request-id",
+    # ABDM puts these on every callback — its own v3 Postman collection shows
+    # REQUEST-ID, TIMESTAMP and X-CM-ID and nothing else on the HIP callback.
+    # They were being reported as unrecognised, which is the opposite of useful:
+    # this log exists to surface the ONE header we do not know, and we get a
+    # single clean look at the first genuine callback to spot it in.
+    "request-id", "timestamp", "x-cm-id",
 }
 
 

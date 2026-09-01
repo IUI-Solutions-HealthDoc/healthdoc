@@ -25,7 +25,7 @@ App at https://localhost (self-signed cert). All thirteen dev accounts use
 ### Tests
 
 ```bash
-make test-pg                       # THE GATE — host venv, real Postgres, ~1077
+make test-pg                       # THE GATE — host venv, real Postgres, ~1128
 make test p=tests/foo.py k=name    # in-container, quick, skips DB tests
 make contract                      # every frontend API call exists in OpenAPI
 make audit-deps                    # pip-audit + npm audit, must be zero
@@ -168,15 +168,24 @@ the console shows `[HMR] connected`.
 
 ## Current state
 
-- 1077 tests passing; `pip-audit` and `npm audit` both clean.
+- 1128 tests passing; `pip-audit` and `npm audit` both clean.
 - WASA cybersecurity track: **all findings closed**, including M3 — the CSP now
   carries a per-request nonce from `frontend/src/proxy.ts` instead of
   `'unsafe-inline'`, and every route renders `force-dynamic` because a nonce
   cannot be baked into prerendered HTML.
-- WASA ABDM track: M1 (ABHA identity), M2 (HIP) and M3 (HIU) are **built and
-  tested** — 8 tables, ECDH/AES-GCM transfer crypto, fail-closed callback auth.
-  `integrations/abdm/consent/` and `nhcx/` remain empty; the consent artefact
-  handling lives in `hip/` and `hiu/`, and NHCX is out of scope for this audit.
+- WASA ABDM track: **M1 is complete and reaching the sandbox. M2 and M3 have
+  no outbound leg at all** — say it that way round, because "built and tested,
+  8 tables, ECDH/AES-GCM transfer crypto, 102 tests" was true and still left
+  the wrong impression. What exists for M2/M3 is the receiving half: tables,
+  local state services, callback routes that fail closed, and working crypto.
+  What does not exist is any code that calls the gateway. Checked on
+  2026-09-01: the ten `abdm_path_hip_*` / `abdm_path_hiu_*` settings are
+  referenced nowhere outside `config.py`, and the only `client.request` calls
+  in the whole package are M1's. A HIP that never posts `link/carecontext` and
+  an HIU that never posts `consent/request/init` cannot pass certification, no
+  matter how good the halves are. `integrations/abdm/consent/` and `nhcx/`
+  remain empty; consent artefact handling lives in `hip/` and `hiu/`, and NHCX
+  is out of scope for this audit.
 - Frontend is production-ready: the `NEXT_PUBLIC_AUTH_MODE=dev` role picker is
   deleted, and `.env.production.example` carries the `NEXT_PUBLIC_*` build args
   the image needs.
@@ -186,14 +195,63 @@ the console shows `[HMR] connected`.
 
 ### Known gaps, stated plainly
 
-**No ABDM call has ever reached the sandbox.** M1/M2/M3 are self-consistent —
-our HIP encrypts, our HIU decrypts, 102 tests across eight files — and that is
-not the same as ABDM agreeing. All fourteen `abdm_path_*` settings in
-`app/common/config.py` are documented v3 shapes, unconfirmed. `_VERIFY_PATH` in `identity/router.py` is still
-deliberately `None`. Callback authentication is a shared secret, not ABDM's
-signature scheme, because the scheme needs the sandbox to confirm before it can
-be written without guessing. Credentials must never be committed and CI must
-never hold them; the client tests are fully mocked and stay that way.
+**ABDM: the gateway now answers, and the path guesses were all wrong.**
+Corrected on 2026-09-01 from the official v3 Postman collections ABDM support
+supplied. Three things are now confirmed against the live sandbox rather than
+documented-and-hoped:
+
+- **The 403 was never a missing subscription.** `/gateway/v1/bridges/*` — the
+  steps in NHA's onboarding email — answers 403 `900908` for a sandbox client
+  because it is a retired API version, not because the client lacks an
+  entitlement. The v3 equivalents (`/api/hiecm/gateway/v3/bridge-services`,
+  `/bridge-service`, `/bridge/url`) answer **200 with the same credentials and
+  the same headers**. A support ticket was raised on the wrong diagnosis; the
+  reply "use the V3 Postman collection" was the whole answer.
+- **ABDM segments v3 by capability, not by one base.** We assumed
+  `/api/hiecm/v3/...` because sessions live under `/api/hiecm/gateway/v3/`.
+  All ten M2/M3 paths built on that assumption returned 404. The real segments
+  are `gateway`, `hip`, `user-initiated-linking`, `consent`, `data-flow` and
+  `patient-share`. Each corrected path was verified by a non-destructive
+  existence probe — GET it and read 404 as "no such route", anything else as
+  "route exists": the POST-only paths answered 405, consent/request/init
+  answered 400, and the bridge and certs routes answered 200 because GET is
+  their real method. Every old path returned 404. Existence is all this proves;
+  no payload has yet been accepted.
+- **The bridge URL is self-service.** `PATCH /api/hiecm/gateway/v3/bridge/url`
+  returns 202 and `SBXID_053401` now points at `https://abdm.healthdoc.world`.
+  Asking NHA to register it was unnecessary.
+
+`tests/integrations/test_abdm_gateway_paths.py` pins the shape so a revert to
+either wrong form fails the suite — nothing in the suite noticed when all ten
+paths were wrong, which is exactly how they stayed wrong.
+
+The bridge is now fully provisioned: URL `https://abdm.healthdoc.world`, and
+two services registered via `PUT /api/hiecm/gateway/v3/bridge-service` —
+`SBXID_053401_HIP` and `SBXID_053401_HIU`, both active. `facilities.hfr_facility_id`
+must equal the HIP service id or inbound callbacks 404 at `_facility_for_hfr_id`;
+DEV001 is set to `SBXID_053401_HIP`.
+
+**Callback signature verification is now unblocked and should be built.**
+`GET /api/hiecm/gateway/v3/certs` returns a JWKS — two RSA keys, `use=sig`,
+RS256 and RS512 — and `/.well-known/openid-configuration` points at it. The
+shared secret was only ever a placeholder because the scheme "needs the sandbox
+to confirm before it can be written without guessing"; the sandbox has now
+confirmed it. This matters more than it looks: the bridge URL is live, so ABDM
+can call us, and a shared secret ABDM does not know means every real callback
+would be rejected. The secret is a stand-in for signature verification, not an
+alternative to it.
+
+**M1 ABHA verification is on.** `_VERIFY_PATH` is
+`/v3/profile/login/search`, relative to `abdm_abha_base_url` — the ABHA host,
+not the gateway, where the same path answers 503. Three details are not
+guessable and each fails quietly if got wrong, so all three are pinned by tests:
+the body key is `ABHANumber` (capitalised — `abhaNumber` returns 400 "Invalid
+ABHA Number", which reads like bad input rather than a bad key); the value must
+be hyphenated `91-0000-0000-0001` while we store it stripped; and an absent
+ABHA is 404 `ABDM-1114`, a real answer that must not be logged as an outage.
+
+Credentials must never be committed and CI must never hold them; the client
+tests are fully mocked and stay that way.
 
 **Audit coverage is 17 of 98 models**, up from 8. `assert_audit_coverage()`
 still exists and is still never called, with `AUDITABLE_MODULE_PREFIXES` empty

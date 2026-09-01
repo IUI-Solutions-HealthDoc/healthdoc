@@ -18,6 +18,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import AuthUser, CurrentDbUser, get_current_user, require_roles
+from app.common.config import get_settings
 from app.common.db import get_db
 from app.common.security import current_aes_key_version, encrypt_pii
 from app.integrations.abdm.client import (
@@ -39,17 +40,40 @@ from app.patients.models import Patient
 log = logging.getLogger("healthdoc.abdm")
 router = APIRouter(prefix="/abdm/abha", tags=["abdm"])
 
-#: The ABDM v3 path that verifies an ABHA number. DELIBERATELY None.
+#: The ABDM v3 path that verifies an ABHA number, relative to
+#: `abdm_abha_base_url` — NOT the gateway base. Confirmed against the sandbox
+#: on 2026-09-01; the same path on the gateway base answers 503.
 #:
-#: The old value was wrong (`/v3/hip/token/on-generate` is a callback the
-#: gateway invokes on the HIP, not something a HIP posts to). The honest
-#: replacement is not a better-looking guess — a plausible constant is worse
-#: than an absent one, because the next person will believe it.
+#: It held None for months rather than a guess, because the previous value was
+#: `/v3/hip/token/on-generate` — a callback the gateway invokes ON a HIP, not
+#: something a HIP posts to. A plausible constant is worse than an absent one.
 #:
-#: While this is None the call is inert and says so. Set it from the ABDM v3
-#: specification as the first step of M1 and verification starts working; no
-#: other line needs to change.
-_VERIFY_PATH: str | None = None
+#: Three things about this endpoint are not guessable and each fails quietly if
+#: got wrong, so all three are pinned by tests:
+#:   * the body key is `ABHANumber`, capitalised. `abhaNumber` returns
+#:     400 "Invalid ABHA Number", which reads like bad input, not a bad key.
+#:   * the value must be HYPHENATED (91-0000-0000-0001). We store the number
+#:     stripped, so it has to be re-formatted on the way out; the stripped form
+#:     also returns 400 "Invalid ABHA Number".
+#:   * an absent ABHA is 404 with code ABDM-1114 "User not found" — a real
+#:     answer, not a transport failure, and it must not be logged as an outage.
+_VERIFY_PATH: str | None = "/v3/profile/login/search"
+
+#: ABDM's "this ABHA does not exist" answer. Distinct from a gateway outage.
+_ABHA_NOT_FOUND_CODE = "ABDM-1114"
+
+
+def _hyphenate_abha(stored: str) -> str:
+    """`91000000000001` -> `91-0000-0000-0001`, the only form ABDM accepts.
+
+    We normalise to digits for storage (`_normalise_abha`), so every outbound
+    call has to undo that. Returned unchanged if it is not 14 digits — ABDM
+    will reject it and say so, which beats us silently mangling a value.
+    """
+    digits = stored.replace("-", "").strip()
+    if len(digits) != 14 or not digits.isdigit():
+        return stored
+    return f"{digits[:2]}-{digits[2:6]}-{digits[6:10]}-{digits[10:]}"
 
 
 class AbhaCapture(BaseModel):
@@ -116,7 +140,14 @@ async def _verify_with_gateway(abha_number: str) -> dict | None:
         return None
 
     try:
-        response = await client.request("POST", _VERIFY_PATH, json={"abhaNumber": abha_number})
+        response = await client.request(
+            "POST",
+            # Absolute URL: enrolment and verification live on the ABHA host,
+            # while the client's base is the gateway. Same pattern as
+            # identity/service.py.
+            f"{get_settings().abdm_abha_base_url.rstrip('/')}{_VERIFY_PATH}",
+            json={"ABHANumber": _hyphenate_abha(abha_number)},
+        )
     except AbdmNotConfigured:
         log.info("ABDM not configured — ABHA recorded without gateway verification")
         return None
@@ -130,8 +161,15 @@ async def _verify_with_gateway(abha_number: str) -> dict | None:
         log.error("ABDM rejected our credentials — ABHA verification is DOWN, not offline")
         return None
     except AbdmRejected as exc:
-        # The gateway answered and declined. Status only; the body can carry PHI.
-        log.warning("ABDM declined ABHA verification (%s)", exc.status_code)
+        # 404 ABDM-1114 is ABDM saying "no such ABHA" — a successful lookup with
+        # a negative result. Logged apart from a decline so an unverifiable
+        # number is not read as an integration fault. Status and error code
+        # only; the body can carry PHI.
+        if exc.status_code == 404:
+            log.info("ABDM: no such ABHA (%s) — recorded unverified",
+                     _ABHA_NOT_FOUND_CODE)
+        else:
+            log.warning("ABDM declined ABHA verification (%s)", exc.status_code)
         return None
 
     body = response.body
