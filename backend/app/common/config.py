@@ -97,9 +97,20 @@ class Settings(BaseSettings):
     # M2 (HIP) and M3 (HIU) gateway paths, relative to abdm_gateway_base_url.
     #
     # CONFIRMED 2026-09-01 against the sandbox with a real session token, using
-    # the official ABDM v3 Postman collection as the source. Every path below
-    # answers 405 to a GET (the route exists, the method is wrong) or 400; the
-    # ten paths this file carried before all answered 404.
+    # the official ABDM v3 Postman collection as the source.
+    #
+    # The probe was an EXISTENCE check, not a method check: GET each path and
+    # treat 404 as "no such route" and anything else as "route exists". It is
+    # deliberately non-destructive — none of these paths were actually invoked.
+    # What came back:
+    #
+    #   405  the POST-only paths (most of them) — route exists, wrong method
+    #   400  /consent/v3/request/init — routed, then rejected the empty request
+    #   200  the bridge and certs routes below, where GET IS the real method
+    #
+    # The ten paths this file carried before all answered 404. A non-404 says a
+    # route is there; it does NOT prove the request shape is right, and none of
+    # these has yet completed a real exchange with the gateway.
     #
     # The mistake they encoded is worth keeping: we assumed ONE base,
     # /api/hiecm/v3/..., because the session endpoint lives under

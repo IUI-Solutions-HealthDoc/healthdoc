@@ -1,8 +1,14 @@
 """ABDM v3 gateway paths — pinned by shape, not by spelling.
 
-Confirmed against the sandbox on 2026-09-01 with a real session token: every
-path below answered 405 to a GET (route exists, wrong method) or 400, while the
-ten paths this repo carried before all answered 404.
+Confirmed against the sandbox on 2026-09-01 with a real session token, by a
+non-destructive existence probe: GET each path and read 404 as "no such route",
+anything else as "route exists". The POST-only paths answered 405,
+/consent/v3/request/init answered 400, and the bridge and certs routes answered
+200 because GET is genuinely their method. The ten paths this repo carried
+before all answered 404.
+
+Existence is all that was proven. None of these has completed a real exchange
+with the gateway, so a correct path here does not mean a correct payload.
 
 These are Settings fields, so a wrong value is an env change rather than a
 release — but nothing in the suite noticed when all ten were wrong, which is

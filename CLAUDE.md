@@ -202,8 +202,12 @@ documented-and-hoped:
   `/api/hiecm/v3/...` because sessions live under `/api/hiecm/gateway/v3/`.
   All ten M2/M3 paths built on that assumption returned 404. The real segments
   are `gateway`, `hip`, `user-initiated-linking`, `consent`, `data-flow` and
-  `patient-share`. Every corrected path was verified by GET → 405 (route
-  exists, wrong method) while every old one returned 404.
+  `patient-share`. Each corrected path was verified by a non-destructive
+  existence probe — GET it and read 404 as "no such route", anything else as
+  "route exists": the POST-only paths answered 405, consent/request/init
+  answered 400, and the bridge and certs routes answered 200 because GET is
+  their real method. Every old path returned 404. Existence is all this proves;
+  no payload has yet been accepted.
 - **The bridge URL is self-service.** `PATCH /api/hiecm/gateway/v3/bridge/url`
   returns 202 and `SBXID_053401` now points at `https://abdm.healthdoc.world`.
   Asking NHA to register it was unnecessary.
