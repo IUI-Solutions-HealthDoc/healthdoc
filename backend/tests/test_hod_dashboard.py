@@ -31,7 +31,7 @@ async def test_overview_combines_queues_and_roster(db):
 
     db.add(User(
         id=doctor_id, keycloak_sub=f"doc-{uuid.uuid4()}", username=f"doc{uuid.uuid4().hex[:6]}",
-        full_name="Dr. Overview", facility_id=facility_id,
+        full_name="Dr. Overview", facility_id=facility_id, department_id=department_id,
     ))
     await db.flush()
 

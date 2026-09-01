@@ -30,6 +30,39 @@ export interface HodRosterSummary {
   is_available: boolean;
 }
 
+export type RosterShift = "morning" | "evening" | "night";
+
+export interface RosterEntry {
+  id: string;
+  staff_user_id: string;
+  department_id: string;
+  room_id: string | null;
+  shift: RosterShift;
+  roster_date: string;
+  is_available: boolean;
+}
+
+export interface RosterCandidate {
+  staff_user_id: string;
+  staff_name: string;
+  designation: string | null;
+}
+
+export interface RosterRoom {
+  id: string;
+  department_id: string;
+  room_number: string;
+  is_active: boolean;
+}
+
+export interface CreateRosterEntry {
+  staff_user_id: string;
+  department_id: string;
+  room_id: string | null;
+  shift: RosterShift;
+  roster_date: string;
+}
+
 export interface HodOverview {
   department_id: string;
   date: string;

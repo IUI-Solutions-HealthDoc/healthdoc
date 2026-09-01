@@ -822,12 +822,17 @@ async def create_roster_entry(
         raise HTTPException(404, "Department not found")
 
     staff = await db.get(User, staff_user_id)
-    if staff is None or staff.facility_id != caller_facility_id:
+    if (
+        staff is None
+        or staff.facility_id != caller_facility_id
+        or staff.department_id != department_id
+        or not staff.is_active
+    ):
         raise HTTPException(404, "Staff member not found")
 
     if room_id is not None:
         room = await db.get(Room, room_id)
-        if room is None or room.department_id != department_id:
+        if room is None or room.department_id != department_id or not room.is_active:
             raise HTTPException(404, "Room not found")
  
     entry = Roster(
@@ -850,6 +855,38 @@ async def create_roster_entry(
         raise
     await db.refresh(entry)
     return entry
+
+
+# ---------------- ROSTER: ACTIVE DEPARTMENT STAFF ----------------
+async def list_roster_candidates(
+    db: AsyncSession,
+    department_id: uuid.UUID,
+    caller_facility_id: uuid.UUID,
+) -> list[dict]:
+    """Active staff an HOD may assign, scoped to one facility and department."""
+    department = await db.get(Department, department_id)
+    if department is None or department.facility_id != caller_facility_id:
+        raise HTTPException(404, "Department not found")
+
+    rows = (
+        await db.execute(
+            select(User.id, User.full_name, User.designation)
+            .where(
+                User.facility_id == caller_facility_id,
+                User.department_id == department_id,
+                User.is_active.is_(True),
+            )
+            .order_by(User.full_name, User.id)
+        )
+    ).all()
+    return [
+        {
+            "staff_user_id": staff_user_id,
+            "staff_name": staff_name,
+            "designation": designation,
+        }
+        for staff_user_id, staff_name, designation in rows
+    ]
  
  
 # ---------------- ROSTER: LIST ----------------

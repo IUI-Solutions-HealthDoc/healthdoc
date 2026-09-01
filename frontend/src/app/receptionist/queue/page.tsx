@@ -189,8 +189,9 @@ export default function Page() {
           </div>
           {openingOptions && openingOptions.items.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No available roster entries remain for {openingOptions.service_date}. Ask the HOD or
-              administrator to roster a doctor first.
+              No available roster entries remain for {openingOptions.service_date}. The department
+              HOD can add one from Department dashboard → Department roster; a development database
+              seed is not required.
             </p>
           ) : (
             <div className="grid gap-4 md:grid-cols-[2fr_1fr_auto] md:items-end">

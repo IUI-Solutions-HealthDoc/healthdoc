@@ -16,10 +16,14 @@ import { api } from "@/lib/api";
 
 import type {
   DepartmentWorkload,
+  CreateRosterEntry,
   EmergencyEscalation,
   HodOverview,
   PendingApproval,
   PendingLabOrder,
+  RosterCandidate,
+  RosterEntry,
+  RosterRoom,
 } from "./types";
 
 /** Queues and roster for one department on one day. */
@@ -64,4 +68,58 @@ export async function listPendingApprovals(departmentId: string): Promise<Pendin
     `/queue/hod-dashboard/${departmentId}/pending-approvals`,
   );
   return response.items;
+}
+
+/** Minimal active staff list for the caller's own department. */
+export async function listRosterCandidates(
+  departmentId: string,
+): Promise<RosterCandidate[]> {
+  const response = await api<{ items: RosterCandidate[] }>(
+    `/queue/roster-candidates?department_id=${encodeURIComponent(departmentId)}`,
+  );
+  return response.items;
+}
+
+/** Active rooms in this department; room assignment on a roster is optional. */
+export async function listRosterRooms(departmentId: string): Promise<RosterRoom[]> {
+  const response = await api<{
+    items: RosterRoom[];
+    page: number;
+    page_size: number;
+    total: number;
+  }>(
+    `/departments/rooms?department_id=${encodeURIComponent(departmentId)}&is_active=true&page=1&page_size=100`,
+  );
+  return response.items;
+}
+
+export async function listRoster(
+  departmentId: string,
+  rosterDate: string,
+): Promise<RosterEntry[]> {
+  const response = await api<{ items: RosterEntry[] }>(
+    `/queue/rosters?department_id=${encodeURIComponent(departmentId)}&roster_date=${encodeURIComponent(rosterDate)}`,
+  );
+  return response.items;
+}
+
+export function createRosterEntry(
+  payload: CreateRosterEntry,
+  idempotencyKey: string,
+): Promise<RosterEntry> {
+  return api<RosterEntry>("/queue/rosters", {
+    method: "POST",
+    idempotencyKey,
+    body: JSON.stringify(payload),
+  });
+}
+
+export function setRosterAvailability(
+  rosterId: string,
+  isAvailable: boolean,
+): Promise<RosterEntry> {
+  return api<RosterEntry>(`/queue/rosters/${rosterId}/availability`, {
+    method: "PATCH",
+    body: JSON.stringify({ is_available: isAvailable }),
+  });
 }
