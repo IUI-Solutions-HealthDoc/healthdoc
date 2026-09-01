@@ -24,11 +24,11 @@ async def _make_facility_and_department(db):
     return facility_id, department_id
 
 
-async def _make_staff(db, facility_id):
+async def _make_staff(db, facility_id, department_id=None, *, active=True, name="Test Staff"):
     staff_id = uuid.uuid4()
     db.add(User(
         id=staff_id, keycloak_sub=f"sub-{uuid.uuid4()}", username=f"u{uuid.uuid4().hex[:6]}",
-        full_name="Test Staff", facility_id=facility_id,
+        full_name=name, facility_id=facility_id, department_id=department_id, is_active=active,
     ))
     await db.flush()
     return staff_id
@@ -37,7 +37,7 @@ async def _make_staff(db, facility_id):
 # ---------------- ROSTER: CREATE ----------------
 async def test_create_roster_entry_succeeds_for_admin(db):
     facility_id, department_id = await _make_facility_and_department(db)
-    staff_id = await _make_staff(db, facility_id)
+    staff_id = await _make_staff(db, facility_id, department_id)
 
     entry = await service.create_roster_entry(
         db,
@@ -56,7 +56,7 @@ async def test_create_roster_entry_succeeds_for_admin(db):
 
 async def test_create_roster_entry_rejects_non_hod_non_admin(db):
     facility_id, department_id = await _make_facility_and_department(db)
-    staff_id = await _make_staff(db, facility_id)
+    staff_id = await _make_staff(db, facility_id, department_id)
 
     with pytest.raises(Exception) as exc_info:
         await service.create_roster_entry(
@@ -75,7 +75,7 @@ async def test_create_roster_entry_rejects_non_hod_non_admin(db):
 
 async def test_create_roster_entry_rejects_hod_wrong_department(db):
     facility_id, department_id = await _make_facility_and_department(db)
-    staff_id = await _make_staff(db, facility_id)
+    staff_id = await _make_staff(db, facility_id, department_id)
     other_department_id = uuid.uuid4()
 
     with pytest.raises(Exception) as exc_info:
@@ -132,10 +132,58 @@ async def test_create_roster_entry_nonexistent_staff_is_not_found_not_duplicate(
     assert "already has a roster entry" not in str(exc_info.value)
 
 
+async def test_create_roster_entry_rejects_staff_from_other_department(db):
+    facility_id, department_id = await _make_facility_and_department(db)
+    other_department_id = uuid.uuid4()
+    db.add(Department(
+        id=other_department_id,
+        code=f"D{uuid.uuid4().hex[:4]}",
+        name="Other Dept",
+        facility_id=facility_id,
+    ))
+    await db.flush()
+    staff_id = await _make_staff(db, facility_id, other_department_id)
+
+    with pytest.raises(Exception) as exc_info:
+        await service.create_roster_entry(
+            db, staff_id, department_id, None, "morning", date.today(),
+            facility_id, ["hod"], department_id,
+        )
+    assert "Staff member not found" in str(exc_info.value)
+
+
+async def test_roster_candidates_are_active_staff_in_the_requested_department(db):
+    facility_id, department_id = await _make_facility_and_department(db)
+    other_department_id = uuid.uuid4()
+    db.add(Department(
+        id=other_department_id,
+        code=f"D{uuid.uuid4().hex[:4]}",
+        name="Other Dept",
+        facility_id=facility_id,
+    ))
+    await db.flush()
+
+    included_id = await _make_staff(
+        db, facility_id, department_id, name="Dr Active"
+    )
+    await _make_staff(db, facility_id, department_id, active=False, name="Dr Inactive")
+    await _make_staff(db, facility_id, other_department_id, name="Dr Elsewhere")
+
+    rows = await service.list_roster_candidates(db, department_id, facility_id)
+
+    assert rows == [
+        {
+            "staff_user_id": included_id,
+            "staff_name": "Dr Active",
+            "designation": None,
+        }
+    ]
+
+
 # ---------------- ROSTER: AVAILABILITY + NOTIFY CASCADE ----------------
 async def test_availability_change_by_admin_produces_notification(db):
     facility_id, department_id = await _make_facility_and_department(db)
-    staff_id = await _make_staff(db, facility_id)
+    staff_id = await _make_staff(db, facility_id, department_id)
 
     entry = await service.create_roster_entry(
         db, staff_id, department_id, None, "morning", date.today(),
@@ -154,7 +202,7 @@ async def test_availability_change_by_admin_produces_notification(db):
 
 async def test_availability_change_by_hod_produces_no_notification(db):
     facility_id, department_id = await _make_facility_and_department(db)
-    staff_id = await _make_staff(db, facility_id)
+    staff_id = await _make_staff(db, facility_id, department_id)
 
     entry = await service.create_roster_entry(
         db, staff_id, department_id, None, "morning", date.today(),

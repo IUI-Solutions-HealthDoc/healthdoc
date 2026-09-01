@@ -34,6 +34,7 @@ import {
   listPendingApprovals,
   listPendingLabOrders,
 } from "./api";
+import { RosterManager } from "./RosterManager";
 import type {
   DepartmentWorkload,
   EmergencyEscalation,
@@ -304,28 +305,10 @@ export function HodDashboard() {
         )}
       </section>
 
-      <section className="space-y-3">
-        <h2 className="text-xl font-semibold">Roster today</h2>
-        {overview && overview.roster.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No roster entries for today.</p>
-        ) : null}
-        <ul className="space-y-2">
-          {overview?.roster.map((r) => (
-            <li key={r.roster_id} className="rounded border border-border p-3 text-sm">
-              <span className="font-medium">{r.shift}</span>
-              <span
-                className={`ml-2 rounded px-2 py-0.5 text-xs ${
-                  r.is_available
-                    ? "bg-green-100 text-green-800"
-                    : "bg-amber-100 text-amber-900"
-                }`}
-              >
-                {r.is_available ? "available" : "unavailable"}
-              </span>
-            </li>
-          ))}
-        </ul>
-      </section>
+      <RosterManager
+        departmentId={department.id}
+        today={facilityToday(user!.facility.timezone)}
+      />
     </div>
   );
 }

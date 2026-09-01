@@ -38,6 +38,7 @@ from app.queue.schemas import (
     QueueTokenListOut,
     QueueTokenOut,
     RosterAvailabilityUpdate,
+    RosterCandidateOut,
     RosterCreate,
     RosterOut,
     TokenPriorityElevate,
@@ -441,6 +442,35 @@ async def create_roster_entry(
         caller_department_id=caller_department_id,
     )
     return RosterOut.model_validate(entry).model_dump(mode="json")
+
+
+# ---------------- ROSTER: ACTIVE DEPARTMENT STAFF ----------------
+@router.get(
+    "/roster-candidates",
+    dependencies=[Depends(require_roles("hod"))],
+)
+async def list_roster_candidates(
+    department_id: uuid.UUID,
+    current_db_user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Return only the staff identity needed by the HOD roster form.
+
+    Widening the admin-only ``GET /users`` endpoint would expose facility-wide
+    staff records.  A purpose-built list keeps this read department-scoped and
+    omits email, mobile, employee id and registration details.
+    """
+    _require_hod_dashboard_department(current_db_user, department_id)
+    rows = await service.list_roster_candidates(
+        db,
+        department_id=department_id,
+        caller_facility_id=current_db_user.facility_id,
+    )
+    return {
+        "items": [
+            RosterCandidateOut(**row).model_dump(mode="json") for row in rows
+        ]
+    }
  
  
 # ---------------- ROSTER: LIST ----------------
@@ -454,6 +484,11 @@ async def list_roster(
     current_db_user: CurrentDbUser,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
+    # Reception, doctors and nurses may inspect another department's roster
+    # within their facility for cross-department flow. A department-scoped HOD
+    # may not use the same read to inspect a peer department.
+    if "hod" in current_db_user.roles:
+        _require_hod_dashboard_department(current_db_user, department_id)
     entries = await service.list_roster(db, department_id, roster_date, current_db_user.facility_id)
     return {"items": [RosterOut.model_validate(e).model_dump(mode="json") for e in entries]}
  
