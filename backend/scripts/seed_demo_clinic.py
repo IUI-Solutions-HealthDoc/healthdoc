@@ -42,6 +42,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 # model was never imported.
 import app.main  # noqa: F401
 from app.admissions.models import Admission, Bed, Ward
+from app.billing.service import create_registration_invoice
 from app.common.db import SessionLocal
 from app.opd.models import Visit
 from app.patients.models import Patient
@@ -68,11 +69,18 @@ PEOPLE = [
     ("Harpreet Singh",  "male",   71, "emergency",   "emergency: fall, head injury"),
 ]
 
-LAB_TESTS = [("Complete Blood Count", "blood"), ("Liver Function Test", "blood"),
-             ("Thyroid Profile", "blood"), ("Urine Routine", "urine"),
-             ("HbA1c", "blood"), ("Serum Electrolytes", "blood")]
-SCANS = [("XRAY", "Chest PA view"), ("CT", "CT head plain"),
-         ("USG", "Ultrasound abdomen"), ("MRI", "MRI lumbar spine")]
+#: (test_code, display name, sample). The CODE must exist in
+#: billing/pricing.py::_LAB_TEST_PRICES or the charge aggregates as an unpriced
+#: line and build_invoice skips it — the bill would silently come out short.
+LAB_TESTS = [("CBC", "Complete Blood Count", "blood"),
+             ("LFT", "Liver Function Test", "blood"),
+             ("KFT", "Kidney Function Test", "blood"),
+             ("URINE_RE", "Urine Routine", "urine"),
+             ("BLOOD_SUGAR_F", "Blood Sugar (Fasting)", "blood")]
+#: Modality is lowercase for the same reason: _RADIOLOGY_MODALITY_PRICES keys
+#: are lowercase, and a case mismatch prices at nothing.
+SCANS = [("xray", "Chest PA view"), ("ct", "CT head plain"),
+         ("usg", "Ultrasound abdomen"), ("mri", "MRI lumbar spine")]
 THEATRE = [("Upper GI endoscopy", 30), ("Arteriovenous fistula check", 45),
            ("Wound debridement", 60)]
 
@@ -89,11 +97,16 @@ async def _reset(db: AsyncSession) -> dict[str, int]:
 
     order_sub = "SELECT id FROM orders WHERE patient_id = ANY(:ids)"
     for stmt, params in [
+        (f"DELETE FROM lab_results WHERE lab_order_item_id IN (SELECT id FROM lab_order_items WHERE order_id IN ({order_sub}))", {"ids": ids}),
+        (f"DELETE FROM radiology_reports WHERE radiology_order_item_id IN (SELECT id FROM radiology_order_items WHERE order_id IN ({order_sub}))", {"ids": ids}),
         (f"DELETE FROM lab_order_items WHERE order_id IN ({order_sub})", {"ids": ids}),
         (f"DELETE FROM radiology_order_items WHERE order_id IN ({order_sub})", {"ids": ids}),
         ("DELETE FROM prescriptions WHERE patient_id = ANY(:ids)", {"ids": ids}),
         ("DELETE FROM ot_schedules WHERE patient_id = ANY(:ids)", {"ids": ids}),
         ("DELETE FROM orders WHERE patient_id = ANY(:ids)", {"ids": ids}),
+        ("DELETE FROM invoice_items WHERE invoice_id IN (SELECT id FROM invoices WHERE patient_id = ANY(:ids))", {"ids": ids}),
+        ("DELETE FROM payments WHERE invoice_id IN (SELECT id FROM invoices WHERE patient_id = ANY(:ids))", {"ids": ids}),
+        ("DELETE FROM invoices WHERE patient_id = ANY(:ids)", {"ids": ids}),
     ]:
         counts[stmt.split()[2]] = (await db.execute(text(stmt), params)).rowcount or 0
 
@@ -137,9 +150,16 @@ async def main() -> int:
             select(User).where(User.username == "dev.doctor"))).scalar_one_or_none()
         reception = (await db.execute(
             select(User).where(User.username == "dev.receptionist"))).scalar_one_or_none()
-        if not (facility and doctor and reception):
+        # Results are authored by the technicians, not the ordering doctor, so
+        # the audit trail reads the way it would in the hospital.
+        labtech = (await db.execute(
+            select(User).where(User.username == "dev.labtech"))).scalar_one_or_none()
+        radiographer = (await db.execute(
+            select(User).where(User.username == "dev.radiology"))).scalar_one_or_none()
+        if not (facility and doctor and reception and labtech and radiographer):
             print("✗ DEV001 facility or dev users missing — run `make setup` first.")
             return 1
+        labtech_id, radiographer_id = labtech.id, radiographer.id
 
         if args.reset:
             removed = await _reset(db)
@@ -198,6 +218,22 @@ async def main() -> int:
             db.add(visit)
             await db.flush()
 
+            # Billing's preview/build endpoints 404 without this row: invoices
+            # are raised at registration, never by the billing screen. Calling
+            # the real service rather than inserting an Invoice here keeps the
+            # registration line, the invoice number series and the charge-master
+            # lookup identical to a patient registered through the desk — which
+            # is the whole point, since the demo asks billing to produce a final
+            # bill from these visits.
+            await create_registration_invoice(
+                db,
+                visit_id=visit.id,
+                patient_id=patient.id,
+                facility_id=facility.id,
+                business_date=visit.visit_date.date(),
+                created_by=reception.id,
+            )
+
             row = {"patient": name, "uhid": patient.uhid, "visit": visit.visit_number,
                    "type": vtype, "story": story, "labs": 0, "scans": 0, "drugs": 0,
                    "theatre": 0, "encounters": 0, "bed": "—"}
@@ -243,15 +279,32 @@ async def main() -> int:
                 {"id": lab_order, "num": f"ORD-DEMO-L{i:04d}", "e": last_encounter,
                  "p": patient.id, "t": visit.visit_date, "f": facility.id, "u": doctor.id})
             for j in range(rng.randint(1, 3)):
-                test, sample = rng.choice(LAB_TESTS)
+                code, test, sample = rng.choice(LAB_TESTS)
+                item_id = uuid.uuid4()
+                item_status = ("placed", "accepted", "completed")[j % 3]
                 await db.execute(text(
-                    "INSERT INTO lab_order_items (id, order_id, accession_number, test_name,"
-                    " sample_type, status, created_by, created_at, updated_at)"
-                    " VALUES (:id, :o, :acc, :t, :s, :st, :u, :ts, :ts)"),
-                    {"id": uuid.uuid4(), "o": lab_order, "acc": f"LAB{i:03d}{j}", "t": test,
-                     "s": sample, "st": ("placed", "accepted", "completed")[j % 3],
+                    "INSERT INTO lab_order_items (id, order_id, accession_number, test_code,"
+                    " test_name, sample_type, status, created_by, created_at, updated_at)"
+                    " VALUES (:id, :o, :acc, :c, :t, :s, :st, :u, :ts, :ts)"),
+                    {"id": item_id, "o": lab_order, "acc": f"LAB{i:03d}{j}", "c": code,
+                     "t": test, "s": sample, "st": item_status,
                      "u": doctor.id, "ts": visit.visit_date})
                 row["labs"] += 1
+
+                # Billing charges a RESULTED test, never an ordered one
+                # (_aggregate_lab_charges requires a current final/corrected
+                # result). Only the completed items get one, so the lab tech
+                # still has live work to do on screen — and billing has
+                # something real to bill before anyone touches anything.
+                if item_status == "completed":
+                    await db.execute(text(
+                        "INSERT INTO lab_results (id, lab_order_item_id, version, is_current,"
+                        " result_data, status, created_by, created_at, updated_at)"
+                        " VALUES (:id, :i, 1, true, CAST(:d AS jsonb), 'final', :u, :ts, :ts)"),
+                        {"id": uuid.uuid4(), "i": item_id,
+                         "d": '{"value": "within reference range"}',
+                         "u": labtech_id, "ts": visit.visit_date + timedelta(hours=1)})
+                    row["lab_results"] = row.get("lab_results", 0) + 1
 
             if rng.random() < 0.6:
                 rad_order = uuid.uuid4()
@@ -263,13 +316,31 @@ async def main() -> int:
                     {"id": rad_order, "num": f"ORD-DEMO-R{i:04d}", "e": last_encounter,
                      "p": patient.id, "t": visit.visit_date, "f": facility.id, "u": doctor.id})
                 modality, scan = rng.choice(SCANS)
+                scan_id = uuid.uuid4()
+                reported = i % 2 == 0   # half reported, half still on the worklist
                 await db.execute(text(
                     "INSERT INTO radiology_order_items (id, order_id, accession_number, modality,"
                     " scan_type, status, created_by, created_at, updated_at)"
-                    " VALUES (:id, :o, :acc, :m, :s, 'scheduled', :u, :ts, :ts)"),
-                    {"id": uuid.uuid4(), "o": rad_order, "acc": f"RAD{i:03d}", "m": modality,
-                     "s": scan, "u": doctor.id, "ts": visit.visit_date})
+                    " VALUES (:id, :o, :acc, :m, :s, :st, :u, :ts, :ts)"),
+                    {"id": scan_id, "o": rad_order, "acc": f"RAD{i:03d}", "m": modality,
+                     "s": scan, "st": "released" if reported else "scheduled",
+                     "u": doctor.id, "ts": visit.visit_date})
                 row["scans"] += 1
+
+                # Same rule as pathology: billable once reported, not once
+                # ordered (_aggregate_radiology_charges requires a current
+                # final/corrected report).
+                if reported:
+                    await db.execute(text(
+                        "INSERT INTO radiology_reports (id, radiology_order_item_id, version,"
+                        " is_current, findings, impression, status, created_by,"
+                        " created_at, updated_at)"
+                        " VALUES (:id, :i, 1, true, :f, :imp, 'final', :u, :ts, :ts)"),
+                        {"id": uuid.uuid4(), "i": scan_id,
+                         "f": "No acute abnormality identified.",
+                         "imp": "Study within normal limits.",
+                         "u": radiographer_id, "ts": visit.visit_date + timedelta(hours=2)})
+                    row["rad_reports"] = row.get("rad_reports", 0) + 1
 
             for _ in range(rng.randint(1, 3)):
                 await db.execute(text(
