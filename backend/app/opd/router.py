@@ -23,6 +23,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.auth.deps import CurrentDbUser, require_roles, get_current_user
+from app.audit.actions import AuditAction
+from app.audit.service import write_audit_log
 from app.common.db import get_db
 # check_idempotency / record_idempotent_response, NOT consume_/store_. This
 # branch carried its own app/common/idempotency.py with a different API;
@@ -33,7 +35,7 @@ from app.common.idempotency import (
     check_idempotency, hash_request_body, record_idempotent_response,
 )
 from app.opd import service
-from app.opd.schemas import VisitCreate, VisitOut, VisitStatusUpdate
+from app.opd.schemas import VisitCreate, VisitOut, VisitStatusUpdate, VisitTypeUpdate
 from app.users.models import Facility
 
 router = APIRouter(prefix="/visits", tags=["visits"])
@@ -129,6 +131,88 @@ async def get_visit(
     if visit is None or visit.facility_id != current_db_user.facility_id:
         raise HTTPException(status_code=404, detail="Visit not found")
     return visit
+
+
+@router.patch(
+    "/{visit_id}/type",
+    response_model=VisitOut,
+    dependencies=[Depends(require_roles("receptionist", "doctor", "admin"))],
+    summary="Reclassify a visit (OPD / IPD / day care / emergency / teleconsult)",
+)
+async def update_visit_type(
+    visit_id: UUID,
+    payload: VisitTypeUpdate,
+    current_db_user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+    if_match: str | None = Header(default=None, alias="If-Match"),
+):
+    """Change what kind of episode of care this visit is.
+
+    Both the front desk and the clinician may do this: reception books what the
+    patient asked for, and the doctor is the one who discovers it should have
+    been an admission. Restricting it to either alone means the correction
+    waits for someone who is not in the room.
+
+    Same If-Match concurrency rule as the status transition beside it — two
+    people reclassifying the same visit must not silently overwrite each other.
+    """
+    visit = await service.get_visit(db, visit_id)
+    if visit is None or visit.facility_id != current_db_user.facility_id:
+        raise HTTPException(status_code=404, detail="Visit not found")
+
+    if if_match is None:
+        raise HTTPException(
+            status_code=428,
+            detail={"code": "if_match_required", "message": "If-Match header is required"},
+        )
+    try:
+        expected_version = int(if_match)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "invalid_if_match", "message": "If-Match must be an integer row_version"},
+        )
+    if expected_version != visit.row_version:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "stale_write",
+                "message": "Visit was modified by another user",
+                "current": VisitOut.model_validate(visit).model_dump(mode="json"),
+            },
+        )
+
+    try:
+        visit, previous = await service.change_visit_type(
+            db,
+            visit=visit,
+            new_type=payload.visit_type,
+            reason=payload.reason,
+            updated_by=current_db_user.id,
+        )
+    except service.InvalidVisitTypeChange as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "invalid_visit_type_change", "message": str(exc)},
+        )
+
+    # Reclassification moves money and bed counts, so it is audited explicitly
+    # rather than left to the listener — `reason` is request-level intent the
+    # column diff cannot see.
+    await write_audit_log(
+        db,
+        facility_id=visit.facility_id,
+        action=AuditAction.UPDATE,
+        resource_type="visits",
+        user_id=current_db_user.id,
+        resource_id=visit.id,
+        patient_id=visit.patient_id,
+        visit_id=visit.id,
+        old_value={"visit_type": previous},
+        new_value={"visit_type": visit.visit_type},
+        reason=payload.reason,
+    )
+    return VisitOut.model_validate(visit)
 
 
 @router.patch(
