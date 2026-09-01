@@ -6,6 +6,7 @@ import { canRoleAccessPath, getDefaultRouteForRole, isPublicPath } from "@/lib/a
 import { useAuth } from "@/providers/auth-provider";
 import Sidebar from "./Sidebar";
 import Navbar from "./Navbar";
+import { HealthDocBrand } from "./HealthDocBrand";
 
 export default function MainLayout({
   children,
@@ -51,8 +52,9 @@ export default function MainLayout({
 
   if (isLoading || !isAuthenticated || (user?.role && !allowed)) {
     return (
-      <div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">
-        Loading your workspace…
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 text-sm text-muted-foreground">
+        <HealthDocBrand size={64} showName={false} preload />
+        <span>Loading your workspace…</span>
       </div>
     );
   }
@@ -61,6 +63,7 @@ export default function MainLayout({
     return (
       <div className="flex min-h-screen items-center justify-center px-4">
         <div className="surface-card max-w-lg p-8 text-center">
+          <HealthDocBrand size={64} className="mb-5 justify-center" subtitle="HMIS" />
           <h1 className="text-xl font-semibold">No HealthDoc role assigned</h1>
           <p className="mt-3 text-sm text-muted-foreground">
             Your sign-in is valid, but no HealthDoc workspace has been assigned.

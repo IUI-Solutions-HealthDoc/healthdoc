@@ -85,3 +85,11 @@ def test_direct_access_grants_are_disabled_on_the_public_client(realm):
     assert frontend.get("directAccessGrantsEnabled") is False
     assert frontend.get("publicClient") is True
     assert frontend["attributes"]["pkce.code.challenge.method"] == "S256"
+
+
+def test_healthdoc_login_theme_is_selected_and_shipped(realm):
+    assert realm.get("loginTheme") == "healthdoc"
+    theme = REALM_PATH.parent / "themes" / "healthdoc" / "login"
+    assert (theme / "theme.properties").is_file()
+    assert (theme / "resources" / "css" / "login.css").is_file()
+    assert (theme / "resources" / "img" / "healthdoc-logo.png").is_file()

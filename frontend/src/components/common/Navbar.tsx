@@ -4,6 +4,7 @@ import { Menu, LogOut, User } from "lucide-react";
 import { meridian } from "@/styles/theme";
 import { REALM_ROLE_LABELS } from "@/features/admin/constants";
 import { useAuth } from "@/providers/auth-provider";
+import { HealthDocBrand } from "./HealthDocBrand";
 
 interface NavbarProps {
   open: boolean;
@@ -38,12 +39,13 @@ export default function Navbar({ open, setOpen }: NavbarProps) {
           <Menu size={22} />
         </button>
 
-        <p
-          className="text-xl font-semibold tracking-tight"
-          style={{ color: meridian.brandPrimary }}
-        >
-          HealthDoc HMIS
-        </p>
+        <HealthDocBrand
+          size={40}
+          preload
+          subtitle="HMIS"
+          nameClassName="text-lg"
+          className="text-[#001F54]"
+        />
       </div>
 
       <div className="flex items-center gap-4" style={{ color: meridian.textSecondary }}>

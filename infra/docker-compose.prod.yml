@@ -78,7 +78,9 @@ services:
       KC_PROXY_HEADERS: xforwarded
       KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:?required}
       KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?required}
-    volumes: [keycloak-import:/opt/keycloak/data/import:ro]
+    volumes:
+      - keycloak-import:/opt/keycloak/data/import:ro
+      - ./keycloak/themes/healthdoc:/opt/keycloak/themes/healthdoc:ro
     depends_on:
       keycloak-db: {condition: service_healthy}
       realm-init: {condition: service_completed_successfully}
