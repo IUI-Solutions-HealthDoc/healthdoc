@@ -25,7 +25,7 @@ App at https://localhost (self-signed cert). All thirteen dev accounts use
 ### Tests
 
 ```bash
-make test-pg                       # THE GATE — host venv, real Postgres, ~1077
+make test-pg                       # THE GATE — host venv, real Postgres, ~1112
 make test p=tests/foo.py k=name    # in-container, quick, skips DB tests
 make contract                      # every frontend API call exists in OpenAPI
 make audit-deps                    # pip-audit + npm audit, must be zero
@@ -168,7 +168,7 @@ the console shows `[HMR] connected`.
 
 ## Current state
 
-- 1077 tests passing; `pip-audit` and `npm audit` both clean.
+- 1112 tests passing; `pip-audit` and `npm audit` both clean.
 - WASA cybersecurity track: **all findings closed**, including M3 — the CSP now
   carries a per-request nonce from `frontend/src/proxy.ts` instead of
   `'unsafe-inline'`, and every route renders `force-dynamic` because a nonce
@@ -186,14 +186,39 @@ the console shows `[HMR] connected`.
 
 ### Known gaps, stated plainly
 
-**No ABDM call has ever reached the sandbox.** M1/M2/M3 are self-consistent —
-our HIP encrypts, our HIU decrypts, 102 tests across eight files — and that is
-not the same as ABDM agreeing. All fourteen `abdm_path_*` settings in
-`app/common/config.py` are documented v3 shapes, unconfirmed. `_VERIFY_PATH` in `identity/router.py` is still
-deliberately `None`. Callback authentication is a shared secret, not ABDM's
-signature scheme, because the scheme needs the sandbox to confirm before it can
-be written without guessing. Credentials must never be committed and CI must
-never hold them; the client tests are fully mocked and stay that way.
+**ABDM: the gateway now answers, and the path guesses were all wrong.**
+Corrected on 2026-09-01 from the official v3 Postman collections ABDM support
+supplied. Three things are now confirmed against the live sandbox rather than
+documented-and-hoped:
+
+- **The 403 was never a missing subscription.** `/gateway/v1/bridges/*` — the
+  steps in NHA's onboarding email — answers 403 `900908` for a sandbox client
+  because it is a retired API version, not because the client lacks an
+  entitlement. The v3 equivalents (`/api/hiecm/gateway/v3/bridge-services`,
+  `/bridge-service`, `/bridge/url`) answer **200 with the same credentials and
+  the same headers**. A support ticket was raised on the wrong diagnosis; the
+  reply "use the V3 Postman collection" was the whole answer.
+- **ABDM segments v3 by capability, not by one base.** We assumed
+  `/api/hiecm/v3/...` because sessions live under `/api/hiecm/gateway/v3/`.
+  All ten M2/M3 paths built on that assumption returned 404. The real segments
+  are `gateway`, `hip`, `user-initiated-linking`, `consent`, `data-flow` and
+  `patient-share`. Every corrected path was verified by GET → 405 (route
+  exists, wrong method) while every old one returned 404.
+- **The bridge URL is self-service.** `PATCH /api/hiecm/gateway/v3/bridge/url`
+  returns 202 and `SBXID_053401` now points at `https://abdm.healthdoc.world`.
+  Asking NHA to register it was unnecessary.
+
+`tests/integrations/test_abdm_gateway_paths.py` pins the shape so a revert to
+either wrong form fails the suite — nothing in the suite noticed when all ten
+paths were wrong, which is exactly how they stayed wrong.
+
+Still open: the bridge has **no services registered** (`services: []`), so no
+HIP or HIU identity exists yet on the gateway;
+`PUT /api/hiecm/gateway/v3/bridge-service` is the route and needs a serviceId
+decision. `_VERIFY_PATH` in `identity/router.py` is still deliberately `None`.
+Callback authentication remains a shared secret rather than ABDM's signature
+scheme. Credentials must never be committed and CI must never hold them; the
+client tests are fully mocked and stay that way.
 
 **Audit coverage is 17 of 98 models**, up from 8. `assert_audit_coverage()`
 still exists and is still never called, with `AUDITABLE_MODULE_PREFIXES` empty

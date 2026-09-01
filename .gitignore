@@ -49,3 +49,10 @@ AGENTS.md
 # Root-anchored: a bare `backups/` would also ignore any nested directory of
 # that name anywhere in the tree.
 /backups/
+
+# Vendor reference, not our source: the official ABDM v3 Postman collections
+# (~10 MB) downloaded from the NHA support ticket. They carry ABDM's own
+# placeholder client-id/secret fields, so they stay out of the repo. Re-download
+# from the sandbox portal if needed; the paths they confirmed are recorded in
+# app/common/config.py and pinned by tests/integrations/test_abdm_gateway_paths.py.
+Postman collections from ABDM/
