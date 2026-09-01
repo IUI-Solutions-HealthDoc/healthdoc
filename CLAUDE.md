@@ -173,10 +173,19 @@ the console shows `[HMR] connected`.
   carries a per-request nonce from `frontend/src/proxy.ts` instead of
   `'unsafe-inline'`, and every route renders `force-dynamic` because a nonce
   cannot be baked into prerendered HTML.
-- WASA ABDM track: M1 (ABHA identity), M2 (HIP) and M3 (HIU) are **built and
-  tested** — 8 tables, ECDH/AES-GCM transfer crypto, fail-closed callback auth.
-  `integrations/abdm/consent/` and `nhcx/` remain empty; the consent artefact
-  handling lives in `hip/` and `hiu/`, and NHCX is out of scope for this audit.
+- WASA ABDM track: **M1 is complete and reaching the sandbox. M2 and M3 have
+  no outbound leg at all** — say it that way round, because "built and tested,
+  8 tables, ECDH/AES-GCM transfer crypto, 102 tests" was true and still left
+  the wrong impression. What exists for M2/M3 is the receiving half: tables,
+  local state services, callback routes that fail closed, and working crypto.
+  What does not exist is any code that calls the gateway. Checked on
+  2026-09-01: the ten `abdm_path_hip_*` / `abdm_path_hiu_*` settings are
+  referenced nowhere outside `config.py`, and the only `client.request` calls
+  in the whole package are M1's. A HIP that never posts `link/carecontext` and
+  an HIU that never posts `consent/request/init` cannot pass certification, no
+  matter how good the halves are. `integrations/abdm/consent/` and `nhcx/`
+  remain empty; consent artefact handling lives in `hip/` and `hiu/`, and NHCX
+  is out of scope for this audit.
 - Frontend is production-ready: the `NEXT_PUBLIC_AUTH_MODE=dev` role picker is
   deleted, and `.env.production.example` carries the `NEXT_PUBLIC_*` build args
   the image needs.
