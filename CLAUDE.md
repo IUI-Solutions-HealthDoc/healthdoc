@@ -25,7 +25,7 @@ App at https://localhost (self-signed cert). All thirteen dev accounts use
 ### Tests
 
 ```bash
-make test-pg                       # THE GATE — host venv, real Postgres, ~1112
+make test-pg                       # THE GATE — host venv, real Postgres, ~1119
 make test p=tests/foo.py k=name    # in-container, quick, skips DB tests
 make contract                      # every frontend API call exists in OpenAPI
 make audit-deps                    # pip-audit + npm audit, must be zero
@@ -168,7 +168,7 @@ the console shows `[HMR] connected`.
 
 ## Current state
 
-- 1112 tests passing; `pip-audit` and `npm audit` both clean.
+- 1119 tests passing; `pip-audit` and `npm audit` both clean.
 - WASA cybersecurity track: **all findings closed**, including M3 — the CSP now
   carries a per-request nonce from `frontend/src/proxy.ts` instead of
   `'unsafe-inline'`, and every route renders `force-dynamic` because a nonce
