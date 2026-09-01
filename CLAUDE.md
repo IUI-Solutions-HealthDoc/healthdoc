@@ -25,7 +25,7 @@ App at https://localhost (self-signed cert). All thirteen dev accounts use
 ### Tests
 
 ```bash
-make test-pg                       # THE GATE — host venv, real Postgres, ~1049
+make test-pg                       # THE GATE — host venv, real Postgres, ~1077
 make test p=tests/foo.py k=name    # in-container, quick, skips DB tests
 make contract                      # every frontend API call exists in OpenAPI
 make audit-deps                    # pip-audit + npm audit, must be zero
@@ -134,11 +134,41 @@ column.** The seed's tariff uses `WHERE NOT EXISTS` for this reason.
 only in migrations are invisible to it. Use `make test-pg` for anything that
 depends on them.
 
+**Serving the app on a second address breaks it in three independent places,
+each failing silently.** Reaching the stack over a LAN IP for a multi-PC demo
+needed all three fixed; any one left undone looks like "login is broken".
+
+1. *`NEXT_PUBLIC_*` pinned to an absolute host.* These are origin-relative by
+   design (`API_BASE_URL` defaults to `/api/v1`). Setting them to
+   `https://<ip>/...` makes the OTHER origin cross-origin, and CSP
+   `default-src 'self'` then blocks the silent-SSO iframe. keycloak-js waits
+   forever for a `postMessage` that can never arrive, so `init()` never
+   settles, `isLoading` stays true, and the sign-in button sits disabled
+   reading "Preparing sign-in…". Keep them relative — one build then serves
+   localhost, a LAN address and a tunnel hostname alike.
+2. *Next's dev server rejects non-localhost origins*, HMR websocket included.
+   The dev runtime bootstraps through that socket, so the page never hydrates:
+   server HTML renders, no effect ever runs, and every control is frozen in its
+   initial state. Same visible symptom as (1), completely different cause. Fix
+   is `allowedDevOrigins` in `next.config.mjs`, wired to `ALLOWED_DEV_ORIGINS`.
+   Production builds have no HMR and no origin check.
+3. *Keycloak derives `iss` from the Host header it was reached on.* The same
+   realm mints `https://localhost/...` for a developer and `https://<ip>/...`
+   for a ward PC, so a single pinned `JWT_ISSUER` 401s every call made from the
+   other address — after a login that appeared to succeed. `JWT_ADDITIONAL_ISSUERS`
+   takes an explicit comma-separated allowlist. This is safe because signatures
+   verify against `JWT_JWKS_URL`, a fixed internal endpoint that does not depend
+   on the token; it is an allowlist and there is no wildcard.
+
+Debugging note: (1) and (2) present identically. What separates them is whether
+React attached — check for a `__react*` key on a rendered button, and whether
+the console shows `[HMR] connected`.
+
 ---
 
 ## Current state
 
-- 1049 tests passing; `pip-audit` and `npm audit` both clean.
+- 1077 tests passing; `pip-audit` and `npm audit` both clean.
 - WASA cybersecurity track: **all findings closed**, including M3 — the CSP now
   carries a per-request nonce from `frontend/src/proxy.ts` instead of
   `'unsafe-inline'`, and every route renders `force-dynamic` because a nonce

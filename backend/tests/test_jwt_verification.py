@@ -78,6 +78,9 @@ def _wire(monkeypatch, jwks):
     class _S:
         jwt_issuer = ISSUER
         jwt_audience = None
+        # Mirrors Settings. A stub that omits a field the verifier reads does
+        # not "default" it — it raises, which is how this drift was caught.
+        jwt_additional_issuers = ""
 
     monkeypatch.setattr(deps, "get_settings", lambda: _S())
     return _S
@@ -183,6 +186,48 @@ async def test_a_foreign_issuer_is_refused(keypair):
 
 
 @pytest.mark.asyncio
+async def test_a_second_configured_issuer_is_accepted(keypair, monkeypatch):
+    """The same realm reached over a second hostname must still authenticate.
+
+    Keycloak builds `iss` from the Host header, so a ward PC on the LAN gets a
+    different issuer than a developer on localhost. Without this the demo fails
+    in its most confusing form: login succeeds, then every call 401s.
+    """
+    lan = "https://192.168.7.106/auth/realms/healthdoc"
+
+    class _S:
+        jwt_issuer = ISSUER
+        jwt_audience = None
+        jwt_additional_issuers = lan
+
+    monkeypatch.setattr(deps, "get_settings", lambda: _S())
+
+    accepted = await _call(_mint(keypair[0], iss=lan))
+    assert accepted.sub == "user-sub-1"
+    # The primary issuer keeps working — this widens the set, it does not move it.
+    assert (await _call(_mint(keypair[0], iss=ISSUER))).sub == "user-sub-1"
+
+
+@pytest.mark.asyncio
+async def test_an_unlisted_issuer_is_still_refused_when_others_are_configured(
+    keypair, monkeypatch
+):
+    """Configuring a second issuer must not degrade into accepting any issuer."""
+    from fastapi import HTTPException
+
+    class _S:
+        jwt_issuer = ISSUER
+        jwt_audience = None
+        jwt_additional_issuers = "https://192.168.7.106/auth/realms/healthdoc"
+
+    monkeypatch.setattr(deps, "get_settings", lambda: _S())
+
+    with pytest.raises(HTTPException) as caught:
+        await _call(_mint(keypair[0], iss="https://evil.test/realms/healthdoc"))
+    assert caught.value.status_code == 401
+
+
+@pytest.mark.asyncio
 async def test_the_401_body_does_not_say_WHY(keypair):
     """The old message was f"Invalid token: {exc}".
 
@@ -211,6 +256,7 @@ async def test_audience_is_enforced_when_configured(monkeypatch, keypair):
     class _S:
         jwt_issuer = ISSUER
         jwt_audience = "healthdoc-backend"
+        jwt_additional_issuers = ""
 
     monkeypatch.setattr(deps, "get_settings", lambda: _S())
 
