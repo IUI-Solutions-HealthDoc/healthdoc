@@ -174,6 +174,7 @@ do not merge out of order.**
 | 0053 | grievance_counters | grievance_counters; ALTER patient_grievances: grievance_number varchar(50) | B7 (#451) — atomic per-facility/day server numbering without truncating a permitted 20-character facility code. |
 | 0054 | inventory_reservations | ALTER inventory_batches: reserved_quantity numeric(12,2) | B6 (#452) — durable source-batch reservation between transfer dispatch and receipt; every stock-out path uses quantity minus reservations. |
 | 0055 | abdm_hip_hiu | abdm_care_contexts; abdm_care_context_links; abdm_hip_consent_artefacts; abdm_hip_hi_requests; abdm_consent_requests; abdm_hiu_consent_artefacts; abdm_hiu_hi_requests; abdm_received_bundles | ABDM M2 (HIP) and M3 (HIU). Four HIP tables record what we hold, who may see it and what we handed over; four HIU tables record what we asked for, on whose authority and what came back. `abdm_hiu_hi_requests.private_key_encrypted` is the one persisted private key in the integration — AES-GCM, bound to its own row, cleared on completion — because the HIU half of the ECDH exchange is asynchronous and must outlive the request that opened it. |
+| 0056 | day_care_visit_type | ALTER visits: visit_type CHECK gains `day_care` | OPD/day-care workflow — day care is bed-occupying like IPD, while admission and bed allocation remain separate clinical actions. |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.

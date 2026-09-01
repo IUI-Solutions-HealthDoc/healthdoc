@@ -154,7 +154,8 @@ export function StartVisit({ patient }: { patient: VisitPatient }) {
         )}
       </label>
       <p className="text-sm text-muted-foreground">
-        This counter flow creates an OPD visit. Use the IPD workspace for admission after clinical review.
+        This counter flow creates the selected visit type. For IPD or day care,
+        use the IPD workspace after clinical review to assign a ward and bed.
       </p>
 
       {visit ? (

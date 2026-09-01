@@ -10,11 +10,14 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
+from unittest.mock import AsyncMock
 
 import pytest
 
 from app.common.enums import AdmissionStatus, VisitType
+from app.opd import router as opd_router
 from app.opd import service
+from app.opd.schemas import VisitTypeUpdate
 
 pytestmark = pytest.mark.asyncio
 
@@ -37,8 +40,8 @@ async def bedded(db, seed):
     bed-strand tests below build the rest here rather than widening a fixture
     every other module depends on.
     """
-    from app.patients.models import Patient
     from app.admissions.models import Bed, Ward
+    from app.patients.models import Patient
 
     dept, room, doctor = seed
     patient = Patient(
@@ -79,6 +82,49 @@ async def test_day_care_is_a_valid_target(db):
     visit = _Visit("opd")
     updated, _ = await _change(db, visit, "day_care")
     assert updated.visit_type == "day_care"
+
+
+async def test_route_commits_reclassification_and_audit(db, bedded, monkeypatch):
+    """The handler owns the transaction; a service flush is not persistence.
+
+    This specifically guards the review defect where the endpoint returned a
+    successful response but request teardown rolled back both the visit change
+    and its audit row because no commit occurred.
+    """
+    from app.opd.models import Visit
+
+    visit = Visit(
+        id=uuid.uuid4(),
+        patient_id=bedded["patient_id"],
+        facility_id=bedded["facility_id"],
+        department_id=bedded["department_id"],
+        visit_type="opd",
+        visit_number=f"VST-C-{uuid.uuid4().hex[:6]}",
+        status="registered",
+        visit_date=datetime(2026, 9, 1, 9, tzinfo=UTC),
+        created_by=bedded["user_id"],
+    )
+    db.add(visit)
+    await db.flush()
+
+    commit_spy = AsyncMock(wraps=db.commit)
+    monkeypatch.setattr(db, "commit", commit_spy)
+    caller = type(
+        "Caller",
+        (),
+        {"id": bedded["user_id"], "facility_id": bedded["facility_id"]},
+    )()
+
+    result = await opd_router.update_visit_type(
+        visit.id,
+        VisitTypeUpdate(visit_type="day_care", reason="scheduled day procedure"),
+        caller,
+        db=db,
+        if_match=str(visit.row_version),
+    )
+
+    assert result.visit_type == "day_care"
+    commit_spy.assert_awaited_once()
 
 
 async def test_day_care_occupies_a_bed():

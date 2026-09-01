@@ -12,8 +12,10 @@ mkdir -p "$DIR"
 # self-signed warning: a different, scarier dialog that some managed browsers
 # refuse to let the user click through at all.
 #
-# Override with LAN_IP=... when the address is not on en0.
-LAN_IP="${LAN_IP:-$(ipconfig getifaddr en0 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}')}"
+# Override with LAN_IP=... when the address is not on en0. Autodetection is
+# best-effort: on hosts with neither macOS ipconfig nor GNU hostname -I, a
+# localhost-only certificate is still a valid development fallback.
+LAN_IP="${LAN_IP:-$(ipconfig getifaddr en0 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}' || true)}"
 SAN="DNS:localhost,IP:127.0.0.1"
 if [[ -n "${LAN_IP:-}" ]]; then
   SAN="$SAN,IP:$LAN_IP"
