@@ -1,5 +1,8 @@
 {
   "realm": "healthdoc",
+  "displayName": "HealthDoc HMIS",
+  "displayNameHtml": "HealthDoc HMIS",
+  "loginTheme": "healthdoc",
   "enabled": true,
   "sslRequired": "external",
   "registrationAllowed": false,

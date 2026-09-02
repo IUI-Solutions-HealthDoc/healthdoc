@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 
+import { HealthDocBrand } from "@/components/common/HealthDocBrand";
 import { useQueueStream } from "./useQueueStream";
 import type { NowServing, StreamStatus } from "./types";
 
@@ -98,10 +99,20 @@ export function QueueDisplayBoard({ departmentId }: { departmentId: string | nul
         gap: "clamp(1.5rem, 3vw, 3rem)",
       }}
     >
-      <header style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: "1rem", flexWrap: "wrap" }}>
-        <h1 style={{ margin: 0, fontSize: "clamp(1.5rem, 3vw, 3rem)", fontWeight: 700 }}>
-          Now serving
-        </h1>
+      <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1rem", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "clamp(1rem, 2vw, 2rem)", flexWrap: "wrap" }}>
+          <HealthDocBrand
+            size={64}
+            preload
+            subtitle="HMIS"
+            nameClassName="text-xl sm:text-2xl"
+            className="text-white"
+            imageClassName="bg-white"
+          />
+          <h1 style={{ margin: 0, fontSize: "clamp(1.5rem, 3vw, 3rem)", fontWeight: 700 }}>
+            Now serving
+          </h1>
+        </div>
 
         {/* Staff need to know the board is stale, and they cannot open a
             console on a wall-mounted TV. */}

@@ -40,7 +40,10 @@ const KNOWN_ROLES = new Set<string>(Object.values(ROLES));
  * `/` is here because the root page decides where to send you once the client
  * knows the real role. `/silent-check-sso.html` must never be redirected —
  * Keycloak loads it in a hidden iframe and a 307 would break silent SSO for
- * every already-authenticated user. The rest come from `isPublicPath`, shared
+ * every already-authenticated user. The logo and manifest are public browser
+ * assets; redirecting the logo makes Next's image optimiser receive the login
+ * page instead of a PNG and render a broken image. The rest come from
+ * `isPublicPath`, shared
  * with MainLayout so the edge and the client cannot disagree — notably
  * `/queue-display`, the waiting-room wall screen, which is unauthenticated by
  * design on both sides of the stack.
@@ -49,6 +52,8 @@ function needsNoSession(pathname: string): boolean {
   return (
     pathname === "/" ||
     pathname === "/silent-check-sso.html" ||
+    pathname === "/healthdoc-logo.png" ||
+    pathname === "/manifest.webmanifest" ||
     isPublicPath(pathname)
   );
 }

@@ -1,0 +1,18 @@
+/* Keep Keycloak's maintained login templates and apply only HealthDoc branding. */
+:root {
+  --pf-v5-global--primary-color--100: #001f54;
+  --pf-v5-global--primary-color--200: #003b82;
+}
+
+#kc-header-wrapper {
+  background: url("../img/healthdoc-logo.png") center top / 88px 88px no-repeat;
+  color: #001f54;
+  padding-top: 100px;
+  text-transform: none;
+}
+
+.pf-v5-c-login__main,
+.login-pf-page .card-pf {
+  border-radius: 16px;
+}
+

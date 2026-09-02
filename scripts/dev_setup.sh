@@ -175,6 +175,10 @@ kc() {
 kc config credentials --server http://localhost:8080/auth --realm master \
   --user "$KEYCLOAK_ADMIN" --password "$KEYCLOAK_ADMIN_PASSWORD" >/dev/null
 
+# --import-realm skips a realm that already exists. Apply the versioned theme
+# explicitly so an existing development database receives branding updates too.
+kc update realms/healthdoc -s loginTheme=healthdoc >/dev/null
+
 ensure_keycloak_user() {
   local username="$1" first_name="$2" last_name="$3" roles="$4" subject role assigned
   subject=$(kc get users -r healthdoc -q exact=true -q username="$username" \
