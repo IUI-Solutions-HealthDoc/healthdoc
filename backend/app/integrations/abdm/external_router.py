@@ -22,9 +22,9 @@ from app.common.config import get_settings
 from app.common.db import get_db
 from app.integrations.abdm.callback_auth import (
     GatewayCallback,
-    verify_hip_gateway_callback,
-    verify_hiu_gateway_callback,
-    verify_profile_gateway_callback,
+    hip_gateway_callback,
+    hiu_gateway_callback,
+    profile_gateway_callback,
 )
 from app.integrations.abdm.client import AbdmError
 from app.integrations.abdm.contracts_v3 import (
@@ -70,9 +70,9 @@ log = logging.getLogger("healthdoc.abdm.callbacks")
 router = APIRouter(tags=["abdm-v3-callbacks"], include_in_schema=False)
 _PLACEHOLDER = "change-me"
 DbSession = Annotated[AsyncSession, Depends(get_db)]
-HipCallback = Annotated[GatewayCallback, Depends(verify_hip_gateway_callback)]
-HiuCallback = Annotated[GatewayCallback, Depends(verify_hiu_gateway_callback)]
-ProfileCallback = Annotated[GatewayCallback, Depends(verify_profile_gateway_callback)]
+HipCallback = Annotated[GatewayCallback, Depends(hip_gateway_callback)]
+HiuCallback = Annotated[GatewayCallback, Depends(hiu_gateway_callback)]
+ProfileCallback = Annotated[GatewayCallback, Depends(profile_gateway_callback)]
 
 
 def _accepted() -> Response:

@@ -238,6 +238,14 @@ class _ReplayStore:
         self.keys.add(key)
         return True
 
+    async def delete(self, *keys):
+        removed = 0
+        for key in keys:
+            if key in self.keys:
+                self.keys.discard(key)
+                removed += 1
+        return removed
+
 
 def _gateway_headers(*, hip=True, cm=True):
     headers = {
@@ -292,3 +300,44 @@ async def test_gateway_retry_is_marked_for_handler_level_idempotency(gateway_set
     second = await callback_auth.verify_hip_gateway_callback(_request(**headers))
     assert first.replayed is False
     assert second.replayed is True
+
+
+async def test_a_failed_handler_releases_the_replay_lock(gateway_settings):
+    """F2: a handler that fails after the header check must not leave its replay
+    lock standing. The gateway's retry carries the same REQUEST-ID; with the
+    lock still held it was answered 202 and the work was silently dropped —
+    which for a consent grant means the grant took effect nowhere."""
+    headers = _gateway_headers()
+
+    gen = callback_auth.hip_gateway_callback(_request(**headers))
+    first = await gen.__anext__()
+    assert first.replayed is False
+    assert first.replay_key
+
+    # The handler raises — e.g. the outbound acknowledgement 502'd and get_db
+    # rolled the row back. The dependency releases the lock on its way out.
+    with pytest.raises(RuntimeError):
+        await gen.athrow(RuntimeError("acknowledgement failed"))
+
+    # The gateway retries with the same REQUEST-ID. It must run for real now.
+    retry_gen = callback_auth.hip_gateway_callback(_request(**headers))
+    retry = await retry_gen.__anext__()
+    assert retry.replayed is False, "the failed handler's replay lock was not released"
+    await retry_gen.aclose()
+
+
+async def test_a_successful_handler_keeps_the_lock_to_coalesce_a_retry(gateway_settings):
+    """The happy path still coalesces: a retry within the TTL after a handler
+    that returned normally is marked replayed, so the DB guard handles it rather
+    than a second full run."""
+    headers = _gateway_headers()
+
+    gen = callback_auth.hip_gateway_callback(_request(**headers))
+    first = await gen.__anext__()
+    assert first.replayed is False
+    await gen.aclose()  # normal exit (GeneratorExit, not Exception) → lock kept
+
+    retry_gen = callback_auth.hip_gateway_callback(_request(**headers))
+    retry = await retry_gen.__anext__()
+    assert retry.replayed is True
+    await retry_gen.aclose()
