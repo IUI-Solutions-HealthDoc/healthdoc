@@ -43,7 +43,11 @@ OFFICIAL_CALLBACK_PATHS = {
 
 
 def test_every_published_v3_callback_is_mounted_at_the_root():
-    paths = {route.path for route in app.routes}
+    # Newer Starlette versions expose internal ``_IncludedRouter`` markers in
+    # ``app.routes`` alongside actual HTTP routes.  Those markers deliberately
+    # have no path; only path-bearing routes belong in this public-surface
+    # assertion.
+    paths = {path for route in app.routes if (path := getattr(route, "path", None))}
     assert OFFICIAL_CALLBACK_PATHS <= paths
     assert (
         not {f"/api/v1{path}" for path in OFFICIAL_CALLBACK_PATHS} & paths
