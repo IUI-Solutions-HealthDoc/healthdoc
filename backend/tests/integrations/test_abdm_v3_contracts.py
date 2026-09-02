@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from app.integrations.abdm.contracts_v3 import (
@@ -43,15 +44,15 @@ OFFICIAL_CALLBACK_PATHS = {
 
 
 def test_every_published_v3_callback_is_mounted_at_the_root():
-    # Newer Starlette versions expose internal ``_IncludedRouter`` markers in
-    # ``app.routes`` alongside actual HTTP routes.  Those markers deliberately
-    # have no path; only path-bearing routes belong in this public-surface
-    # assertion.
-    paths = {path for route in app.routes if (path := getattr(route, "path", None))}
-    assert OFFICIAL_CALLBACK_PATHS <= paths
-    assert (
-        not {f"/api/v1{path}" for path in OFFICIAL_CALLBACK_PATHS} & paths
-    ), "official callbacks were accidentally mounted below /api/v1"
+    # Exercise routing through ASGI instead of inspecting FastAPI internals.
+    # Starlette 1.6 keeps included routers as nested markers while older
+    # releases flatten them, and these public callbacks are intentionally
+    # excluded from OpenAPI.  An empty body should be rejected by validation or
+    # callback authentication; only a missing route may answer 404.
+    client = TestClient(app)
+    for path in sorted(OFFICIAL_CALLBACK_PATHS):
+        assert client.post(path, json={}).status_code != 404, path
+        assert client.post(f"/api/v1{path}", json={}).status_code == 404, path
 
 
 def test_scan_and_share_parses_the_published_nested_profile():
