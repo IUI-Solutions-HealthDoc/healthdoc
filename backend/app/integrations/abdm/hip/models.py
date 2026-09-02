@@ -66,9 +66,12 @@ class AbdmCareContext(Base, UUIDPk, Timestamps, Blame):
 
     __table_args__ = (
         UniqueConstraint("patient_id", "reference", name="uq_abdm_care_context_patient_reference"),
+        # Narrowed to the types fhir/builder.py can actually populate — see the
+        # HI_TYPES note in hip/gateway.py. Migration 0059 narrows the DB CHECK to
+        # match; the drift test keeps builder, validator and CHECK in agreement.
         CheckConstraint(
             "hi_type IN ('OPConsultation','Prescription','DiagnosticReport',"
-            "'DischargeSummary','ImmunizationRecord','HealthDocumentRecord','WellnessRecord')",
+            "'DischargeSummary','WellnessRecord')",
             name="abdm_care_context_hi_type",
         ),
         Index("ix_abdm_care_contexts_facility_id", "facility_id"),

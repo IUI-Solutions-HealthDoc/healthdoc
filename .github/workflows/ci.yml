@@ -175,8 +175,15 @@ jobs:
           done
           echo "MinIO did not become ready — logs follow:"; docker logs minio; exit 1
 
-      - name: Lint (style only — does not block)
-        run: ruff check . || true
+      # Non-blocking by intent, but expressed with GitHub's own
+      # `continue-on-error` rather than `|| true`. The shell trick is the exact
+      # vacuous-gate anti-pattern this file's header forbids: it exits 0, so the
+      # step shows a green tick even when ruff found problems, hiding them. With
+      # continue-on-error the step reports its real status (a visible ⚠ on
+      # failure) while still not blocking the build.
+      - name: Lint (style only — reported, does not block)
+        run: ruff check .
+        continue-on-error: true
 
       - name: Import check (the app must actually start)
         run: python -c "import app.main; print('app imports OK')"

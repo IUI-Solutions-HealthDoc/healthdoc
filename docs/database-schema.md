@@ -177,6 +177,7 @@ do not merge out of order.**
 | 0056 | day_care_visit_type | ALTER visits: visit_type CHECK gains `day_care` | OPD/day-care workflow — day care is bed-occupying like IPD, while admission and bed allocation remain separate clinical actions. |
 | 0057 | patient_abha_address | ALTER patients: abha_address | Store the verified address used by M2 discovery/linking separately from the 14-digit ABHA number. |
 | 0058 | abdm_protocol_state | ALTER abdm_care_context_links, abdm_hiu_hi_requests, abdm_received_bundles | Durable v3 callback correlation and multi-page transfer state. |
+| 0059 | abdm_care_context_hi_type_narrow | ALTER abdm_care_contexts: hi_type CHECK narrowed to the 5 types fhir/builder.py can populate | Drop ImmunizationRecord/HealthDocumentRecord: storable-but-unbuildable types linked and discovered, then failed silently at transfer. Aligns the CHECK with the builder and validator; a drift test holds the three together. |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.

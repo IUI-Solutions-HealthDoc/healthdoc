@@ -37,6 +37,7 @@ from __future__ import annotations
 import hmac
 import logging
 import uuid
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -69,6 +70,10 @@ class GatewayCallback:
     timestamp: datetime
     recipient_id: str
     replayed: bool = False
+    #: The Redis processing-lock key claimed for this REQUEST-ID. Carried so a
+    #: handler that FAILS can release it and let the gateway's retry re-run —
+    #: see `_release_replay` and the `*_gateway_callback` dependencies below.
+    replay_key: str | None = None
 
 
 def is_configured() -> bool:
@@ -275,7 +280,33 @@ async def _verify_gateway_headers(
         timestamp=timestamp,
         recipient_id=recipient or cm_id,
         replayed=not bool(first_seen),
+        replay_key=replay_key,
     )
+
+
+async def _release_replay(callback: GatewayCallback) -> None:
+    """Drop the processing lock after a handler failed, so the retry re-runs.
+
+    The lock claimed in `_verify_gateway_headers` exists to coalesce a gateway
+    retry that arrives WHILE the first request is still in flight. It is not the
+    durable duplicate guard — that is the database (transaction_id /
+    consent_artefact_id are UNIQUE and the state machines upsert).
+
+    The bug this closes: the lock was claimed on receipt, but a handler that
+    then failed — its outbound acknowledgement raised, say, and `get_db` rolled
+    the row back — left the lock standing for its full TTL. The gateway's retry,
+    carrying the same REQUEST-ID, hit `if callback.replayed: return _accepted()`
+    and was answered 202 without the work ever being redone. An unacknowledged
+    consent grant is treated by ABDM as failed, so the grant silently took
+    effect nowhere. Releasing the lock on failure lets the retry run for real;
+    the DB guard keeps a genuine duplicate idempotent.
+    """
+    if callback.replayed or not callback.replay_key:
+        return
+    try:
+        await get_redis().delete(callback.replay_key)
+    except Exception:  # noqa: BLE001 — releasing a lock must never mask the handler error
+        log.warning("Could not release the ABDM callback replay lock after a failed handler")
 
 
 async def verify_hip_gateway_callback(request: Request) -> GatewayCallback:
@@ -306,3 +337,36 @@ async def verify_profile_gateway_callback(request: Request) -> GatewayCallback:
         recipient_header=None,
         expected_recipient=None,
     )
+
+
+# The dependencies the routes actually use. They wrap the coroutines above with
+# release-on-failure. The coroutines stay callable and return a GatewayCallback
+# (the unit tests call them directly); only the routed path gets the generator
+# semantics that let a failed handler release its replay lock.
+
+
+async def hip_gateway_callback(request: Request) -> AsyncIterator[GatewayCallback]:
+    callback = await verify_hip_gateway_callback(request)
+    try:
+        yield callback
+    except Exception:
+        await _release_replay(callback)
+        raise
+
+
+async def hiu_gateway_callback(request: Request) -> AsyncIterator[GatewayCallback]:
+    callback = await verify_hiu_gateway_callback(request)
+    try:
+        yield callback
+    except Exception:
+        await _release_replay(callback)
+        raise
+
+
+async def profile_gateway_callback(request: Request) -> AsyncIterator[GatewayCallback]:
+    callback = await verify_profile_gateway_callback(request)
+    try:
+        yield callback
+    except Exception:
+        await _release_replay(callback)
+        raise

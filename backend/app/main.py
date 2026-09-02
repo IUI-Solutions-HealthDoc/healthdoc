@@ -108,6 +108,11 @@ async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
     _get_hmac_key()
     log.info("Crypto keys validated")
     _assert_production_auth_hardening()
+    # Fail fast if a model in an auditable module forgot its
+    # __audit_resource_type__ opt-in. The guard existed for months but was never
+    # called (see app/audit/listeners.py); it runs here, after every router — and
+    # therefore every model — has imported.
+    _audit_listeners.assert_audit_coverage()
     yield
 
 

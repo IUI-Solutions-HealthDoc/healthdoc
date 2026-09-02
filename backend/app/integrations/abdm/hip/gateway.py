@@ -41,20 +41,27 @@ from app.integrations.abdm.client import AbdmResponse, get_abdm_client
 
 log = logging.getLogger("healthdoc.abdm")
 
-#: ABDM's fixed vocabulary for health-information types. A value outside this
-#: set is rejected by the gateway with a validation error that names the field
-#: but not the allowed values, so the check is done here where the list can be
-#: read.
+#: The health-information types HealthDoc can actually PRODUCE end to end.
+#:
+#: This is deliberately narrower than ABDM's full HI-type vocabulary. It must
+#: equal three things that used to disagree, and their disagreement was a silent
+#: transfer failure (see tests/integrations/test_abdm_hi_type_vocabulary.py):
+#:   * the FHIR builder's RECORD_TYPES (fhir/builder.py) — what can be built;
+#:   * this validator — what an outbound call will accept;
+#:   * the abdm_care_contexts.hi_type CHECK — what can be stored.
+#: A type that could be stored and offered but not built linked and discovered
+#: fine and then failed at transfer with "No clinical mapper exists" — the
+#: empty-shell failure mode. ImmunizationRecord, HealthDocumentRecord and
+#: Invoice were removed for exactly that reason; re-add one only once
+#: fhir/builder.py can populate it, and the drift test will hold the three sets
+#: together.
 HI_TYPES: frozenset[str] = frozenset(
     {
+        "OPConsultation",
         "Prescription",
         "DiagnosticReport",
-        "OPConsultation",
         "DischargeSummary",
-        "ImmunizationRecord",
-        "HealthDocumentRecord",
         "WellnessRecord",
-        "Invoice",
     }
 )
 
