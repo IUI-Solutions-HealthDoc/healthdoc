@@ -12,8 +12,9 @@
 
 ## Verdict
 
-**Both blockers are closed. The cybersecurity track is ready; the ABDM
-functional track is not, because the workflows do not exist yet.**
+**Both cybersecurity blockers are closed. The ABDM implementation is
+code-ready; milestone certification still needs real M1, M2 and M3 sandbox
+journeys and the evidence NHA asks for.**
 
 A correction to the first version of this document: it claimed "no handler
 returns exception text." That was wrong. `app/auth/deps.py` raised
@@ -31,7 +32,7 @@ controls, and both are now in place.
 | Track | State |
 |---|---|
 | Cybersecurity (VAPT) | ✅ blockers closed · **all minors closed** · **1049 tests pass on the upgraded stack** |
-| ABDM functional | ⚠️ **Partially assessable** — M1/M2/M3 built and tested; no sandbox round trip yet |
+| ABDM functional | ⚠️ **Code-ready** — bridge/session and public callbacks verified; real patient milestone round trips pending |
 
 > **A naming collision, because it has already caused confusion.** M1/M2/M3 in
 > the *Minor findings* table below are VAPT scanner findings (Starlette,
@@ -167,12 +168,12 @@ code did — hence the dates on every claim below.
 
 | ABDM module | State |
 |---|---|
-| `identity` (M1) | ✅ Built — ABHA link/read/unlink, **plus** enrol-by-Aadhaar-OTP and login-by-mobile-OTP. 46 tests |
-| `fhir` | ✅ Bundle builders |
-| `hip` (M2) | ✅ Built — care contexts, links, consent notification, health-information request gate. 13 tests on the gate alone |
-| `hiu` (M3) | ✅ Built — consent requests, artefacts, data requests, encrypted receipt. 14 tests |
+| `identity` (M1) | ✅ Built — enrol/login OTP workflows, verified identity persistence and receptionist UI |
+| `fhir` | ✅ Clinical mappers; six generated shapes pass NRCeS 6.5.0 with the official HL7 validator 6.9.12 |
+| `hip` (M2) | ✅ Official discovery/link callbacks, mediated single-use OTP, confirmed care contexts, consent gate and encrypted paged transfer worker |
+| `hiu` (M3) | ✅ Consent request/fetch/status, HI request, callback state handling, authenticated direct data receipt and decryption |
 | `hi_crypto` | ✅ X25519 + HKDF-SHA256 + AES-256-GCM transfer crypto. 11 tests |
-| `callback_auth` | ✅ Inbound gateway authentication, fails closed. 7 tests |
+| `callback_auth` | ✅ Required v3 headers, recipient/timestamp/replay and durable transaction checks; legacy private callbacks keep their own shared secret |
 | `consent` (ABDM) | **empty** — the artefact handling lives in `hip/` and `hiu/`; this package is unused |
 | `nhcx` | **empty** — claims/insurance, out of scope for this audit |
 
@@ -201,33 +202,34 @@ code did — hence the dates on every claim below.
 
 ### What is still NOT proven, and must not be claimed
 
-**No call has ever been made to the ABDM sandbox.** Every test above is
-self-consistency between our own two halves — our HIP encrypts, our HIU
-decrypts. That proves the implementation is coherent; it does **not** prove
-ABDM agrees, and this document must not be read as saying it does.
+The sandbox client credentials obtain a real session, the registered bridge
+and HIP/HIU services read back active, and `https://abdm.healthdoc.world`
+currently reaches the official callback paths. That proves provisioning and
+reachability. It does **not** prove a milestone journey has passed NHA's
+assessment.
 
-Specifically unverified:
+Still unverified end to end:
 
-- All eleven gateway paths in `app/common/config.py` (`abdm_path_hip_*`,
-  `abdm_path_hiu_*`, and the four M1 paths). They are the documented v3 shapes.
-  They are settings, so a wrong one is an env change rather than a release.
-- `_VERIFY_PATH` in `identity/router.py` is still deliberately `None`.
-- The callback authentication is a **shared secret**, not ABDM's signature
-  scheme. That is the weakest acceptable answer and it is there because the
-  strong answer needs the sandbox to confirm the signing scheme before it can
-  be written without guessing. `verify_callback` is the one function that
-  changes when it is known.
-- Whether ABDM sends the ECDH public key raw or with an uncompressed-point
-  prefix. Both are accepted; anything else is refused.
+- M1 enrolment/login using a consenting sandbox user's Aadhaar/mobile OTP.
+- M2 patient discovery and mediated care-context linking through the ABHA app.
+  The deployment must provide an HTTPS SMS relay through
+  `ABDM_LINK_OTP_DELIVERY_URL` and `ABDM_LINK_OTP_DELIVERY_TOKEN`; there is no
+  fixed or logged fallback OTP.
+- M3 consent approval, HI request, HIP encrypted push, HIU decryption and final
+  receipt/notification across the public sandbox route.
+- Public callback headers are not cryptographic origin proof. NHA's published
+  v3 collection defines `REQUEST-ID`, `TIMESTAMP`, `X-CM-ID` and addressed
+  service headers, but no request-signature header/canonical input. Network
+  source restrictions remain an ingress control until NHA publishes one.
 
 ### What is needed to close it
 
-Sandbox credentials on a machine that is not CI: `ABDM_CLIENT_ID`,
-`ABDM_CLIENT_SECRET`, `ABDM_HFR_FACILITY_ID`, `ABDM_PUBLIC_KEY_PEM`,
-`ABDM_CALLBACK_SHARED_SECRET`. All are `change-me` or absent today, which is
-why the endpoints answer 503 with a reason rather than failing obscurely. They
-must never be committed, and CI must never hold them — the client tests are
-fully mocked and are to stay that way.
+A stable public deployment and local secret-store values for `ABDM_CLIENT_ID`,
+`ABDM_CLIENT_SECRET`, `ABDM_HIP_ID`, `ABDM_HIU_ID`,
+`ABDM_HFR_FACILITY_ID`, `ABDM_PUBLIC_KEY_PEM`, and the SMS relay settings.
+Credentials must never be committed or put in CI; the protocol tests remain
+mocked. `ABDM_CALLBACK_SHARED_SECRET` is for legacy private callbacks, not the
+official root-level v3 routes.
 
 ---
 
@@ -266,7 +268,9 @@ cd frontend && npm run test:e2e                 # 9 roles, WCAG + silent SSO
 **Role:** HIP **and** HIU. `.env.example` records the sandbox as registered for
 both. That widens the functional scope — an HIU is assessed on consent handling
 and data *requests*, an HIP on data *provision* — and both are now built and
-tested, though neither has spoken to the sandbox.
+tested. The bridge has spoken to the sandbox for sessions/provisioning; the
+patient milestone journeys are not certified until their end-to-end evidence
+is captured.
 
 **Remediation capacity:** every finding above is either a dependency bump, a
 Keycloak realm setting, or a localised code change. None requires architectural

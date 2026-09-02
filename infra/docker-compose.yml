@@ -54,6 +54,7 @@ services:
       KC_HOSTNAME_STRICT: "false"
     volumes:
       - ../infra/keycloak/realm-healthdoc.json:/opt/keycloak/data/import/realm-healthdoc.json:ro
+      - ../infra/keycloak/themes/healthdoc:/opt/keycloak/themes/healthdoc:ro
     ports:
       - "127.0.0.1:${KEYCLOAK_PORT:-8081}:8080"
 

@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { ApiError, newIdempotencyKey } from "@/lib/api";
 
 import { registerPatient } from "./api";
+import { AbhaIdentityPanel } from "./AbhaIdentityPanel";
 import { StartVisit } from "./StartVisit";
 import type { Patient, PatientCreate } from "./types";
 import {
@@ -102,6 +103,8 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
             {registered.age_years !== null ? ` · ${registered.age_years}y` : ""}
           </p>
         </div>
+
+        <AbhaIdentityPanel patient={registered} />
 
         {/* A UHID on its own does nothing for the patient standing at the desk.
             The visit is what starts billing; the token is what gets them seen. */}

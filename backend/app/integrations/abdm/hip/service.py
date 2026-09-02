@@ -14,6 +14,7 @@ the grant — each returns a refusal, and none of them fall through to a partial
 release. There is no branch in this module that releases data without a stored,
 unexpired, matching artefact.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -33,6 +34,7 @@ from app.integrations.abdm.hip.models import (
     AbdmHipConsentArtefact,
     AbdmHipHealthInformationRequest,
 )
+from app.opd.models import Visit
 
 log = logging.getLogger("healthdoc.abdm.hip")
 
@@ -136,7 +138,9 @@ async def authorise_hi_request(
     # asked for with no indication it had been trimmed, and the HIU would
     # record that as the patient's complete record for that period.
     if grant_from is not None and req_from is not None and req_from < grant_from:
-        raise HipError("date_range_not_permitted", "Requested period starts before the consent window")
+        raise HipError(
+            "date_range_not_permitted", "Requested period starts before the consent window"
+        )
     if grant_to is not None and req_to is not None and req_to > grant_to:
         raise HipError("date_range_not_permitted", "Requested period ends after the consent window")
 
@@ -222,17 +226,50 @@ async def list_care_contexts_for_transfer(
     alone would hand over another patient's contexts to anyone who obtained a
     valid artefact id.
     """
+    links = list(
+        (
+            await db.execute(
+                select(AbdmCareContextLink).where(
+                    AbdmCareContextLink.facility_id == facility_id,
+                    AbdmCareContextLink.abha_address == abha_address,
+                    AbdmCareContextLink.status == "confirmed",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    linked_references = {
+        str(reference) for link in links for reference in (link.care_context_references or [])
+    }
+
+    # The artefact names the exact care contexts the patient authorised. A
+    # valid consent for one consultation is not authority for every linked
+    # consultation at this facility.
+    raw = authorisation.artefact.raw_artefact or {}
+    detail = raw.get("notification", {}).get("consentDetail") or raw.get("consentDetail") or {}
+    consented_references = {
+        str(item.get("careContextReference"))
+        for item in (detail.get("careContexts") or [])
+        if item.get("careContextReference")
+    }
+    permitted_references = linked_references & consented_references
+    if not permitted_references:
+        return []
+
     stmt = (
         select(AbdmCareContext)
-        .join(AbdmCareContextLink, AbdmCareContextLink.patient_id == AbdmCareContext.patient_id)
+        .join(Visit, Visit.id == AbdmCareContext.visit_id)
         .where(
             AbdmCareContext.facility_id == facility_id,
-            AbdmCareContextLink.facility_id == facility_id,
-            AbdmCareContextLink.abha_address == abha_address,
-            AbdmCareContextLink.status == "confirmed",
+            AbdmCareContext.reference.in_(permitted_references),
             AbdmCareContext.hi_type.in_(authorisation.hi_types),
         )
     )
+    if authorisation.date_range_from is not None:
+        stmt = stmt.where(Visit.visit_date >= authorisation.date_range_from)
+    if authorisation.date_range_to is not None:
+        stmt = stmt.where(Visit.visit_date <= authorisation.date_range_to)
     return list((await db.execute(stmt)).scalars().unique().all())
 
 

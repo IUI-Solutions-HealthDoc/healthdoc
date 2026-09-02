@@ -1,4 +1,5 @@
 """HealthDoc API entrypoint — B1-W1-06 (skeleton, /health, envelope middleware)."""
+
 import importlib
 import logging
 from collections.abc import AsyncIterator
@@ -19,15 +20,43 @@ from app.common.envelope import EnvelopeMiddleware
 from app.common.metrics import MetricsMiddleware
 from app.common.mongo import get_mongo
 from app.common.redis import get_redis
+from app.integrations.abdm.external_router import router as abdm_external_router
 
 log = logging.getLogger("healthdoc")
 
 MODULES = [
-    "allergies", "audit", "billing", "blood_bank", "consent", "departments",
-    "diagnoses", "dpdp", "emergency", "encounters", "files", "inventory", "ipd", "notifications",
-    "maintenance", "nursing", "opd", "orders", "ot", "outbox", "pathology", "patients", "procedures",
-    "pharmacy", "platform", "queue", "radiology", "registration", "reports",
-    "security_audit", "users", "wards",
+    "allergies",
+    "audit",
+    "billing",
+    "blood_bank",
+    "consent",
+    "departments",
+    "diagnoses",
+    "dpdp",
+    "emergency",
+    "encounters",
+    "files",
+    "inventory",
+    "ipd",
+    "notifications",
+    "maintenance",
+    "nursing",
+    "opd",
+    "orders",
+    "ot",
+    "outbox",
+    "pathology",
+    "patients",
+    "procedures",
+    "pharmacy",
+    "platform",
+    "queue",
+    "radiology",
+    "registration",
+    "reports",
+    "security_audit",
+    "users",
+    "wards",
 ]
 # NB: "ipd" re-exports app.admissions.router — admissions is intentionally absent
 # from this list. See app/ipd/router.py before concluding it is unmounted.
@@ -111,8 +140,8 @@ app.add_middleware(MetricsMiddleware)
 # B1-W4-02: CORS locked to the Electron/desktop origin only (no wildcard).
 # Extra origins (e.g. http://localhost:3000 for browser dev) come from settings.
 _ALLOWED_ORIGINS = [
-    "app://healthdoc",           # Electron packaged app custom scheme
-    "https://localhost",         # nginx edge (browser dev)
+    "app://healthdoc",  # Electron packaged app custom scheme
+    "https://localhost",  # nginx edge (browser dev)
 ] + [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
@@ -231,3 +260,8 @@ _B1_ROUTERS = [
 ]
 for path in _B1_ROUTERS:
     _include(path)
+
+# ABDM calls these exact public v3 paths. Mounting them through `_include`
+# would prepend `/api/v1` and produce `/api/v1/api/v3/...`, which is the route
+# mismatch that kept every real sandbox callback at 404.
+app.include_router(abdm_external_router)

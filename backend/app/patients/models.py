@@ -1,4 +1,5 @@
 """Patient models — see docs/database-schema.md §3 (0006) and docs/schema-conventions.md."""
+
 import uuid
 from datetime import date, datetime
 
@@ -74,8 +75,14 @@ class Patient(Base, UUIDPk, Timestamps, Blame, Versioned):
     state_code: Mapped[str | None] = mapped_column(String(5), nullable=True)
     pincode: Mapped[str | None] = mapped_column(String(6), nullable=True)
 
-    photo_file_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)  # FK to files added in 0019
+    photo_file_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )  # FK to files added in 0019
     abha_number: Mapped[str | None] = mapped_column(String(17), unique=True, nullable=True)
+    # PHR address (for example name@sbx) is the identity ABDM uses in M2/M3
+    # discovery and consent callbacks. It is distinct from the 14-digit ABHA
+    # number and must be retained after a verified M1 exchange.
+    abha_address: Mapped[str | None] = mapped_column(String(120), unique=True, nullable=True)
 
     # 0030 — ABHA linking token (B1). Encrypted same scheme as patient_identifiers.
     abha_linking_token_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
@@ -95,14 +102,22 @@ class Patient(Base, UUIDPk, Timestamps, Blame, Versioned):
     guardian_verification_method: Mapped[str | None] = mapped_column(String(30), nullable=True)
 
     identity_path: Mapped[str] = mapped_column(String(50), nullable=False)
-    identity_status: Mapped[str] = mapped_column(String(50), nullable=False, server_default="verified")
+    identity_status: Mapped[str] = mapped_column(
+        String(50), nullable=False, server_default="verified"
+    )
     status: Mapped[str] = mapped_column(String(50), nullable=False, server_default="active")
-    merged_into_patient_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("patients.id"), nullable=True)
+    merged_into_patient_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("patients.id"), nullable=True
+    )
 
-    facility_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("facilities.id"), nullable=False)
+    facility_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("facilities.id"), nullable=False
+    )
 
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    deleted_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    deleted_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+    )
 
 
 class PatientIdentifier(Base, UUIDPk, Timestamps):
@@ -114,14 +129,20 @@ class PatientIdentifier(Base, UUIDPk, Timestamps):
         CheckConstraint(IdentifierType.sql_check("identifier_type"), name="identifier_type"),
     )
 
-    patient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("patients.id"), nullable=False, index=True)
+    patient_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("patients.id"), nullable=False, index=True
+    )
     identifier_type: Mapped[str] = mapped_column(String(50), nullable=False)
     identifier_value_encrypted: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     identifier_blind_index: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     key_version: Mapped[int] = mapped_column(SmallInteger, nullable=False, server_default="1")
     verified: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
-    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    captured_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    captured_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    captured_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
 
 
 class PatientMergeLog(Base, UUIDPk, Timestamps):
@@ -132,12 +153,22 @@ class PatientMergeLog(Base, UUIDPk, Timestamps):
     )
 
     source_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    source_patient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("patients.id"), nullable=False, index=True)
-    target_patient_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("patients.id"), nullable=False, index=True)
+    source_patient_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("patients.id"), nullable=False, index=True
+    )
+    target_patient_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("patients.id"), nullable=False, index=True
+    )
 
-    requested_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    approved_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    requested_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    approved_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+    )
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     status: Mapped[str] = mapped_column(String(50), nullable=False)

@@ -24,6 +24,13 @@ export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
   title: "HealthDoc HMIS",
   description: "Hospital Information Management System",
+  applicationName: "HealthDoc HMIS",
+  manifest: "/manifest.webmanifest",
+  icons: {
+    icon: "/healthdoc-logo.png",
+    shortcut: "/healthdoc-logo.png",
+    apple: "/healthdoc-logo.png",
+  },
 };
 
 export default function RootLayout({

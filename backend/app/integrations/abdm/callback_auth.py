@@ -23,23 +23,27 @@ incident.
 
 WHAT THIS IS NOT
 ----------------
-This is a shared-secret check, which is the weakest acceptable answer and is
-here because the strong answer is not yet knowable: ABDM v3 signs callbacks,
-and the exact signature scheme (header name, canonical string, key source) has
-to be confirmed against the sandbox before it can be implemented without
-guessing. `verify_callback` is the single place that will change when it is —
-every route already depends on it, so the upgrade is one function body, not a
-sweep. Until then a wrong guess at a signature algorithm would be worse than an
-honest shared secret, because it would look like real cryptography.
+`verify_callback` below protects HealthDoc's legacy, private callback routes
+with a shared secret.  The official ABDM v3 routes use the documented gateway
+headers, strict recipient matching, timestamp freshness, replay coalescing and
+transaction/consent checks instead.  The public ABDM collection does not define
+a request-signature header, so this module deliberately does not claim those
+headers are cryptographic proof of origin; source restrictions belong at the
+public edge until NHA publishes such a scheme.
 """
+
 from __future__ import annotations
 
 import hmac
 import logging
+import uuid
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
 from fastapi import Header, HTTPException, Request
 
 from app.common.config import get_settings
+from app.common.redis import get_redis
 
 log = logging.getLogger("healthdoc.abdm")
 
@@ -49,6 +53,22 @@ log = logging.getLogger("healthdoc.abdm")
 CALLBACK_SECRET_HEADER = "X-HealthDoc-Callback-Secret"
 
 _PLACEHOLDER = "change-me"
+_MAX_CLOCK_SKEW = timedelta(minutes=10)
+# This key is a short processing lock, not the durable idempotency record.  A
+# gateway retry while the first request is still running is coalesced, but a
+# failed handler must be allowed to run again.  The database transaction/state
+# machines below the callback are the durable duplicate guard.
+_REPLAY_TTL_SECONDS = 60
+
+
+@dataclass(frozen=True)
+class GatewayCallback:
+    """Validated routing metadata for an official ABDM gateway callback."""
+
+    request_id: str
+    timestamp: datetime
+    recipient_id: str
+    replayed: bool = False
 
 
 def is_configured() -> bool:
@@ -59,45 +79,61 @@ def is_configured() -> bool:
 #: Headers we already understand. Anything else arriving on a callback is worth
 #: naming in the log exactly once — see _log_unrecognised_scheme.
 _KNOWN_HEADERS = {
-    "host", "user-agent", "accept", "accept-encoding", "connection",
-    "content-type", "content-length", CALLBACK_SECRET_HEADER.lower(),
-    "x-forwarded-for", "x-forwarded-proto", "x-forwarded-host",
-    "x-forwarded-port", "x-real-ip",
+    "host",
+    "user-agent",
+    "accept",
+    "accept-encoding",
+    "connection",
+    "content-type",
+    "content-length",
+    CALLBACK_SECRET_HEADER.lower(),
+    "x-forwarded-for",
+    "x-forwarded-proto",
+    "x-forwarded-host",
+    "x-forwarded-port",
+    "x-real-ip",
     # Cloudflare adds these to every request that passes through a tunnel, and
     # the sandbox deployment reaches ABDM through one. Found by running the
     # reachability probe against the public hostname and reading what this very
     # function logged: "cdn-loop, cf-connecting-ip, cf-ipcountry, cf-ray,
     # cf-visitor, cf-warp-tag-id" — six lines of noise that would sit directly
     # on top of the one header this log exists to surface.
-    "cdn-loop", "cf-connecting-ip", "cf-ipcountry", "cf-ray", "cf-visitor",
-    "cf-warp-tag-id", "cf-worker", "cf-ew-via", "cf-request-id",
+    "cdn-loop",
+    "cf-connecting-ip",
+    "cf-ipcountry",
+    "cf-ray",
+    "cf-visitor",
+    "cf-warp-tag-id",
+    "cf-worker",
+    "cf-ew-via",
+    "cf-request-id",
     # ABDM puts these on every callback — its own v3 Postman collection shows
     # REQUEST-ID, TIMESTAMP and X-CM-ID and nothing else on the HIP callback.
     # They were being reported as unrecognised, which is the opposite of useful:
     # this log exists to surface the ONE header we do not know, and we get a
     # single clean look at the first genuine callback to spot it in.
-    "request-id", "timestamp", "x-cm-id",
+    "request-id",
+    "timestamp",
+    "x-cm-id",
+    "x-hip-id",
+    "x-hiu-id",
 }
 
 
 def _log_unrecognised_scheme(request: Request) -> None:
     """Name the headers a refused caller sent. NAMES ONLY, never values.
 
-    The shared secret below is a placeholder for ABDM's real scheme, which
-    signs its callbacks — and the exact scheme (header name, canonical string,
-    key source) cannot be implemented without seeing one. This turns the first
-    genuine sandbox callback into the answer instead of a silent 503: whatever
-    ABDM signs with will show up here as an unrecognised header name.
+    This applies only to legacy private callbacks. It remains useful when a
+    trusted caller and this deployment disagree about their configured secret,
+    without logging any credential-bearing value.
 
-    Values are deliberately excluded. A signature header carries key material,
-    and this line is written at WARNING on a route reachable from the internet.
+    Values are deliberately excluded because this line is written at WARNING
+    on a route reachable from the internet.
     """
     unknown = sorted(k for k in request.headers.keys() if k.lower() not in _KNOWN_HEADERS)
     if unknown:
         log.warning(
-            "Refused ABDM callback carried unrecognised headers (names only): %s. "
-            "If this came from the gateway, that is the signature scheme to "
-            "implement in verify_callback.",
+            "Refused legacy ABDM callback carried unrecognised headers " "(names only): %s.",
             ", ".join(unknown),
         )
 
@@ -122,10 +158,13 @@ async def verify_callback(
             "set, so this server cannot tell the gateway from anyone else."
         )
         _log_unrecognised_scheme(request)
-        raise HTTPException(503, {
-            "code": "abdm_callbacks_not_configured",
-            "message": "This server is not configured to accept ABDM callbacks.",
-        })
+        raise HTTPException(
+            503,
+            {
+                "code": "abdm_callbacks_not_configured",
+                "message": "This server is not configured to accept ABDM callbacks.",
+            },
+        )
 
     expected = get_settings().abdm_callback_shared_secret or ""
     presented = x_healthdoc_callback_secret or ""
@@ -139,3 +178,131 @@ async def verify_callback(
         log.warning("Inbound ABDM callback rejected — shared secret did not match")
         _log_unrecognised_scheme(request)
         raise HTTPException(401, {"code": "unauthorised", "message": "Unauthorised"})
+
+
+def _parse_timestamp(raw: str) -> datetime:
+    try:
+        value = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise HTTPException(
+            400, {"code": "invalid_timestamp", "message": "Invalid TIMESTAMP"}
+        ) from exc
+    if value.tzinfo is None:
+        raise HTTPException(
+            400, {"code": "invalid_timestamp", "message": "TIMESTAMP must include a timezone"}
+        )
+    return value.astimezone(UTC)
+
+
+async def _verify_gateway_headers(
+    request: Request,
+    *,
+    recipient_header: str | None,
+    expected_recipient: str | None,
+) -> GatewayCallback:
+    """Validate ABDM's documented callback headers and reject replays.
+
+    ABDM's published v3 callback contract does not send HealthDoc's private
+    shared secret. It sends REQUEST-ID, TIMESTAMP, X-CM-ID and the addressed
+    X-HIP-ID/X-HIU-ID. These checks enforce that contract without pretending a
+    spoofable custom header is gateway authentication. Network allow-listing
+    remains an edge control; transaction/consent checks remain the data control.
+    """
+    request_id = request.headers.get("REQUEST-ID")
+    raw_timestamp = request.headers.get("TIMESTAMP")
+    recipient = request.headers.get(recipient_header) if recipient_header else None
+    cm_id = request.headers.get("X-CM-ID")
+    if (
+        not request_id
+        or not raw_timestamp
+        or not cm_id
+        or (recipient_header is not None and not recipient)
+    ):
+        recipient_message = f", {recipient_header}" if recipient_header else ""
+        raise HTTPException(
+            400,
+            {
+                "code": "missing_abdm_headers",
+                "message": f"REQUEST-ID, TIMESTAMP, X-CM-ID{recipient_message} are required",
+            },
+        )
+    try:
+        uuid.UUID(request_id)
+    except ValueError as exc:
+        raise HTTPException(
+            400, {"code": "invalid_request_id", "message": "REQUEST-ID must be a UUID"}
+        ) from exc
+
+    settings = get_settings()
+    if recipient_header and (not expected_recipient or expected_recipient == _PLACEHOLDER):
+        raise HTTPException(
+            503,
+            {
+                "code": "abdm_callbacks_not_configured",
+                "message": f"{recipient_header} is not configured on this server",
+            },
+        )
+    if recipient_header and not hmac.compare_digest(recipient or "", expected_recipient or ""):
+        raise HTTPException(404, {"code": "unknown_service", "message": "Unknown ABDM service"})
+    if not hmac.compare_digest(cm_id, settings.abdm_x_cm_id):
+        raise HTTPException(401, {"code": "invalid_cm_id", "message": "Unauthorised"})
+
+    timestamp = _parse_timestamp(raw_timestamp)
+    if abs(datetime.now(UTC) - timestamp) > _MAX_CLOCK_SKEW:
+        raise HTTPException(
+            400,
+            {
+                "code": "stale_callback",
+                "message": "Callback timestamp is outside the accepted window",
+            },
+        )
+
+    replay_scope = recipient_header.lower() if recipient_header else "profile-share"
+    replay_key = f"abdm:callback:{replay_scope}:{request.url.path}:{request_id}"
+    try:
+        first_seen = await get_redis().set(replay_key, "1", ex=_REPLAY_TTL_SECONDS, nx=True)
+    except Exception as exc:  # fail closed when replay state is unavailable
+        log.error("ABDM callback replay store unavailable (%s)", type(exc).__name__)
+        raise HTTPException(
+            503,
+            {
+                "code": "callback_replay_store_unavailable",
+                "message": "Callback verification is temporarily unavailable",
+            },
+        ) from exc
+    return GatewayCallback(
+        request_id=request_id,
+        timestamp=timestamp,
+        recipient_id=recipient or cm_id,
+        replayed=not bool(first_seen),
+    )
+
+
+async def verify_hip_gateway_callback(request: Request) -> GatewayCallback:
+    return await _verify_gateway_headers(
+        request,
+        recipient_header="X-HIP-ID",
+        expected_recipient=get_settings().abdm_hip_id,
+    )
+
+
+async def verify_hiu_gateway_callback(request: Request) -> GatewayCallback:
+    return await _verify_gateway_headers(
+        request,
+        recipient_header="X-HIU-ID",
+        expected_recipient=get_settings().abdm_hiu_id,
+    )
+
+
+async def verify_profile_gateway_callback(request: Request) -> GatewayCallback:
+    """Validate Scan-and-Share, whose published callback has no X-HIP-ID.
+
+    The addressed HIP is carried in ``metaData.hipId`` and is checked by the
+    route after Pydantic has validated the body.  Requiring a header which the
+    gateway does not send made an otherwise valid profile share impossible.
+    """
+    return await _verify_gateway_headers(
+        request,
+        recipient_header=None,
+        expected_recipient=None,
+    )

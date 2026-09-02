@@ -39,12 +39,13 @@ A transaction created at one facility must not be completable from another.
 transaction id is a bearer-ish value: anyone holding it could otherwise finish
 someone else's enrolment and attach an ABHA to a patient record they do not own.
 """
+
 from __future__ import annotations
 
 import json
 import uuid
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 
 from app.common.redis import get_redis
@@ -113,7 +114,7 @@ class OtpSession:
         return json.dumps(asdict(self) | {"purpose": self.purpose.value})
 
     @classmethod
-    def from_json(cls, raw: str) -> "OtpSession":
+    def from_json(cls, raw: str) -> OtpSession:
         data = json.loads(raw)
         return cls(**(data | {"purpose": OtpPurpose(data["purpose"])}))
 
@@ -143,17 +144,13 @@ async def start(
         facility_id=str(facility_id),
         started_by=str(started_by),
         patient_id=str(patient_id) if patient_id else None,
-        created_at=datetime.now(timezone.utc).isoformat(),
+        created_at=datetime.now(UTC).isoformat(),
     )
-    await get_redis().set(
-        _key(session.session_id), session.to_json(), ex=OTP_SESSION_TTL_SECONDS
-    )
+    await get_redis().set(_key(session.session_id), session.to_json(), ex=OTP_SESSION_TTL_SECONDS)
     return session
 
 
-async def load(
-    session_id: str, *, facility_id: str, purpose: OtpPurpose
-) -> OtpSession:
+async def load(session_id: str, *, facility_id: str, purpose: OtpPurpose) -> OtpSession:
     """Fetch a session for its second leg, or refuse.
 
     Does NOT delete. Verification can legitimately fail on a wrong OTP and the

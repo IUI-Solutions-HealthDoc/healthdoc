@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { PatientSearch } from "@/features/receptionist/PatientSearch";
+import { AbhaIdentityPanel } from "@/features/receptionist/AbhaIdentityPanel";
 import { RegistrationForm } from "@/features/receptionist/RegistrationForm";
 import { StartVisit } from "@/features/receptionist/StartVisit";
 import type { PatientSearchResult } from "@/features/receptionist/types";
@@ -50,6 +51,7 @@ export default function Page() {
                 Choose another patient
               </button>
             </div>
+            <AbhaIdentityPanel patient={selected} />
             <StartVisit
               patient={{
                 id: selected.id,

@@ -29,6 +29,7 @@ import { REALM_ROLE_LABELS } from "@/features/admin/constants";
 import { ROLES, type Role } from "@/config/roles";
 import { canRoleAccessPath } from "@/lib/auth/routes";
 import { useAuth } from "@/providers/auth-provider";
+import { HealthDocBrand } from "./HealthDocBrand";
 
 type NavItem = {
   href: string;
@@ -175,9 +176,11 @@ export default function Sidebar({ open, setOpen }: SidebarProps) {
       >
         <div className="flex items-center justify-between border-b border-gray-200 pb-4">
           <div>
-            <h2 className="text-xl font-bold text-[#001F54] tracking-wide">
-              HMIS
-            </h2>
+            <HealthDocBrand
+              size={42}
+              subtitle="HMIS"
+              nameClassName="text-lg text-[#001F54]"
+            />
             <p className="text-xs text-gray-500 mt-1">
               Signed in as {roleLabel}
             </p>

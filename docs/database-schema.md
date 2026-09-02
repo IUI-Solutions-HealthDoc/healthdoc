@@ -175,6 +175,8 @@ do not merge out of order.**
 | 0054 | inventory_reservations | ALTER inventory_batches: reserved_quantity numeric(12,2) | B6 (#452) — durable source-batch reservation between transfer dispatch and receipt; every stock-out path uses quantity minus reservations. |
 | 0055 | abdm_hip_hiu | abdm_care_contexts; abdm_care_context_links; abdm_hip_consent_artefacts; abdm_hip_hi_requests; abdm_consent_requests; abdm_hiu_consent_artefacts; abdm_hiu_hi_requests; abdm_received_bundles | ABDM M2 (HIP) and M3 (HIU). Four HIP tables record what we hold, who may see it and what we handed over; four HIU tables record what we asked for, on whose authority and what came back. `abdm_hiu_hi_requests.private_key_encrypted` is the one persisted private key in the integration — AES-GCM, bound to its own row, cleared on completion — because the HIU half of the ECDH exchange is asynchronous and must outlive the request that opened it. |
 | 0056 | day_care_visit_type | ALTER visits: visit_type CHECK gains `day_care` | OPD/day-care workflow — day care is bed-occupying like IPD, while admission and bed allocation remain separate clinical actions. |
+| 0057 | patient_abha_address | ALTER patients: abha_address | Store the verified address used by M2 discovery/linking separately from the 14-digit ABHA number. |
+| 0058 | abdm_protocol_state | ALTER abdm_care_context_links, abdm_hiu_hi_requests, abdm_received_bundles | Durable v3 callback correlation and multi-page transfer state. |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -504,6 +506,7 @@ mobile          varchar(20)                      -- contact only, NEVER identity
 address_line    text · village_town text · district text · state_code varchar(5) · pincode varchar(6)
 photo_file_id   UUID NULL                        -- MinIO ref via files (FK added 0019); photo mandatory per ADR 0001
 abha_number     varchar(17) UNIQUE NULL
+abha_address    varchar(120) NULL                  -- verified M2/M3 address, added by 0057
 abha_linking_token_encrypted bytea NULL          -- AES-256-GCM, added by 0030. NEVER plaintext
 abha_linking_key_version smallint NULL           -- added by 0030; which key encrypted the token
 abha_linked_at  timestamptz NULL                 -- added by 0030; when ABHA was linked to a care context
@@ -1669,7 +1672,7 @@ INDEX ix_idempotency_keys_expires_at (expires_at)   -- expiry sweep
 > the first such endpoint lands; and `response_body` should become `jsonb`, since
 > every response we store is JSON and `text` gives up querying it.
 
-### 0055 — ABDM M2 (HIP) and M3 (HIU)
+### 0055–0058 — ABDM M2 (HIP) and M3 (HIU)
 
 Four HIP tables record what we hold, who may see it and what we handed over;
 four HIU tables record what we asked for, on whose authority and what came
@@ -1677,8 +1680,8 @@ back. Breaking any link in that chain is what an ABDM assessor looks for, so
 each stage is its own row with its own timestamps rather than a status flag on
 one wide table.
 
-Every gateway path these use is UNVERIFIED against the sandbox — see
-`app/common/config.py` and `docs/wasa-readiness.md`.
+The external callbacks are mounted on ABDM's exact `/api/v3/...` paths. Internal
+staff APIs remain under `/api/v1/abdm/...`.
 
 **abdm_care_contexts** (0055) — a unit of care that can be offered to an ABHA
 ```
@@ -1693,7 +1696,8 @@ UNIQUE (patient_id, reference)                    -- two facilities may both hol
 **abdm_care_context_links** (0055) — an ABHA address's claim on those contexts
 ```
 patient_id UUID NOT NULL → patients · abha_address varchar(120) NOT NULL
-link_ref_number varchar(120) · gateway_request_id varchar(100)
+link_ref_number varchar(120) · gateway_request_id varchar(100) · transaction_id varchar(120)
+care_context_references jsonb NOT NULL DEFAULT '[]' -- exact set approved during link-init
 status varchar(50) NOT NULL DEFAULT 'pending'     -- pending|confirmed|failed|expired
 failure_reason text · confirmed_at timestamptz · expires_at timestamptz
 facility_id UUID NOT NULL → facilities
@@ -1755,6 +1759,7 @@ artefact_id UUID NOT NULL → abdm_hiu_consent_artefacts
 transaction_id varchar(120) · gateway_request_id varchar(100)
 status varchar(50) NOT NULL DEFAULT 'requested'   -- requested|acknowledged|received|partial|failed|expired
 failure_reason text
+expected_page_count smallint · received_pages jsonb NOT NULL DEFAULT '[]'
 public_key_b64 text NOT NULL · nonce_b64 text NOT NULL
 private_key_encrypted bytea · key_version smallint
 key_expires_at timestamptz NOT NULL
@@ -1773,9 +1778,13 @@ append-only, so a copy there would outlive the clearing.
 ```
 hi_request_id UUID NOT NULL → abdm_hiu_hi_requests
 care_context_reference varchar(120)
+page_number smallint NOT NULL DEFAULT 0 · entry_index smallint NOT NULL DEFAULT 0
+media_type varchar(100) NOT NULL DEFAULT 'application/fhir+json'
+declared_checksum varchar(128)
 content_sha256 varchar(64) NOT NULL               -- of the DECRYPTED bundle
 status varchar(50) NOT NULL DEFAULT 'stored'      -- stored|undecipherable|rejected
 failure_reason text · facility_id UUID NOT NULL → facilities
+UNIQUE (hi_request_id, page_number, entry_index)
 ```
 The decrypted bundle is not stored here; it takes the outbox path every other
 clinical document takes, and this row is the durable fact that it arrived —

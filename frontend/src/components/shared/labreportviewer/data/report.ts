@@ -6,7 +6,7 @@ export const report: ReportData = {
   laboratory: {
     id: "LAB-001",
     name: "ABC Diagnostics Laboratory",
-    logo: "/images/logo.svg",
+    logo: "/healthdoc-logo.png",
     nablNumber: "NABL-M-123456",
     address:
       "105 - 108, Smart Square, Near D-Mart, Bhumkar Chowk, Pune - 411057",

@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 // Capital B: the file is components/ui/Button.tsx. The lowercase import
 // resolved on a case-insensitive macOS filesystem and failed in Linux CI.
 import { Button } from "@/components/ui/Button";
+import { HealthDocBrand } from "@/components/common/HealthDocBrand";
 import { isKeycloakConfigured, loginWithKeycloak } from "@/lib/auth/keycloak";
 import { getDefaultRouteForRole } from "@/lib/auth/routes";
 import { useAuth } from "@/providers/auth-provider";
@@ -55,7 +56,13 @@ export function LoginScreen() {
 
   return (
     <div className="surface-card p-8">
-      <p className="brand-gradient text-3xl font-bold tracking-tight">healthdoc</p>
+      <HealthDocBrand
+        size={72}
+        preload
+        className="items-center"
+        nameClassName="brand-gradient text-3xl font-bold"
+        subtitle="HMIS"
+      />
       <h1 className="mt-4 text-2xl font-semibold text-foreground">Sign in</h1>
       <p className="mt-2 text-sm text-muted-foreground">
         Hospital Information Management System
