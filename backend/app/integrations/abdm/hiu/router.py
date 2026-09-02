@@ -2,8 +2,9 @@
 
 Same two-kinds-of-route split as the HIP router, and the same rule: staff
 routes take a bearer token and get their facility from it; gateway routes take
-no user, depend on `verify_callback`, and refuse when this server has no shared
-secret configured.
+no user. Legacy private callbacks depend on `verify_callback`; official ABDM
+v3 callbacks are mounted in `external_router.py` with the gateway's documented
+headers and durable transaction checks.
 
 The asymmetry worth noticing is that an HIU is assessed on restraint. A HIP is
 judged on whether it refuses to hand over records it should not; an HIU is
@@ -13,11 +14,13 @@ artefact that justified every record it holds. That is why
 row in this database — not a consent id in the request body, a row we recorded
 when the manager told us.
 """
+
 from __future__ import annotations
 
 import logging
 import uuid
 from datetime import datetime
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
@@ -43,6 +46,7 @@ from app.integrations.abdm.hiu.models import (
 log = logging.getLogger("healthdoc.abdm.hiu")
 
 router = APIRouter(prefix="/abdm/hiu", tags=["abdm-hiu"])
+DbSession = Annotated[AsyncSession, Depends(get_db)]
 
 
 def _refusal(exc: service.HiuError, status: int = 409) -> HTTPException:
@@ -68,42 +72,57 @@ async def _dispatch(row, coro):
     except AbdmNotConfigured as exc:
         row.status = "failed"
         row.failure_reason = "ABDM integration is not configured on this server"
-        raise HTTPException(503, {
-            "code": "abdm_not_configured",
-            "message": "This server is not configured to talk to ABDM.",
-        }) from exc
+        raise HTTPException(
+            503,
+            {
+                "code": "abdm_not_configured",
+                "message": "This server is not configured to talk to ABDM.",
+            },
+        ) from exc
     except AbdmUnavailable as exc:
         row.status = "failed"
         row.failure_reason = "ABDM gateway did not respond"
-        raise HTTPException(502, {
-            "code": "abdm_unavailable",
-            "message": "The ABDM gateway did not respond. The request was not sent.",
-        }) from exc
+        raise HTTPException(
+            502,
+            {
+                "code": "abdm_unavailable",
+                "message": "The ABDM gateway did not respond. The request was not sent.",
+            },
+        ) from exc
     except AbdmAuthError as exc:
         # Ours to fix, not the caller's. Never surfaced as "try again".
         row.status = "failed"
         row.failure_reason = "ABDM rejected this facility's credentials"
         log.error("ABDM rejected our credentials on an HIU call")
-        raise HTTPException(502, {
-            "code": "abdm_auth_failed",
-            "message": "ABDM rejected this server's credentials.",
-        }) from exc
+        raise HTTPException(
+            502,
+            {
+                "code": "abdm_auth_failed",
+                "message": "ABDM rejected this server's credentials.",
+            },
+        ) from exc
     except AbdmRejected as exc:
         # Status only in the reason. The gateway's body echoes identifiers we
         # just sent, including the ABHA address.
         row.status = "failed"
         row.failure_reason = f"ABDM declined the request ({exc.status_code})"
-        raise HTTPException(502, {
-            "code": "abdm_rejected",
-            "message": f"ABDM declined the request ({exc.status_code}).",
-        }) from exc
+        raise HTTPException(
+            502,
+            {
+                "code": "abdm_rejected",
+                "message": f"ABDM declined the request ({exc.status_code}).",
+            },
+        ) from exc
     except (gateway.HiuIdentityNotConfigured, gateway.DataPushUrlNotConfigured) as exc:
         row.status = "failed"
         row.failure_reason = str(exc)
-        raise HTTPException(503, {
-            "code": "abdm_not_configured",
-            "message": str(exc),
-        }) from exc
+        raise HTTPException(
+            503,
+            {
+                "code": "abdm_not_configured",
+                "message": str(exc),
+            },
+        ) from exc
 
     row.gateway_request_id = request_id
     return response
@@ -115,16 +134,23 @@ def _require_idempotency_key(
     """Mutations carry one. A retried consent request that opens a second ask
     is a second thing the patient has to answer."""
     if not idempotency_key:
-        raise HTTPException(400, {
-            "code": "idempotency_key_required",
-            "message": "Idempotency-Key header is required for this request",
-        })
+        raise HTTPException(
+            400,
+            {
+                "code": "idempotency_key_required",
+                "message": "Idempotency-Key header is required for this request",
+            },
+        )
     return idempotency_key
+
+
+IdempotencyKey = Annotated[str, Depends(_require_idempotency_key)]
 
 
 # =============================================================================
 # Staff routes
 # =============================================================================
+
 
 class ConsentRequestIn(BaseModel):
     patient_id: uuid.UUID | None = None
@@ -151,8 +177,8 @@ class ConsentRequestOut(BaseModel):
 async def create_consent_request(
     payload: ConsentRequestIn,
     current_db_user: CurrentDbUser,
-    idempotency_key: str = Depends(_require_idempotency_key),
-    db: AsyncSession = Depends(get_db),
+    idempotency_key: IdempotencyKey,
+    db: DbSession,
 ) -> ConsentRequestOut:
     """Ask the consent manager for access to a patient's records elsewhere."""
     try:
@@ -211,22 +237,34 @@ class ArtefactOut(BaseModel):
 async def list_artefacts(
     request_id: uuid.UUID,
     current_db_user: CurrentDbUser,
-    db: AsyncSession = Depends(get_db),
+    db: DbSession,
 ) -> list[ArtefactOut]:
     """The artefacts a request produced — the evidence for what we may hold."""
     rows = (
-        await db.execute(
-            select(AbdmHiuConsentArtefact)
-            .join(AbdmConsentRequest, AbdmConsentRequest.id == AbdmHiuConsentArtefact.consent_request_id)
-            .where(
-                AbdmHiuConsentArtefact.consent_request_id == request_id,
-                AbdmHiuConsentArtefact.facility_id == current_db_user.facility_id,
+        (
+            await db.execute(
+                select(AbdmHiuConsentArtefact)
+                .join(
+                    AbdmConsentRequest,
+                    AbdmConsentRequest.id == AbdmHiuConsentArtefact.consent_request_id,
+                )
+                .where(
+                    AbdmHiuConsentArtefact.consent_request_id == request_id,
+                    AbdmHiuConsentArtefact.facility_id == current_db_user.facility_id,
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return [
-        ArtefactOut(id=r.id, consent_artefact_id=r.consent_artefact_id, status=r.status,
-                    hi_types=list(r.hi_types or []), expires_at=r.expires_at)
+        ArtefactOut(
+            id=r.id,
+            consent_artefact_id=r.consent_artefact_id,
+            status=r.status,
+            hi_types=list(r.hi_types or []),
+            expires_at=r.expires_at,
+        )
         for r in rows
     ]
 
@@ -246,8 +284,8 @@ class HiRequestOut(BaseModel):
 async def request_health_information(
     artefact_id: uuid.UUID,
     current_db_user: CurrentDbUser,
-    idempotency_key: str = Depends(_require_idempotency_key),
-    db: AsyncSession = Depends(get_db),
+    idempotency_key: IdempotencyKey,
+    db: DbSession,
 ) -> HiRequestOut:
     """Mint key material and open a data request under a granted artefact.
 
@@ -268,8 +306,10 @@ async def request_health_information(
 
     try:
         row, wire = await service.begin_hi_request(
-            db, facility_id=current_db_user.facility_id,
-            artefact=artefact, created_by=current_db_user.id,
+            db,
+            facility_id=current_db_user.facility_id,
+            artefact=artefact,
+            created_by=current_db_user.id,
         )
     except service.HiuError as exc:
         raise _refusal(exc, status=403) from exc
@@ -279,14 +319,17 @@ async def request_health_information(
     # be requesting records outside a consent we cannot evidence — the one thing
     # an HIU is judged on. Refuse instead.
     if artefact.date_range_from is None or artefact.date_range_to is None:
-        raise HTTPException(409, {
-            "code": "artefact_range_unknown",
-            "message": (
-                "This consent artefact has no recorded date range, so the "
-                "permitted period is unknown. Re-fetch the artefact before "
-                "requesting records."
-            ),
-        })
+        raise HTTPException(
+            409,
+            {
+                "code": "artefact_range_unknown",
+                "message": (
+                    "This consent artefact has no recorded date range, so the "
+                    "permitted period is unknown. Re-fetch the artefact before "
+                    "requesting records."
+                ),
+            },
+        )
 
     # The key material was minted and stored and then went nowhere. Sending it
     # is what makes the HIP encrypt a bundle to our public key and push it to
@@ -315,6 +358,7 @@ async def request_health_information(
 # Gateway / HIP callbacks — NO user, fail closed
 # =============================================================================
 
+
 class TransferIn(BaseModel):
     transaction_id: str
     care_context_reference: str | None = None
@@ -330,7 +374,7 @@ class TransferIn(BaseModel):
 )
 async def receive_transfer(
     payload: TransferIn,
-    db: AsyncSession = Depends(get_db),
+    db: DbSession,
 ) -> dict:
     """A HIP is pushing one encrypted bundle against a request we opened."""
     request = (
@@ -363,6 +407,7 @@ async def receive_transfer(
     # the durable fact that it arrived.
     log.info(
         "ABDM transfer accepted for request %s (%d bytes decrypted)",
-        request.id, len(plaintext),
+        request.id,
+        len(plaintext),
     )
     return {"received": str(receipt.id), "status": receipt.status}

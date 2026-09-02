@@ -28,6 +28,7 @@ silently rather than loudly if it is not:
     derivation, so reusing one across requests makes two bundles decryptable
     with the same key material.
 """
+
 from __future__ import annotations
 
 import logging
@@ -100,7 +101,7 @@ def data_push_url() -> str:
             "ABDM_HIU_CALLBACK_BASE_URL is not set, so there is nowhere for a "
             "HIP to deliver records."
         )
-    return f"{base.rstrip('/')}/api/v1/abdm/hiu/callbacks/health-information/transfer"
+    return f"{base.rstrip('/')}/api/v3/hiu/health-information/transfer"
 
 
 def _now_iso() -> str:
@@ -138,6 +139,7 @@ async def _post(
 # =============================================================================
 # Consent
 # =============================================================================
+
 
 async def request_consent(
     *,
@@ -185,6 +187,7 @@ async def request_consent(
                 },
             }
         },
+        extra_headers={"X-HIU-ID": hiu_id()},
         request_id=request_id,
     )
 
@@ -246,6 +249,7 @@ async def acknowledge_consent_notification(
             "acknowledgement": [{"status": status, "consentId": consent_id}],
             "response": {"requestId": gateway_request_id},
         },
+        extra_headers={"X-HIU-ID": hiu_id()},
         request_id=request_id,
     )
 
@@ -253,6 +257,7 @@ async def acknowledge_consent_notification(
 # =============================================================================
 # Data flow
 # =============================================================================
+
 
 async def request_health_information(
     *,

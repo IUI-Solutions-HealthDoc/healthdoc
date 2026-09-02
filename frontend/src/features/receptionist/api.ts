@@ -5,6 +5,8 @@ import type {
   PatientCreate,
   PatientSearchRequest,
   PatientSearchResponse,
+  AbhaIdentityLinked,
+  AbhaOtpRequested,
   QueueSummary,
   QueueCreate,
   QueueCreated,
@@ -39,6 +41,55 @@ export function registerPatient(
   return api<Patient>("/patients", {
     method: "POST",
     body: JSON.stringify(payload),
+    idempotencyKey,
+  });
+}
+
+export function requestAbhaLoginOtp(
+  patientId: string,
+  abhaNumber: string,
+  idempotencyKey: string,
+): Promise<AbhaOtpRequested> {
+  return api<AbhaOtpRequested>("/abdm/abha/login/request-otp", {
+    method: "POST",
+    body: JSON.stringify({ patient_id: patientId, abha_number: digitsOnly(abhaNumber) }),
+    idempotencyKey,
+  });
+}
+
+export function verifyAbhaLoginOtp(
+  sessionId: string,
+  otp: string,
+  idempotencyKey: string,
+): Promise<AbhaIdentityLinked> {
+  return api<AbhaIdentityLinked>("/abdm/abha/login/verify-otp", {
+    method: "POST",
+    body: JSON.stringify({ session_id: sessionId, otp }),
+    idempotencyKey,
+  });
+}
+
+export function requestAbhaEnrolmentOtp(
+  patientId: string,
+  aadhaar: string,
+  idempotencyKey: string,
+): Promise<AbhaOtpRequested> {
+  return api<AbhaOtpRequested>("/abdm/abha/enrol/aadhaar/request-otp", {
+    method: "POST",
+    body: JSON.stringify({ patient_id: patientId, aadhaar: digitsOnly(aadhaar) }),
+    idempotencyKey,
+  });
+}
+
+export function verifyAbhaEnrolmentOtp(
+  sessionId: string,
+  otp: string,
+  mobile: string | null,
+  idempotencyKey: string,
+): Promise<AbhaIdentityLinked> {
+  return api<AbhaIdentityLinked>("/abdm/abha/enrol/aadhaar/verify-otp", {
+    method: "POST",
+    body: JSON.stringify({ session_id: sessionId, otp, mobile }),
     idempotencyKey,
   });
 }

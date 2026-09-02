@@ -21,9 +21,12 @@ key in the database indefinitely. A transfer that arrives after it is refused
 rather than opened — late data is a failed transfer to retry, not a reason to
 keep key material alive forever.
 """
+
 from __future__ import annotations
 
+import base64
 import hashlib
+import json
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -144,6 +147,10 @@ async def record_artefact(
         if existing.status == "revoked" and status == "granted":
             raise HiuError("consent_revoked", "A revoked artefact cannot be re-granted")
         existing.status = status
+        existing.hi_types = hi_types
+        existing.date_range_from = date_range_from
+        existing.date_range_to = date_range_to
+        existing.expires_at = expires_at
         existing.raw_artefact = raw
         if status != "granted":
             # A revoked artefact must stop authorising in-flight requests too,
@@ -170,13 +177,17 @@ async def record_artefact(
 
 async def _expire_open_requests(db: AsyncSession, *, artefact_row_id: uuid.UUID) -> None:
     rows = (
-        await db.execute(
-            select(AbdmHiuHealthInformationRequest).where(
-                AbdmHiuHealthInformationRequest.artefact_id == artefact_row_id,
-                AbdmHiuHealthInformationRequest.status.in_(("requested", "acknowledged")),
+        (
+            await db.execute(
+                select(AbdmHiuHealthInformationRequest).where(
+                    AbdmHiuHealthInformationRequest.artefact_id == artefact_row_id,
+                    AbdmHiuHealthInformationRequest.status.in_(("requested", "acknowledged")),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     for row in rows:
         row.status = "expired"
         row.failure_reason = "Consent artefact was revoked while this request was open"
@@ -254,6 +265,38 @@ def _load_private_key(row: AbdmHiuHealthInformationRequest):
     return hi_crypto.X25519PrivateKey.from_private_bytes(bytes.fromhex(hex_key))
 
 
+async def _record_rejection(
+    db: AsyncSession,
+    *,
+    request: AbdmHiuHealthInformationRequest,
+    care_context_reference: str | None,
+    page_number: int,
+    entry_index: int,
+    media_type: str,
+    declared_checksum: str | None,
+    content_sha256: str,
+    status: str,
+    reason: str,
+) -> None:
+    """Keep a durable receipt for an authenticated transfer we refused."""
+    db.add(
+        AbdmReceivedBundle(
+            facility_id=request.facility_id,
+            hi_request_id=request.id,
+            care_context_reference=care_context_reference,
+            page_number=page_number,
+            entry_index=entry_index,
+            media_type=media_type,
+            declared_checksum=declared_checksum,
+            content_sha256=content_sha256,
+            status=status,
+            failure_reason=reason,
+        )
+    )
+    request.status = "partial"
+    await db.flush()
+
+
 async def receive_bundle(
     db: AsyncSession,
     *,
@@ -262,6 +305,10 @@ async def receive_bundle(
     hip_public_key_b64: str,
     hip_nonce_b64: str,
     care_context_reference: str | None,
+    page_number: int = 0,
+    entry_index: int = 0,
+    media_type: str = "application/fhir+json",
+    declared_checksum: str | None = None,
     now: datetime | None = None,
 ) -> tuple[AbdmReceivedBundle, str]:
     """Decrypt one pushed bundle and record that it arrived.
@@ -292,35 +339,107 @@ async def receive_bundle(
         # Recorded, not swallowed. A bundle that failed to authenticate is a
         # security event: either the wrong key or a tampered payload. Treating
         # it as "no data" would let tampering read as an empty record.
-        receipt = AbdmReceivedBundle(
-            facility_id=request.facility_id,
-            hi_request_id=request.id,
+        await _record_rejection(
+            db,
+            request=request,
             care_context_reference=care_context_reference,
+            page_number=page_number,
+            entry_index=entry_index,
+            media_type=media_type,
+            declared_checksum=declared_checksum,
             content_sha256="",
             status="undecipherable",
-            failure_reason=str(exc),
+            reason=str(exc),
         )
-        db.add(receipt)
-        request.status = "partial"
-        await db.flush()
         raise HiuError("undecipherable", "A pushed bundle failed authentication") from exc
+
+    digest_bytes = hashlib.sha256(plaintext.encode()).digest()
+    digest_hex = digest_bytes.hex()
+    if declared_checksum and declared_checksum not in {
+        digest_hex,
+        base64.b64encode(digest_bytes).decode(),
+    }:
+        await _record_rejection(
+            db,
+            request=request,
+            care_context_reference=care_context_reference,
+            page_number=page_number,
+            entry_index=entry_index,
+            media_type=media_type,
+            declared_checksum=declared_checksum,
+            content_sha256=digest_hex,
+            status="rejected",
+            reason="Declared checksum did not match decrypted content",
+        )
+        raise HiuError("checksum_mismatch", "A pushed bundle failed checksum verification")
+
+    if media_type != "application/fhir+json":
+        await _record_rejection(
+            db,
+            request=request,
+            care_context_reference=care_context_reference,
+            page_number=page_number,
+            entry_index=entry_index,
+            media_type=media_type,
+            declared_checksum=declared_checksum,
+            content_sha256=digest_hex,
+            status="rejected",
+            reason="Unsupported media type",
+        )
+        raise HiuError("unsupported_media", "Only application/fhir+json is accepted")
+    try:
+        parsed = json.loads(plaintext)
+    except json.JSONDecodeError as exc:
+        await _record_rejection(
+            db,
+            request=request,
+            care_context_reference=care_context_reference,
+            page_number=page_number,
+            entry_index=entry_index,
+            media_type=media_type,
+            declared_checksum=declared_checksum,
+            content_sha256=digest_hex,
+            status="rejected",
+            reason="Decrypted content was not valid JSON",
+        )
+        raise HiuError("invalid_fhir_json", "The decrypted bundle is not valid JSON") from exc
+    if not isinstance(parsed, dict) or (
+        parsed.get("resourceType") != "Bundle" or parsed.get("type") != "document"
+    ):
+        await _record_rejection(
+            db,
+            request=request,
+            care_context_reference=care_context_reference,
+            page_number=page_number,
+            entry_index=entry_index,
+            media_type=media_type,
+            declared_checksum=declared_checksum,
+            content_sha256=digest_hex,
+            status="rejected",
+            reason="Decrypted content was not a FHIR document Bundle",
+        )
+        raise HiuError(
+            "invalid_fhir_bundle", "The decrypted document is not a FHIR document Bundle"
+        )
 
     receipt = AbdmReceivedBundle(
         facility_id=request.facility_id,
         hi_request_id=request.id,
         care_context_reference=care_context_reference,
-        content_sha256=hashlib.sha256(plaintext.encode()).hexdigest(),
+        page_number=page_number,
+        entry_index=entry_index,
+        media_type=media_type,
+        declared_checksum=declared_checksum,
+        content_sha256=digest_hex,
         status="stored",
     )
     db.add(receipt)
-    request.status = "received"
+    request.status = "partial"
     await db.flush()
     return receipt, plaintext
 
 
-async def complete_request(
-    db: AsyncSession, *, request: AbdmHiuHealthInformationRequest
-) -> None:
+async def complete_request(db: AsyncSession, *, request: AbdmHiuHealthInformationRequest) -> None:
     """Finish a transfer and drop the key that could still open it."""
     _clear_key(request)
     await db.flush()

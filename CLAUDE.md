@@ -173,8 +173,9 @@ the console shows `[HMR] connected`.
   carries a per-request nonce from `frontend/src/proxy.ts` instead of
   `'unsafe-inline'`, and every route renders `force-dynamic` because a nonce
   cannot be baked into prerendered HTML.
-- WASA ABDM track: **M1 is complete and reaching the sandbox. M2 and M3 can now
-  speak** — `hip/gateway.py` and `hiu/gateway.py` carry the outbound wire
+- WASA ABDM track: **the M1/M2/M3 implementation is code-ready, but milestone
+  certification still requires real patient sandbox runs.** `hip/gateway.py`
+  and `hiu/gateway.py` carry the outbound wire
   protocol (11 calls, every shape taken field-by-field from ABDM's official v3
   Postman collection) and the routers call them. Before this the ten
   `abdm_path_*` settings were referenced nowhere outside `config.py`: the
@@ -187,15 +188,27 @@ the console shows `[HMR] connected`.
   else); HIP care-context notification, whose absence is the classic HIP defect
   — linking works once and every record created afterwards is invisible.
 
-  **Still missing, and neither is small:** the bundle transfer worker (the HIP
-  accepts and authorises a health-information request, but nothing yet encrypts
-  and pushes to the HIU's `dataPushUrl` or sends `notify_hi_transfer`), and the
-  HIP-initiated link-token flow, which needs a callback route for the token
-  before `link_care_contexts` can be used. `respond_to_discovery`,
-  `respond_to_link_init` and `respond_to_link_confirm` exist and are tested but
-  have no callback routes calling them yet. `integrations/abdm/consent/` and
-  `nhcx/` remain empty; consent artefact handling lives in `hip/` and `hiu/`,
-  and NHCX is out of scope for this audit.
+  The official root-level `/api/v3/hip`, `/api/v3/hiu`, `/api/v3/consent` and
+  direct transfer callbacks are mounted with nested camel-case contracts. The
+  HIP transfer worker selects only consented, confirmed care contexts, builds
+  NRCeS document bundles, encrypts and pages the push, then sends the terminal
+  transfer notification. Generated OP Consultation, lab and imaging Diagnostic
+  Report, Prescription, Discharge Summary and Wellness samples validate with
+  zero errors and zero warnings against NRCeS 6.5.0 using the official HL7
+  validator 6.9.12. Offline terminology mode emits one informational MIME note
+  for the PACS-reference attachment; it is not a warning or error.
+
+  Patient-initiated linking is `MEDIATE`, not `DIRECT`: a random single-use OTP
+  is hashed in Redis, expires after ten minutes, locks after five failures and
+  is delivered through a deployment-owned HTTPS relay. There is deliberately
+  no fixed development OTP. A real M2 run therefore needs
+  `ABDM_LINK_OTP_DELIVERY_URL` and its bearer token configured. The remaining
+  work is external evidence: run M1 with a consenting sandbox user, complete
+  M2 discovery/linking, and complete the M3 consent/data round trip while
+  retaining NHA milestone screenshots and request IDs.
+
+  `integrations/abdm/consent/` and `nhcx/` remain empty; consent artefact
+  handling lives in `hip/` and `hiu/`, and NHCX is out of scope for this audit.
 - Frontend is production-ready: the `NEXT_PUBLIC_AUTH_MODE=dev` role picker is
   deleted, and `.env.production.example` carries the `NEXT_PUBLIC_*` build args
   the image needs.
@@ -225,8 +238,10 @@ documented-and-hoped:
   existence probe — GET it and read 404 as "no such route", anything else as
   "route exists": the POST-only paths answered 405, consent/request/init
   answered 400, and the bridge and certs routes answered 200 because GET is
-  their real method. Every old path returned 404. Existence is all this proves;
-  no payload has yet been accepted.
+  their real method. Every old path returned 404. Those probes established
+  route existence; the local implementation now covers the corresponding
+  request and callback payloads, while real milestone acceptance still needs
+  to be captured with a consenting sandbox user.
 - **The bridge URL is self-service.** `PATCH /api/hiecm/gateway/v3/bridge/url`
   returns 202 and `SBXID_053401` now points at `https://abdm.healthdoc.world`.
   Asking NHA to register it was unnecessary.
@@ -241,15 +256,16 @@ two services registered via `PUT /api/hiecm/gateway/v3/bridge-service` —
 must equal the HIP service id or inbound callbacks 404 at `_facility_for_hfr_id`;
 DEV001 is set to `SBXID_053401_HIP`.
 
-**Callback signature verification is now unblocked and should be built.**
-`GET /api/hiecm/gateway/v3/certs` returns a JWKS — two RSA keys, `use=sig`,
-RS256 and RS512 — and `/.well-known/openid-configuration` points at it. The
-shared secret was only ever a placeholder because the scheme "needs the sandbox
-to confirm before it can be written without guessing"; the sandbox has now
-confirmed it. This matters more than it looks: the bridge URL is live, so ABDM
-can call us, and a shared secret ABDM does not know means every real callback
-would be rejected. The secret is a stand-in for signature verification, not an
-alternative to it.
+**Official callbacks do not use HealthDoc's private shared secret.** The
+published v3 callback requests carry `REQUEST-ID`, `TIMESTAMP`, `X-CM-ID` and
+the addressed `X-HIP-ID`/`X-HIU-ID`; the published collection does not define a
+request-signature header or canonical signing input. The root-level handlers
+therefore enforce those headers, UUID/timestamp freshness, replay coalescing,
+recipient matching and the durable consent/transaction state machine without
+pretending that headers are cryptographic proof of origin. Source restrictions
+remain an ingress/Cloudflare control until NHA publishes a verifiable callback
+signature scheme. `ABDM_CALLBACK_SHARED_SECRET` protects only legacy private
+`/api/v1/abdm/...` callback routes and is not required by ABDM.
 
 **M1 ABHA verification is on.** `_VERIFY_PATH` is
 `/v3/profile/login/search`, relative to `abdm_abha_base_url` — the ABHA host,

@@ -27,6 +27,7 @@ to POST to, when it is a callback the gateway invokes ON a HIP. Every function
 below records which way it points in its docstring. `on-*` names are OUR
 response to something the gateway asked us; the rest are requests we start.
 """
+
 from __future__ import annotations
 
 import logging
@@ -44,16 +45,18 @@ log = logging.getLogger("healthdoc.abdm")
 #: set is rejected by the gateway with a validation error that names the field
 #: but not the allowed values, so the check is done here where the list can be
 #: read.
-HI_TYPES: frozenset[str] = frozenset({
-    "Prescription",
-    "DiagnosticReport",
-    "OPConsultation",
-    "DischargeSummary",
-    "ImmunizationRecord",
-    "HealthDocumentRecord",
-    "WellnessRecord",
-    "Invoice",
-})
+HI_TYPES: frozenset[str] = frozenset(
+    {
+        "Prescription",
+        "DiagnosticReport",
+        "OPConsultation",
+        "DischargeSummary",
+        "ImmunizationRecord",
+        "HealthDocumentRecord",
+        "WellnessRecord",
+        "Invoice",
+    }
+)
 
 _PLACEHOLDER = "change-me"
 
@@ -84,6 +87,12 @@ def _now_iso() -> str:
     endpoints and silently tolerates on others — the inconsistent kind of bug.
     """
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+
+
+def _iso(value: datetime) -> str:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
 def validate_hi_types(hi_types: Sequence[str]) -> list[str]:
@@ -117,8 +126,7 @@ def care_context_payload(
     empty link.
     """
     contexts = [
-        {"referenceNumber": c["referenceNumber"], "display": c["display"]}
-        for c in care_contexts
+        {"referenceNumber": c["referenceNumber"], "display": c["display"]} for c in care_contexts
     ]
     return {
         "referenceNumber": abha_address,
@@ -157,6 +165,7 @@ async def _post(
 # =============================================================================
 # HIP-initiated linking — we start these
 # =============================================================================
+
 
 async def generate_link_token(
     *,
@@ -261,6 +270,7 @@ async def notify_care_context(
 # Patient-initiated linking — the gateway asks, we answer
 # =============================================================================
 
+
 async def respond_to_discovery(
     *,
     transaction_id: str,
@@ -314,21 +324,45 @@ async def respond_to_discovery(
     )
 
 
+async def respond_to_discovery_groups(
+    *,
+    transaction_id: str,
+    gateway_request_id: str,
+    patient_groups: Sequence[Mapping[str, Any]],
+    matched_by: Sequence[str],
+    request_id: str | None = None,
+) -> tuple[str, AbdmResponse]:
+    """HIP -> gateway. One discovery answer containing every granted HI type."""
+    settings = get_settings()
+    for group in patient_groups:
+        validate_hi_types([str(group["hiType"])])
+    return await _post(
+        settings.abdm_path_hip_on_discover,
+        {
+            "transactionId": transaction_id,
+            "patient": [dict(group) for group in patient_groups],
+            "matchedBy": list(matched_by),
+            "response": {"requestId": gateway_request_id},
+        },
+        extra_headers={"X-HIP-ID": hip_id()},
+        request_id=request_id,
+    )
+
+
 async def respond_to_link_init(
     *,
     transaction_id: str,
     gateway_request_id: str,
     link_ref_number: str,
-    authentication_type: str = "DIRECT",
+    authentication_type: str = "MEDIATE",
+    communication_hint: str = "",
     communication_expiry: str | None = None,
     request_id: str | None = None,
 ) -> tuple[str, AbdmResponse]:
     """HIP -> gateway. Answer a link-init with a reference number.
 
-    `DIRECT` means we are not challenging the patient for an OTP of our own —
-    the CM already authenticated them. The alternative requires us to run an
-    OTP flow, which this deployment does not, so it is not offered as an option
-    rather than accepted and ignored.
+    ABDM v3 uses mediated authentication here: the HIP sends a short-lived OTP
+    to the patient's registered mobile and verifies the token on confirm.
     """
     settings = get_settings()
     return await _post(
@@ -340,10 +374,30 @@ async def respond_to_link_init(
                 "authenticationType": authentication_type,
                 "meta": {
                     "communicationMedium": "MOBILE",
-                    "communicationHint": "OTP",
+                    "communicationHint": communication_hint,
                     "communicationExpiry": communication_expiry or _now_iso(),
                 },
             },
+            "response": {"requestId": gateway_request_id},
+        },
+        extra_headers={"X-HIP-ID": hip_id()},
+        request_id=request_id,
+    )
+
+
+async def respond_to_link_confirm_error(
+    *,
+    gateway_request_id: str,
+    code: str,
+    message: str,
+    request_id: str | None = None,
+) -> tuple[str, AbdmResponse]:
+    """HIP -> gateway. Refuse a link confirmation without exposing state."""
+    settings = get_settings()
+    return await _post(
+        settings.abdm_path_hip_on_link_confirm,
+        {
+            "error": {"code": code, "message": message},
             "response": {"requestId": gateway_request_id},
         },
         extra_headers={"X-HIP-ID": hip_id()},
@@ -385,9 +439,31 @@ async def respond_to_link_confirm(
     )
 
 
+async def respond_to_link_confirm_groups(
+    *,
+    gateway_request_id: str,
+    patient_groups: Sequence[Mapping[str, Any]],
+    request_id: str | None = None,
+) -> tuple[str, AbdmResponse]:
+    """HIP -> gateway. Confirm a link containing multiple HI-type groups."""
+    settings = get_settings()
+    for group in patient_groups:
+        validate_hi_types([str(group["hiType"])])
+    return await _post(
+        settings.abdm_path_hip_on_link_confirm,
+        {
+            "patient": [dict(group) for group in patient_groups],
+            "response": {"requestId": gateway_request_id},
+        },
+        extra_headers={"X-HIP-ID": hip_id()},
+        request_id=request_id,
+    )
+
+
 # =============================================================================
 # Consent and data flow — acknowledgements the gateway waits for
 # =============================================================================
+
 
 async def acknowledge_consent_notification(
     *,
@@ -406,6 +482,38 @@ async def acknowledge_consent_notification(
         settings.abdm_path_hip_on_consent_notify,
         {
             "acknowledgement": {"status": status, "consentId": consent_id},
+            "response": {"requestId": gateway_request_id},
+        },
+        extra_headers={"X-HIP-ID": hip_id()},
+        request_id=request_id,
+    )
+
+
+async def acknowledge_profile_share(
+    *,
+    gateway_request_id: str,
+    abha_address: str,
+    context: str,
+    token_number: str,
+    expiry_seconds: int = 1800,
+    request_id: str | None = None,
+) -> tuple[str, AbdmResponse]:
+    """HIP -> gateway. Return the facility token for scan-and-share."""
+    settings = get_settings()
+    return await _post(
+        settings.abdm_path_hip_profile_on_share,
+        {
+            "acknowledgement": {
+                "status": "SUCCESS",
+                "abhaAddress": abha_address,
+                "profile": {
+                    "context": context,
+                    "tokenNumber": token_number,
+                    # ABDM Scan-and-Share defines this as a duration in
+                    # seconds (a string), not an ISO timestamp.
+                    "expiry": str(expiry_seconds),
+                },
+            },
             "response": {"requestId": gateway_request_id},
         },
         extra_headers={"X-HIP-ID": hip_id()},

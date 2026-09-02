@@ -13,6 +13,7 @@ what makes these rows scopeable by the same `CurrentDbUser` rule as the rest of
 the app, and what lets audit_logs.facility_id be satisfied when these models
 are opted into the audit listener.
 """
+
 from __future__ import annotations
 
 from sqlalchemy import (
@@ -42,9 +43,15 @@ class AbdmCareContext(Base, UUIDPk, Timestamps, Blame):
 
     __tablename__ = "abdm_care_contexts"
 
-    facility_id = Column(UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False)
-    patient_id = Column(UUID(as_uuid=True), ForeignKey("patients.id", ondelete="RESTRICT"), nullable=False)
-    visit_id = Column(UUID(as_uuid=True), ForeignKey("visits.id", ondelete="RESTRICT"), nullable=True)
+    facility_id = Column(
+        UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False
+    )
+    patient_id = Column(
+        UUID(as_uuid=True), ForeignKey("patients.id", ondelete="RESTRICT"), nullable=False
+    )
+    visit_id = Column(
+        UUID(as_uuid=True), ForeignKey("visits.id", ondelete="RESTRICT"), nullable=True
+    )
 
     reference = Column(String(100), nullable=False)
     display = Column(String(200), nullable=False)
@@ -94,12 +101,18 @@ class AbdmCareContextLink(Base, UUIDPk, Timestamps):
 
     __tablename__ = "abdm_care_context_links"
 
-    facility_id = Column(UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False)
-    patient_id = Column(UUID(as_uuid=True), ForeignKey("patients.id", ondelete="RESTRICT"), nullable=False)
+    facility_id = Column(
+        UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False
+    )
+    patient_id = Column(
+        UUID(as_uuid=True), ForeignKey("patients.id", ondelete="RESTRICT"), nullable=False
+    )
 
     abha_address = Column(String(120), nullable=False)
     link_ref_number = Column(String(120), nullable=True)
     gateway_request_id = Column(String(100), nullable=True)
+    transaction_id = Column(String(120), nullable=True)
+    care_context_references = Column(JSONB, nullable=False, server_default="[]")
     status = Column(String(50), nullable=False, server_default="pending")
     #: Why a link failed, for the desk. Never carries a gateway body verbatim —
     #: those echo identifiers we just sent.
@@ -112,10 +125,13 @@ class AbdmCareContextLink(Base, UUIDPk, Timestamps):
     __audit_patient_id_field__ = "patient_id"
 
     __table_args__ = (
-        CheckConstraint("status IN ('pending','confirmed','failed','expired')", name="abdm_link_status"),
+        CheckConstraint(
+            "status IN ('pending','confirmed','failed','expired')", name="abdm_link_status"
+        ),
         Index("ix_abdm_links_facility_id", "facility_id"),
         Index("ix_abdm_links_abha_address", "abha_address"),
         Index("ix_abdm_links_ref", "link_ref_number"),
+        Index("ix_abdm_links_transaction", "transaction_id"),
         Index("ix_abdm_links_patient_id", "patient_id"),
     )
 
@@ -136,7 +152,9 @@ class AbdmHipConsentArtefact(Base, UUIDPk, Timestamps):
 
     __tablename__ = "abdm_hip_consent_artefacts"
 
-    facility_id = Column(UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False)
+    facility_id = Column(
+        UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False
+    )
     consent_artefact_id = Column(String(120), nullable=False)
     abha_address = Column(String(120), nullable=False)
     status = Column(String(50), nullable=False, server_default="granted")
@@ -152,7 +170,9 @@ class AbdmHipConsentArtefact(Base, UUIDPk, Timestamps):
 
     __table_args__ = (
         UniqueConstraint("consent_artefact_id", name="uq_abdm_hip_artefact_id"),
-        CheckConstraint("status IN ('granted','revoked','expired')", name="abdm_hip_artefact_status"),
+        CheckConstraint(
+            "status IN ('granted','revoked','expired')", name="abdm_hip_artefact_status"
+        ),
         Index("ix_abdm_hip_artefacts_facility_id", "facility_id"),
         Index("ix_abdm_hip_artefacts_abha", "abha_address"),
     )
@@ -168,7 +188,9 @@ class AbdmHipHealthInformationRequest(Base, UUIDPk, Timestamps):
 
     __tablename__ = "abdm_hip_hi_requests"
 
-    facility_id = Column(UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False)
+    facility_id = Column(
+        UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False
+    )
     consent_artefact_id = Column(String(120), nullable=False)
     transaction_id = Column(String(120), nullable=False)
     gateway_request_id = Column(String(100), nullable=True)

@@ -1,4 +1,5 @@
 """Central settings — every module reads config from here, never os.environ directly."""
+
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -160,13 +161,13 @@ class Settings(BaseSettings):
     #: HIP -> gateway. Acknowledge a consent notification.
     abdm_path_hip_on_consent_notify: str = "/api/hiecm/consent/v3/request/hip/on-notify"
     #: HIP -> gateway. Acknowledge a health-information request.
-    abdm_path_hip_on_hi_request: str = (
-        "/api/hiecm/data-flow/v3/health-information/hip/on-request"
-    )
+    abdm_path_hip_on_hi_request: str = "/api/hiecm/data-flow/v3/health-information/hip/on-request"
     #: HIP -> gateway. Report the outcome of a data push.
     abdm_path_hip_hi_notify: str = "/api/hiecm/data-flow/v3/health-information/notify"
     #: HIP -> gateway. Exchange patient demographics for a link token.
     abdm_path_hip_token_generate: str = "/api/hiecm/v3/token/generate-token"
+    #: HIP -> gateway. Acknowledge a scan-and-share patient profile.
+    abdm_path_hip_profile_on_share: str = "/api/hiecm/patient-share/v3/on-share"
 
     #: HIU -> gateway. Ask the consent manager for a new consent.
     abdm_path_hiu_consent_request_init: str = "/api/hiecm/consent/v3/request/init"
@@ -190,7 +191,9 @@ class Settings(BaseSettings):
     abdm_path_bridge_services: str = "/api/hiecm/gateway/v3/bridge-services"
     abdm_path_bridge_service: str = "/api/hiecm/gateway/v3/bridge-service"
     abdm_path_bridge_url: str = "/api/hiecm/gateway/v3/bridge/url"
-    #: Gateway signing keys, for verifying callbacks ABDM sends us.
+    #: Gateway JWKS discovery endpoint. Kept configurable for future protocol
+    #: use; the published v3 callback contract currently defines no signature
+    #: header/canonical input to verify with these keys.
     abdm_path_gateway_certs: str = "/api/hiecm/gateway/v3/certs"
 
     #: NOTE (2026-08-31): bridge management — PATCH /gateway/v1/bridges and
@@ -215,12 +218,18 @@ class Settings(BaseSettings):
     #: Placeholder means HIU data-transfer requests are refused rather than
     #: sent with an address nobody can reach.
     abdm_hiu_callback_base_url: str = "change-me"
-    
+    #: HTTPS relay owned by the deployment for delivering the HIP's mediated
+    #: user-linking OTP. It receives the documented JSON contract from
+    #: integrations/abdm/hip/link_otp.py. Unset means the linking callback
+    #: fails closed; accepting an unverified confirmation is never a fallback.
+    abdm_link_otp_delivery_url: str | None = None
+    abdm_link_otp_delivery_token: str | None = None
+
     aadhaar_hmac_key: str = "change-me-in-env"
     aadhaar_encryption_key: str = "change-me-in-env"
     aadhaar_hmac_keys_json: str = ""
     aadhaar_encryption_keys_json: str = ""
-    
+
     aadhaar_hmac_current_key_version: int = 1
     # Drives encrypt_pii's default key version going forward.
     # decrypt_pii reads its version from the ciphertext blob itself,

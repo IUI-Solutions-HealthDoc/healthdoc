@@ -35,13 +35,14 @@ the entire life of the file. **The defaults below are the documented v3 shapes
 and have NOT been confirmed against the sandbox.** When one is wrong, the fix
 is an environment variable, not a release.
 """
+
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
 
-from app.integrations.abdm.client import AbdmResponse, get_abdm_client
 from app.common.config import get_settings
+from app.integrations.abdm.client import AbdmResponse, get_abdm_client
 
 from . import otp_session
 from .crypto import encrypt_for_abdm
@@ -97,9 +98,7 @@ def _txn_id(body: object) -> str:
         value = body.get(key)
         if isinstance(value, str) and value:
             return value
-    raise AbdmIdentityError(
-        "abdm_bad_response", "gateway response carried no transaction id"
-    )
+    raise AbdmIdentityError("abdm_bad_response", "gateway response carried no transaction id")
 
 
 async def _post(path: str, payload: dict) -> AbdmResponse:
@@ -118,8 +117,13 @@ async def _post(path: str, payload: dict) -> AbdmResponse:
 
 # ------------------------------------------------------- enrol by Aadhaar
 
+
 async def request_aadhaar_otp(
-    *, aadhaar: str, facility_id: str, started_by: str
+    *,
+    aadhaar: str,
+    facility_id: str,
+    started_by: str,
+    patient_id: str | None = None,
 ) -> OtpRequested:
     """Leg one of enrolment: ask ABDM to OTP the mobile linked to this Aadhaar.
 
@@ -146,6 +150,7 @@ async def request_aadhaar_otp(
         purpose=OtpPurpose.ENROL_BY_AADHAAR,
         facility_id=facility_id,
         started_by=started_by,
+        patient_id=patient_id,
     )
     return OtpRequested(
         session_id=session.session_id,
@@ -154,7 +159,12 @@ async def request_aadhaar_otp(
 
 
 async def enrol_by_aadhaar_otp(
-    *, session_id: str, otp: str, mobile: str | None, facility_id: str
+    *,
+    session_id: str,
+    otp: str,
+    mobile: str | None,
+    facility_id: str,
+    consume_session: bool = True,
 ) -> AbhaIssued:
     """Leg two: present the OTP and receive a new ABHA.
 
@@ -193,7 +203,8 @@ async def enrol_by_aadhaar_otp(
             "abdm_no_abha_returned", "enrolment completed without an ABHA number"
         )
 
-    await otp_session.finish(session_id)
+    if consume_session:
+        await otp_session.finish(session_id)
     return AbhaIssued(
         abha_number=abha_number,
         abha_address=profile.get("phrAddress") or profile.get("abhaAddress"),
@@ -205,6 +216,7 @@ async def enrol_by_aadhaar_otp(
 
 
 # ---------------------------------------------------------- login by ABHA
+
 
 async def request_login_otp(
     *, abha_number: str, facility_id: str, started_by: str, patient_id: str | None = None
@@ -237,7 +249,7 @@ async def request_login_otp(
 
 
 async def verify_login_otp(
-    *, session_id: str, otp: str, facility_id: str
+    *, session_id: str, otp: str, facility_id: str, consume_session: bool = True
 ) -> AbhaIssued:
     """Leg two: the OTP proves the patient holds this ABHA."""
     session = await otp_session.load(
@@ -265,15 +277,14 @@ async def verify_login_otp(
     profile = body.get("ABHAProfile") or body.get("abhaProfile") or {}
     abha_number = profile.get("ABHANumber") or profile.get("abhaNumber")
     if not abha_number:
-        raise AbdmIdentityError(
-            "abdm_no_abha_returned", "login completed without an ABHA number"
-        )
+        raise AbdmIdentityError("abdm_no_abha_returned", "login completed without an ABHA number")
 
-    await otp_session.finish(session_id)
+    if consume_session:
+        await otp_session.finish(session_id)
     return AbhaIssued(
         abha_number=abha_number,
         abha_address=profile.get("phrAddress") or profile.get("abhaAddress"),
-        linking_token=body.get("token"),
+        linking_token=body.get("token") or body.get("tokens", {}).get("token"),
         name=profile.get("name"),
         gender=profile.get("gender"),
         date_of_birth=profile.get("dob") or profile.get("dateOfBirth"),

@@ -18,11 +18,13 @@ matched against the HIP id ABDM addressed. An unknown HFR id is refused — the
 alternative is attributing another organisation's callback to whichever
 facility happens to be first in the table.
 """
+
 from __future__ import annotations
 
 import logging
 import uuid
 from datetime import datetime
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
@@ -39,11 +41,15 @@ from app.integrations.abdm.hip.models import (
     AbdmCareContextLink,
     AbdmHipHealthInformationRequest,
 )
+from app.opd.models import Visit
+from app.patients.models import Patient
 from app.users.models import Facility
 
 log = logging.getLogger("healthdoc.abdm.hip")
 
 router = APIRouter(prefix="/abdm/hip", tags=["abdm-hip"])
+
+DbSession = Annotated[AsyncSession, Depends(get_db)]
 
 
 def _require_idempotency_key(
@@ -57,11 +63,17 @@ def _require_idempotency_key(
     construction instead; see the note on each.
     """
     if not idempotency_key:
-        raise HTTPException(400, {
-            "code": "idempotency_key_required",
-            "message": "Idempotency-Key header is required for this request",
-        })
+        raise HTTPException(
+            400,
+            {
+                "code": "idempotency_key_required",
+                "message": "Idempotency-Key header is required for this request",
+            },
+        )
     return idempotency_key
+
+
+IdempotencyKey = Annotated[str, Depends(_require_idempotency_key)]
 
 
 async def _acknowledge(what: str, coro) -> None:
@@ -106,6 +118,7 @@ async def _facility_for_hfr_id(db: AsyncSession, hfr_id: str) -> uuid.UUID:
 # Staff routes — bearer token, role-gated, facility from the token
 # =============================================================================
 
+
 class CareContextIn(BaseModel):
     patient_id: uuid.UUID
     visit_id: uuid.UUID | None = None
@@ -130,14 +143,61 @@ class CareContextOut(BaseModel):
 async def create_care_context(
     payload: CareContextIn,
     current_db_user: CurrentDbUser,
-    idempotency_key: str = Depends(_require_idempotency_key),
-    db: AsyncSession = Depends(get_db),
+    idempotency_key: IdempotencyKey,
+    db: DbSession,
 ) -> CareContextOut:
     """Register a unit of care as offerable to an ABHA address.
 
     Creating the context does not share anything. Sharing needs a confirmed
     link AND a consent artefact — see service.authorise_hi_request.
     """
+    try:
+        gateway.validate_hi_types([payload.hi_type])
+    except ValueError as exc:
+        raise HTTPException(
+            422,
+            {
+                "code": "invalid_hi_type",
+                "message": str(exc),
+            },
+        ) from exc
+
+    patient = (
+        await db.execute(
+            select(Patient.id).where(
+                Patient.id == payload.patient_id,
+                Patient.facility_id == current_db_user.facility_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if patient is None:
+        raise HTTPException(
+            404,
+            {
+                "code": "patient_not_found",
+                "message": "No such patient",
+            },
+        )
+
+    if payload.visit_id is not None:
+        visit = (
+            await db.execute(
+                select(Visit.id).where(
+                    Visit.id == payload.visit_id,
+                    Visit.patient_id == payload.patient_id,
+                    Visit.facility_id == current_db_user.facility_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if visit is None:
+            raise HTTPException(
+                404,
+                {
+                    "code": "visit_not_found",
+                    "message": "No such visit for this patient",
+                },
+            )
+
     context = AbdmCareContext(
         facility_id=current_db_user.facility_id,
         patient_id=payload.patient_id,
@@ -150,8 +210,10 @@ async def create_care_context(
     db.add(context)
     await db.flush()
     return CareContextOut(
-        id=context.id, reference=context.reference,
-        display=context.display, hi_type=context.hi_type,
+        id=context.id,
+        reference=context.reference,
+        display=context.display,
+        hi_type=context.hi_type,
     )
 
 
@@ -163,8 +225,8 @@ async def create_care_context(
 async def notify_care_context(
     context_id: uuid.UUID,
     current_db_user: CurrentDbUser,
-    idempotency_key: str = Depends(_require_idempotency_key),
-    db: AsyncSession = Depends(get_db),
+    idempotency_key: IdempotencyKey,
+    db: DbSession,
 ) -> dict:
     """Tell the consent manager a new care context exists for a linked patient.
 
@@ -189,22 +251,29 @@ async def notify_care_context(
         raise HTTPException(404, {"code": "not_found", "message": "No such care context"})
 
     link = (
-        await db.execute(
-            select(AbdmCareContextLink).where(
-                AbdmCareContextLink.patient_id == context.patient_id,
-                AbdmCareContextLink.facility_id == current_db_user.facility_id,
-                AbdmCareContextLink.status == "confirmed",
+        (
+            await db.execute(
+                select(AbdmCareContextLink).where(
+                    AbdmCareContextLink.patient_id == context.patient_id,
+                    AbdmCareContextLink.facility_id == current_db_user.facility_id,
+                    AbdmCareContextLink.status == "confirmed",
+                )
             )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     if link is None:
-        raise HTTPException(409, {
-            "code": "not_linked",
-            "message": (
-                "This patient has no confirmed ABHA link, so there is nobody to "
-                "notify. Link the patient before sharing new care contexts."
-            ),
-        })
+        raise HTTPException(
+            409,
+            {
+                "code": "not_linked",
+                "message": (
+                    "This patient has no confirmed ABHA link, so there is nobody to "
+                    "notify. Link the patient before sharing new care contexts."
+                ),
+            },
+        )
 
     try:
         request_id, _ = await gateway.notify_care_context(
@@ -217,10 +286,13 @@ async def notify_care_context(
     except AbdmError as exc:
         # Type only. The gateway's body echoes the ABHA address we just sent.
         log.error("Care-context notification failed (%s)", type(exc).__name__)
-        raise HTTPException(502, {
-            "code": "abdm_unavailable",
-            "message": "ABDM did not accept the notification. Nothing was shared.",
-        }) from exc
+        raise HTTPException(
+            502,
+            {
+                "code": "abdm_unavailable",
+                "message": "ABDM did not accept the notification. Nothing was shared.",
+            },
+        ) from exc
 
     return {"notified": context.reference, "request_id": request_id}
 
@@ -240,21 +312,26 @@ class LinkOut(BaseModel):
 async def list_links(
     patient_id: uuid.UUID,
     current_db_user: CurrentDbUser,
-    db: AsyncSession = Depends(get_db),
+    db: DbSession,
 ) -> list[LinkOut]:
     """Which ABHA addresses may see this patient's records here."""
     rows = (
-        await db.execute(
-            select(AbdmCareContextLink).where(
-                AbdmCareContextLink.patient_id == patient_id,
-                # Scoped by the token's facility, never the path.
-                AbdmCareContextLink.facility_id == current_db_user.facility_id,
+        (
+            await db.execute(
+                select(AbdmCareContextLink).where(
+                    AbdmCareContextLink.patient_id == patient_id,
+                    # Scoped by the token's facility, never the path.
+                    AbdmCareContextLink.facility_id == current_db_user.facility_id,
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return [
-        LinkOut(id=r.id, abha_address=r.abha_address, status=r.status,
-                failure_reason=r.failure_reason)
+        LinkOut(
+            id=r.id, abha_address=r.abha_address, status=r.status, failure_reason=r.failure_reason
+        )
         for r in rows
     ]
 
@@ -262,6 +339,7 @@ async def list_links(
 # =============================================================================
 # Gateway callbacks — NO user, authenticated by shared secret, fail closed
 # =============================================================================
+
 
 class ConsentNotification(BaseModel):
     hip_id: str
@@ -289,7 +367,7 @@ class ConsentNotification(BaseModel):
 )
 async def consent_notify(
     payload: ConsentNotification,
-    db: AsyncSession = Depends(get_db),
+    db: DbSession,
 ) -> dict:
     """The consent manager tells us a consent was granted, revoked or expired.
 
@@ -360,7 +438,7 @@ class HiRequestIn(BaseModel):
 )
 async def hi_request(
     payload: HiRequestIn,
-    db: AsyncSession = Depends(get_db),
+    db: DbSession,
 ) -> dict:
     """A HIU is asking for data under a consent artefact.
 
@@ -385,10 +463,13 @@ async def hi_request(
     ).scalar_one_or_none()
     if already is not None:
         if already.status == "refused":
-            raise HTTPException(403, {
-                "code": already.failure_reason or "consent_not_valid",
-                "message": "This request was already refused",
-            })
+            raise HTTPException(
+                403,
+                {
+                    "code": already.failure_reason or "consent_not_valid",
+                    "message": "This request was already refused",
+                },
+            )
         return {
             "accepted": already.transaction_id,
             "care_contexts": int(already.bundles_sent or 0),

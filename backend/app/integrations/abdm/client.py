@@ -51,15 +51,17 @@ and durations. It never logs a request or response body, including on error.
 to the gateway's own logs during certification. The caller gets the id we sent
 so it can store it.
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
 import time
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Mapping
+from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 
@@ -152,9 +154,7 @@ class _TokenCache:
 
     def set(self, token: str, expires_in_seconds: float) -> None:
         self._token = token
-        self._expires_at = time.monotonic() + max(
-            0.0, expires_in_seconds - _EXPIRY_MARGIN_SECONDS
-        )
+        self._expires_at = time.monotonic() + max(0.0, expires_in_seconds - _EXPIRY_MARGIN_SECONDS)
 
     def clear(self) -> None:
         self._token = None
@@ -202,9 +202,7 @@ class AbdmClient:
         Call sites can use this to keep an endpoint registered but inert,
         rather than deciding at import time whether ABDM exists.
         """
-        return all(
-            v and v != _PLACEHOLDER for v in (self.client_id, self.client_secret)
-        )
+        return all(v and v != _PLACEHOLDER for v in (self.client_id, self.client_secret))
 
     def _require_configured(self) -> None:
         if not self.is_configured:
@@ -239,16 +237,16 @@ class AbdmClient:
             )
         except (httpx.TimeoutException, httpx.TransportError) as exc:
             # No body logged: even an auth failure body can echo the client id.
-            log.warning("ABDM session request %s failed at transport: %s",
-                        request_id, type(exc).__name__)
+            log.warning(
+                "ABDM session request %s failed at transport: %s", request_id, type(exc).__name__
+            )
             raise AbdmUnavailable("ABDM gateway unreachable for session") from exc
 
         if resp.status_code in (401, 403):
-            log.error("ABDM rejected client credentials (session %s, %s)",
-                      request_id, resp.status_code)
-            raise AbdmAuthError(
-                f"ABDM rejected client credentials ({resp.status_code})"
+            log.error(
+                "ABDM rejected client credentials (session %s, %s)", request_id, resp.status_code
             )
+            raise AbdmAuthError(f"ABDM rejected client credentials ({resp.status_code})")
         if resp.status_code >= 500:
             log.warning("ABDM session %s returned %s", request_id, resp.status_code)
             raise AbdmUnavailable(f"ABDM session endpoint returned {resp.status_code}")
@@ -363,14 +361,24 @@ class AbdmClient:
         try:
             resp = await self._http.request(method, path, json=json_body, headers=headers)
         except (httpx.TimeoutException, httpx.TransportError) as exc:
-            log.warning("ABDM %s %s (request %s) failed at transport: %s",
-                        method, path, request_id, type(exc).__name__)
+            log.warning(
+                "ABDM %s %s (request %s) failed at transport: %s",
+                method,
+                path,
+                request_id,
+                type(exc).__name__,
+            )
             raise AbdmUnavailable(f"ABDM gateway unreachable for {method} {path}") from exc
 
         # Status and duration only. Never the body — it carries PHI.
-        log.info("ABDM %s %s -> %s (request %s, %.0fms)",
-                 method, path, resp.status_code, request_id,
-                 (time.monotonic() - started) * 1000)
+        log.info(
+            "ABDM %s %s -> %s (request %s, %.0fms)",
+            method,
+            path,
+            resp.status_code,
+            request_id,
+            (time.monotonic() - started) * 1000,
+        )
         return resp
 
     async def aclose(self) -> None:
@@ -379,7 +387,7 @@ class AbdmClient:
 
 def _timestamp() -> str:
     """ABDM wants ISO-8601 UTC with a trailing Z, to milliseconds."""
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
 def _safe_body(resp: httpx.Response) -> Any:
