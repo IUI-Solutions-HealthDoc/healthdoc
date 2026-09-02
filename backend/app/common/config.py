@@ -1,4 +1,5 @@
 """Central settings — every module reads config from here, never os.environ directly."""
+
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -55,6 +56,14 @@ class Settings(BaseSettings):
     # origin here so joining a path cannot silently produce /gateway/v3/*.
     abdm_gateway_base_url: str = "https://dev.abdm.gov.in"
     abdm_client_id: str = "change-me"
+    #: Our identities ON the gateway, registered with
+    #: PUT /api/hiecm/gateway/v3/bridge-service. These are NOT the client id:
+    #: one bridge carries many services, and every M2/M3 call has to say which
+    #: one is speaking (X-HIP-ID / X-HIU-ID). They also have to match
+    #: facilities.hfr_facility_id, or an inbound callback resolves to no
+    #: facility and 404s.
+    abdm_hip_id: str = "change-me"
+    abdm_hiu_id: str = "change-me"
     abdm_client_secret: str = "change-me"
     abdm_hfr_facility_id: str = "change-me"
     # Consent-manager id sent as X-CM-ID on every gateway call. 'sbx' is the
@@ -152,13 +161,13 @@ class Settings(BaseSettings):
     #: HIP -> gateway. Acknowledge a consent notification.
     abdm_path_hip_on_consent_notify: str = "/api/hiecm/consent/v3/request/hip/on-notify"
     #: HIP -> gateway. Acknowledge a health-information request.
-    abdm_path_hip_on_hi_request: str = (
-        "/api/hiecm/data-flow/v3/health-information/hip/on-request"
-    )
+    abdm_path_hip_on_hi_request: str = "/api/hiecm/data-flow/v3/health-information/hip/on-request"
     #: HIP -> gateway. Report the outcome of a data push.
     abdm_path_hip_hi_notify: str = "/api/hiecm/data-flow/v3/health-information/notify"
     #: HIP -> gateway. Exchange patient demographics for a link token.
     abdm_path_hip_token_generate: str = "/api/hiecm/v3/token/generate-token"
+    #: HIP -> gateway. Acknowledge a scan-and-share patient profile.
+    abdm_path_hip_profile_on_share: str = "/api/hiecm/patient-share/v3/on-share"
 
     #: HIU -> gateway. Ask the consent manager for a new consent.
     abdm_path_hiu_consent_request_init: str = "/api/hiecm/consent/v3/request/init"
@@ -166,6 +175,14 @@ class Settings(BaseSettings):
     abdm_path_hiu_consent_fetch: str = "/api/hiecm/consent/v3/fetch"
     #: HIU -> gateway. Ask for the data a consent artefact permits.
     abdm_path_hiu_hi_request: str = "/api/hiecm/data-flow/v3/health-information/request"
+    #: HIU -> gateway. Poll a consent request. A backstop for a callback that
+    #: never lands, which is otherwise indistinguishable from a patient who has
+    #: simply not answered yet.
+    abdm_path_hiu_consent_request_status: str = "/api/hiecm/consent/v3/request/status"
+    #: HIU -> gateway. Acknowledge a consent notification. Note this is the HIU
+    #: sibling of abdm_path_hip_on_consent_notify and takes a LIST where the HIP
+    #: one takes an object — ABDM's asymmetry, not ours.
+    abdm_path_hiu_on_consent_notify: str = "/api/hiecm/consent/v3/request/hiu/on-notify"
 
     #: Bridge management. NOT /gateway/v1/bridges — that path answers 403
     #: "900908 API Subscription validation failed" for a sandbox client, which
@@ -174,7 +191,9 @@ class Settings(BaseSettings):
     abdm_path_bridge_services: str = "/api/hiecm/gateway/v3/bridge-services"
     abdm_path_bridge_service: str = "/api/hiecm/gateway/v3/bridge-service"
     abdm_path_bridge_url: str = "/api/hiecm/gateway/v3/bridge/url"
-    #: Gateway signing keys, for verifying callbacks ABDM sends us.
+    #: Gateway JWKS discovery endpoint. Kept configurable for future protocol
+    #: use; the published v3 callback contract currently defines no signature
+    #: header/canonical input to verify with these keys.
     abdm_path_gateway_certs: str = "/api/hiecm/gateway/v3/certs"
 
     #: NOTE (2026-08-31): bridge management — PATCH /gateway/v1/bridges and
@@ -199,12 +218,18 @@ class Settings(BaseSettings):
     #: Placeholder means HIU data-transfer requests are refused rather than
     #: sent with an address nobody can reach.
     abdm_hiu_callback_base_url: str = "change-me"
-    
+    #: HTTPS relay owned by the deployment for delivering the HIP's mediated
+    #: user-linking OTP. It receives the documented JSON contract from
+    #: integrations/abdm/hip/link_otp.py. Unset means the linking callback
+    #: fails closed; accepting an unverified confirmation is never a fallback.
+    abdm_link_otp_delivery_url: str | None = None
+    abdm_link_otp_delivery_token: str | None = None
+
     aadhaar_hmac_key: str = "change-me-in-env"
     aadhaar_encryption_key: str = "change-me-in-env"
     aadhaar_hmac_keys_json: str = ""
     aadhaar_encryption_keys_json: str = ""
-    
+
     aadhaar_hmac_current_key_version: int = 1
     # Drives encrypt_pii's default key version going forward.
     # decrypt_pii reads its version from the ciphertext blob itself,

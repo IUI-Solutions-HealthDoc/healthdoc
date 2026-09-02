@@ -168,9 +168,22 @@ case "${1:-}" in
     [[ "$2" == https://* ]] || { echo "✗ ABDM requires https"; exit 1; }
     base="${2%/}"
     fail=0
-    for path in /api/v1/abdm/hip/callbacks/consent-notify \
-                /api/v1/abdm/hip/callbacks/health-information/request \
-                /api/v1/abdm/hiu/callbacks/health-information/transfer; do
+    for path in /api/v3/hip/patient/share \
+                /api/v3/hip/token/on-generate-token \
+                /api/v3/link/on_carecontext \
+                /api/v3/links/context/on-notify \
+                /api/v3/patients/sms/on-notify \
+                /api/v3/hip/patient/care-context/discover \
+                /api/v3/hip/link/care-context/init \
+                /api/v3/hip/link/care-context/confirm \
+                /api/v3/consent/request/hip/notify \
+                /api/v3/hip/health-information/request \
+                /api/v3/hiu/consent/request/on-init \
+                /api/v3/hiu/consent/request/on-status \
+                /api/v3/hiu/consent/request/notify \
+                /api/v3/hiu/consent/on-fetch \
+                /api/v3/hiu/health-information/on-request \
+                /api/v3/hiu/health-information/transfer; do
       # No `|| echo 000` — curl already writes 000 to stdout when it cannot
       # connect, and the fallback appended a second one, producing "000000"
       # which then fell through to the "unexpected" branch and hid the real
@@ -179,15 +192,15 @@ case "${1:-}" in
              -X POST "$base$path" -H 'Content-Type: application/json' -d '{}') || true
       [[ -n "$code" ]] || code=000
       case "$code" in
-        503) verdict="reachable — refusing because ABDM_CALLBACK_SHARED_SECRET is unset (expected before setup)";;
-        401) verdict="reachable — authenticating (secret is set)";;
+        400|409|422) verdict="reachable — official v3 contract rejected the empty probe (expected)";;
+        401) verdict="reachable — gateway identity headers were rejected (expected for probe)";;
         404) verdict="ROUTED SOMEWHERE ELSE — this host is not serving this app"; fail=1;;
         000) verdict="NO RESPONSE — tunnel down, or origin unreachable"; fail=1;;
         50*) verdict="origin error $code — check the backend logs"; fail=1;;
-        200|202) verdict="ACCEPTED WITHOUT AUTH — investigate before registering this URL"; fail=1;;
+        200|202) verdict="ACCEPTED AN EMPTY CALLBACK — investigate before registering this URL"; fail=1;;
         *)   verdict="unexpected $code"; fail=1;;
       esac
-      printf '  %-58s %s\n' "${path#/api/v1}" "$verdict"
+      printf '  %-58s %s\n' "$path" "$verdict"
     done
     echo
     if [[ "$fail" == "0" ]]; then

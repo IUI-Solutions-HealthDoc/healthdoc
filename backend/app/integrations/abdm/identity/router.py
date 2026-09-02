@@ -8,16 +8,18 @@ syncs to the cloud. Never stores the token in plaintext.
 Follows the same graceful-degradation pattern as integrations/icd11/client.py:
 a rural facility going offline must not break registration.
 """
+
 import logging
 import uuid
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.deps import AuthUser, CurrentDbUser, get_current_user, require_roles
+from app.auth.deps import CurrentDbUser, require_roles
 from app.common.config import get_settings
 from app.common.db import get_db
 from app.common.security import current_aes_key_version, encrypt_pii
@@ -28,9 +30,11 @@ from app.integrations.abdm.client import (
     AbdmUnavailable,
     get_abdm_client,
 )
+from app.integrations.abdm.identity import otp_session
 from app.integrations.abdm.identity import service as identity_service
 from app.integrations.abdm.identity.crypto import AbdmPublicKeyMissing
 from app.integrations.abdm.identity.otp_session import (
+    OtpPurpose,
     OtpSessionMismatch,
     OtpSessionNotFound,
 )
@@ -39,6 +43,7 @@ from app.patients.models import Patient
 
 log = logging.getLogger("healthdoc.abdm")
 router = APIRouter(prefix="/abdm/abha", tags=["abdm"])
+DbSession = Annotated[AsyncSession, Depends(get_db)]
 
 #: The ABDM v3 path that verifies an ABHA number, relative to
 #: `abdm_abha_base_url` — NOT the gateway base. Confirmed against the sandbox
@@ -76,12 +81,6 @@ def _hyphenate_abha(stored: str) -> str:
     return f"{digits[:2]}-{digits[2:6]}-{digits[6:10]}-{digits[10:]}"
 
 
-class AbhaCapture(BaseModel):
-    patient_id: str
-    abha_number: str
-    linking_token: str        # from ABDM; encrypted before storage, never persisted raw
-
-
 async def _verify_with_gateway(abha_number: str) -> dict | None:
     """Verify an ABHA with the gateway. None means "not verified".
 
@@ -113,21 +112,17 @@ async def _verify_with_gateway(abha_number: str) -> dict | None:
     Three outcomes are now distinguishable in the logs, where before there was
     one: not configured, gateway unavailable, and gateway said no.
 
-    STILL OUTSTANDING — read before trusting this
-    ---------------------------------------------
-    AUTH IS FIXED. THE ENDPOINT IS NOT. `_VERIFY_PATH` is None, so this returns
-    None without calling anything, and every ABHA is recorded unverified — the
-    same OUTCOME as before, reached honestly instead of via a doomed request
-    that leaked the client secret into an Authorization header.
-
-    Set `_VERIFY_PATH` from the ABDM v3 spec to turn verification on. That is
-    M1's first task and the only line that needs to change.
+    `_VERIFY_PATH` is pinned to the sandbox endpoint and contract-tested. A
+    transport outage still records the number as unverified; the OTP flows
+    below are the path that can produce a verified patient identity.
     """
     # Ordered most-certain-first: an unknown path and absent credentials are
     # both facts we hold locally, and neither should reach the network.
     if _VERIFY_PATH is None:
-        log.info("ABDM verify path not yet set from the v3 spec — "
-                 "ABHA recorded without gateway verification")
+        log.info(
+            "ABDM verify path not yet set from the v3 spec — "
+            "ABHA recorded without gateway verification"
+        )
         return None
 
     client = get_abdm_client()
@@ -166,8 +161,7 @@ async def _verify_with_gateway(abha_number: str) -> dict | None:
         # number is not read as an integration fault. Status and error code
         # only; the body can carry PHI.
         if exc.status_code == 404:
-            log.info("ABDM: no such ABHA (%s) — recorded unverified",
-                     _ABHA_NOT_FOUND_CODE)
+            log.info("ABDM: no such ABHA (%s) — recorded unverified", _ABHA_NOT_FOUND_CODE)
         else:
             log.warning("ABDM declined ABHA verification (%s)", exc.status_code)
         return None
@@ -176,11 +170,11 @@ async def _verify_with_gateway(abha_number: str) -> dict | None:
     # A 2xx whose body is not an object is not a verification. Returning it
     # would make `gateway_result is not None` true on a bare `null` or `""`.
     if not isinstance(body, dict):
-        log.warning("ABDM returned %s with a non-object body — treating as unverified",
-                    response.status_code)
+        log.warning(
+            "ABDM returned %s with a non-object body — treating as unverified", response.status_code
+        )
         return None
     return body
-
 
 
 class AbhaOut(BaseModel):
@@ -206,71 +200,6 @@ async def _get_patient_or_404(
     return patient
 
 
-@router.post("/link", dependencies=[Depends(require_roles("receptionist", "doctor"))])
-async def link_abha(payload: AbhaCapture,
-                    user: Annotated[AuthUser, Depends(get_current_user)],
-                    db: AsyncSession = Depends(get_db)) -> dict:
-    user_row = (await db.execute(
-        text("SELECT id, facility_id FROM users WHERE keycloak_sub = :sub"),
-        {"sub": user.sub},
-    )).mappings().one_or_none()
-    if user_row is None:
-        raise HTTPException(403, "Authenticated user has no HealthDoc profile")
-
-    # An ABHA belongs to exactly one person. patients.abha_number is UNIQUE, so
-    # without this the collision surfaces as an IntegrityError 500 rather than
-    # something a receptionist can act on.
-    normalised = _normalise_abha(payload.abha_number)
-    clash = (await db.execute(
-        select(Patient.id).where(
-            Patient.abha_number == normalised,
-            Patient.id != payload.patient_id,
-        )
-    )).scalar_one_or_none()
-    if clash is not None:
-        raise HTTPException(409, {
-            "code": "duplicate_abha",
-            "message": "This ABHA number is already linked to another patient",
-        })
-
-    # Try verifying with ABDM — gracefully degrade if gateway is down
-    gateway_result = await _verify_with_gateway(payload.abha_number)
-    gateway_verified = gateway_result is not None
-
-    # encrypt_pii returns BYTES, not a (blob, version) pair.
-    #
-    # This was `blob, key_version = encrypt_pii(...)`, which asks Python to
-    # unpack a bytes object into two names. That iterates the bytes and raises
-    # "too many values to unpack" for any blob longer than two bytes — which is
-    # every blob, since the layout is 1-byte version + 12-byte nonce +
-    # ciphertext. So POST /abdm/abha/link returned 500 on every single call and
-    # no ABHA could ever be linked.
-    #
-    # The version is embedded in byte 0 of the blob, but patients.
-    # abha_linking_key_version stores it separately so a rotation can be audited
-    # without decrypting anything. Read it from the same source encrypt_pii used.
-    key_version = current_aes_key_version()
-    blob = encrypt_pii(payload.linking_token, key_version=key_version)
-    result = await db.execute(text("""
-        UPDATE patients
-        SET abha_number = :abha,
-            abha_linking_token_encrypted = :blob,
-            abha_linking_key_version = :kv,
-            abha_linked_at = now(), updated_at = now(), updated_by = :uid,
-            identity_status = CASE WHEN :verified THEN identity_status ELSE 'identity_unverified' END
-        WHERE id = :pid AND facility_id = :facility_id
-    """), {"abha": payload.abha_number, "blob": blob, "kv": key_version,
-           "pid": payload.patient_id, "uid": user_row["id"],
-           "facility_id": user_row["facility_id"], "verified": gateway_verified})
-    if result.rowcount != 1:
-        raise HTTPException(404, "Patient not found in caller facility")
-    await enqueue(db, aggregate_type="patient", aggregate_id=payload.patient_id,
-                  event_type="abha_linked", payload={"abha_number": payload.abha_number},
-                  sensitivity="important")
-    return {"patient_id": payload.patient_id, "abha_linked": True,
-            "gateway_verified": gateway_verified}
-
-
 @router.get(
     "/patients/{patient_id}/abha",
     response_model=AbhaOut,
@@ -279,7 +208,7 @@ async def link_abha(payload: AbhaCapture,
 async def get_abha(
     patient_id: uuid.UUID,
     current_db_user: CurrentDbUser,
-    db: AsyncSession = Depends(get_db),
+    db: DbSession,
 ) -> AbhaOut:
     """Read a patient's linked ABHA. Facility-scoped via _get_patient_or_404."""
     patient = await _get_patient_or_404(db, patient_id, current_db_user.facility_id)
@@ -294,7 +223,7 @@ async def get_abha(
 async def unlink_abha(
     patient_id: uuid.UUID,
     current_db_user: CurrentDbUser,
-    db: AsyncSession = Depends(get_db),
+    db: DbSession,
 ) -> AbhaOut:
     """Unlink an ABHA, clearing the encrypted token with it.
 
@@ -308,12 +237,16 @@ async def unlink_abha(
     patient = await _get_patient_or_404(db, patient_id, current_db_user.facility_id)
 
     if patient.abha_number is None:
-        raise HTTPException(409, {
-            "code": "no_abha_linked",
-            "message": "Patient has no ABHA number linked",
-        })
+        raise HTTPException(
+            409,
+            {
+                "code": "no_abha_linked",
+                "message": "Patient has no ABHA number linked",
+            },
+        )
 
     patient.abha_number = None
+    patient.abha_address = None
     patient.abha_linking_token_encrypted = None
     patient.abha_linking_key_version = None
     patient.abha_linked_at = None
@@ -344,15 +277,16 @@ async def unlink_abha(
 # identity flow completed by someone who never met them is exactly the
 # attribution gap this codebase has fixed three times elsewhere.
 
+
 class AadhaarOtpRequest(BaseModel):
     #: Twelve digits. Encrypted before transmission and never stored.
     aadhaar: str = Field(min_length=12, max_length=12, pattern=r"^\d{12}$")
+    patient_id: uuid.UUID
 
 
 class AbhaLoginOtpRequest(BaseModel):
     abha_number: str
-    #: Optional: attach the verified ABHA to a patient already registered here.
-    patient_id: uuid.UUID | None = None
+    patient_id: uuid.UUID
 
 
 class OtpVerifyRequest(BaseModel):
@@ -373,6 +307,8 @@ class AbhaIssuedOut(BaseModel):
     name: str | None = None
     gender: str | None = None
     date_of_birth: str | None = None
+    linked_patient_id: uuid.UUID
+    linked: bool = True
     #: Deliberately absent: the linking token. It is a credential, it is stored
     #: encrypted server-side by the link endpoint, and a browser has no use for
     #: it. Returning it would put it in a response body, a proxy log and a
@@ -387,6 +323,80 @@ def _unavailable(reason: str) -> HTTPException:
     return HTTPException(503, {"code": "abdm_unavailable", "message": reason})
 
 
+async def _persist_verified_identity(
+    *,
+    db: AsyncSession,
+    current_db_user: CurrentDbUser,
+    session_id: str,
+    purpose: OtpPurpose,
+    issued: identity_service.AbhaIssued,
+) -> uuid.UUID:
+    """Bind a successful OTP result without ever exposing its token to a client."""
+    session = await otp_session.load(
+        session_id,
+        facility_id=str(current_db_user.facility_id),
+        purpose=purpose,
+    )
+    if session.started_by != str(current_db_user.id) or not session.patient_id:
+        raise HTTPException(
+            404,
+            {
+                "code": "otp_session_not_found",
+                "message": "This OTP session has expired or does not exist",
+            },
+        )
+    if not issued.linking_token:
+        raise HTTPException(
+            502,
+            {
+                "code": "abdm_no_linking_token",
+                "message": "ABDM verified the identity but returned no linking credential",
+            },
+        )
+
+    patient_id = uuid.UUID(session.patient_id)
+    patient = await _get_patient_or_404(db, patient_id, current_db_user.facility_id)
+    normalised = _normalise_abha(issued.abha_number)
+    clash = (
+        await db.execute(
+            select(Patient.id).where(
+                Patient.abha_number == normalised,
+                Patient.id != patient.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if clash is not None:
+        raise HTTPException(
+            409,
+            {
+                "code": "duplicate_abha",
+                "message": "This ABHA number is already linked to another patient",
+            },
+        )
+
+    key_version = current_aes_key_version()
+    patient.abha_number = normalised
+    patient.abha_address = issued.abha_address
+    patient.abha_linking_token_encrypted = encrypt_pii(
+        issued.linking_token, key_version=key_version
+    )
+    patient.abha_linking_key_version = key_version
+    patient.abha_linked_at = datetime.now(UTC)
+    patient.identity_status = "verified"
+    patient.updated_by = current_db_user.id
+    await db.flush()
+    await enqueue(
+        db,
+        aggregate_type="patient",
+        aggregate_id=str(patient.id),
+        event_type="abha_linked",
+        payload={"abha_number": normalised},
+        sensitivity="important",
+    )
+    await otp_session.finish(session_id)
+    return patient.id
+
+
 @router.post(
     "/enrol/aadhaar/request-otp",
     response_model=OtpRequestedOut,
@@ -395,33 +405,39 @@ def _unavailable(reason: str) -> HTTPException:
 async def enrol_request_otp(
     payload: AadhaarOtpRequest,
     current_db_user: CurrentDbUser,
+    db: DbSession,
 ) -> OtpRequestedOut:
     """Send an OTP to the mobile registered against this Aadhaar.
 
     The Aadhaar number is encrypted in this call and referenced nowhere after
     it — not in the OTP session, not in an audit row, not in a log line.
     """
+    await _get_patient_or_404(db, payload.patient_id, current_db_user.facility_id)
     try:
         result = await identity_service.request_aadhaar_otp(
             aadhaar=payload.aadhaar,
             facility_id=str(current_db_user.facility_id),
             started_by=str(current_db_user.id),
+            patient_id=str(payload.patient_id),
         )
     except AbdmNotConfigured:
-        raise _unavailable("ABDM credentials are not configured on this server")
+        raise _unavailable("ABDM credentials are not configured on this server") from None
     except AbdmPublicKeyMissing:
-        raise _unavailable("ABDM public certificate is not configured on this server")
+        raise _unavailable("ABDM public certificate is not configured on this server") from None
     except AbdmUnavailable:
-        raise _unavailable("ABDM did not respond")
+        raise _unavailable("ABDM did not respond") from None
     except AbdmRejected as exc:
         # Status only. The gateway's body can echo the identifier we just sent.
         log.warning("ABDM declined an enrolment OTP request (%s)", exc.status_code)
-        raise HTTPException(502, {
-            "code": "abdm_rejected",
-            "message": "ABDM declined the request",
-        })
+        raise HTTPException(
+            502,
+            {
+                "code": "abdm_rejected",
+                "message": "ABDM declined the request",
+            },
+        ) from exc
     except identity_service.AbdmIdentityError as exc:
-        raise _identity_error(exc)
+        raise _identity_error(exc) from exc
 
     return OtpRequestedOut(session_id=result.session_id, masked_mobile=result.masked_mobile)
 
@@ -434,6 +450,7 @@ async def enrol_request_otp(
 async def enrol_verify_otp(
     payload: OtpVerifyRequest,
     current_db_user: CurrentDbUser,
+    db: DbSession,
 ) -> AbhaIssuedOut:
     """Present the OTP and receive a newly created ABHA."""
     try:
@@ -442,37 +459,52 @@ async def enrol_verify_otp(
             otp=payload.otp,
             mobile=payload.mobile,
             facility_id=str(current_db_user.facility_id),
+            consume_session=False,
         )
     except (OtpSessionNotFound, OtpSessionMismatch):
         # One response for expired, already-spent, wrong-facility and
         # wrong-purpose. Distinguishing them would confirm that someone else's
         # transaction exists, which is the enumeration oracle this codebase
         # avoids with 404-not-403 everywhere else.
-        raise HTTPException(404, {
-            "code": "otp_session_not_found",
-            "message": "This OTP session has expired or does not exist",
-        })
+        raise HTTPException(
+            404,
+            {
+                "code": "otp_session_not_found",
+                "message": "This OTP session has expired or does not exist",
+            },
+        ) from None
     except AbdmNotConfigured:
-        raise _unavailable("ABDM credentials are not configured on this server")
+        raise _unavailable("ABDM credentials are not configured on this server") from None
     except AbdmPublicKeyMissing:
-        raise _unavailable("ABDM public certificate is not configured on this server")
+        raise _unavailable("ABDM public certificate is not configured on this server") from None
     except AbdmUnavailable:
-        raise _unavailable("ABDM did not respond")
+        raise _unavailable("ABDM did not respond") from None
     except AbdmRejected as exc:
         log.warning("ABDM declined an enrolment verification (%s)", exc.status_code)
-        raise HTTPException(502, {
-            "code": "abdm_rejected",
-            "message": "ABDM declined the OTP",
-        })
+        raise HTTPException(
+            502,
+            {
+                "code": "abdm_rejected",
+                "message": "ABDM declined the OTP",
+            },
+        ) from exc
     except identity_service.AbdmIdentityError as exc:
-        raise _identity_error(exc)
+        raise _identity_error(exc) from exc
 
+    linked_patient_id = await _persist_verified_identity(
+        db=db,
+        current_db_user=current_db_user,
+        session_id=payload.session_id,
+        purpose=OtpPurpose.ENROL_BY_AADHAAR,
+        issued=issued,
+    )
     return AbhaIssuedOut(
         abha_number=issued.abha_number,
         abha_address=issued.abha_address,
         name=issued.name,
         gender=issued.gender,
         date_of_birth=issued.date_of_birth,
+        linked_patient_id=linked_patient_id,
     )
 
 
@@ -484,29 +516,34 @@ async def enrol_verify_otp(
 async def login_request_otp(
     payload: AbhaLoginOtpRequest,
     current_db_user: CurrentDbUser,
+    db: DbSession,
 ) -> OtpRequestedOut:
     """Send an OTP to the mobile behind an ABHA the patient says they hold."""
+    await _get_patient_or_404(db, payload.patient_id, current_db_user.facility_id)
     try:
         result = await identity_service.request_login_otp(
             abha_number=_normalise_abha(payload.abha_number),
             facility_id=str(current_db_user.facility_id),
             started_by=str(current_db_user.id),
-            patient_id=str(payload.patient_id) if payload.patient_id else None,
+            patient_id=str(payload.patient_id),
         )
     except AbdmNotConfigured:
-        raise _unavailable("ABDM credentials are not configured on this server")
+        raise _unavailable("ABDM credentials are not configured on this server") from None
     except AbdmPublicKeyMissing:
-        raise _unavailable("ABDM public certificate is not configured on this server")
+        raise _unavailable("ABDM public certificate is not configured on this server") from None
     except AbdmUnavailable:
-        raise _unavailable("ABDM did not respond")
+        raise _unavailable("ABDM did not respond") from None
     except AbdmRejected as exc:
         log.warning("ABDM declined a login OTP request (%s)", exc.status_code)
-        raise HTTPException(502, {
-            "code": "abdm_rejected",
-            "message": "ABDM declined the request",
-        })
+        raise HTTPException(
+            502,
+            {
+                "code": "abdm_rejected",
+                "message": "ABDM declined the request",
+            },
+        ) from exc
     except identity_service.AbdmIdentityError as exc:
-        raise _identity_error(exc)
+        raise _identity_error(exc) from exc
 
     return OtpRequestedOut(session_id=result.session_id, masked_mobile=result.masked_mobile)
 
@@ -519,6 +556,7 @@ async def login_request_otp(
 async def login_verify_otp(
     payload: OtpVerifyRequest,
     current_db_user: CurrentDbUser,
+    db: DbSession,
 ) -> AbhaIssuedOut:
     """The OTP proves the patient holds this ABHA."""
     try:
@@ -526,31 +564,46 @@ async def login_verify_otp(
             session_id=payload.session_id,
             otp=payload.otp,
             facility_id=str(current_db_user.facility_id),
+            consume_session=False,
         )
     except (OtpSessionNotFound, OtpSessionMismatch):
-        raise HTTPException(404, {
-            "code": "otp_session_not_found",
-            "message": "This OTP session has expired or does not exist",
-        })
+        raise HTTPException(
+            404,
+            {
+                "code": "otp_session_not_found",
+                "message": "This OTP session has expired or does not exist",
+            },
+        ) from None
     except AbdmNotConfigured:
-        raise _unavailable("ABDM credentials are not configured on this server")
+        raise _unavailable("ABDM credentials are not configured on this server") from None
     except AbdmPublicKeyMissing:
-        raise _unavailable("ABDM public certificate is not configured on this server")
+        raise _unavailable("ABDM public certificate is not configured on this server") from None
     except AbdmUnavailable:
-        raise _unavailable("ABDM did not respond")
+        raise _unavailable("ABDM did not respond") from None
     except AbdmRejected as exc:
         log.warning("ABDM declined a login verification (%s)", exc.status_code)
-        raise HTTPException(502, {
-            "code": "abdm_rejected",
-            "message": "ABDM declined the OTP",
-        })
+        raise HTTPException(
+            502,
+            {
+                "code": "abdm_rejected",
+                "message": "ABDM declined the OTP",
+            },
+        ) from exc
     except identity_service.AbdmIdentityError as exc:
-        raise _identity_error(exc)
+        raise _identity_error(exc) from exc
 
+    linked_patient_id = await _persist_verified_identity(
+        db=db,
+        current_db_user=current_db_user,
+        session_id=payload.session_id,
+        purpose=OtpPurpose.LOGIN_BY_ABHA,
+        issued=issued,
+    )
     return AbhaIssuedOut(
         abha_number=issued.abha_number,
         abha_address=issued.abha_address,
         name=issued.name,
         gender=issued.gender,
         date_of_birth=issued.date_of_birth,
+        linked_patient_id=linked_patient_id,
     )

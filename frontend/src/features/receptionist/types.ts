@@ -67,6 +67,21 @@ export interface PatientSearchResponse {
   total: number;
 }
 
+export interface AbhaOtpRequested {
+  session_id: string;
+  masked_mobile: string | null;
+}
+
+export interface AbhaIdentityLinked {
+  abha_number: string;
+  abha_address: string | null;
+  name: string | null;
+  gender: string | null;
+  date_of_birth: string | null;
+  linked_patient_id: string;
+  linked: boolean;
+}
+
 /**
  * How confident a match is, in words.
  *

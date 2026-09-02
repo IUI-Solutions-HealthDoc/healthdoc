@@ -6,7 +6,11 @@ callbacks through is the only way to see the feature work. An unauthenticated
 inbound route that writes consent artefacts and moves patient data is the worst
 outcome in this integration, so "not configured" has to mean refuse.
 """
+
 from __future__ import annotations
+
+import uuid
+from datetime import UTC, datetime
 
 import pytest
 from fastapi import HTTPException, Request
@@ -84,7 +88,12 @@ async def test_the_rejection_says_nothing_about_why(monkeypatch):
 
 async def test_the_matching_secret_passes(monkeypatch):
     _set_secret(monkeypatch, "the-real-secret")
-    assert await callback_auth.verify_callback(_request(), x_healthdoc_callback_secret="the-real-secret") is None
+    assert (
+        await callback_auth.verify_callback(
+            _request(), x_healthdoc_callback_secret="the-real-secret"
+        )
+        is None
+    )
 
 
 def test_the_comparison_is_timing_safe():
@@ -98,7 +107,8 @@ def test_the_comparison_is_timing_safe():
 
     tree = ast.parse(inspect.getsource(callback_auth))
     verify = next(
-        node for node in ast.walk(tree)
+        node
+        for node in ast.walk(tree)
         if isinstance(node, ast.AsyncFunctionDef) and node.name == "verify_callback"
     )
     calls = {
@@ -111,9 +121,10 @@ def test_the_comparison_is_timing_safe():
     assert "hmac.compare_digest" in calls
     # And no plain equality against the secret anywhere in the function.
     assert not [
-        node for node in ast.walk(verify)
+        node
+        for node in ast.walk(verify)
         if isinstance(node, ast.Compare)
-        and any(isinstance(op, (ast.Eq, ast.NotEq)) for op in node.ops)
+        and any(isinstance(op, ast.Eq | ast.NotEq) for op in node.ops)
         and any(
             isinstance(operand, ast.Name) and operand.id in {"expected", "presented"}
             for operand in [node.left, *node.comparators]
@@ -187,9 +198,12 @@ async def test_cloudflare_tunnel_headers_are_not_reported_as_a_scheme(monkeypatc
     _set_secret(monkeypatch, "the-real-secret")
 
     cloudflare = {
-        "CDN-Loop": "cloudflare", "CF-Connecting-IP": "1.2.3.4",
-        "CF-IPCountry": "IN", "CF-RAY": "abc123-DEL",
-        "CF-Visitor": '{"scheme":"https"}', "CF-Warp-Tag-Id": "x",
+        "CDN-Loop": "cloudflare",
+        "CF-Connecting-IP": "1.2.3.4",
+        "CF-IPCountry": "IN",
+        "CF-RAY": "abc123-DEL",
+        "CF-Visitor": '{"scheme":"https"}',
+        "CF-Warp-Tag-Id": "x",
     }
     with caplog.at_level("WARNING"):
         with pytest.raises(HTTPException):
@@ -212,3 +226,69 @@ async def test_a_real_signature_header_still_surfaces_through_the_tunnel(monkeyp
     logged = " ".join(r.getMessage() for r in caplog.records)
     assert "x-hmac-signature" in logged.lower()
     assert "cf-ray" not in logged.lower()
+
+
+class _ReplayStore:
+    def __init__(self):
+        self.keys = set()
+
+    async def set(self, key, value, *, ex, nx):
+        if key in self.keys:
+            return False
+        self.keys.add(key)
+        return True
+
+
+def _gateway_headers(*, hip=True, cm=True):
+    headers = {
+        "REQUEST-ID": str(uuid.uuid4()),
+        "TIMESTAMP": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+    }
+    if cm:
+        headers["X-CM-ID"] = "sbx"
+    if hip:
+        headers["X-HIP-ID"] = "SBXID_TEST_HIP"
+    return headers
+
+
+@pytest.fixture
+def gateway_settings(monkeypatch):
+    monkeypatch.setenv("ABDM_HIP_ID", "SBXID_TEST_HIP")
+    monkeypatch.setenv("ABDM_HIU_ID", "SBXID_TEST_HIU")
+    monkeypatch.setenv("ABDM_X_CM_ID", "sbx")
+    get_settings.cache_clear()
+    replay = _ReplayStore()
+    monkeypatch.setattr(callback_auth, "get_redis", lambda: replay)
+    return replay
+
+
+async def test_official_hip_callback_requires_the_documented_headers(gateway_settings):
+    with pytest.raises(HTTPException) as caught:
+        await callback_auth.verify_hip_gateway_callback(_request(**_gateway_headers(cm=False)))
+    assert caught.value.status_code == 400
+    assert caught.value.detail["code"] == "missing_abdm_headers"
+
+
+async def test_official_callback_rejects_a_different_recipient(gateway_settings):
+    headers = _gateway_headers()
+    headers["X-HIP-ID"] = "SOMEONE_ELSES_HIP"
+    with pytest.raises(HTTPException) as caught:
+        await callback_auth.verify_hip_gateway_callback(_request(**headers))
+    assert caught.value.status_code == 404
+
+
+async def test_profile_share_matches_the_published_header_set(gateway_settings):
+    """Scan-and-Share addresses the HIP in metaData, not X-HIP-ID."""
+    verified = await callback_auth.verify_profile_gateway_callback(
+        _request(**_gateway_headers(hip=False))
+    )
+    assert verified.replayed is False
+    assert verified.recipient_id == "sbx"
+
+
+async def test_gateway_retry_is_marked_for_handler_level_idempotency(gateway_settings):
+    headers = _gateway_headers()
+    first = await callback_auth.verify_hip_gateway_callback(_request(**headers))
+    second = await callback_auth.verify_hip_gateway_callback(_request(**headers))
+    assert first.replayed is False
+    assert second.replayed is True

@@ -6,6 +6,7 @@ requested data under it (HI request) → data arrived (receipt). Breaking any
 link in that chain is what an assessor is looking for, so each is its own row
 with its own timestamps rather than status flags on one wide table.
 """
+
 from __future__ import annotations
 
 from sqlalchemy import (
@@ -31,8 +32,12 @@ class AbdmConsentRequest(Base, UUIDPk, Timestamps, Blame):
 
     __tablename__ = "abdm_consent_requests"
 
-    facility_id = Column(UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False)
-    patient_id = Column(UUID(as_uuid=True), ForeignKey("patients.id", ondelete="RESTRICT"), nullable=True)
+    facility_id = Column(
+        UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False
+    )
+    patient_id = Column(
+        UUID(as_uuid=True), ForeignKey("patients.id", ondelete="RESTRICT"), nullable=True
+    )
 
     abha_address = Column(String(120), nullable=False)
     purpose_code = Column(String(50), nullable=False)
@@ -75,9 +80,13 @@ class AbdmHiuConsentArtefact(Base, UUIDPk, Timestamps):
 
     __tablename__ = "abdm_hiu_consent_artefacts"
 
-    facility_id = Column(UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False)
+    facility_id = Column(
+        UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False
+    )
     consent_request_id = Column(
-        UUID(as_uuid=True), ForeignKey("abdm_consent_requests.id", ondelete="RESTRICT"), nullable=False
+        UUID(as_uuid=True),
+        ForeignKey("abdm_consent_requests.id", ondelete="RESTRICT"),
+        nullable=False,
     )
 
     consent_artefact_id = Column(String(120), nullable=False)
@@ -93,7 +102,9 @@ class AbdmHiuConsentArtefact(Base, UUIDPk, Timestamps):
 
     __table_args__ = (
         UniqueConstraint("consent_artefact_id", name="uq_abdm_hiu_artefact_id"),
-        CheckConstraint("status IN ('granted','revoked','expired')", name="abdm_hiu_artefact_status"),
+        CheckConstraint(
+            "status IN ('granted','revoked','expired')", name="abdm_hiu_artefact_status"
+        ),
         Index("ix_abdm_hiu_artefacts_facility_id", "facility_id"),
         Index("ix_abdm_hiu_artefacts_request", "consent_request_id"),
     )
@@ -120,15 +131,21 @@ class AbdmHiuHealthInformationRequest(Base, UUIDPk, Timestamps, Blame):
 
     __tablename__ = "abdm_hiu_hi_requests"
 
-    facility_id = Column(UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False)
+    facility_id = Column(
+        UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False
+    )
     artefact_id = Column(
-        UUID(as_uuid=True), ForeignKey("abdm_hiu_consent_artefacts.id", ondelete="RESTRICT"), nullable=False
+        UUID(as_uuid=True),
+        ForeignKey("abdm_hiu_consent_artefacts.id", ondelete="RESTRICT"),
+        nullable=False,
     )
 
     transaction_id = Column(String(120), nullable=True)
     gateway_request_id = Column(String(100), nullable=True)
     status = Column(String(50), nullable=False, server_default="requested")
     failure_reason = Column(Text, nullable=True)
+    expected_page_count = Column(SmallInteger, nullable=True)
+    received_pages = Column(JSONB, nullable=False, server_default="[]")
 
     #: OUR half. Public parts are sent to the gateway; the private key is
     #: encrypted at rest and cleared on completion.
@@ -181,12 +198,20 @@ class AbdmReceivedBundle(Base, UUIDPk, Timestamps):
 
     __tablename__ = "abdm_received_bundles"
 
-    facility_id = Column(UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False)
+    facility_id = Column(
+        UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False
+    )
     hi_request_id = Column(
-        UUID(as_uuid=True), ForeignKey("abdm_hiu_hi_requests.id", ondelete="RESTRICT"), nullable=False
+        UUID(as_uuid=True),
+        ForeignKey("abdm_hiu_hi_requests.id", ondelete="RESTRICT"),
+        nullable=False,
     )
 
     care_context_reference = Column(String(120), nullable=True)
+    page_number = Column(SmallInteger, nullable=False, server_default="0")
+    entry_index = Column(SmallInteger, nullable=False, server_default="0")
+    media_type = Column(String(100), nullable=False, server_default="application/fhir+json")
+    declared_checksum = Column(String(128), nullable=True)
     #: sha256 of the DECRYPTED bundle. Lets a later reader prove the document
     #: they are looking at is the one that arrived, without this table holding
     #: the clinical content itself.
@@ -198,7 +223,15 @@ class AbdmReceivedBundle(Base, UUIDPk, Timestamps):
     __audit_facility_id_field__ = "facility_id"
 
     __table_args__ = (
-        CheckConstraint("status IN ('stored','undecipherable','rejected')", name="abdm_received_bundle_status"),
+        CheckConstraint(
+            "status IN ('stored','undecipherable','rejected')", name="abdm_received_bundle_status"
+        ),
         Index("ix_abdm_received_bundles_facility_id", "facility_id"),
         Index("ix_abdm_received_bundles_request", "hi_request_id"),
+        UniqueConstraint(
+            "hi_request_id",
+            "page_number",
+            "entry_index",
+            name="uq_abdm_received_bundle_page_entry",
+        ),
     )
