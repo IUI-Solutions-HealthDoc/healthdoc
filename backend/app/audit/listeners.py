@@ -365,8 +365,15 @@ def _write_captured_audit_entries(session: Session, flush_context) -> None:
 # gap it doesn't know to look for, so growing it module-by-module IS the
 # rollout — not a one-time task, and not blocking on this PR.
 AUDITABLE_MODULE_PREFIXES: tuple[str, ...] = (
-    # "app.patients",
-    # "app.billing",
+    # Started non-empty here (F8): every model under these two ABDM sub-packages
+    # already declares __audit_resource_type__, so the guard is non-vacuous and
+    # cannot break boot — while the consent artefacts, links and data requests it
+    # covers are exactly the compliance-relevant rows an assessor asks about.
+    # assert_audit_coverage() is now called from app.main's lifespan.
+    # Widen to app.patients / app.billing per #290 once every model in those
+    # packages carries a facility_id column and can opt in.
+    "app.integrations.abdm.hip",
+    "app.integrations.abdm.hiu",
 )
 
 
