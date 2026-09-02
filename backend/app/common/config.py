@@ -188,12 +188,21 @@ class Settings(BaseSettings):
     #: "900908 API Subscription validation failed" for a sandbox client, which
     #: reads as a missing entitlement and is really a retired API version. The
     #: v3 equivalents below answer 200 with the same credentials and headers.
+    #:
+    #: Reserved by design: these three (and abdm_path_gateway_certs below) have
+    #: NO caller in app/. Bridge provisioning is a one-time operations task run
+    #: through scripts/abdm_sandbox.sh, not the running app — so unlike the
+    #: abdm_path_hip_*/hiu_* settings, a zero-caller here is expected, not the
+    #: dead-limb bug the wiring audit hunts for.
     abdm_path_bridge_services: str = "/api/hiecm/gateway/v3/bridge-services"
     abdm_path_bridge_service: str = "/api/hiecm/gateway/v3/bridge-service"
     abdm_path_bridge_url: str = "/api/hiecm/gateway/v3/bridge/url"
-    #: Gateway JWKS discovery endpoint. Kept configurable for future protocol
-    #: use; the published v3 callback contract currently defines no signature
-    #: header/canonical input to verify with these keys.
+    #: Gateway JWKS discovery endpoint. Reserved, no in-app caller yet: the
+    #: published v3 callback contract defines no signature header or canonical
+    #: input to verify with these keys, so callback_auth.py cannot use them. This
+    #: is the home a callback-signature verifier grows into once NHA publishes a
+    #: scheme — the compensating control for the forgeable v3 callback surface
+    #: (see docs/ABDM_BREAKING_POINTS_AND_FIX_PLAN.md, F1).
     abdm_path_gateway_certs: str = "/api/hiecm/gateway/v3/certs"
 
     #: NOTE (2026-08-31): bridge management — PATCH /gateway/v1/bridges and
