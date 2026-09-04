@@ -515,3 +515,24 @@ async def stream_audit_logs_csv(
             yield buf.getvalue()
             buf.seek(0)
             buf.truncate(0)
+
+
+async def list_audit_resource_types(
+    db: AsyncSession, *, facility_id: uuid.UUID
+) -> list[str]:
+    """Distinct, non-null resource_type values for one facility, sorted.
+
+    DISTINCT over an indexed, low-cardinality column — this is a facet list for
+    a dropdown, not a report, and it must stay cheap enough to run on every
+    page load.
+    """
+    rows = await db.execute(
+        select(AuditLog.resource_type)
+        .where(
+            AuditLog.facility_id == facility_id,
+            AuditLog.resource_type.is_not(None),
+        )
+        .distinct()
+        .order_by(AuditLog.resource_type.asc())
+    )
+    return [r for (r,) in rows.all() if r]

@@ -10,8 +10,10 @@ import { ExportButton } from "@/components/ui/ExportButton";
 import { toast } from "@/components/ui/toast";
 import { meridian } from "@/styles/theme";
 import { exportAuditLogsCsv } from "../api";
+import { toCsv } from "../lib/toCsv.mjs";
 import { useAuditEntry } from "../hooks/useAuditEntry";
 import { useAuditLogs } from "../hooks/useAuditLogs";
+import { useAuditResourceTypes } from "../hooks/useAuditResourceTypes";
 import { useDataAccessLogs } from "../hooks/useDataAccessLogs";
 import { useFileAccessLogs } from "../hooks/useFileAccessLogs";
 import { useIntegritySummary } from "../hooks/useIntegritySummary";
@@ -35,6 +37,7 @@ export function AuditTrailDashboard() {
   const dataAccess = useDataAccessLogs({ access_channel: "all" });
   const files = useFileAccessLogs({ action: "all" });
   const integrity = useIntegritySummary();
+  const resourceTypes = useAuditResourceTypes();
 
   const selectedKey = selected ? auditRowKey(selected.id, selected.created_at) : null;
 
@@ -42,21 +45,68 @@ export function AuditTrailDashboard() {
     setSelected({ id: row.id, created_at: row.created_at });
   };
 
+  /**
+   * Export what the reader is looking at.
+   *
+   * This button used to sit above the tabs and always call
+   * exportAuditLogsCsv(logs.filters) — so viewing Access log and pressing
+   * Export handed you AUDIT rows, filtered by the AUDIT tab's dropdowns, with
+   * a toast saying it worked. The other three tabs had no export at all.
+   *
+   * The audit tab keeps the server endpoint on purpose: that request writes
+   * its own audit_logs row ("the export itself is the compliance event", per
+   * app/audit/router.py), and it reads the whole result set rather than the
+   * page the screen happens to hold. The other tabs have no such endpoint, so
+   * they serialise the rows already on screen.
+   */
+  const download = (csv: string, name: string) => {
+    const blobUrl = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = blobUrl;
+    link.download = `${name}_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(blobUrl);
+  };
+
   const handleExport = async () => {
     setExporting(true);
     try {
-      const csv = await exportAuditLogsCsv(logs.filters);
-      const blobUrl = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-      const link = document.createElement("a");
-      link.href = blobUrl;
-      link.download = `audit_logs_${new Date().toISOString().slice(0, 10)}.csv`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(blobUrl);
-      toast.success("Audit CSV downloaded");
+      if (tab === "audit") {
+        const csv = await exportAuditLogsCsv(logs.filters);
+        download(csv, "audit_logs");
+        // Say which rows were NOT covered rather than let the file quietly
+        // disagree with the screen. `action` and `query` are client-side only,
+        // so the server cannot honour them and the CSV is wider than the view.
+        const clientOnly =
+          (logs.filters.action && logs.filters.action !== "all") || logs.filters.query?.trim();
+        toast.success(
+          clientOnly
+            ? "Audit CSV downloaded — server filters only; Action/Search are not applied to the file"
+            : "Audit CSV downloaded",
+        );
+        return;
+      }
+
+      const { rows, name } =
+        tab === "data_access"
+          ? { rows: dataAccess.rows as Record<string, unknown>[], name: "data_access_log" }
+          : tab === "files"
+            ? { rows: files.rows as unknown as Record<string, unknown>[], name: "file_access_log" }
+            : { rows: integrity.checks as unknown as Record<string, unknown>[], name: "integrity_checks" };
+
+      if (rows.length === 0) {
+        // Never hand over a headers-only file and call it a success. An empty
+        // evidence export that reports "downloaded" is how an inspection gets
+        // nothing and nobody notices.
+        toast.error("Nothing to export on this tab with the current filters");
+        return;
+      }
+      download(toCsv(rows), name);
+      toast.success(`${rows.length} row(s) exported`);
     } catch (reason) {
-      toast.error(reason instanceof Error ? reason.message : "Audit export failed");
+      toast.error(reason instanceof Error ? reason.message : "Export failed");
     } finally {
       setExporting(false);
     }
@@ -84,7 +134,15 @@ export function AuditTrailDashboard() {
         </Box>
         <ExportButton
           formats={["csv"]}
-          label="Export audit CSV"
+          label={
+            tab === "audit"
+              ? "Export audit CSV"
+              : tab === "data_access"
+                ? "Export access log CSV"
+                : tab === "files"
+                  ? "Export file access CSV"
+                  : "Export integrity CSV"
+          }
           loading={exporting}
           onExport={handleExport}
         />
@@ -157,6 +215,7 @@ export function AuditTrailDashboard() {
             onQueryChange={logs.setQuery}
             onActionChange={logs.setAction}
             onResourceTypeChange={logs.setResourceType}
+          resourceTypes={resourceTypes}
             onFromChange={logs.setFrom}
             onToChange={logs.setTo}
             onSelect={handleSelect}

@@ -1,4 +1,5 @@
 export {
+  listAuditResourceTypes,
   exportAuditLogsCsv,
   getAuditEntry,
   listArchives,

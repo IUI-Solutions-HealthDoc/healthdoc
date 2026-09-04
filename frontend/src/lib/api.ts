@@ -8,6 +8,8 @@
 // Never add a storage write here without Tech Lead sign-off.
 
 import { apiErrorCode, userFacingApiError } from "./api-error-policy.mjs";
+import { sessionExpiredPath } from "./session-policy.mjs";
+import { clearAuthToken } from "./auth";
 export { userFacingApiError } from "./api-error-policy.mjs";
 
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api/v1";
@@ -95,6 +97,7 @@ export async function api<T>(path: string, init: ApiOptions = {}): Promise<T> {
   try {
     body = (await res.json()) as Envelope<T>;
   } catch {
+    if (res.status === 401) handleExpiredSession();
     throw new ApiError(
       res.status,
       userFacingApiError(res.status),
@@ -109,6 +112,7 @@ export async function api<T>(path: string, init: ApiOptions = {}): Promise<T> {
       typeof body.error?.code === "string"
         ? { code: body.error.code, message: body.error.message }
         : (body.error?.message ?? body.error);
+    if (statusCode === 401) handleExpiredSession();
     throw new ApiError(
       statusCode,
       userFacingApiError(statusCode, payload),
@@ -117,6 +121,40 @@ export async function api<T>(path: string, init: ApiOptions = {}): Promise<T> {
     );
   }
   return body.data as T;
+}
+
+/**
+ * A 401 means the session is gone, so send the user to sign in again.
+ *
+ * The message "Your session has expired. Sign in again." already existed and
+ * nothing acted on it — so an expired session surfaced as a red error on
+ * whatever screen made the call, telling the clinician to do something the
+ * page gave them no way to do. Worst on a consultation: the note is still on
+ * screen, Submit keeps failing, and the instruction is to sign in again with
+ * no sign-in to go to.
+ *
+ * Centralised here rather than per-screen: every screen calls api(), and the
+ * ones that would forget are the long-lived clinical ones where it matters.
+ *
+ * `?reason=session-expired` is what LoginScreen reads to explain why the user
+ * is suddenly at sign-in, and sessionExpiredPath preserves where they were.
+ */
+let redirectingToLogin = false;
+
+function handleExpiredSession(): void {
+  if (typeof window === "undefined") return;
+  // The login page itself makes calls; redirecting from there would loop.
+  if (window.location.pathname.startsWith("/login")) return;
+  // A screen that fires several requests at once would otherwise queue up
+  // several navigations, and the last one wins with a different `redirect`.
+  if (redirectingToLogin) return;
+  redirectingToLogin = true;
+
+  clearAuthToken();
+  setAccessToken(null);
+  window.location.replace(
+    sessionExpiredPath(window.location.pathname, window.location.search),
+  );
 }
 
 /** Money always arrives as a string ("50.00"). Never parseFloat it — paise get lost. */

@@ -3,15 +3,35 @@
  * data_access / file_access / integrity are schema-ahead (no live BE routes yet).
  */
 
+/**
+ * Mirrors app/audit/actions.py exactly.
+ *
+ * It previously listed "merge" and "delete_attempt", neither of which the
+ * backend has ever written, while omitting nine that it does. The dropdown
+ * built from it therefore offered filters that matched nothing and hid
+ * records that existed.
+ *
+ * tests/audit-action-vocabulary.test.mjs compares this list against the
+ * Python enum and fails on any drift in either direction.
+ */
 export type AuditAction =
+  | "approve"
+  | "break_glass_access"
   | "create"
-  | "update"
-  | "merge"
+  | "delete"
+  | "dispense"
+  | "erase"
+  | "export"
   | "login"
   | "logout"
-  | "view"
-  | "export"
-  | "delete_attempt";
+  | "print"
+  | "return"
+  | "role_change"
+  | "thid_merge"
+  | "thid_unmerge"
+  | "uhid_merge"
+  | "update"
+  | "view";
 
 export type VerificationStatus = "pending" | "verified" | "failed";
 

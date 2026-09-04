@@ -28,6 +28,8 @@ type Props = {
   onQueryChange: (q: string) => void;
   onActionChange: (a: string) => void;
   onResourceTypeChange: (r: string) => void;
+  /** From GET /audit/resource-types; falls back to COMMON_RESOURCE_TYPES while loading. */
+  resourceTypes?: string[];
   onFromChange?: (v: string) => void;
   onToChange?: (v: string) => void;
   onSelect: (row: AuditLog) => void;
@@ -45,6 +47,7 @@ export function AuditLogListPanel({
   onQueryChange,
   onActionChange,
   onResourceTypeChange,
+  resourceTypes = [],
   onFromChange,
   onToChange,
   onSelect,
@@ -111,12 +114,17 @@ export function AuditLogListPanel({
             fullWidth
           >
             <MenuItem value="all">All</MenuItem>
-            {COMMON_RESOURCE_TYPES.map((r) => (
+            {/* Served by GET /audit/resource-types, so the options are exactly
+                the types this facility has rows for. The previous hand-kept
+                list offered six, three of which matched nothing, while hiding
+                the rest of the data — and needed a code change every time a
+                model started auditing. COMMON_RESOURCE_TYPES is the fallback
+                for the moment before the fetch resolves. */}
+            {(resourceTypes.length > 0 ? resourceTypes : COMMON_RESOURCE_TYPES).map((r) => (
               <MenuItem key={r} value={r}>
                 {r}
               </MenuItem>
             ))}
-            <MenuItem value="audit_logs">audit_logs</MenuItem>
           </TextField>
         </Stack>
         {onFromChange && onToChange ? (
@@ -159,6 +167,7 @@ export function AuditLogListPanel({
             return (
               <Button
                 key={key}
+                data-testid="audit-log-row"
                 onClick={() => onSelect(row)}
                 sx={{
                   display: "block",
