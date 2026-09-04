@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import type { Role } from "@/config/roles";
+import { recordLogin, recordLogout } from "@/lib/audit-session";
 import {
   type AuthUser,
   clearAuthToken,
@@ -66,6 +67,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               };
               setUser(next);
               setSessionPresence(next.role ?? undefined);
+              // The audit row for "this session began". Not awaited: it is
+              // evidence about the session, not a gate on entering it, and a
+              // clinician must not wait on an audit write to reach a
+              // workspace.
+              void recordLogin();
               if (next.role === null) {
                 // Authenticated, but holding no role this app has a workspace
                 // for. Log it loudly: in practice it means the realm and
@@ -154,6 +160,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function logout() {
+    // Before the token is discarded — the row is written from that token's
+    // identity, so recording after clearing it would produce a 401 and no row.
+    await recordLogout();
     setUser(null);
     setAccessToken(null);
     clearAuthToken();

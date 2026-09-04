@@ -37,7 +37,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.audit import service
+from app.audit import events, service
 from app.audit.actions import AuditAction
 from app.audit.deps import _extract_ip, select_acting_role
 from app.audit.schemas import AuditLogListOut, AuditLogOut
@@ -93,6 +93,56 @@ async def list_audit_logs(
         page_size=page_size,
         total=total,
     ).model_dump(mode="json")
+
+
+@router.post("/session/login", status_code=202)
+async def record_login(
+    request: Request,
+    user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Record that this user's session started.
+
+    WHY THIS ENDPOINT EXISTS AT ALL. Authentication happens in Keycloak, not
+    here — this backend only ever sees a bearer token on an already-established
+    session, so there is no natural point at which it can observe a login. That
+    is why events.log_login() was written and never called: there was nowhere
+    to call it from.
+
+    The honest options were a Keycloak event listener or a client that says
+    "I have just signed in". This is the second. It is attributable — the row
+    is written from the token's own identity, never from the body — and its
+    weakness is stated rather than hidden: a client that never calls it simply
+    produces no login row. It cannot be forged into someone else's name, which
+    is the property that matters for an audit trail.
+
+    Deliberately NOT role-gated beyond authentication: every role logs in, and
+    a login that goes unrecorded because the role list was not updated is the
+    failure this is meant to end.
+    """
+    await events.log_login(
+        db,
+        facility_id=user.facility_id,
+        user_id=user.id,
+        ip_address=request.client.host if request.client else None,
+    )
+    return {"recorded": "login"}
+
+
+@router.post("/session/logout", status_code=202)
+async def record_logout(
+    request: Request,
+    user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Record that this user signed out. Same reasoning as the login route."""
+    await events.log_logout(
+        db,
+        facility_id=user.facility_id,
+        user_id=user.id,
+        ip_address=request.client.host if request.client else None,
+    )
+    return {"recorded": "logout"}
 
 
 @router.get("/resource-types", dependencies=[Depends(require_roles("auditor", "admin"))])
