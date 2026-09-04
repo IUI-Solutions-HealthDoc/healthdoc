@@ -95,6 +95,26 @@ async def list_audit_logs(
     ).model_dump(mode="json")
 
 
+@router.get("/resource-types", dependencies=[Depends(require_roles("auditor", "admin"))])
+async def list_audit_resource_types(
+    user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """The resource types this facility actually has audit rows for.
+
+    The screen's Resource dropdown was a hand-kept list of six. The table holds
+    far more than that, and three of the six matched nothing — so the filter
+    simultaneously offered dead options and hid most of the data. A
+    hand-maintained list cannot track a vocabulary that grows every time a
+    model opts into auditing.
+
+    Facility-scoped like every other audit read: the set of resource types a
+    facility holds is itself information about that facility.
+    """
+    values = await service.list_audit_resource_types(db, facility_id=user.facility_id)
+    return {"items": values}
+
+
 @router.get("/logs/export", dependencies=[Depends(require_roles("auditor", "admin"))])
 async def export_audit_logs_csv(
     request: Request,

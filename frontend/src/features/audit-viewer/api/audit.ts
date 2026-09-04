@@ -27,12 +27,22 @@ function auditParams(filters: AuditLogFilters): URLSearchParams {
   const params = new URLSearchParams();
   if (filters.user_id) params.set("user_id", filters.user_id);
   if (filters.patient_id) params.set("patient_id", filters.patient_id);
-  if (filters.resource_type) params.set("resource_type", filters.resource_type);
   // The UI calls these from/to; the endpoint calls them date_from/date_to.
   // Mapped rather than renamed on the type, because the screen's labels are
   // fine and the wire name is the server's to choose.
   if (filters.from) params.set("date_from", filters.from);
   if (filters.to) params.set("date_to", filters.to);
+  // "all" is the dropdown's own placeholder, not a resource type the server
+  // has ever stored. Sending it asks for rows whose resource_type is literally
+  // "all", which matches nothing — so the DEFAULT view of the audit trail came
+  // back empty and read as "no audit entries", with 200+ rows sitting in the
+  // table.
+  //
+  // This guard was already here and correct. It was defeated by an unguarded
+  // `params.set("resource_type", ...)` a few lines above, which set the value
+  // first; a second set() cannot unset what the first one wrote. That
+  // duplicate is now gone. Any future filter added here must be set in exactly
+  // one place, for the same reason.
   if (filters.resource_type && filters.resource_type !== "all") {
     params.set("resource_type", filters.resource_type);
   }
@@ -142,7 +152,6 @@ export async function listDataAccessLogs(
   filters: DataAccessFilters = {},
 ): Promise<{ items: DataAccessLog[]; unattributed_in_page: number }> {
   const params = new URLSearchParams();
-  // access_channel / query have no server equivalent — see refineLoadedPage.
   if (filters.consent_id) params.set("consent_id", filters.consent_id);
   params.set("page", "1");
   params.set("page_size", "100");
@@ -151,7 +160,32 @@ export async function listDataAccessLogs(
     items: DataAccessLog[];
     unattributed_in_page: number;
   }>(`/audit/data-access?${params.toString()}`);
-  return response;
+
+  // access_channel / query have no server equivalent, so they narrow the
+  // loaded page here — the same treatment refineLoadedPage gives audit logs
+  // and listFileAccessLogs gives file access.
+  //
+  // The comment above USED to say exactly that while the function returned the
+  // response untouched, so the search box and the channel dropdown moved,
+  // refetched, and changed nothing. A control that looks like it filters and
+  // does not is worse than no control: on an audit screen it reads as "these
+  // are all the matching records" when it means "these are all the records".
+  //
+  // Same page-one limitation as the others, and written down for the same
+  // reason: a match on page two is not found.
+  const q = filters.query?.trim().toLowerCase() ?? "";
+  const channel = filters.access_channel;
+  const items = response.items.filter((row) => {
+    if (channel && channel !== "all" && row.access_channel !== channel) return false;
+    if (!q) return true;
+    return [row.id, row.user_id, row.patient_id, row.access_channel, row.purpose_code, row.resource_type]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .includes(q);
+  });
+
+  return { ...response, items };
 }
 
 /** GET /audit/file-access — who downloaded which file, scoped via files.facility_id. */
@@ -202,5 +236,20 @@ export async function listIntegrityChecks(): Promise<{
 /** GET /audit/archives — partitions in object storage and whether they verified. */
 export async function listArchives(): Promise<AuditLogArchive[]> {
   const response = await api<{ items: AuditLogArchive[] }>("/audit/archives");
+  return response.items;
+}
+
+
+/**
+ * GET /audit/resource-types — the resource types this facility actually has
+ * rows for.
+ *
+ * The dropdown used to be a hand-kept list of six. The table holds more than
+ * that and three of the six matched nothing, so the filter offered dead
+ * options and hid most of the data at the same time. A list maintained by hand
+ * cannot track a vocabulary that grows whenever a model opts into auditing.
+ */
+export async function listAuditResourceTypes(): Promise<string[]> {
+  const response = await api<{ items: string[] }>("/audit/resource-types");
   return response.items;
 }

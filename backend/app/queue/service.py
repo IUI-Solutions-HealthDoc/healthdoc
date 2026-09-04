@@ -562,6 +562,58 @@ async def complete_by_visit_id(
     return await _complete_token_and_advance(db, token)
 
 
+async def complete_for_visit_if_active(
+    db: AsyncSession, visit_id: uuid.UUID
+) -> QueueToken | None:
+    """Close the queue token for a visit whose consultation just ended.
+
+    Tolerant where complete_by_visit_id() is strict, and that difference is the
+    bug this exists to fix. complete_by_visit_id() only matches a token in
+    CALLED and raises 404 otherwise — but a doctor who sees a patient without
+    pressing "call next" leaves the token in WAITING, and a consultation closed
+    from the encounter screen has no business 404ing because of it. The result
+    was a consultation showing "Completed" beside a patient still listed as
+    "Waiting" in the doctor's own queue.
+
+    Returns None, without raising, when there is no active token: an IPD or
+    teleconsult visit legitimately has none, and closing those notes must not
+    fail because the OPD queue has nothing to advance.
+    """
+    token = (
+        await db.execute(
+            select(QueueToken)
+            .where(
+                QueueToken.visit_id == visit_id,
+                QueueToken.status.in_(
+                    (QueueTokenStatus.WAITING.value, QueueTokenStatus.CALLED.value)
+                ),
+            )
+            .with_for_update()
+        )
+    ).scalars().first()
+    if token is None:
+        return None
+
+    if token.status == QueueTokenStatus.WAITING.value:
+        # Promote through CALLED rather than jumping straight to COMPLETED.
+        # _complete_token_and_advance refuses waiting -> completed, and that
+        # guard is right: a token that was never called has no business being
+        # marked done by the queue's own controls.
+        #
+        # But the consultation ending IS the evidence the patient was seen —
+        # the doctor simply did not press "call next" first. Recording the call
+        # here keeps the history truthful (called, then completed, both
+        # timestamped) instead of leaving a hole, and keeps the invariant
+        # intact instead of relaxing it for everyone.
+        token.status = QueueTokenStatus.CALLED.value
+        if token.called_at is None:
+            token.called_at = datetime.now(UTC)
+        await db.flush()
+
+    completed, _next_token, _event = await _complete_token_and_advance(db, token)
+    return completed
+
+
 async def admin_force_complete(
     db: AsyncSession,
     token_id: uuid.UUID,
