@@ -125,3 +125,78 @@ async def test_diagnosis_create_and_list(db, visit):
     diagnoses = await service.list_diagnoses(db, encounter.id)
     assert len(diagnoses) == 2
     assert {d.icd_code for d in diagnoses} == {"J11", "R50.9"}
+
+
+# --------------------------------------------------------------------------- #
+# Closing the note closes the queue token.
+#
+# Reported as: consultation shows "Completed" while the same patient is still
+# "Waiting" in the Doctor Queue. The encounter PATCH set ended_at and nothing
+# else; queue.service.complete_by_visit_id() existed but its only other mention
+# in the codebase was a commented-out example.
+# --------------------------------------------------------------------------- #
+
+async def test_closing_an_encounter_completes_the_patients_queue_token(db, visit, seed):
+    from datetime import date
+
+    from app.queue import service as queue_service
+
+    v, doctor = visit
+    dept, room, _doctor = seed
+    queue = await queue_service.create_queue(
+        db, dept.id, doctor.id, room.id, "Q", date.today(), dept.facility_id)
+    token = await queue_service.create_token(db, queue.id, v.id, "normal", queue.facility_id)
+    assert token.status == "waiting"
+
+    encounter = await service.create_encounter(
+        db, EncounterCreate(visit_id=v.id, provider_user_id=doctor.id, chief_complaint="fever"),
+        actor_id=doctor.id, facility_id=v.facility_id)
+    await service.update_encounter(
+        db, encounter, EncounterUpdate(ended_at=datetime.now(timezone.utc)), actor_id=doctor.id)
+
+    await db.refresh(token)
+    assert token.status == "completed", (
+        "closing the consultation must close the queue token — otherwise the "
+        "encounter reads Completed while the queue still shows the patient Waiting"
+    )
+
+
+async def test_editing_a_closed_note_does_not_re_advance_the_queue(db, visit, seed):
+    """Only the transition into ended_at triggers the queue, not every PATCH."""
+    from datetime import date
+
+    from app.queue import service as queue_service
+
+    v, doctor = visit
+    dept, room, _doctor = seed
+    queue = await queue_service.create_queue(
+        db, dept.id, doctor.id, room.id, "Q2", date.today(), dept.facility_id)
+    first = await queue_service.create_token(db, queue.id, v.id, "normal", queue.facility_id)
+
+    encounter = await service.create_encounter(
+        db, EncounterCreate(visit_id=v.id, provider_user_id=doctor.id, chief_complaint="fever"),
+        actor_id=doctor.id, facility_id=v.facility_id)
+    ended = datetime.now(timezone.utc)
+    await service.update_encounter(db, encounter, EncounterUpdate(ended_at=ended), actor_id=doctor.id)
+    await db.refresh(first)
+    assert first.status == "completed"
+
+    # A second token for the same visit stands in for "the queue moved on".
+    # Re-PATCHing the closed note must not touch it.
+    second = await queue_service.create_token(db, queue.id, v.id, "normal", queue.facility_id)
+    await service.update_encounter(db, encounter, EncounterUpdate(ended_at=ended), actor_id=doctor.id)
+    await db.refresh(second)
+    assert second.status == "waiting", "re-saving a closed note must not advance the queue again"
+
+
+async def test_closing_a_note_for_a_visit_with_no_token_still_works(db, visit):
+    """IPD and teleconsult visits have no OPD token; the note must still close."""
+    v, doctor = visit
+    encounter = await service.create_encounter(
+        db, EncounterCreate(visit_id=v.id, provider_user_id=doctor.id, chief_complaint="admitted"),
+        actor_id=doctor.id, facility_id=v.facility_id)
+
+    updated = await service.update_encounter(
+        db, encounter, EncounterUpdate(ended_at=datetime.now(timezone.utc)), actor_id=doctor.id)
+
+    assert updated.ended_at is not None

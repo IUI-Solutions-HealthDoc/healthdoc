@@ -374,3 +374,63 @@ async def test_elevate_priority_initial_priority_unchanged_after_elevation(db, q
     assert updated.priority == "emergency"
     assert updated.initial_priority == "normal"  # unchanged
     
+
+
+# --------------------------------------------------------------------------- #
+# Consultation close advances the queue
+#
+# Reported as: consultation shows "Completed" while the same patient is still
+# "Waiting" in the Doctor Queue. Two screens disagreeing about one event.
+#
+# Cause: complete_by_visit_id() existed but nothing called it — its only other
+# mention in the codebase was a commented-out example — and it matches only a
+# CALLED token, so it would have 404'd on the common case anyway.
+# --------------------------------------------------------------------------- #
+
+async def test_closing_a_consultation_completes_a_waiting_token(db, queue):
+    """The reported case: the doctor never pressed "call next"."""
+    visit_id = uuid.uuid4()
+    token = await service.create_token(db, queue.id, visit_id, "normal", queue.facility_id)
+    assert token.status == "waiting"
+
+    completed = await service.complete_for_visit_if_active(db, visit_id)
+
+    assert completed is not None, "a waiting token must still close when the consultation ends"
+    assert completed.status == "completed"
+
+
+async def test_closing_a_consultation_completes_a_called_token(db, queue):
+    """And the case complete_by_visit_id() already handled."""
+    visit_id = uuid.uuid4()
+    token = await service.create_token(db, queue.id, visit_id, "normal", queue.facility_id)
+    token.status = "called"
+    await db.flush()
+
+    completed = await service.complete_for_visit_if_active(db, visit_id)
+
+    assert completed is not None
+    assert completed.status == "completed"
+
+
+async def test_a_visit_with_no_token_closes_without_raising(db, queue):
+    """IPD and teleconsult visits have no OPD token.
+
+    complete_by_visit_id() raises 404 here. Closing a clinical note must not
+    fail because the OPD queue has nothing to advance — the note is the record,
+    and the queue is a convenience on top of it.
+    """
+    assert await service.complete_for_visit_if_active(db, uuid.uuid4()) is None
+
+
+async def test_an_already_completed_token_is_not_touched_again(db, queue):
+    """A second PATCH re-sending the same ended_at must not re-advance the
+    queue. The service only matches waiting/called, so the second call is a
+    no-op rather than an error."""
+    visit_id = uuid.uuid4()
+    await service.create_token(db, queue.id, visit_id, "normal", queue.facility_id)
+
+    first = await service.complete_for_visit_if_active(db, visit_id)
+    second = await service.complete_for_visit_if_active(db, visit_id)
+
+    assert first is not None and first.status == "completed"
+    assert second is None

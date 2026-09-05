@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.opd.models import Diagnosis, DoctorReview, Encounter, Visit
 from app.users.models import User
 from app.encounters.schemas import DiagnosisCreate, EncounterCreate, EncounterUpdate
+from app.queue import service as queue_service
 
 
 class VisitNotFound(Exception):
@@ -183,6 +184,7 @@ async def update_encounter(
         encounter.encounter_type = payload.encounter_type
     if payload.chief_complaint is not None:
         encounter.chief_complaint = payload.chief_complaint
+    closing_now = payload.ended_at is not None and encounter.ended_at is None
     if payload.ended_at is not None:
         encounter.ended_at = payload.ended_at
     if payload.subjective is not None:
@@ -198,6 +200,22 @@ async def update_encounter(
     # From the token, never the body. Besides the forgery, the old line
     # assigned payload.updated_by unconditionally — and it is optional, so a
     # PATCH that omitted it NULLed out the last-editor of a clinical note.
+    # Closing the note is the "consultation over" signal, so the patient's
+    # queue token closes with it. Without this the encounter showed
+    # "Completed" while the same patient sat in the doctor's queue as
+    # "Waiting" — two screens disagreeing about the same event.
+    #
+    # Guarded on the TRANSITION, not on ended_at being set: a later PATCH that
+    # re-sends the same ended_at must not try to complete an already-completed
+    # token, and editing a closed note must not re-advance the queue.
+    #
+    # Same transaction as the note, deliberately. If the token cannot be
+    # closed the note write goes back with it, because a consultation recorded
+    # as finished while the queue still holds the patient is the exact
+    # inconsistency being fixed.
+    if closing_now and encounter.visit_id is not None:
+        await queue_service.complete_for_visit_if_active(db, encounter.visit_id)
+
     encounter.updated_by = actor_id
     # Timestamps.updated_at uses SQL ``onupdate=now()``. PostgreSQL expires the
     # attribute after flush, and response serialization would then attempt an
