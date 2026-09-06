@@ -12,6 +12,7 @@ import { api, newIdempotencyKey } from "@/lib/api";
 
 import type {
   Adjustment,
+  ApproverCandidate,
   CreatePurchaseOrderInput,
   CreateStockTransferInput,
   PurchaseOrder,
@@ -272,4 +273,23 @@ export function cancelStockTransfer(transferId: string): Promise<StockTransfer> 
     body: JSON.stringify({}),
     idempotencyKey: newIdempotencyKey(),
   });
+}
+
+/**
+ * First-approver candidates for a stock adjustment.
+ *
+ * Not `GET /users`: that route is gated `admin`, so the pharmacist who owns
+ * this screen got 403 on every keystroke and the picker rendered an empty
+ * list. This route is gated `pharmacist, admin` and returns only what the
+ * picker shows.
+ */
+export async function listAdjustmentCandidates(
+  search: string,
+): Promise<ApproverCandidate[]> {
+  const params = new URLSearchParams();
+  if (search.trim()) params.set("search", search.trim());
+  const page = await api<{ items: ApproverCandidate[] }>(
+    `/pharmacy/adjustment-candidates?${params.toString()}`,
+  );
+  return page.items;
 }

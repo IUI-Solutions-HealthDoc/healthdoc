@@ -23,15 +23,13 @@
  */
 import { useCallback, useEffect, useState } from "react";
 
-import { listUsers } from "@/features/admin/api/users";
-import type { User } from "@/features/admin/types";
 import { searchMedicines } from "@/features/pharmacy/api";
 import type { BatchAvailability, MedicineSearchResult } from "@/features/pharmacy/types";
 import { useCurrentUser } from "@/features/session/useCurrentUser";
 import { ApiError } from "@/lib/api";
 
-import { createAdjustment, decideAdjustment, listAdjustments } from "./api";
-import type { AdjustmentListRow } from "./types";
+import { createAdjustment, decideAdjustment, listAdjustmentCandidates, listAdjustments } from "./api";
+import type { AdjustmentListRow, ApproverCandidate } from "./types";
 
 export function AdjustmentWorkspace() {
   const { user } = useCurrentUser();
@@ -47,8 +45,9 @@ export function AdjustmentWorkspace() {
   const [reason, setReason] = useState("");
 
   const [approverTerm, setApproverTerm] = useState("");
-  const [approvers, setApprovers] = useState<User[]>([]);
-  const [firstApprover, setFirstApprover] = useState<User | null>(null);
+  const [approvers, setApprovers] = useState<ApproverCandidate[]>([]);
+  const [approverError, setApproverError] = useState<string | null>(null);
+  const [firstApprover, setFirstApprover] = useState<ApproverCandidate | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -89,15 +88,26 @@ export function AdjustmentWorkspace() {
     }
     let cancelled = false;
     const timer = setTimeout(() => {
-      listUsers({ query: q, page_size: 10 })
-        .then((page) => {
+      listAdjustmentCandidates(q)
+        .then((candidates) => {
           if (cancelled) return;
+          setApproverError(null);
           // The submitter cannot be their own first approver — the server
-          // refuses it 422 and the database refuses it again. Filtered out of
-          // the picker so nobody selects a name that will be rejected.
-          setApprovers(page.items.filter((candidate) => candidate.id !== user?.id));
+          // refuses it 422 and the database refuses it again. The endpoint
+          // already excludes the caller; this is belt and braces against a
+          // stale token identity.
+          setApprovers(candidates.filter((candidate) => candidate.id !== user?.id));
         })
-        .catch(() => !cancelled && setApprovers([]));
+        .catch((reason: unknown) => {
+          if (cancelled) return;
+          // Never swallow this. The previous version returned an empty list on
+          // failure, so a lookup that was actually being refused looked exactly
+          // like a colleague who does not work here.
+          setApprovers([]);
+          setApproverError(
+            reason instanceof ApiError ? reason.message : "Could not search staff",
+          );
+        });
     }, 250);
     return () => {
       cancelled = true;
@@ -345,6 +355,11 @@ export function AdjustmentWorkspace() {
                       </li>
                     ))}
                   </ul>
+                ) : null}
+                {approverError ? (
+                  <p role="alert" className="mt-1 text-xs text-danger">
+                    {approverError}
+                  </p>
                 ) : null}
               </>
             )}

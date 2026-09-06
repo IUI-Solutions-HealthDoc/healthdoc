@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from decimal import Decimal
+from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException
@@ -173,6 +174,36 @@ async def test_reorder_alerts_flags_items_at_or_below_threshold(db_session, inve
     alerts = await get_reorder_alerts(db_session, facility_id=inventory_seed["facility_id"])
     flagged_ids = [a.item_id for a in alerts.items]
     assert inventory_seed["medicine_id"] in flagged_ids
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("nominee_state", ["inactive", "foreign", "missing"])
+async def test_adjustment_rejects_unusable_first_approver(db_session, inventory_seed, nominee_state):
+    nominee = inventory_seed["hod_id"]
+    if nominee_state == "inactive":
+        await db_session.execute(text("UPDATE users SET is_active = false WHERE id = :id"), {"id": nominee})
+    elif nominee_state == "foreign":
+        other = uuid4()
+        await db_session.execute(text(
+            "INSERT INTO facilities (id, code, name, state_code) VALUES (:id, :code, 'Other test facility', 'DL')"
+        ), {"id": other, "code": f"OTH{uuid4().hex[:8]}"})
+        await db_session.execute(text("UPDATE users SET facility_id = :fid WHERE id = :id"), {"fid": other, "id": nominee})
+    else:
+        nominee = uuid4()
+    before = await db_session.scalar(text("SELECT COUNT(*) FROM adjustments WHERE facility_id = :fid"), {"fid": inventory_seed["facility_id"]})
+    with pytest.raises(HTTPException) as exc:
+        await create_adjustment(
+            db_session,
+            AdjustmentCreate(
+                item_id=inventory_seed["medicine_id"], batch_id=inventory_seed["early_batch_id"],
+                quantity_change=Decimal("-1"), reason="Synthetic regression",
+                first_approver_id=nominee,
+            ),
+            current_user_id=inventory_seed["pharmacist_id"], facility_id=inventory_seed["facility_id"],
+        )
+    assert exc.value.status_code == 404
+    after = await db_session.scalar(text("SELECT COUNT(*) FROM adjustments WHERE facility_id = :fid"), {"fid": inventory_seed["facility_id"]})
+    assert after == before, "No adjustment may be recorded against an unusable nominee"
 
 
 @pytest.mark.asyncio

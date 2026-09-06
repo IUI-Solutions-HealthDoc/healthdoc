@@ -9,23 +9,22 @@ Companion to `docs/dashboard-test-assignments.md` (the per-role checklists) and
 
 | | |
 |---|---|
-| Backend tests | 930 passing |
+| Backend tests | 1,226 passing in the 5 September local retest; see current evidence below |
 | Dependency CVEs | zero, backend and frontend (`make audit-deps`) |
 | WASA cybersecurity track | blockers closed; one Medium open (CSP `unsafe-inline`) |
-| WASA ABDM track | **not assessable** — `hip/`, `hiu/`, `consent/`, `nhcx/` are empty |
+| WASA ABDM track | Local role testing is not evidence of ABDM milestone acceptance; verify live sandbox round trips separately |
 | Screens | 34 workspaces, 47 role/workspace pairs across 13 roles |
 
 **What automated testing already covers:** every screen loads, every API call on
 load succeeds, every role lands where it should. `e2e/dashboards.smoke.mjs` runs
 that on real Keycloak logins in CI.
 
-**What it deliberately does not cover, and is therefore what this exercise is
-for:** mutating workflows. Raising an indent and approving it, dispensing a
-prescription, resolving a grievance, confirming a saved value survives a
-refresh. Every defect this project shipped rendered perfectly — `/radiology`
-was a title-only shell for weeks, procurement's approval queue was empty rather
-than broken, ABHA verification 401'd silently for months. Loading is not
-working, and only a human clicking the primary button finds that out.
+**Action coverage now exists separately** in `e2e/workflows.smoke.mjs`. Consult
+[the generated evidence](role-verification-evidence.md) and
+[its coverage limits](local-role-verification.md) before assigning duplicate
+work. Remaining manual priorities include inventory approval chains, dispensing,
+billing payments, grievance resolution and staff creation. A screen loading is
+not proof of any of those actions.
 
 ---
 
@@ -125,7 +124,7 @@ cp .env.example .env          # defaults work for local; no secrets needed
 make setup                    # ~5 min first run
 ```
 
-**`make setup` must end with `Seeded development facility and 13 authenticated
+**`make setup` must end with `Seeded development facility and 14 authenticated
 users`.** If it stops before that line, the accounts do not exist and every
 login will fail — do not proceed, report it.
 

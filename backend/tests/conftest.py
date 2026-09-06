@@ -23,6 +23,8 @@ from app.main import app
 from app.common.db import Base
 from app.audit.models import AuditLog
 from app.departments.models import Department, Room
+from app.opd.models import Visit
+from app.patients.models import Patient
 from app.users.models import Facility, User
 from app.integrations.abdm.fhir.models import FhirBundleTransaction
 from app.outbox.models import OutboxEvent
@@ -153,6 +155,48 @@ async def seed(db):
     return dept, room, doctor
  
  
+@pytest_asyncio.fixture
+async def opd_visit(db, seed):
+    """Factory for a real visit at the seeded facility.
+
+    `create_token` now loads the visit to check its type and its facility, so a
+    fabricated uuid is no longer a stand-in for one. That is the point: the
+    endpoint used to accept ANY visit id — including another facility's — and
+    could not tell an outpatient from an admission.
+    """
+    dept, _room, doctor = seed
+    counter = count(1)
+
+    async def make(visit_type: str = "opd", facility_id: uuid.UUID | None = None):
+        target_facility = facility_id or dept.facility_id
+        suffix = uuid.uuid4().hex[:10]
+        patient = Patient(
+            id=uuid.uuid4(),
+            uhid=f"UH{suffix}",
+            full_name="Queue Test Patient",
+            sex="unknown",
+            age_years=30,
+            identity_path="demographics_only",
+            facility_id=target_facility,
+            created_by=doctor.id,
+        )
+        visit = Visit(
+            id=uuid.uuid4(),
+            visit_number=f"QV-{next(counter):03d}-{suffix}",
+            patient_id=patient.id,
+            facility_id=target_facility,
+            department_id=dept.id if target_facility == dept.facility_id else None,
+            visit_type=visit_type,
+            visit_date=datetime.now(),
+            created_by=doctor.id,
+        )
+        db.add_all([patient, visit])
+        await db.flush()
+        return visit
+
+    return make
+
+
 @pytest_asyncio.fixture
 async def queue(db, seed):
     dept, room, doctor = seed

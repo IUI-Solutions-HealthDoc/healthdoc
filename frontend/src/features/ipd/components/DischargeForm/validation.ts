@@ -14,6 +14,7 @@ export const addDischargeSchema = z
     discharged_at: z.string().min(1),
     discharge_type: z.enum(DISCHARGE_TYPES),
     discharge_summary: z.string().min(1, "Discharge summary is required"),
+    // Normalised on the way out, in dischargePatient — see the note there.
     follow_up_date: z.string().optional(),
     // Backend: DischargeRequest.destination_facility_id / destination_facility_name.
     // Required (either one) only when discharge_type === "transferred" —

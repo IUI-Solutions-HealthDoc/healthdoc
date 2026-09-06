@@ -59,7 +59,17 @@ export async function admitPatient(data: AddAdmissionSchema) {
 }
 
 export async function dischargePatient(data: AddDischargeSchema) {
-  const { admission_id, ...payload } = data;
+  const { admission_id, follow_up_date, ...rest } = data;
+  const payload = {
+    ...rest,
+    // Two mismatches, both fatal, both fixed here because this function
+    // already owns the wire shape. `DischargeRequest.follow_up_date` is a
+    // `date`, but the form collects it with a datetime-local input; and an
+    // untouched optional date arrives as "", which is neither a date nor
+    // absent. The server answered 422 to every discharge until this, and the
+    // screen surfaced no reason.
+    follow_up_date: follow_up_date ? follow_up_date.slice(0, 10) : undefined,
+  };
   return api<Discharge>(`/admissions/${admission_id}/discharge`, {
     method: "POST",
     body: JSON.stringify(payload),

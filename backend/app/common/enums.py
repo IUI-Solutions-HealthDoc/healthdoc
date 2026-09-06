@@ -61,6 +61,17 @@ class VisitType(CheckedEnum):
     def bed_occupying(cls) -> frozenset[str]:
         return frozenset({cls.IPD.value, cls.DAY_CARE.value})
 
+    #: Visit types that take an OPD counter token. Only a walk-in outpatient
+    #: waits in a corridor for a consulting room to call a number. An
+    #: admission, a day-care procedure, an emergency and a teleconsult each
+    #: reach the clinician another way, and issuing them a token puts a patient
+    #: on the waiting-room wall display who is not in that waiting room — and,
+    #: for an emergency, makes arrival at the desk depend on somebody having
+    #: opened an OPD queue that morning.
+    @classmethod
+    def token_issuing(cls) -> frozenset[str]:
+        return frozenset({cls.OPD.value})
+
 
 class VisitStatus(CheckedEnum):
     REGISTERED = "registered"

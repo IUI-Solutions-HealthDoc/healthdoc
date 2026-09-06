@@ -20,7 +20,7 @@ def _realm_dict() -> dict:
     """A source realm that is actually VALID.
 
     Deliberately carries NO passwordPolicy. A dev realm must not have one:
-    dev_setup.sh provisions thirteen accounts with "devpass", and Keycloak
+    dev_setup.sh provisions fourteen accounts with "devpass", and Keycloak
     enforces the policy at set-password time, so a strong rule in the shared
     realm leaves every dev identity without a usable credential. The renderer
     imposes the production policy instead.
@@ -85,7 +85,7 @@ def test_render_rejects_non_https_origin_or_path(tmp_path: Path, origin: str) ->
 
 def test_production_render_forces_totp(tmp_path: Path) -> None:
     """The dev realm enables CONFIGURE_TOTP without forcing it — forcing there
-    would send all thirteen dev identities to an OTP enrolment screen on first
+    would send all fourteen dev identities to an OTP enrolment screen on first
     login. Production is where it becomes mandatory."""
     destination = tmp_path / "out.json"
     renderer.render(_source(tmp_path), destination, "https://healthdoc.example.org")
@@ -162,7 +162,7 @@ def test_production_render_imposes_the_password_policy(tmp_path: Path) -> None:
 
     This is the regression that broke nurse-auth-e2e: the policy was put in the
     shared realm, Keycloak rejected `kc set-password ... devpass` for all
-    thirteen dev identities, and every real-auth login failed. The rule is
+    fourteen dev identities, and every real-auth login failed. The rule is
     correct for production and fatal to dev, so it is applied here.
     """
     source = _source(tmp_path)
@@ -187,6 +187,6 @@ def test_the_dev_realm_carries_no_password_policy() -> None:
     assert "passwordPolicy" not in realm, (
         "the dev realm has a passwordPolicy. dev_setup.sh sets every test "
         "identity to 'devpass'; Keycloak enforces the policy at set-password "
-        "time, so this leaves all thirteen accounts unusable. Put production "
+        "time, so this leaves all fourteen accounts unusable. Put production "
         "password rules in scripts/deploy/render_keycloak_realm.py instead."
     )

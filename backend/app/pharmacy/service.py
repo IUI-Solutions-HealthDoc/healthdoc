@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import date as _date
+from datetime import timedelta as _timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -15,19 +17,13 @@ from app.common.enums import DispenseStatus, NotificationStatus
 from app.common.redis import publish_event, stock_alert_channel
 from app.pharmacy.interactions import DrugInteractionConflict, check_against_existing
 from app.pharmacy.schemas import (
-    GrnListItem,
-    GrnListOut,
-    IndentListItem,
-    IndentListOut,
-    AdjustmentListItem,
-    AdjustmentListOut,
-    SupplierOut,
-    SupplierListOut,
-    StockLocationOut,
-    StockLocationListOut,
     AdjustmentApprovalRequest,
     AdjustmentCreate,
+    AdjustmentListItem,
+    AdjustmentListOut,
     AdjustmentOut,
+    ApproverCandidateListOut,
+    ApproverCandidateOut,
     BatchAllocation,
     BatchAvailability,
     DispenseCreate,
@@ -37,11 +33,15 @@ from app.pharmacy.schemas import (
     ExpiryTrackerResponse,
     GrnCreate,
     GrnItemOut,
+    GrnListItem,
+    GrnListOut,
     GrnOut,
     GrnVerifyRequest,
     IndentApprovalRequest,
     IndentCreate,
     IndentItemOut,
+    IndentListItem,
+    IndentListOut,
     IndentOut,
     MedicineSearchResult,
     PendingSubstitutionOut,
@@ -50,8 +50,13 @@ from app.pharmacy.schemas import (
     PrescriptionQueueResponse,
     ReorderAlertItem,
     ReorderAlertsResponse,
+    StockLocationListOut,
+    StockLocationOut,
     SubstitutionApprovalRequest,
+    SupplierListOut,
+    SupplierOut,
 )
+from app.pharmacy.schemas import PharmacyMisReport as _PharmacyMisReport
 
 # ---------------------------------------------------------------------------
 # Prescription queue
@@ -1120,12 +1125,6 @@ async def _recompute_dispense_status(db: AsyncSession, dispense_id: str) -> None
 # Pharmacy MIS report
 # ---------------------------------------------------------------------------
 
-from datetime import date as _date
-from datetime import timedelta as _timedelta
-
-from app.pharmacy.schemas import PharmacyMisReport as _PharmacyMisReport
-
-
 async def _facility_business_date(db: AsyncSession, facility_id: UUID) -> _date:
     """Current business date for this facility - schema doc's blanket rule:
     business dates use the facility's IANA timezone, never bare UTC now() or
@@ -1972,6 +1971,15 @@ async def create_adjustment(
             detail="The designated first approver must be different from the creator",
         )
 
+    # The picker is a convenience, not authorization. Direct callers must not
+    # nominate inactive/foreign staff, or turn a missing ID into a database 500.
+    nominee = await db.scalar(text("""
+        SELECT id FROM users
+        WHERE id = :id AND facility_id = :facility_id AND is_active = true
+    """), {"id": str(payload.first_approver_id), "facility_id": str(facility_id)})
+    if nominee is None:
+        raise HTTPException(404, "First approver not found")
+
     adjustment_id = uuid4()
     await db.execute(
         text("""
@@ -2147,6 +2155,43 @@ async def get_expiry_tracker(
             for r in rows
         ],
     )
+
+
+async def list_adjustment_candidates(
+    db: AsyncSession, *, facility_id: UUID, exclude_user_id: UUID, search: str | None = None
+) -> ApproverCandidateListOut:
+    """Colleagues this pharmacist may nominate as first approver.
+
+    Scoped, self-excluding and active-only, because each of those is a rule the
+    write path already enforces and a picker that offers a name the server will
+    then refuse is worse than an empty one.
+
+    NOT filtered to users who actually hold `pharmacist` or `admin`. Roles live
+    in Keycloak, not in `users`, so answering that here would mean an Admin API
+    round trip on every keystroke of a search box. `POST /adjustments/{id}/approve`
+    is role-gated and remains the enforcement point; this list is a convenience
+    over the same facility, not an authorisation decision.
+    """
+    sql = """
+        SELECT id, full_name, designation
+        FROM users
+        WHERE facility_id = :facility_id
+          AND id <> :exclude_user_id
+          AND is_active = true
+    """
+    params: dict[str, object] = {
+        "facility_id": str(facility_id),
+        "exclude_user_id": str(exclude_user_id),
+    }
+    if search and search.strip():
+        # Matches the columns GET /users searches, minus employee_id: a
+        # pharmacist picking an approver knows a name, not a payroll number.
+        sql += " AND (full_name ILIKE :term OR username ILIKE :term)"
+        params["term"] = f"%{search.strip()}%"
+    sql += " ORDER BY full_name LIMIT 10"
+
+    rows = (await db.execute(text(sql), params)).mappings().all()
+    return ApproverCandidateListOut(items=[ApproverCandidateOut(**dict(r)) for r in rows])
 
 
 async def list_suppliers(

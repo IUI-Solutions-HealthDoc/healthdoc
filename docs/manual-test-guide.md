@@ -6,7 +6,7 @@ and this file is stale — fix it here rather than working around it.
 
 ---
 
-## Credentials — all thirteen roles
+## Credentials — thirteen roles across fourteen accounts
 
 **Every account uses the password `devpass`.** Created by `scripts/dev_setup.sh`
 against the Keycloak realm `healthdoc`; the realm role is what the app reads
@@ -26,10 +26,15 @@ secrets and they are not present in any production realm.
 | 7 | `dev.hod` | `hod` | `/hod` | `/queue-display`, `/inventory` |
 | 8 | `dev.emergency` | `emergency` | `/emergency` | — |
 | 9 | `dev.supervisor` | `supervisor` | `/supervisor/merges` | `/reports` |
-| 10 | `dev.admin` | `admin` | `/admin` | `/admin/*`, `/billing`, `/reports`, `/audit-viewer` |
-| 11 | `dev.auditor` | `auditor` | `/audit-viewer` | `/reports`, `/admin/data-protection` |
-| 12 | `dev.patient` | `patient` | `/patient-portal` | — |
-| 13 | `dev.superadmin` | `superadmin` | `/superadmin` | Platform facility directory only; no clinical routes |
+| 10 | `dev.supervisor2` | `supervisor` | `/supervisor/merges` | `/reports` |
+| 11 | `dev.admin` | `admin` | `/admin` | `/admin/*`, `/billing`, `/reports`, `/audit-viewer` |
+| 12 | `dev.auditor` | `auditor` | `/audit-viewer` | `/reports`, `/admin/data-protection` |
+| 13 | `dev.patient` | `patient` | `/patient-portal` | — |
+| 14 | `dev.superadmin` | `superadmin` | `/superadmin` | Platform facility directory only; no clinical routes |
+
+`dev.supervisor2` exists only because THID→UHID promotion is maker–checker: the
+approver must differ from the requester, and the unmerger from the approver.
+One supervisor account could only ever demonstrate the refusal.
 
 ### Other consoles
 
@@ -48,7 +53,7 @@ The usual cause is that the identities were never created. Re-run and read the
 banner:
 
 ```bash
-make setup   # must print "Seeded development facility and 13 authenticated users"
+make setup   # must print "Seeded development facility and 14 authenticated users"
 ```
 
 If it stops before that line, the accounts do not exist and every login will
@@ -76,7 +81,7 @@ make setup        # first time, or after pulling changes to realm/seed/deps
 make up           # subsequent starts
 ```
 
-Wait for the banner listing thirteen dev logins. If it does not appear, nothing
+Wait for the banner listing fourteen dev logins. If it does not appear, nothing
 below will work — read the error there first.
 
 **App:** https://localhost — accept the self-signed certificate warning.
@@ -194,8 +199,8 @@ anything.
 ### dev.admin → `/admin`
 
 `/admin` (no call on mount), `/admin/users`, `/admin/departments`,
-`/admin/permissions`, `/admin/account-requests`, `/admin/audit`,
-`/audit-viewer`, `/admin/data-protection`, `/admin/maintenance`, `/reports`,
+`/admin/permissions`, `/admin/account-requests`, `/audit-viewer`,
+`/admin/data-protection`, `/admin/maintenance`, `/reports`,
 `/billing`.
 
 `/admin/abdm-sync` is search-driven — **zero calls on mount is correct**. Enter

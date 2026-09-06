@@ -25,11 +25,25 @@
  *   /users             admin
  */
 import { existsSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 import process from "node:process";
 
 import puppeteer from "puppeteer";
 
 const baseUrl = process.env.E2E_BASE_URL ?? "https://localhost";
+
+/** Optional evidence capture, matching dashboards/workflows: the screenshot is
+ *  taken after the checks below have decided, and carries their verdict. */
+const evidenceDir = process.env.E2E_EVIDENCE_DIR;
+const runId = process.env.E2E_RUN_ID;
+if (evidenceDir) {
+  await mkdir(evidenceDir, { recursive: true });
+  await writeFile(path.join(evidenceDir, "superadmin.json"), JSON.stringify({
+    runId, baseUrl, completed: false, fullRun: true, steps: [],
+  }));
+}
+let evidenceLanding = null;
 const executablePath =
   process.env.PUPPETEER_EXECUTABLE_PATH ??
   [
@@ -119,6 +133,7 @@ try {
   if (!realmRoles.includes("superadmin")) {
     failures.push(`token does not carry the superadmin role: ${realmRoles.join(", ")}`);
   }
+  evidenceLanding = landing;
   console.log(`signed in as dev.superadmin -> ${landing}`);
   console.log(`realm roles: ${[...realmRoles].sort().join(", ")}\n`);
 
@@ -167,6 +182,44 @@ try {
     const ok = settled !== route;
     console.log(`  ${ok ? "PASS" : "FAIL"} ui         ${route} -> settled ${settled}`);
     if (!ok) failures.push(`${route} rendered for superadmin instead of redirecting`);
+  }
+  if (evidenceDir) {
+    // Back to the workspace the role actually owns, so the image shows the
+    // screen rather than the last redirect of the denial loop.
+    await page.goto(`${baseUrl}/superadmin`, { waitUntil: "domcontentloaded", timeout: 45_000 });
+    await page.waitForSelector("#main-content", { timeout: 45_000 });
+    await settle(1500);
+    await mkdir(evidenceDir, { recursive: true });
+    await page.addStyleTag({ content: "nextjs-portal{display:none!important}" });
+    const file = "workflow__superadmin__platform-isolation.png";
+    await page.screenshot({ path: path.join(evidenceDir, file), fullPage: true });
+    await writeFile(
+      path.join(evidenceDir, "superadmin.json"),
+      `${JSON.stringify({
+        capturedAt: new Date().toISOString(),
+        baseUrl,
+        runId,
+        completed: true,
+        fullRun: true,
+        failures,
+        steps: [
+          {
+            role: "superadmin",
+            name: "Platform isolation — permitted, denied and redirected",
+            detail:
+              `Signed in as dev.superadmin and landed on ${evidenceLanding}. The permitted platform ` +
+              "read answered 200; every facility and clinical route answered 403 to this role's own " +
+              "bearer token; and every facility workspace redirected away. The API check is the one " +
+              "that counts — a hidden menu stops a confused operator and does nothing about curl.",
+            passed: failures.length === 0,
+            failures: [...failures],
+            screenshot: file,
+            capturedAt: new Date().toISOString(),
+          },
+        ],
+      }, null, 2)}\n`,
+    );
+    console.log(`\nEvidence: superadmin isolation captured in ${evidenceDir}`);
   }
 } finally {
   await browser.close();

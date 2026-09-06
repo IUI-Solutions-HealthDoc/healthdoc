@@ -223,6 +223,12 @@ PATIENT_SUB=$(ensure_keycloak_user dev.patient Dev Patient patient)
 HOD_SUB=$(ensure_keycloak_user dev.hod Dev "Head of Department" hod)
 EMERGENCY_SUB=$(ensure_keycloak_user dev.emergency Dev "Emergency Registrar" emergency)
 SUPERVISOR_SUB=$(ensure_keycloak_user dev.supervisor Dev "Records Supervisor" supervisor)
+# A SECOND supervisor, because THID->UHID promotion is maker-checker: the
+# approver must not be the requester, and the unmerger must not be the
+# approver. With one supervisor account the only reachable outcome was the
+# refusal, so the approve and unmerge halves of the flow had never been run by
+# anyone. Two accounts cover all three actors (requester unmerges).
+SUPERVISOR2_SUB=$(ensure_keycloak_user dev.supervisor2 Dev "Records Supervisor Two" supervisor)
 SUPERADMIN_SUB=$(ensure_keycloak_user dev.superadmin Dev "Platform Superadmin" superadmin)
 
 # Do not print a successful setup banner if even one advertised login was not
@@ -232,7 +238,7 @@ SUPERADMIN_SUB=$(ensure_keycloak_user dev.superadmin Dev "Platform Superadmin" s
 DEV_USERNAMES=(
   dev.receptionist dev.doctor dev.nurse dev.labtech dev.radiology
   dev.pharmacist dev.admin dev.auditor dev.patient dev.hod dev.emergency
-  dev.supervisor dev.superadmin
+  dev.supervisor dev.supervisor2 dev.superadmin
 )
 for username in "${DEV_USERNAMES[@]}"; do
   subject=$(kc get users -r healthdoc -q exact=true -q username="$username" \
@@ -257,6 +263,7 @@ docker compose -f infra/docker-compose.yml --env-file .env exec -T backend \
     --user "dev.hod=$HOD_SUB" \
     --user "dev.emergency=$EMERGENCY_SUB" \
     --user "dev.supervisor=$SUPERVISOR_SUB" \
+    --user "dev.supervisor2=$SUPERVISOR2_SUB" \
     --user "dev.superadmin=$SUPERADMIN_SUB"
 
 # ---------------------------------------------------------------------------
@@ -316,5 +323,5 @@ HealthDoc dev stack is up:
 Dev logins (Keycloak realm 'healthdoc', password 'devpass'):
   dev.receptionist / dev.doctor / dev.nurse / dev.labtech /
   dev.radiology / dev.pharmacist / dev.admin / dev.auditor / dev.patient / dev.hod /
-  dev.emergency / dev.supervisor / dev.superadmin
+  dev.emergency / dev.supervisor / dev.supervisor2 / dev.superadmin
 DONE

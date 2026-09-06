@@ -18,7 +18,7 @@ from app.departments.models import Department
 from app.notifications.models import NotificationHistory
 from app.queue import service
 from app.queue.models import QueueTokenPriorityChange
-from app.users.models import User
+from app.users.models import Facility, User
 
 pytestmark = pytest.mark.asyncio
 
@@ -95,11 +95,67 @@ async def test_create_queue_wrong_caller_facility_404(db, seed):
         await service.create_queue(db, dept.id, doctor.id, room.id, "label", date.today(), other_facility_id)
     assert exc.value.status_code == 404
 
-async def test_create_token_wrong_facility_404(db, queue):
-    other_facility_id = uuid.uuid4()
+async def test_create_token_wrong_facility_404(db, queue, seed, opd_visit):
+    """A caller elsewhere cannot issue against this queue.
+
+    The visit is created at the CALLER's facility on purpose. Handing this a
+    visit from the queue's facility would stop at the visit check above and
+    never reach the queue scoping this test is named for — it would pass while
+    proving something else.
+    """
+    dept, _room, _doctor = seed
+    other_facility = Facility(
+        id=uuid.uuid4(), code=f"OTH{uuid.uuid4().hex[:5]}", name="Other", state_code="TS"
+    )
+    db.add(other_facility)
+    await db.flush()
+    visit = await opd_visit(facility_id=other_facility.id)
+
     with pytest.raises(HTTPException) as exc:
-        await service.create_token(db, queue.id, uuid.uuid4(), "normal", other_facility_id)
+        await service.create_token(db, queue.id, visit.id, "normal", other_facility.id)
     assert exc.value.status_code == 404
+    assert exc.value.detail == "Queue not found", (
+        "must fail on queue scope, not on the visit lookup before it"
+    )
+    assert dept.facility_id != other_facility.id
+
+
+async def test_create_token_rejects_another_facilitys_visit(db, queue, opd_visit):
+    """Before this check the endpoint took any visit id at all.
+
+    404, not 403: a 403 would confirm the visit exists.
+    """
+    other_facility = Facility(
+        id=uuid.uuid4(), code=f"OTH{uuid.uuid4().hex[:5]}", name="Other", state_code="TS"
+    )
+    db.add(other_facility)
+    await db.flush()
+    stranger = await opd_visit(facility_id=other_facility.id)
+
+    with pytest.raises(HTTPException) as exc:
+        await service.create_token(db, queue.id, stranger.id, "normal", queue.facility_id)
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "Visit not found"
+
+
+@pytest.mark.parametrize("visit_type", ["ipd", "day_care", "emergency", "teleconsult"])
+async def test_only_an_outpatient_visit_takes_a_counter_token(db, queue, opd_visit, visit_type):
+    """The reported defect: reception issued an OPD token for every visit type.
+
+    Enforced here rather than only in the screen, because a hidden control
+    stops a confused user and does nothing about a token and curl.
+    """
+    visit = await opd_visit(visit_type=visit_type)
+    with pytest.raises(HTTPException) as exc:
+        await service.create_token(db, queue.id, visit.id, "normal", queue.facility_id)
+    assert exc.value.status_code == 422
+    assert visit_type in exc.value.detail
+
+    # And the type that DOES take one still does — otherwise this rule could be
+    # satisfied by refusing everybody.
+    outpatient = await opd_visit(visit_type="opd")
+    token = await service.create_token(db, queue.id, outpatient.id, "normal", queue.facility_id)
+    assert token.status == "waiting"
 
 
 async def test_initial_token_priority_uses_the_same_role_boundary_as_elevation():
@@ -126,14 +182,14 @@ async def test_list_queue_tokens_wrong_facility_404(db, queue):
 # QUEUE_COUNTERS (Blocker 3) -- the actual "two doctors, same number" fix
 # --------------------------------------------------------------------------- #
 
-async def test_token_display_sequence_within_one_queue(db, queue):
-    t1 = await service.create_token(db, queue.id, uuid.uuid4(), "normal", queue.facility_id)
-    t2 = await service.create_token(db, queue.id, uuid.uuid4(), "normal", queue.facility_id)
+async def test_token_display_sequence_within_one_queue(db, queue, opd_visit):
+    t1 = await service.create_token(db, queue.id, (await opd_visit()).id, "normal", queue.facility_id)
+    t2 = await service.create_token(db, queue.id, (await opd_visit()).id, "normal", queue.facility_id)
     assert t1.token_display.endswith("-001")
     assert t2.token_display.endswith("-002")
 
 
-async def test_two_doctors_same_department_share_counter_no_collision(db, seed):
+async def test_two_doctors_same_department_share_counter_no_collision(db, seed, opd_visit):
     """THE core Blocker 3 test. Two different doctors, same department,
     same day -- their tokens must NOT both be "-001"."""
     from datetime import date
@@ -149,8 +205,8 @@ async def test_two_doctors_same_department_share_counter_no_collision(db, seed):
     queue_a = await service.create_queue(db, dept.id, doctor_a.id, room.id, "Queue A", date.today(), dept.facility_id)
     queue_b = await service.create_queue(db, dept.id, doctor_b.id, room.id, "Queue B", date.today(), dept.facility_id)
  
-    tok_a = await service.create_token(db, queue_a.id, uuid.uuid4(), "normal", queue_a.facility_id)
-    tok_b = await service.create_token(db, queue_b.id, uuid.uuid4(), "normal", queue_b.facility_id)
+    tok_a = await service.create_token(db, queue_a.id, (await opd_visit()).id, "normal", queue_a.facility_id)
+    tok_b = await service.create_token(db, queue_b.id, (await opd_visit()).id, "normal", queue_b.facility_id)
     
     assert tok_a.token_display != tok_b.token_display
     assert tok_a.token_display.endswith("-001")
@@ -161,22 +217,22 @@ async def test_two_doctors_same_department_share_counter_no_collision(db, seed):
 # CALL NEXT / STUCK TOKEN (unchanged logic, re-verified against new code)
 # --------------------------------------------------------------------------- #
 
-async def test_call_next_respects_priority_over_age(db, queue):
-    await service.create_token(db, queue.id, uuid.uuid4(), "normal", queue.facility_id)
-    emergency_tok = await service.create_token(db, queue.id, uuid.uuid4(), "emergency", queue.facility_id)
+async def test_call_next_respects_priority_over_age(db, queue, opd_visit):
+    await service.create_token(db, queue.id, (await opd_visit()).id, "normal", queue.facility_id)
+    emergency_tok = await service.create_token(db, queue.id, (await opd_visit()).id, "emergency", queue.facility_id)
     called, _pending_event = await service.call_next_token(db, queue.id, queue.facility_id)
     assert called.id == emergency_tok.id
 
 
-async def test_call_next_wrong_facility_404(db, queue):
-    await service.create_token(db, queue.id, uuid.uuid4(), "normal", queue.facility_id)
+async def test_call_next_wrong_facility_404(db, queue, opd_visit):
+    await service.create_token(db, queue.id, (await opd_visit()).id, "normal", queue.facility_id)
     with pytest.raises(HTTPException) as exc:
         await service.call_next_token(db, queue.id, uuid.uuid4())
     assert exc.value.status_code == 404
 
 
-async def test_call_next_returns_pending_event_with_no_pii(db, queue):
-    await service.create_token(db, queue.id, uuid.uuid4(), "normal", queue.facility_id)
+async def test_call_next_returns_pending_event_with_no_pii(db, queue, opd_visit):
+    await service.create_token(db, queue.id, (await opd_visit()).id, "normal", queue.facility_id)
     called, pending_event = await service.call_next_token(db, queue.id, queue.facility_id)
  
     assert pending_event is not None
@@ -196,8 +252,8 @@ async def test_call_next_returns_pending_event_with_no_pii(db, queue):
 # PRIORITY ELEVATION (Blocker 4) -- reason, tier authority, audit trail
 # --------------------------------------------------------------------------- #
 
-async def test_elevate_priority_requires_reason(db, queue):
-    tok = await service.create_token(db, queue.id, uuid.uuid4(), "normal", queue.facility_id)
+async def test_elevate_priority_requires_reason(db, queue, opd_visit):
+    tok = await service.create_token(db, queue.id, (await opd_visit()).id, "normal", queue.facility_id)
     with pytest.raises(HTTPException) as exc:
         await service.elevate_priority(
             db, tok.id, "emergency", "short", caller_sub="x", caller_roles=["doctor"],
@@ -206,9 +262,9 @@ async def test_elevate_priority_requires_reason(db, queue):
     assert exc.value.status_code == 422
 
 
-async def test_elevate_priority_rejects_same_priority(db, queue, seed):
+async def test_elevate_priority_rejects_same_priority(db, queue, seed, opd_visit):
     _dept, _room, doctor = seed
-    tok = await service.create_token(db, queue.id, uuid.uuid4(), "normal", queue.facility_id)
+    tok = await service.create_token(db, queue.id, (await opd_visit()).id, "normal", queue.facility_id)
     with pytest.raises(HTTPException) as exc:
         await service.elevate_priority(
             db, tok.id, "normal", "no actual change requested here",
@@ -218,8 +274,8 @@ async def test_elevate_priority_rejects_same_priority(db, queue, seed):
     assert exc.value.status_code == 422
 
 
-async def test_elevate_priority_receptionist_can_set_senior_citizen(db, queue):
-    tok = await service.create_token(db, queue.id, uuid.uuid4(), "normal", queue.facility_id)
+async def test_elevate_priority_receptionist_can_set_senior_citizen(db, queue, opd_visit):
+    tok = await service.create_token(db, queue.id, (await opd_visit()).id, "normal", queue.facility_id)
     # receptionist has no department_id requirement for this tier
     fake_receptionist_sub = f"recep-{uuid.uuid4()}"
     from app.users.models import User as UserModel
@@ -238,8 +294,8 @@ async def test_elevate_priority_receptionist_can_set_senior_citizen(db, queue):
     assert updated.priority == "senior_citizen"
 
 
-async def test_elevate_priority_receptionist_cannot_set_emergency(db, queue, seed):
-    tok = await service.create_token(db, queue.id, uuid.uuid4(), "normal", queue.facility_id)
+async def test_elevate_priority_receptionist_cannot_set_emergency(db, queue, seed, opd_visit):
+    tok = await service.create_token(db, queue.id, (await opd_visit()).id, "normal", queue.facility_id)
     with pytest.raises(HTTPException) as exc:
         await service.elevate_priority(
             db, tok.id, "emergency", "patient looks critically unwell",
@@ -249,9 +305,9 @@ async def test_elevate_priority_receptionist_cannot_set_emergency(db, queue, see
     assert exc.value.status_code == 403
 
 
-async def test_elevate_priority_doctor_recall_requires_own_doctor(db, queue, seed, other_doctor):
+async def test_elevate_priority_doctor_recall_requires_own_doctor(db, queue, seed, other_doctor, opd_visit):
     _dept, _room, owning_doctor = seed
-    tok = await service.create_token(db, queue.id, uuid.uuid4(), "normal", queue.facility_id)
+    tok = await service.create_token(db, queue.id, (await opd_visit()).id, "normal", queue.facility_id)
 
     # The OTHER doctor (not this queue's own) tries to set doctor_recall.
     with pytest.raises(HTTPException) as exc:
@@ -271,8 +327,8 @@ async def test_elevate_priority_doctor_recall_requires_own_doctor(db, queue, see
     assert updated.priority == "doctor_recall"
 
 
-async def test_elevate_priority_admin_override_requires_hod_and_mfa(db, queue, hod_in_department):
-    tok = await service.create_token(db, queue.id, uuid.uuid4(), "normal", queue.facility_id)
+async def test_elevate_priority_admin_override_requires_hod_and_mfa(db, queue, hod_in_department, opd_visit):
+    tok = await service.create_token(db, queue.id, (await opd_visit()).id, "normal", queue.facility_id)
 
     # hod, right department, but NO MFA -- rejected.
     with pytest.raises(HTTPException) as exc:
@@ -292,8 +348,8 @@ async def test_elevate_priority_admin_override_requires_hod_and_mfa(db, queue, h
     assert updated.priority == "admin_override"
 
 
-async def test_elevate_priority_admin_override_wrong_department_blocked(db, queue, hod_in_other_department):
-    tok = await service.create_token(db, queue.id, uuid.uuid4(), "normal", queue.facility_id)
+async def test_elevate_priority_admin_override_wrong_department_blocked(db, queue, hod_in_other_department, opd_visit):
+    tok = await service.create_token(db, queue.id, (await opd_visit()).id, "normal", queue.facility_id)
     with pytest.raises(HTTPException) as exc:
         await service.elevate_priority(
             db, tok.id, "admin_override", "VIP protocol per facility policy",
@@ -303,9 +359,9 @@ async def test_elevate_priority_admin_override_wrong_department_blocked(db, queu
     assert exc.value.status_code == 403
 
 
-async def test_elevate_priority_demote_requires_hod(db, queue, seed, hod_in_department):
+async def test_elevate_priority_demote_requires_hod(db, queue, seed, hod_in_department, opd_visit):
     _dept, _room, doctor = seed
-    tok = await service.create_token(db, queue.id, uuid.uuid4(), "emergency", queue.facility_id)
+    tok = await service.create_token(db, queue.id, (await opd_visit()).id, "emergency", queue.facility_id)
 
     # A doctor tries to demote emergency -> normal. Blocked.
     with pytest.raises(HTTPException) as exc:
@@ -325,9 +381,9 @@ async def test_elevate_priority_demote_requires_hod(db, queue, seed, hod_in_depa
     assert updated.priority == "normal"
 
 
-async def test_elevate_priority_only_waiting_tokens(db, queue, seed):
+async def test_elevate_priority_only_waiting_tokens(db, queue, seed, opd_visit):
     _dept, _room, doctor = seed
-    tok = await service.create_token(db, queue.id, uuid.uuid4(), "normal", queue.facility_id)
+    tok = await service.create_token(db, queue.id, (await opd_visit()).id, "normal", queue.facility_id)
     await service.call_next_token(db, queue.id, queue.facility_id)  # now 'called', not 'waiting'
 
     with pytest.raises(HTTPException) as exc:
@@ -339,9 +395,9 @@ async def test_elevate_priority_only_waiting_tokens(db, queue, seed):
     assert exc.value.status_code == 409
 
 
-async def test_elevate_priority_writes_audit_row(db, queue, seed):
+async def test_elevate_priority_writes_audit_row(db, queue, seed, opd_visit):
     _dept, _room, doctor = seed
-    tok = await service.create_token(db, queue.id, uuid.uuid4(), "normal", queue.facility_id)
+    tok = await service.create_token(db, queue.id, (await opd_visit()).id, "normal", queue.facility_id)
 
     await service.elevate_priority(
         db, tok.id, "doctor_recall", "results just came back, need them now",
@@ -359,11 +415,11 @@ async def test_elevate_priority_writes_audit_row(db, queue, seed):
     assert "results just came back" in rows[0].reason
 
 
-async def test_elevate_priority_initial_priority_unchanged_after_elevation(db, queue, seed):
+async def test_elevate_priority_initial_priority_unchanged_after_elevation(db, queue, seed, opd_visit):
     """initial_priority records what the token was ISSUED at, and must
     NOT change even after priority is elevated."""
     _dept, _room, doctor = seed
-    tok = await service.create_token(db, queue.id, uuid.uuid4(), "normal", queue.facility_id)
+    tok = await service.create_token(db, queue.id, (await opd_visit()).id, "normal", queue.facility_id)
     assert tok.initial_priority == "normal"
 
     updated = await service.elevate_priority(
@@ -387,9 +443,9 @@ async def test_elevate_priority_initial_priority_unchanged_after_elevation(db, q
 # CALLED token, so it would have 404'd on the common case anyway.
 # --------------------------------------------------------------------------- #
 
-async def test_closing_a_consultation_completes_a_waiting_token(db, queue):
+async def test_closing_a_consultation_completes_a_waiting_token(db, queue, opd_visit):
     """The reported case: the doctor never pressed "call next"."""
-    visit_id = uuid.uuid4()
+    visit_id = (await opd_visit()).id
     token = await service.create_token(db, queue.id, visit_id, "normal", queue.facility_id)
     assert token.status == "waiting"
 
@@ -399,9 +455,9 @@ async def test_closing_a_consultation_completes_a_waiting_token(db, queue):
     assert completed.status == "completed"
 
 
-async def test_closing_a_consultation_completes_a_called_token(db, queue):
+async def test_closing_a_consultation_completes_a_called_token(db, queue, opd_visit):
     """And the case complete_by_visit_id() already handled."""
-    visit_id = uuid.uuid4()
+    visit_id = (await opd_visit()).id
     token = await service.create_token(db, queue.id, visit_id, "normal", queue.facility_id)
     token.status = "called"
     await db.flush()
@@ -422,11 +478,11 @@ async def test_a_visit_with_no_token_closes_without_raising(db, queue):
     assert await service.complete_for_visit_if_active(db, uuid.uuid4()) is None
 
 
-async def test_an_already_completed_token_is_not_touched_again(db, queue):
+async def test_an_already_completed_token_is_not_touched_again(db, queue, opd_visit):
     """A second PATCH re-sending the same ended_at must not re-advance the
     queue. The service only matches waiting/called, so the second call is a
     no-op rather than an error."""
-    visit_id = uuid.uuid4()
+    visit_id = (await opd_visit()).id
     await service.create_token(db, queue.id, visit_id, "normal", queue.facility_id)
 
     first = await service.complete_for_visit_if_active(db, visit_id)
