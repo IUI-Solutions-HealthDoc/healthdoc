@@ -6,8 +6,12 @@ const SHIFT_LABELS: Record<string, string> = {
   night: "Night",
 };
 
-function actorId(value?: string): string {
-  return value ? value.slice(0, 8) : "Unknown";
+/** Prefer the resolved name; the id prefix is the fallback when a user row has
+ *  since been removed. A truncated UUID tells a nurse nothing about who took
+ *  the patient. */
+function actorLabel(name?: string | null, id?: string): string {
+  if (name) return name;
+  return id ? id.slice(0, 8) : "Unknown";
 }
 
 export default function HandoverNotes({
@@ -61,12 +65,12 @@ export default function HandoverNotes({
             <div className="mt-4 grid gap-4 md:grid-cols-2">
               <div>
                 <p className="text-xs text-muted-foreground">Handed Over By</p>
-                <p className="font-mono text-sm">{actorId(note.created_by)}</p>
+                <p className="text-sm">{actorLabel(note.created_by_name, note.created_by)}</p>
               </div>
 
               <div>
                 <p className="text-xs text-muted-foreground">Handed Over To</p>
-                <p className="font-mono text-sm">{actorId(note.handed_over_to)}</p>
+                <p className="text-sm">{actorLabel(note.handed_over_to_name, note.handed_over_to)}</p>
               </div>
             </div>
 

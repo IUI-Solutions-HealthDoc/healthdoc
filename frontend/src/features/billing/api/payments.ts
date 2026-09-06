@@ -74,7 +74,10 @@ export function collectPayment(
 }
 
 /**
- * POST /billing/payments/{payment_id}/refunds — supervisor/admin only.
+ * POST /billing/payments/{payment_id}/refunds — admin only.
+ *
+ * Not the billing desk, and no longer the supervisor: the desk that raises a
+ * refund must not also approve it, or the maker-checker is a formality.
  *
  * Refunds are a reversal ledger, not an edit: the payment row stays exactly as
  * recorded and a refund row is added against it. That is why there is no

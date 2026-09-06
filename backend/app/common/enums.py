@@ -73,6 +73,17 @@ class VisitType(CheckedEnum):
         return frozenset({cls.OPD.value})
 
 
+class NursingShift(CheckedEnum):
+    """The three shifts a ward handover happens between.
+
+    Named rather than free text because the handover's whole value is being
+    able to ask "who held this patient on nights last week" and get an answer.
+    """
+    MORNING = "morning"
+    EVENING = "evening"
+    NIGHT = "night"
+
+
 class VisitStatus(CheckedEnum):
     REGISTERED = "registered"
     IN_QUEUE = "in_queue"

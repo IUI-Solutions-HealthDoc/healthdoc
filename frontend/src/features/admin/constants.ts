@@ -75,6 +75,7 @@ export const REALM_ROLE_LABELS: Record<RealmRole, string> = {
   pharmacist: "Pharmacist",
   emergency: "Emergency",
   supervisor: "Supervisor",
+  billing: "Billing desk",
   admin: "Admin",
   hod: "HOD",
   auditor: "Auditor",
@@ -143,14 +144,19 @@ export const MATRIX_CAPABILITY_LABELS: Record<MatrixCapability, string> = {
 
 /** Which ModuleCode / core areas each realm role typically touches (reference only). */
 export const ROLE_CAPABILITY_MAP: Record<RealmRole, MatrixCapability[]> = {
-  receptionist: ["patients", "registration", "opd", "queue", "billing"],
+  receptionist: ["patients", "registration", "opd", "queue"],
   doctor: ["patients", "registration", "opd", "queue", "lab", "radiology", "pharmacy", "ipd", "ot", "emergency"],
   nurse: ["patients", "opd", "ipd", "emergency", "pharmacy"],
   lab_tech: ["patients", "lab"],
   radiology_tech: ["patients", "radiology"],
-  pharmacist: ["patients", "pharmacy", "inventory"],
+  //: `billing` here is the over-the-counter medicine counter only — the API
+  //: refuses a pharmacist any invoice carrying a non-pharmacy charge.
+  pharmacist: ["patients", "pharmacy", "inventory", "billing"],
   emergency: ["patients", "registration", "emergency", "opd"],
-  supervisor: ["patients", "registration", "opd", "queue", "billing", "lab", "radiology", "pharmacy", "ipd", "audit"],
+  supervisor: ["patients", "registration", "opd", "queue", "lab", "radiology", "pharmacy", "ipd", "audit"],
+  //: Raising, issuing and settling invoices, plus the tariff catalogue. The
+  //: only role besides admin that may bill anything other than medicines.
+  billing: ["billing", "patients"],
   admin: ["users", "billing", "inventory", "audit", "consent"],
   hod: ["patients", "opd", "queue", "lab", "radiology", "pharmacy", "ipd", "ot"],
   auditor: ["audit", "consent", "billing"],

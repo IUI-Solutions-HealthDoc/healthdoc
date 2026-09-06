@@ -24,6 +24,7 @@ export const ROLES = {
   PHARMACIST: "pharmacist",
   EMERGENCY: "emergency",
   SUPERVISOR: "supervisor",
+  BILLING: "billing",
   ADMIN: "admin",
   HOD: "hod",
   AUDITOR: "auditor",

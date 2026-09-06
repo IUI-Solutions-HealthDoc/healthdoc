@@ -25,7 +25,10 @@ const roles = [
     name: "receptionist",
     username: "dev.receptionist",
     landingPath: "/receptionist/registration",
-    forbiddenPath: "/admin",
+    // Billing, not /admin: registering a patient no longer carries the
+    // authority to raise or settle their invoice, and this is where that is
+    // proved for the role that used to have it.
+    forbiddenPath: "/billing",
     api: { method: "POST", path: "/api/v1/patients/search" },
     async startJourney(page) {
       await page.waitForSelector('form input', { timeout: 60_000 });
@@ -90,20 +93,18 @@ const roles = [
     api: { method: "GET", path: "/api/v1/pharmacy/queue" },
   },
   {
-    name: "billing-receptionist",
-    username: "dev.receptionist",
-    landingPath: "/receptionist/registration",
+    // Was "billing-receptionist" and drove the front desk to /billing. Billing
+    // is the billing desk's job now, so the same journey runs as the role that
+    // owns it — and `/billing` is the receptionist's forbidden path below,
+    // which is the assertion that the split actually took.
+    name: "billing",
+    username: "dev.billing",
+    landingPath: "/billing",
     forbiddenPath: "/doctor",
     api: { method: "GET", path: "/api/v1/billing/invoices" },
-    async startJourney(page) {
-      await page.goto(`${baseUrl}/billing`, {
-        waitUntil: "domcontentloaded",
-        timeout: 30_000,
-      });
-      await page.waitForFunction(() => window.location.pathname === "/billing", {
-        timeout: 60_000,
-      });
-    },
+    // No startJourney: /billing IS this role's landing page, and re-navigating
+    // to the page you are already on raced the frame here. The old case needed
+    // it because a receptionist landed on registration and had to travel.
   },
   {
     name: "admin",

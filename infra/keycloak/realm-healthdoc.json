@@ -69,6 +69,10 @@
       {
         "name": "patient",
         "description": "Patient portal"
+      },
+      {
+        "name": "billing",
+        "description": "Billing desk. The only role besides admin that may issue an invoice or take payment for anything other than dispensed medicines."
       }
     ]
   },

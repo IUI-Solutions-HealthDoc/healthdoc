@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.common.enums import (
     ClinicalIncidentSeverity, ClinicalIncidentStatus, ClinicalIncidentType,
-    IntakeOutputType, MedicationAdministrationStatus,
+    IntakeOutputType, MedicationAdministrationStatus, NursingShift,
 )
 
 
@@ -281,3 +281,67 @@ class IncidentOut(BaseModel):
     reviewed_at: datetime | None
     root_cause: str | None
     corrective_action: str | None
+
+
+class HandoverNoteCreate(BaseModel):
+    """One SBAR shift handover.
+
+    All four SBAR fields are required here even though the columns are
+    nullable. The columns predate any writer; the structure is the safety
+    mechanism, and a handover with the assessment left blank is the one nobody
+    can act on. Loosen this only with a clinical reason, not to make a form
+    easier to submit.
+    """
+
+    admission_id: UUID
+    shift: NursingShift
+    situation: str = Field(min_length=5, max_length=4000)
+    background: str = Field(min_length=5, max_length=4000)
+    assessment: str = Field(min_length=5, max_length=4000)
+    recommendation: str = Field(min_length=5, max_length=4000)
+    handed_over_to: UUID = Field(
+        description="The receiving nurse. A handover to nobody is a note, not a handover.",
+    )
+
+
+class HandoverNoteOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    admission_id: UUID
+    shift: str
+    situation: str | None
+    background: str | None
+    assessment: str | None
+    recommendation: str | None
+    handed_over_to: UUID
+    #: Who handed over. Resolved for display so the ward board does not have to
+    #: fetch a user per row.
+    handed_over_to_name: str | None = None
+    created_by: UUID
+    created_by_name: str | None = None
+    created_at: datetime
+
+
+class HandoverNoteListOut(BaseModel):
+    items: list[HandoverNoteOut]
+
+
+class HandoverCandidateOut(BaseModel):
+    """A colleague a nurse can hand a patient over to.
+
+    Narrower than UserOut on purpose, and for the same reason the pharmacy
+    adjustment picker has its own route: GET /users is gated `admin`, so the
+    handover form could not list anybody and fell back to asking a nurse to
+    paste a user UUID at the end of a shift.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    full_name: str
+    designation: str | None
+
+
+class HandoverCandidateListOut(BaseModel):
+    items: list[HandoverCandidateOut]

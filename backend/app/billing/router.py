@@ -64,6 +64,7 @@ from app.audit.deps import get_current_actor_dependency
 from app.auth.deps import AuthUser, CurrentDbUser, require_roles
 from app.billing import service
 from app.billing.models import Invoice, InvoiceItem, Payment, Refund
+from app.common.enums import ChargeCategory
 from app.billing.schemas import (
     DailyRevenueResponse,
     InvoiceBuildRequest,
@@ -90,18 +91,35 @@ from app.patients.models import Patient
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
-# No dedicated "billing" Keycloak realm role — confirmed against schema
-# doc §7 role list. receptionist/supervisor/admin is our best mapping
-# for who staffs a billing counter — confirm with role definitions owner.
-_BILLING_ROLES = ("receptionist", "supervisor", "admin")
+# The billing desk, and nobody else. `billing` is a real realm role now; the
+# previous receptionist/supervisor/admin set was an explicit guess ("confirm
+# with role definitions owner") that had the front desk raising and settling
+# invoices as a side effect of registering a patient.
+#
+# The pharmacist is deliberately NOT here. They bill dispensed medicines only,
+# through the pharmacy-scoped routes below, which refuse every other charge
+# category — a counter that can bill for a scan is not a pharmacy counter.
+_BILLING_ROLES = ("billing", "admin")
 
 # Refund approval is a step up from posting a payment (refunds.approved_by
-# implies sign-off) — not receptionist self-service. Flag if wrong.
-_REFUND_APPROVAL_ROLES = ("supervisor", "admin")
+# implies sign-off). `billing` is absent on purpose: the desk that raises a
+# refund must not also approve it, or the maker-checker is a formality. That
+# leaves admin as the checker now that supervisor no longer touches billing.
+_REFUND_APPROVAL_ROLES = ("admin",)
 
-# MIS: financial overview, not counter work. admin owns "billing config,
-# facility MIS" per §Account governance; auditor for compliance reads.
-_MIS_ROLES = ("supervisor", "admin", "auditor")
+# MIS: financial overview, not counter work. The billing desk needs its own
+# revenue view; auditor reads it for compliance. Supervisor was removed with
+# the rest of their billing access.
+_MIS_ROLES = ("billing", "admin", "auditor")
+
+# Tariff configuration is a billing-department job, not a ward one.
+_TARIFF_WRITE_ROLES = ("billing", "admin")
+_TARIFF_READ_ROLES = ("billing", "admin", "auditor")
+
+# Dispensed medicines, and only those. Used by the pharmacy-scoped billing
+# routes so a pharmacist can settle an over-the-counter sale without gaining
+# authority over consultation, lab, radiology or bed charges.
+_PHARMACY_BILLING_ROLES = ("pharmacist", "billing", "admin")
 
 
 def _require_idempotency_key(idempotency_key: str | None) -> str:
@@ -162,6 +180,48 @@ async def _assert_invoice_in_facility(db: AsyncSession, invoice_id: uuid.UUID, f
     ).scalar_one_or_none()
     if found is None:
         raise _NOT_FOUND
+
+
+def _is_pharmacy_counter(user: AuthUser) -> bool:
+    """True when the caller may bill medicines and nothing else.
+
+    A pharmacist who also holds `billing` or `admin` is not restricted — the
+    narrower rule exists to stop a pharmacy counter settling a consultation,
+    not to punish someone for holding two roles.
+    """
+    roles = set(getattr(user, "roles", ()) or ())
+    return "pharmacist" in roles and not roles & {"billing", "admin"}
+
+
+async def _assert_invoice_is_pharmacy_only(db: AsyncSession, invoice_id: uuid.UUID) -> None:
+    """A pharmacy counter may settle an invoice made only of dispensed medicines.
+
+    There is one invoice per visit (schema §3 0014), so an invoice can carry
+    consultation, lab and bed charges beside the pharmacy ones. Letting a
+    pharmacist take payment on that invoice would be letting them collect for
+    all of it — "medicines only" has to be checked against what is on the
+    invoice, not against the role alone.
+    """
+    categories = set(
+        (
+            await db.execute(
+                select(InvoiceItem.charge_category).where(InvoiceItem.invoice_id == invoice_id)
+            )
+        ).scalars().all()
+    )
+    if not categories:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This invoice has no charges yet. Add the dispensed medicines before settling it.",
+        )
+    other = sorted(categories - {ChargeCategory.PHARMACY.value})
+    if other:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "A pharmacy counter may settle invoices containing dispensed medicines "
+            f"only. This invoice also carries: {', '.join(other)}. "
+            "The billing desk settles a mixed invoice.",
+        )
 
 
 async def _assert_payment_in_facility(db: AsyncSession, payment_id: uuid.UUID, facility_id: uuid.UUID) -> None:
@@ -252,10 +312,16 @@ async def build_visit_invoice(
     current_db_user: CurrentDbUser,
     body: InvoiceBuildRequest = InvoiceBuildRequest(),
     db: AsyncSession = Depends(get_db),
-    user: AuthUser = Depends(require_roles(*_BILLING_ROLES)),
+    user: AuthUser = Depends(require_roles(*_PHARMACY_BILLING_ROLES)),
     _actor: AuditActor = Depends(get_current_actor_dependency),
 ) -> InvoiceBuildResponse:
     await _assert_visit_in_facility(db, visit_id, current_db_user.facility_id)
+    # A pharmacy counter appends dispensed medicines and nothing else. Without
+    # this it could sweep the visit's consultation, lab and radiology charges
+    # onto the invoice as a side effect of billing a strip of tablets.
+    only_categories = (
+        frozenset({ChargeCategory.PHARMACY.value}) if _is_pharmacy_counter(user) else None
+    )
     # §4A.1 lists "orders" but not invoices/invoice_items explicitly —
     # not adding Idempotency-Key enforcement here until that's confirmed
     # with whoever owns the reliability contract. Flag for review.
@@ -265,7 +331,11 @@ async def build_visit_invoice(
         fallback_id=getattr(user, "id", None),
     )
     return await service.build_invoice(
-        db, visit_id=visit_id, actor_user_id=actor_user_id, dry_run=body.dry_run
+        db,
+        visit_id=visit_id,
+        actor_user_id=actor_user_id,
+        dry_run=body.dry_run,
+        only_categories=only_categories,
     )
 
 
@@ -285,13 +355,16 @@ async def get_pmjay_eligibility(
 @router.get(
     "/invoices/{invoice_id}",
     response_model=InvoiceDetailOut,
-    dependencies=[Depends(require_roles(*_BILLING_ROLES))],
+    dependencies=[Depends(require_roles(*_PHARMACY_BILLING_ROLES))],
     summary="One invoice with its charge lines, receipts and remaining balance",
 )
 async def get_invoice(
     invoice_id: uuid.UUID,
     current_db_user: CurrentDbUser,
     db: AsyncSession = Depends(get_db),
+    # Bound as a parameter, not only in `dependencies=[]`, because the body
+    # needs the caller's roles to decide whether the pharmacy scope applies.
+    user: AuthUser = Depends(require_roles(*_PHARMACY_BILLING_ROLES)),
 ) -> InvoiceDetailOut:
     """Replaces three frontend mocks that had no backend at all — getInvoice,
     listPayments and getInvoiceBalance.
@@ -304,6 +377,10 @@ async def get_invoice(
     the paths differ — but note it must stay below the literal /invoices route.
     """
     await _assert_invoice_in_facility(db, invoice_id, current_db_user.facility_id)
+    # The pharmacy counter reads this to get the row_version it must send as
+    # If-Match when issuing. It sees only invoices it is allowed to settle.
+    if _is_pharmacy_counter(user):
+        await _assert_invoice_is_pharmacy_only(db, invoice_id)
 
     row = (
         await db.execute(
@@ -409,7 +486,7 @@ async def issue_invoice(
     current_db_user: CurrentDbUser,
     db: AsyncSession = Depends(get_db),
     if_match: str | None = Header(None, alias="If-Match"),
-    user: AuthUser = Depends(require_roles(*_BILLING_ROLES)),
+    user: AuthUser = Depends(require_roles(*_PHARMACY_BILLING_ROLES)),
     _actor: AuditActor = Depends(get_current_actor_dependency),
 ) -> InvoiceListItemOut:
     """The missing half of the billing journey.
@@ -421,8 +498,13 @@ async def issue_invoice(
     If-Match carries the row_version read from the invoice. It is required, not
     optional: issuing freezes the amounts, and a stale client would freeze an
     invoice that is missing a charge line appended since it loaded.
+
+    A pharmacy counter may issue only an invoice made of dispensed medicines —
+    it needs this step to settle an over-the-counter sale, and nothing more.
     """
     await _assert_invoice_in_facility(db, invoice_id, current_db_user.facility_id)
+    if _is_pharmacy_counter(user):
+        await _assert_invoice_is_pharmacy_only(db, invoice_id)
 
     if if_match is None:
         raise HTTPException(
@@ -493,10 +575,12 @@ async def record_invoice_payment(
     current_db_user: CurrentDbUser,
     idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
     db: AsyncSession = Depends(get_db),
-    user: AuthUser = Depends(require_roles(*_BILLING_ROLES)),
+    user: AuthUser = Depends(require_roles(*_PHARMACY_BILLING_ROLES)),
     _actor: AuditActor = Depends(get_current_actor_dependency),
 ) -> PaymentOut:
     await _assert_invoice_in_facility(db, invoice_id, current_db_user.facility_id)
+    if _is_pharmacy_counter(user):
+        await _assert_invoice_is_pharmacy_only(db, invoice_id)
     key = _require_idempotency_key(idempotency_key)
     endpoint = "POST /billing/invoices/{invoice_id}/payments"
     request_body = {"invoice_id": str(invoice_id), **body.model_dump(mode="json")}
@@ -608,9 +692,10 @@ async def get_scheme_breakdown(
 # query the tariff "once 0033 lands". It landed. #389 made registration its
 # first consumer; these endpoints are how a facility maintains it.
 
-# Tariff changes reprice every future invoice, so this is narrower than
-# _BILLING_ROLES: a receptionist staffs the counter, they do not set prices.
-_TARIFF_ADMIN_ROLES = ("supervisor", "admin")
+# Tariff changes reprice every future invoice. Setting prices is a billing
+# department job; supervisor was removed along with the rest of their billing
+# access. See _TARIFF_WRITE_ROLES / _TARIFF_READ_ROLES at the top of the file.
+_TARIFF_ADMIN_ROLES = _TARIFF_WRITE_ROLES
 
 
 @router.get(
@@ -622,7 +707,7 @@ async def list_tariffs(
     charge_code: str | None = Query(None, description="Filter to one charge_code."),
     active_only: bool = Query(True, description="Set false to include retired rows."),
     db: AsyncSession = Depends(get_db),
-    user: AuthUser = Depends(require_roles(*_MIS_ROLES)),
+    user: AuthUser = Depends(require_roles(*_TARIFF_READ_ROLES)),
 ) -> list[TariffOut]:
     facility_id = await service.facility_id_for_user(db, keycloak_sub=user.sub)
     rows = await service.list_charge_master(

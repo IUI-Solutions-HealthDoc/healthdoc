@@ -60,21 +60,38 @@ function getKeycloak(): Keycloak {
  * a screen they cannot use and whose API calls would 403 with no explanation.
  * "I don't know where you belong" is information; guessing is not.
  */
-const ROLE_PRECEDENCE: readonly Role[] = [
-  ROLES.SUPERADMIN,
-  ROLES.ADMIN,
-  ROLES.HOD,
-  ROLES.SUPERVISOR,
-  ROLES.AUDITOR,
-  ROLES.DOCTOR,
-  ROLES.NURSE,
-  ROLES.PHARMACIST,
-  ROLES.LAB_TECH,
-  ROLES.RADIOLOGY_TECH,
-  ROLES.EMERGENCY,
-  ROLES.RECEPTIONIST,
-  ROLES.PATIENT,
-];
+/**
+ * Which workspace someone lands in when their token carries several roles.
+ * Lower number wins.
+ *
+ * Typed as a TOTAL Record<Role, number> on purpose. The previous array form
+ * was a hand-maintained list of role names, and adding `billing` to the realm
+ * without adding it here made mapKeycloakRolesToAppRole return null: the
+ * account authenticated, held every backend permission, and was dropped on "/"
+ * with no workspace and no sidebar. A missing entry is now a compile error.
+ */
+const ROLE_RANK: Record<Role, number> = {
+  [ROLES.SUPERADMIN]: 0,
+  [ROLES.ADMIN]: 1,
+  [ROLES.HOD]: 2,
+  [ROLES.SUPERVISOR]: 3,
+  [ROLES.AUDITOR]: 4,
+  [ROLES.DOCTOR]: 5,
+  [ROLES.NURSE]: 6,
+  [ROLES.PHARMACIST]: 7,
+  [ROLES.LAB_TECH]: 8,
+  [ROLES.RADIOLOGY_TECH]: 9,
+  [ROLES.EMERGENCY]: 10,
+  // Below the clinical roles: somebody who is a pharmacist AND on the billing
+  // desk should still open in the pharmacy, where their patients are.
+  [ROLES.BILLING]: 11,
+  [ROLES.RECEPTIONIST]: 12,
+  [ROLES.PATIENT]: 13,
+};
+
+const ROLE_PRECEDENCE: readonly Role[] = (Object.keys(ROLE_RANK) as Role[]).sort(
+  (a, b) => ROLE_RANK[a] - ROLE_RANK[b],
+);
 
 export function mapKeycloakRolesToAppRole(roles: string[]): Role | null {
   const held = new Set(roles.map((r) => r.toLowerCase()));

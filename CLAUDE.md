@@ -14,7 +14,7 @@ make up           # subsequent starts
 make down
 ```
 
-`make setup` MUST end with `Seeded development facility and 14 authenticated
+`make setup` MUST end with `Seeded development facility and 15 authenticated
 users`. If it stops short, the accounts do not exist and every login fails —
 which presents as a wrong password, so people blame themselves before the
 script. It now verifies this and exits 1 naming the missing accounts.
@@ -39,6 +39,16 @@ cannot reach the published ports the host tests use, so DB tests skip there.
 ---
 
 ## Conventions that are load-bearing
+
+**Billing authority is narrow, and deliberately so.** `billing` and `admin` may
+raise, issue and settle an invoice. A pharmacist may do the same *only* for an
+invoice made entirely of dispensed medicines — there is one invoice per visit
+(§3 0014), so "medicines only" is checked against what is on the invoice, not
+against the role. Receptionist and supervisor have no billing access at all;
+registering a patient still creates the draft registration invoice server-side,
+because the whole billing chain 404s without it. Refunds are admin-approved: the
+desk that raises one must not approve it.
+
 
 **404, never 403, for another facility's record.** A 403 confirms the row
 exists and is an enumeration oracle. Tests assert this.

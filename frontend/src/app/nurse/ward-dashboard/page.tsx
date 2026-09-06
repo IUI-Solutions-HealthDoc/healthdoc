@@ -23,6 +23,10 @@ import {
 } from "@/features/ipd/api/ipd";
 import AddIntakeOutputForm from "@/features/nurse/components/AddIntakeOutputForm";
 import AddVitalsForm from "@/features/nurse/components/AddVitalsForm";
+import AddHandoverForm from "@/features/nurse/components/AddHandoverForm";
+import HandoverNotes from "@/features/nurse/components/HandoverNotes";
+import type { HandoverNote } from "@/features/nurse/components/HandoverNotes/HandoverNotes.types";
+import type { HandoverRecipientOption } from "@/features/nurse/types";
 import IncidentReportForm from "@/features/nurse/components/IncidentReportForm";
 import { IncidentListPanel } from "@/features/nurse/components/IncidentListPanel";
 import TaskQueue, { type Order } from "@/features/nurse/components/TaskQueue";
@@ -38,13 +42,16 @@ import {
   getAdmissionMedicationAdministrations,
   getAdmissionSummary,
   getNursingTasks,
+  getAdmissionHandoverNotes,
+  addHandover,
+  listHandoverCandidates,
   getPatientVitals,
   type FluidBalance,
   type NursingTask,
 } from "@/features/nurse/api/nursing";
-import { formatDateTime } from "@/lib/api";
+import { ApiError, formatDateTime } from "@/lib/api";
 
-type PatientAction = "vitals" | "fluid" | "transfer" | "incident" | null;
+type PatientAction = "vitals" | "fluid" | "transfer" | "incident" | "handover" | null;
 
 function toOrder(task: NursingTask): Order {
   return {
@@ -91,6 +98,8 @@ export default function Page() {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [vitals, setVitals] = useState<VitalRecord[]>([]);
+  const [handovers, setHandovers] = useState<HandoverNote[]>([]);
+  const [handoverCandidates, setHandoverCandidates] = useState<HandoverRecipientOption[]>([]);
   const [fluidBalance, setFluidBalance] = useState<FluidBalance | null>(null);
   const [medications, setMedications] = useState<MedicationRecord[]>([]);
   const [summary, setSummary] = useState<DischargeSummary | null>(null);
@@ -159,24 +168,33 @@ export default function Page() {
       setFluidBalance(null);
       setMedications([]);
       setSummary(null);
+      setHandovers([]);
       setDetailError(null);
       return;
     }
     setDetailLoading(true);
     setDetailError(null);
-    const [vitalsResult, fluidResult, emarResult, summaryResult] =
+    const [vitalsResult, fluidResult, emarResult, summaryResult, handoverResult] =
       await Promise.allSettled([
         getPatientVitals(bed.occupant.patient_id),
         getAdmissionFluidBalance(bed.occupant.admission_id),
         getAdmissionMedicationAdministrations(bed.occupant.admission_id),
         getAdmissionSummary(bed.occupant.admission_id),
+        getAdmissionHandoverNotes(bed.occupant.admission_id),
       ]);
     setVitals(vitalsResult.status === "fulfilled" ? vitalsResult.value : []);
     setFluidBalance(fluidResult.status === "fulfilled" ? fluidResult.value : null);
     setMedications(emarResult.status === "fulfilled" ? emarResult.value : []);
     setSummary(summaryResult.status === "fulfilled" ? summaryResult.value : null);
+    setHandovers(handoverResult.status === "fulfilled" ? handoverResult.value : []);
+    // Colleagues this nurse can hand over to. Loaded here rather than on
+    // mount so it is fetched once a patient is actually open, and tolerated
+    // failing: the form falls back to a user id when the list is empty.
+    listHandoverCandidates("")
+      .then(setHandoverCandidates)
+      .catch(() => setHandoverCandidates([]));
     if (
-      [vitalsResult, fluidResult, emarResult, summaryResult].some(
+      [vitalsResult, fluidResult, emarResult, summaryResult, handoverResult].some(
         (entry) => entry.status === "rejected",
       )
     ) {
@@ -442,6 +460,46 @@ export default function Page() {
               </Link>
             </div>
             <EMARTable medications={medications} />
+          </section>
+
+          <section className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-xl font-semibold">Shift handover</h2>
+                <p className="text-sm text-muted-foreground">
+                  SBAR handovers for this admission, most recent first.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="rounded-md border border-border px-3 py-2 text-sm"
+                onClick={() => setActiveAction(activeAction === "handover" ? null : "handover")}
+              >
+                Record handover
+              </button>
+            </div>
+            <HandoverNotes admissionId={occupant.admission_id} notes={handovers} />
+            {activeAction === "handover" ? (
+              <AddHandoverForm
+                admissionId={occupant.admission_id}
+                recipientOptions={handoverCandidates}
+                onSubmit={async (data) => {
+                  try {
+                    await addHandover(data);
+                    setHandovers(await getAdmissionHandoverNotes(occupant.admission_id));
+                    setActiveAction(null);
+                    return true;
+                  } catch (reason) {
+                    // Surfaced, never swallowed: a handover that silently
+                    // failed to save is worse than one never attempted.
+                    setDetailError(
+                      reason instanceof ApiError ? reason.message : "Could not record the handover",
+                    );
+                    return false;
+                  }
+                }}
+              />
+            ) : null}
           </section>
 
           <section className="space-y-4">

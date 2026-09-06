@@ -619,6 +619,28 @@ const workflows = {
       // Read it back on the timeline rather than trusting the 201: the submit
       // hook swallows failures into console.error and returns false.
       await page.waitForFunction(() => document.querySelector("#main-content")?.textContent?.includes("37.1"), { timeout: 30_000 });
+      // Shift handover: the table shipped in 0050 with no writer, so the ward
+      // could not record the moment responsibility for a patient transferred.
+      await click(page, "Record handover");
+      await page.waitForSelector("#field-situation", { timeout: 30_000 });
+      await setById(page, "field-shift", "night");
+      const receiver = await page.evaluate(() => {
+        const select = document.getElementById("field-handed_over_to");
+        const option = [...(select?.options ?? [])].find((o) => o.value && o.value !== "__manual__");
+        return option ? { value: option.value, label: option.textContent.trim() } : null;
+      });
+      assert.ok(receiver, "A colleague must be offerable as the receiving nurse");
+      await setById(page, "field-handed_over_to", receiver.value);
+      await setById(page, "field-situation", "Post-operative day one, stable.");
+      await setById(page, "field-background", "Admitted for elective procedure.");
+      await setById(page, "field-assessment", "Vitals within range, pain controlled.");
+      await setById(page, "field-recommendation", "Continue observations four-hourly.");
+      await responseTo(page, "POST", "/nursing/handover-notes", () => click(page, "Complete Handover"), 201);
+      // Read it back on the board, by the receiver's NAME — the list used to
+      // print a truncated uuid because no endpoint resolved one.
+      await text(page, receiver.label.split(" · ")[0]);
+      await record(page, { role: "nurse", name: "Ward dashboard — record a shift handover", detail: `Recorded an SBAR handover to \`${receiver.label}\` and read it back on the ward board by name. The table has existed since migration 0050 with no model, service or route behind it, so this could not be done at all before.` });
+
       await record(page, { role: "nurse", name: "Ward dashboard — record vitals", detail: "Charted a set of observations against the admission and confirmed they appear on the patient's vitals timeline, not merely that the POST returned 201." });
     });
 

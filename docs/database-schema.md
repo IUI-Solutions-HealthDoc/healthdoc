@@ -178,6 +178,7 @@ do not merge out of order.**
 | 0057 | patient_abha_address | ALTER patients: abha_address | Store the verified address used by M2 discovery/linking separately from the 14-digit ABHA number. |
 | 0058 | abdm_protocol_state | ALTER abdm_care_context_links, abdm_hiu_hi_requests, abdm_received_bundles | Durable v3 callback correlation and multi-page transfer state. |
 | 0059 | abdm_care_context_hi_type_narrow | ALTER abdm_care_contexts: hi_type CHECK narrowed to the 5 types fhir/builder.py can populate | Drop ImmunizationRecord/HealthDocumentRecord: storable-but-unbuildable types linked and discovered, then failed silently at transfer. Aligns the CHECK with the builder and validator; a drift test holds the three together. |
+| 0060 | nursing_handover_shift_check | ALTER nursing_handover_notes: CHECK on shift, widen to varchar(50); ALTER medication_administration: widen status to varchar(50) | 0050 created the column as a bare varchar(30). Every other enumerated column is varchar + CHECK via CheckedEnum.sql_check(); without it the database accepted "Morning" or "nite" while the API accepted three values, and the point of naming the shift is being able to ask who held a patient on nights. Table was empty — nothing could write to it. |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
