@@ -72,10 +72,10 @@ password policy applied at render time by
 `scripts/deploy/render_keycloak_realm.py`.
 
 **Both are production-only, and the reason is not convenience.** Forcing TOTP
-in the shared realm sends all thirteen dev identities to an OTP enrolment
+in the shared realm sends all fourteen dev identities to an OTP enrolment
 screen. A strong password policy there is worse: `dev_setup.sh` sets every test
 account to `devpass`, Keycloak enforces the policy at set-password time, and
-all thirteen `kc set-password` calls are rejected — leaving the accounts with
+all fourteen `kc set-password` calls are rejected — leaving the accounts with
 no usable credential and the real-auth smoke suite unable to log in as anybody.
 
 That is not hypothetical. The policy was first added to the shared realm and

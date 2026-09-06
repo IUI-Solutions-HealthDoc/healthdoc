@@ -56,3 +56,10 @@ AGENTS.md
 # from the sandbox portal if needed; the paths they confirmed are recorded in
 # app/common/config.py and pinned by tests/integrations/test_abdm_gateway_paths.py.
 Postman collections from ABDM/
+
+# Role-verification evidence (scripts/build_role_evidence.py, e2e harnesses).
+# Screenshots and run manifests are regenerated on every verification run, so
+# committing them would add ~25 MB of binaries to history each time. The report
+# at docs/role-verification-evidence.md IS tracked; regenerate the images it
+# links to with the commands in docs/local-role-verification.md.
+/docs/evidence/
