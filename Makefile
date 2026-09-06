@@ -82,6 +82,10 @@ test-pg: test-db  ## Run the tests that need real PostgreSQL: make test-pg k=lat
 # and ran nowhere. Skipped when p= names a specific file, so targeted runs stay
 # targeted.
 	@if [ -z "$(p)" ]; then .venv/bin/pytest scripts/tests -q; fi
+# CI's "Migration chain integrity" step. It ran only there, so a migration
+# missing from the docs/database-schema.md §2 map was a green local gate and a
+# red pull request — one round trip to learn something a second costs nothing.
+	@if [ -z "$(p)" ]; then cd backend && ../.venv/bin/python scripts/check_migration_integrity.py; fi
 
 audit-deps:       ## CVE scan of backend + frontend dependencies (WASA gate)
 	@echo "== backend (pip-audit) =="
