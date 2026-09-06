@@ -22,6 +22,7 @@ from sqlalchemy.pool import StaticPool
 from app.main import app
 from app.common.db import Base
 from app.audit.models import AuditLog
+from app.admissions.models import Admission, Bed, Ward
 from app.departments.models import Department, Room
 from app.opd.models import Visit
 from app.patients.models import Patient
@@ -195,6 +196,59 @@ async def opd_visit(db, seed):
         return visit
 
     return make
+
+
+@pytest_asyncio.fixture
+async def nursing_seed(db, seed, opd_visit):
+    """One admitted inpatient, plus a second nurse to hand over to.
+
+    Every ward screen is keyed on an admission, and a handover needs somebody
+    on the other end of it — a fixture with one nurse can only ever exercise
+    the refusal.
+    """
+    dept, _room, doctor = seed
+    visit = await opd_visit(visit_type="ipd")
+
+    ward = Ward(id=uuid.uuid4(), name="Test Ward", facility_id=dept.facility_id)
+    bed = Bed(id=uuid.uuid4(), ward_id=ward.id, bed_number="T-01", status="occupied")
+    nurses = []
+    for label in ("giving", "receiving"):
+        nurses.append(
+            User(
+                id=uuid.uuid4(),
+                keycloak_sub=f"nurse-{label}-{uuid.uuid4()}",
+                username=f"nurse{label}{uuid.uuid4().hex[:6]}",
+                full_name=f"Nurse {label.title()}",
+                facility_id=dept.facility_id,
+                is_active=True,
+            )
+        )
+    db.add_all([ward, bed, *nurses])
+    await db.flush()
+
+    admission = Admission(
+        id=uuid.uuid4(),
+        visit_id=visit.id,
+        patient_id=visit.patient_id,
+        ward_id=ward.id,
+        bed_id=bed.id,
+        admitted_at=datetime.now(),
+        status="admitted",
+        created_by=doctor.id,
+    )
+    db.add(admission)
+    await db.flush()
+
+    return {
+        "facility_id": dept.facility_id,
+        "ward_id": ward.id,
+        "bed_id": bed.id,
+        "visit_id": visit.id,
+        "patient_id": visit.patient_id,
+        "admission_id": admission.id,
+        "nurse_id": nurses[0].id,
+        "other_nurse_id": nurses[1].id,
+    }
 
 
 @pytest_asyncio.fixture

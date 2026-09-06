@@ -25,6 +25,7 @@ from __future__ import annotations
 import uuid
 
 from tests.integration.conftest import (
+    BILLING,
     DOCTOR,
     LAB_TECH,
     PATHOLOGIST,
@@ -287,7 +288,9 @@ class TestOPDCoreJourney:
         assert verify_resp.json()["data"]["status"] == "final"
 
         # --- Step 5: invoice (billing/router.py) ---
-        client = client_as(RECEPTIONIST)
+        # The billing desk, not the receptionist who registered the patient.
+        # The journey now changes hands here, which is the point of the split.
+        client = client_as(BILLING)
         build_resp = client.post(
             f"/api/v1/billing/visits/{visit_id}/invoice/build",
             json={"dry_run": False},

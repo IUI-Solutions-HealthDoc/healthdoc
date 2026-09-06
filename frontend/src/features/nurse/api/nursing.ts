@@ -7,6 +7,8 @@ import type { AddIntakeOutputSchema } from "@/features/nurse/components/AddIntak
 import type { AddProcedureAssistanceSchema } from "@/features/nurse/components/AddProcedureAssistanceForm/validation";
 import type { AddNursingNoteSchema } from "@/features/nurse/components/AddNursingNoteForm/validation";
 import type { VitalRecord } from "@/components/VitalsTimeline/VitalsTimeline.types";
+import type { HandoverNote } from "@/features/nurse/components/HandoverNotes/HandoverNotes.types";
+import type { HandoverRecipientOption } from "@/features/nurse/types";
 import type { MedicationRecord } from "@/components/tables/EMARTable/EMARTable.types";
 import type { DischargeSummary } from "@/features/ipd/api/ipd";
 import type {
@@ -61,9 +63,10 @@ export async function getAdmissionMedicationAdministrations(admissionId: string)
 }
 
 export async function getAdmissionHandoverNotes(admissionId: string) {
-  void admissionId;
-  // Table exists (0023) but no published FastAPI read route yet.
-  throw new UnsupportedWorkflowError("Handover notes list");
+  const page = await api<{ items: HandoverNote[] }>(
+    `/nursing/admissions/${admissionId}/handover-notes`,
+  );
+  return page.items;
 }
 
 export async function getAdmissionSummary(admissionId: string) {
@@ -107,9 +110,33 @@ export async function addVitals(data: AddVitalsSchema) {
 }
 
 export async function addHandover(data: AddHandoverSchema) {
-  void data;
-  // Table exists (0023) but no published FastAPI write route yet.
-  throw new UnsupportedWorkflowError("Handover note entry");
+  return api<HandoverNote>("/nursing/handover-notes", {
+    method: "POST",
+    body: JSON.stringify(data),
+    idempotencyKey: newIdempotencyKey(),
+  });
+}
+
+/**
+ * Colleagues this nurse can hand over to.
+ *
+ * Not `GET /users`: that route is gated `admin`, which is why the handover
+ * form previously had nobody to list and asked for a pasted user UUID.
+ */
+export async function listHandoverCandidates(search: string) {
+  const params = new URLSearchParams();
+  if (search.trim()) params.set("search", search.trim());
+  const page = await api<{
+    items: { id: string; full_name: string; designation: string | null }[];
+  }>(`/nursing/handover-candidates?${params.toString()}`);
+  // Mapped to the picker's shape here rather than widening the component's
+  // contract to the wire's.
+  return page.items.map<HandoverRecipientOption>((candidate) => ({
+    value: candidate.id,
+    label: candidate.designation
+      ? `${candidate.full_name} · ${candidate.designation}`
+      : candidate.full_name,
+  }));
 }
 
 export async function reportIncident(data: ReportIncidentPayload) {

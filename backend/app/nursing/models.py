@@ -20,7 +20,11 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.common.db import Base
-from app.common.enums import IntakeOutputType, MedicationAdministrationStatus
+from app.common.enums import (
+    IntakeOutputType,
+    MedicationAdministrationStatus,
+    NursingShift,
+)
 from app.common.models import Blame, Timestamps, UUIDPk
 
 
@@ -119,7 +123,41 @@ class MedicationAdministration(Base, UUIDPk, Timestamps, Blame):
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     administered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
-    status: Mapped[str] = mapped_column(String(30), nullable=False)
+    status: Mapped[str] = mapped_column(String(50), nullable=False)
     dose_given: Mapped[str | None] = mapped_column(String(100), nullable=True)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class NursingHandoverNote(Base, UUIDPk, Timestamps, Blame):
+    """One shift handover, in SBAR. §3 0050.
+
+    The table has existed since 0050 with no model, service or route behind it,
+    so the frontend's AddHandoverForm and HandoverNotes were built against an
+    API that was never published and the ward could not record a handover at
+    all. Shift handover is the point at which responsibility for a patient
+    transfers, and NABH asks to see it; an unrecorded transfer is the gap every
+    incident review looks for first.
+
+    SBAR rather than a free-text box because that is what the columns already
+    are, and because the structure is the safety mechanism: it is what stops a
+    handover being "patient in bed 4 is fine".
+
+    `handed_over_to` is the receiving nurse, and is deliberately NOT nullable —
+    a handover to nobody is a note, not a handover.
+    """
+
+    __tablename__ = "nursing_handover_notes"
+    __table_args__ = (
+        CheckConstraint(NursingShift.sql_check("shift"), name="shift"),
+    )
+
+    admission_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("admissions.id", ondelete="RESTRICT"), nullable=False)
+    shift: Mapped[str] = mapped_column(String(50), nullable=False)
+    situation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    background: Mapped[str | None] = mapped_column(Text, nullable=True)
+    assessment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    recommendation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    handed_over_to: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)

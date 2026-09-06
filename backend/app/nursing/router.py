@@ -24,6 +24,11 @@ from app.common.db import get_db
 from app.common.idempotency import check_idempotency, hash_request_body, record_idempotent_response
 from app.nursing import incidents, service
 from app.nursing.schemas import (
+    HandoverCandidateListOut,
+    HandoverCandidateOut,
+    HandoverNoteCreate,
+    HandoverNoteListOut,
+    HandoverNoteOut,
     FluidBalanceOut, IncidentOut, IncidentReport, IncidentReviewRequest,
     IntakeOutputCreate, IntakeOutputOut,
     MedicationAdministrationCreate, MedicationAdministrationOut,
@@ -453,3 +458,78 @@ async def review_incident(
             detail={"code": "closure_incomplete", "message": str(exc)},
         ) from exc
     return IncidentOut.model_validate(incident)
+
+
+@router.post(
+    "/handover-notes",
+    response_model=HandoverNoteOut,
+    status_code=http_status.HTTP_201_CREATED,
+    dependencies=[Depends(require_roles("nurse", "admin"))],
+)
+async def create_handover_note(
+    payload: HandoverNoteCreate,
+    current_db_user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+) -> HandoverNoteOut:
+    """Record one SBAR shift handover.
+
+    `nursing_handover_notes` has existed since 0050 with nothing able to write
+    to it, so a ward could not record the moment responsibility for a patient
+    transferred — the first thing any incident review asks for.
+
+    Nurse and admin only: a handover is signed by the person giving it, and
+    letting a wider set of roles write one makes the signature meaningless.
+    """
+    await _require_admission_scope(db, payload.admission_id, current_db_user.facility_id)
+    note = await service.record_handover_note(
+        db,
+        payload,
+        recorded_by=current_db_user.id,
+        facility_id=current_db_user.facility_id,
+    )
+    return HandoverNoteOut.model_validate(note)
+
+
+@router.get(
+    "/admissions/{admission_id}/handover-notes",
+    response_model=HandoverNoteListOut,
+    dependencies=[Depends(require_roles(*_READ_ROLES))],
+)
+async def list_handover_notes(
+    admission_id: UUID,
+    current_db_user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+) -> HandoverNoteListOut:
+    """Handovers for one admission, most recent first.
+
+    Readable by the wider clinical set, not just nurses: a doctor picking up a
+    patient needs the last handover as much as the incoming nurse does.
+    """
+    await _require_admission_scope(db, admission_id, current_db_user.facility_id)
+    rows = await service.list_handover_notes(db, admission_id)
+    return HandoverNoteListOut(items=[HandoverNoteOut.model_validate(r) for r in rows])
+
+
+@router.get(
+    "/handover-candidates",
+    response_model=HandoverCandidateListOut,
+    dependencies=[Depends(require_roles("nurse", "admin"))],
+)
+async def list_handover_candidates(
+    current_db_user: CurrentDbUser,
+    search: str | None = Query(None, description="Matches full name or username."),
+    db: AsyncSession = Depends(get_db),
+) -> HandoverCandidateListOut:
+    """Colleagues a nurse can hand a patient over to.
+
+    Exists because GET /users is gated `admin`: without this the handover form
+    had nobody to list and asked a nurse to paste a user UUID at the end of a
+    shift, which is how a handover ends up recorded against the wrong person.
+    """
+    rows = await service.list_handover_candidates(
+        db, facility_id=current_db_user.facility_id, exclude_user_id=current_db_user.id,
+        search=search,
+    )
+    return HandoverCandidateListOut(
+        items=[HandoverCandidateOut.model_validate(r) for r in rows]
+    )

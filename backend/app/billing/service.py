@@ -520,16 +520,42 @@ async def preview_invoice(db: AsyncSession, visit_id: uuid.UUID) -> InvoicePrevi
     )
 
 
+def restrict_to_categories(
+    lines: list[ChargeLine], only_categories: frozenset[str] | None
+) -> list[ChargeLine]:
+    """Narrow prospective charge lines to the categories a caller may bill.
+
+    `None` means no restriction — the billing desk bills everything on the
+    visit. The pharmacy counter passes {"pharmacy"}, so settling an
+    over-the-counter sale cannot sweep the visit's consultation, lab and
+    radiology charges onto the same invoice.
+
+    Its own function so the rule can be tested without standing up an invoice,
+    a database session and an audit writer to observe three lines of filtering.
+    """
+    if only_categories is None:
+        return lines
+    return [line for line in lines if line.charge_category.value in only_categories]
+
+
 async def build_invoice(
     db: AsyncSession,
     visit_id: uuid.UUID,
     actor_user_id: uuid.UUID,
     dry_run: bool = False,
+    only_categories: frozenset[str] | None = None,
 ) -> InvoiceBuildResponse:
     """
     Append unbilled, priced charge lines to the visit's draft invoice
     and recompute totals. No db.commit() here — see module docstring;
     app/common/db.get_db() commits once after the route handler returns.
+
+    `only_categories` narrows what the caller may append. The pharmacy counter
+    passes {"pharmacy"} so a pharmacist settling an over-the-counter sale
+    cannot sweep the visit's consultation, lab and radiology charges onto the
+    invoice as a side effect of billing a strip of tablets. Enforced here
+    rather than in the route because this is the function that decides what
+    "everything chargeable for this visit" means.
     """
     invoice = await _get_invoice_for_visit(db, visit_id)
 
@@ -542,7 +568,9 @@ async def build_invoice(
             ),
         )
 
-    charge_lines = await aggregate_unbilled_charges(db, visit_id, invoice.id)
+    charge_lines = restrict_to_categories(
+        await aggregate_unbilled_charges(db, visit_id, invoice.id), only_categories
+    )
     priced_lines = [line for line in charge_lines if line.priced]
     skipped = len(charge_lines) - len(priced_lines)
 

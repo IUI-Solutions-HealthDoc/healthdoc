@@ -19,11 +19,13 @@ export default function AddHandoverForm({
   admissionId,
   isSubmitting = false,
   recipientOptions = [],
+  onSubmit,
 }: AddHandoverFormProps) {
   const [useManualUuid, setUseManualUuid] = useState(recipientOptions.length === 0);
 
   const {
     register,
+    handleSubmit,
     reset,
     setValue,
     control,
@@ -55,6 +57,11 @@ export default function AddHandoverForm({
     [recipientOptions],
   );
 
+  const submitHandler = async (data: AddHandoverSchema) => {
+    const success = await onSubmit?.(data);
+    if (success) handleReset();
+  };
+
   const handleReset = () => {
     reset({
       ...DEFAULT_VALUES,
@@ -66,15 +73,11 @@ export default function AddHandoverForm({
   return (
     <FormSection
       title="Patient Handover"
-      description="Shift handover entry is not available in this release."
+      description="Record the SBAR handover for the selected patient."
     >
-      <p className="mb-4 rounded-md border border-border bg-muted p-3 text-sm text-muted-foreground">
-        Continue using the approved ward handover process for this release.
-      </p>
-      <form
-        onSubmit={(e) => e.preventDefault()}
-        className="pointer-events-none space-y-6 opacity-50"
-      >
+      {/* Enabled now that POST /nursing/handover-notes exists. It was inert,
+          and said so, for as long as the table had no writer. */}
+      <form onSubmit={handleSubmit(submitHandler)} className="space-y-6" noValidate>
         <div className="grid gap-5 md:grid-cols-2">
           <SelectField
             label="Shift"

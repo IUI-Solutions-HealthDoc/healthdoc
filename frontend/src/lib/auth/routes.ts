@@ -21,6 +21,7 @@ const DEFAULT_ROUTES: Record<Role, string> = {
   [ROLES.PHARMACIST]: "/pharmacy/prescription-queue",
   [ROLES.EMERGENCY]: "/emergency",
   [ROLES.SUPERVISOR]: "/supervisor/merges",
+  [ROLES.BILLING]: "/billing",
   [ROLES.ADMIN]: "/admin",
   [ROLES.HOD]: "/hod",
   [ROLES.AUDITOR]: "/audit-viewer",
@@ -35,7 +36,10 @@ const DEFAULT_ROUTES: Record<Role, string> = {
  * different role policies.
  */
 const ROUTE_PREFIXES: Record<Role, readonly string[]> = {
-  [ROLES.RECEPTIONIST]: ["/receptionist", "/billing", "/consent"],
+  // Billing removed: raising and settling invoices is the billing desk's
+  // job, not a side effect of registering a patient. The registration
+  // invoice is still created server-side by create_visit.
+  [ROLES.RECEPTIONIST]: ["/receptionist", "/consent"],
   [ROLES.DOCTOR]: ["/doctor", "/consent", "/ipd", "/lab", "/radiology"],
   [ROLES.NURSE]: ["/nurse", "/ipd", "/consent"],
   [ROLES.LAB_TECH]: ["/lab", "/admin/maintenance"],
@@ -46,6 +50,8 @@ const ROUTE_PREFIXES: Record<Role, readonly string[]> = {
   // intentionally excludes supervisors. Their maker-checker promotion APIs
   // need a separate records-authority screen (#221) at /supervisor/merges.
   [ROLES.SUPERVISOR]: ["/supervisor", "/reports"],
+  //: The billing desk. /reports carries the finance MIS panel it needs.
+  [ROLES.BILLING]: ["/billing", "/reports"],
   // The backend accepts admin on some HOD reads for operational support, but
   // that does not make a department-operating dashboard part of the admin UI.
   [ROLES.ADMIN]: ["/admin", "/billing", "/reports", "/audit-viewer"],

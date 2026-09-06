@@ -60,10 +60,13 @@ DOCTOR = AuthUser(sub="opdj-sub-doctor-0001", username="opdj-doc1", roles=["doct
 NURSE = AuthUser(sub="opdj-sub-nurse-0001", username="opdj-nurse1", roles=["nurse"])
 LAB_TECH = AuthUser(sub="opdj-sub-labtech-0001", username="opdj-tech1", roles=["lab_tech"])
 PATHOLOGIST = AuthUser(sub="opdj-sub-pathologist-0001", username="opdj-patho1", roles=["lab_tech"])
+# The billing desk. Registration and consultation are not billing roles any
+# more, so a journey that ends in a receipt has to change hands here.
+BILLING = AuthUser(sub="opdj-sub-billing-0001", username="opdj-billing1", roles=["billing"])
 SUPERVISOR = AuthUser(sub="opdj-sub-supervisor-0001", username="opdj-super1", roles=["supervisor"])
 ADMIN = AuthUser(sub="opdj-sub-admin-0001", username="opdj-admin1", roles=["admin"])
 
-ALL_TEST_USERS = [RECEPTIONIST, DOCTOR, NURSE, LAB_TECH, PATHOLOGIST, SUPERVISOR, ADMIN]
+ALL_TEST_USERS = [RECEPTIONIST, DOCTOR, NURSE, LAB_TECH, PATHOLOGIST, SUPERVISOR, BILLING, ADMIN]
 
 
 def _db_user_for(user: AuthUser) -> DbUser:

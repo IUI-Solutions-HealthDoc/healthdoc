@@ -81,7 +81,6 @@ const ROLE_DASHBOARDS = [
       { path: "/receptionist/registration", expectCalls: false },
       { path: "/receptionist/patient-search", expectCalls: false },
       { path: "/receptionist/queue", expectCalls: true },
-      { path: "/billing", expectCalls: true },
       {
         path: "/consent",
         expectCalls: true,
@@ -258,6 +257,17 @@ const ROLE_DASHBOARDS = [
       { path: "/admin/maintenance", expectCalls: true },
       { path: "/reports", expectCalls: true },
       { path: "/billing", expectCalls: true },
+    ],
+  },
+  {
+    // The billing desk. Split out of receptionist so raising and settling an
+    // invoice is no longer a side effect of registering a patient.
+    name: "billing",
+    username: "dev.billing",
+    landingPath: "/billing",
+    dashboards: [
+      { path: "/billing", expectCalls: true },
+      { path: "/reports", expectCalls: true },
     ],
   },
   {
