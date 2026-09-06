@@ -12,8 +12,9 @@ from tests._lab_seed import TEST_DATABASE_URL
 from tests.billing.conftest import seed_draft_invoice, seed_visit
 from tests.billing.test_billing_flows import _seed_billable_lab_charge
 from tests.integration.conftest import (
+    ADMIN,
+    BILLING,
     RECEPTIONIST,
-    SUPERVISOR,
     TEST_FACILITY_ID,
 )
 
@@ -23,7 +24,7 @@ async def _seed_billing_journey(patient_id: str) -> tuple[uuid.UUID, uuid.UUID]:
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     try:
         async with session_factory() as db:
-            actor_id = uuid.uuid5(uuid.NAMESPACE_OID, RECEPTIONIST.sub)
+            actor_id = uuid.uuid5(uuid.NAMESPACE_OID, BILLING.sub)
             visit_id = await seed_visit(
                 db,
                 facility_id=TEST_FACILITY_ID,
@@ -74,7 +75,9 @@ async def _payment_count(invoice_id: uuid.UUID) -> int:
 
 def test_invoice_build_payment_replay_and_refund(client_as, seeded_patient_id):
     visit_id, invoice_id = asyncio.run(_seed_billing_journey(seeded_patient_id))
-    clerk = client_as(RECEPTIONIST)
+    # The billing desk, not the front desk: registering a patient no longer
+    # carries the authority to raise and settle their invoice.
+    clerk = client_as(BILLING)
 
     response = clerk.post(
         f"/api/v1/billing/visits/{visit_id}/invoice/build",
@@ -123,8 +126,10 @@ def test_invoice_build_payment_replay_and_refund(client_as, seeded_patient_id):
     )
     assert forbidden.status_code == 403, forbidden.text
 
-    supervisor = client_as(SUPERVISOR)
-    refunded = supervisor.post(
+    # Refunds are approved by admin now. The desk that raised the payment must
+    # not also approve its reversal, and supervisor no longer touches billing.
+    approver = client_as(ADMIN)
+    refunded = approver.post(
         f"/api/v1/billing/payments/{payment['id']}/refunds",
         json={"amount": "50.00", "reason": "Journey test partial refund"},
         headers={"Idempotency-Key": f"refund-{uuid.uuid4()}"},

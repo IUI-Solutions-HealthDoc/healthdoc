@@ -30,7 +30,6 @@ import {
   snapshotsToCsv,
 } from "../lib/kpiView";
 import type { CoreKpiCode, KpiPeriod } from "../types";
-import { BillingMisPanel } from "./BillingMisPanel";
 import { KpiLatestTable } from "./KpiLatestTable";
 import { KpiSparklineCard } from "./KpiSparklinePanel";
 import { KpiSummaryBar } from "./KpiSummaryBar";
@@ -194,7 +193,8 @@ export function MisDashboard() {
               }}
             >
               Live facility KPI snapshots for OPD wait and sharp injuries from
-              /reports/kpis. Billing finance MIS uses /billing/mis/* below.
+              /reports/kpis. The finance MIS is a separate panel with a
+              separate audience.
             </Typography>
           </Box>
 
@@ -439,7 +439,6 @@ export function MisDashboard() {
 
       <KpiLatestTable latest={latest} loading={loading} />
 
-      <BillingMisPanel />
     </Box>
   );
 }

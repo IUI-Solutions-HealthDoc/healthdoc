@@ -15,6 +15,7 @@ export type RealmRole =
   | "pharmacist"
   | "emergency"
   | "supervisor"
+  | "billing"
   | "admin"
   | "hod"
   | "auditor"
