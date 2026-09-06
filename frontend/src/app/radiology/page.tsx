@@ -19,6 +19,7 @@ import type {
   RadiologyReport,
 } from "@/features/radiology/types";
 import { ApiError, formatDateTime } from "@/lib/api";
+import { useAuth } from "@/providers/auth-provider";
 
 const WORKFLOW: { status: string; label: string; hint: string }[] = [
   { status: "placed", label: "To schedule", hint: "Ordered, not yet booked onto a machine" },
@@ -42,6 +43,11 @@ function StatusChip({ status }: { status: string }) {
 }
 
 function RadiologyPageContent() {
+  const { user } = useAuth();
+  // Match the existing API boundary: technicians operate the machine;
+  // doctors author and sign reports. Read access does not imply both jobs.
+  const canOperate = user?.role === "radiology_tech";
+  const canReport = user?.role === "doctor";
   const [items, setItems] = useState<RadiologyOrderItem[]>([]);
   const [filter, setFilter] = useState<string>("all");
   const [loading, setLoading] = useState(true);
@@ -131,7 +137,12 @@ function RadiologyPageContent() {
       const list = freshItems ?? (await listRadiologyWork(filter)).items;
       setItems(list);
       const updated = list.find((item) => item.id === itemId) ?? null;
-      if (updated) setSelected(updated);
+      if (updated) {
+        setSelected(updated);
+        // Scheduling refreshes the row without reopening it. Carry the saved
+        // machine into the newly displayed reschedule form too.
+        setRescheduleMachine(updated.machine_id ?? "");
+      }
       await loadReports(itemId);
     },
     [filter, loadReports],
@@ -289,7 +300,13 @@ function RadiologyPageContent() {
                 </p>
               </div>
 
-              {selected.status === "placed" && (
+              {!canOperate && (selected.status === "placed" || selected.status === "scheduled") && (
+                <p className="text-sm text-muted-foreground">
+                  Scheduling and scan completion are handled by a radiology technician.
+                </p>
+              )}
+
+              {canOperate && selected.status === "placed" && (
                 <div className="space-y-3">
                   <p className="text-sm font-medium">Book a slot</p>
                   <label className="block space-y-1 text-sm">
@@ -331,7 +348,7 @@ function RadiologyPageContent() {
                 </div>
               )}
 
-              {selected.status === "scheduled" && (
+              {canOperate && selected.status === "scheduled" && (
                 <div className="space-y-3">
                   <p className="text-sm">
                     Booked for {selected.scheduled_at ? formatDateTime(selected.scheduled_at) : "—"}
@@ -405,7 +422,7 @@ function RadiologyPageContent() {
                 </div>
               )}
 
-              {(selected.status === "placed" || selected.status === "scheduled") && (
+              {canOperate && (selected.status === "placed" || selected.status === "scheduled") && (
                 <div className="space-y-3 border-t border-border pt-4">
                   <p className="text-sm font-medium text-danger">Cancel scan</p>
                   <label className="block space-y-1 text-sm">
@@ -442,6 +459,11 @@ function RadiologyPageContent() {
                   <p className="text-sm font-medium">
                     {selected.status === "scanned" ? "Draft report" : "Report"}
                   </p>
+                  {!canReport && selected.status !== "released" && (
+                    <p className="text-sm text-muted-foreground">
+                      Awaiting a doctor&apos;s report and sign-off. Technicians can view reports here.
+                    </p>
+                  )}
                   <label className="block space-y-1 text-sm">
                     <span className="text-muted-foreground">Findings</span>
                     <textarea
@@ -449,7 +471,7 @@ function RadiologyPageContent() {
                       className="w-full rounded-md border border-border px-3 py-2"
                       value={findings}
                       onChange={(e) => setFindings(e.target.value)}
-                      disabled={selected.status === "released"}
+                      disabled={!canReport || selected.status === "released"}
                     />
                   </label>
                   <label className="block space-y-1 text-sm">
@@ -459,7 +481,7 @@ function RadiologyPageContent() {
                       className="w-full rounded-md border border-border px-3 py-2"
                       value={impression}
                       onChange={(e) => setImpression(e.target.value)}
-                      disabled={selected.status === "released"}
+                      disabled={!canReport || selected.status === "released"}
                     />
                   </label>
                   <label className="block space-y-1 text-sm">
@@ -468,12 +490,12 @@ function RadiologyPageContent() {
                       className="w-full rounded-md border border-border px-3 py-2 font-mono text-xs"
                       value={pacsStudyUid}
                       onChange={(e) => setPacsStudyUid(e.target.value)}
-                      disabled={selected.status === "released"}
+                      disabled={!canReport || selected.status === "released"}
                       placeholder="Optional DICOM study instance UID"
                     />
                   </label>
 
-                  {selected.status === "scanned" && (
+                  {canReport && selected.status === "scanned" && (
                     <button
                       type="button"
                       disabled={busy || !findings.trim() || !impression.trim()}
@@ -495,7 +517,7 @@ function RadiologyPageContent() {
                     </button>
                   )}
 
-                  {selected.status === "reporting" && (
+                  {canReport && selected.status === "reporting" && (
                     <button
                       type="button"
                       disabled={busy}
