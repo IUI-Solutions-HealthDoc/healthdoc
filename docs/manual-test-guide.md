@@ -25,9 +25,18 @@ secrets and they are not present in any production realm.
 | 6 | `dev.pharmacist` | `pharmacist` | `/pharmacy/prescription-queue` | `/pharmacy/*`, `/inventory` |
 | 7 | `dev.hod` | `hod` | `/hod` | `/queue-display`, `/inventory` |
 | 8 | `dev.emergency` | `emergency` | `/emergency` | — |
-| 9 | `dev.supervisor` | `supervisor` | `/supervisor/merges` | `/reports` |
+| 9 | `dev.supervisor` | `supervisor` | `/supervisor/merges` | `/reports` (clinical KPIs only) |
+| 9a | `dev.billing` | `billing` | `/billing` | `/reports` (finance MIS only) |
 | 10 | `dev.supervisor2` | `supervisor` | `/supervisor/merges` | `/reports` |
 | 11 | `dev.admin` | `admin` | `/admin` | `/admin/*`, `/billing`, `/reports`, `/audit-viewer` |
+
+Billing is the billing desk's job and nobody else's. A receptionist registers a
+patient — which still raises the draft registration invoice server-side, inside
+the same transaction as the visit — but cannot build, issue or settle it. A
+pharmacist may bill dispensed medicines: the API refuses them any invoice
+carrying a non-pharmacy charge, so an over-the-counter sale settles at the
+pharmacy and a mixed visit settles at the billing desk. Refunds are approved by
+admin, because the desk that raises one must not also approve it.
 | 12 | `dev.auditor` | `auditor` | `/audit-viewer` | `/reports`, `/admin/data-protection` |
 | 13 | `dev.patient` | `patient` | `/patient-portal` | — |
 | 14 | `dev.superadmin` | `superadmin` | `/superadmin` | Platform facility directory only; no clinical routes |
@@ -53,7 +62,7 @@ The usual cause is that the identities were never created. Re-run and read the
 banner:
 
 ```bash
-make setup   # must print "Seeded development facility and 14 authenticated users"
+make setup   # must print "Seeded development facility and 15 authenticated users"
 ```
 
 If it stops before that line, the accounts do not exist and every login will

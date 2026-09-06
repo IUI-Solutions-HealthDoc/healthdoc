@@ -124,7 +124,7 @@ cp .env.example .env          # defaults work for local; no secrets needed
 make setup                    # ~5 min first run
 ```
 
-**`make setup` must end with `Seeded development facility and 14 authenticated
+**`make setup` must end with `Seeded development facility and 15 authenticated
 users`.** If it stops before that line, the accounts do not exist and every
 login will fail — do not proceed, report it.
 
