@@ -179,6 +179,25 @@ kc config credentials --server http://localhost:8080/auth --realm master \
 # explicitly so an existing development database receives branding updates too.
 kc update realms/healthdoc -s loginTheme=healthdoc >/dev/null
 
+# Realm roles live in infra/keycloak/realm-healthdoc.json, but Keycloak imports
+# that file only when it CREATES the realm. On an existing dev stack a newly
+# added role therefore does not exist, `kc add-roles` fails, and — because the
+# output was discarded and never checked — the user was created without it and
+# setup still printed success. That is how `billing` shipped as a role nobody
+# could actually hold.
+ensure_realm_role() {
+  local role="$1"
+  # Direct lookup, not a grep over the whole list: the CSV form reported
+  # existing roles as missing and printed a misleading "creating" line for
+  # roles it then re-created harmlessly.
+  if ! kc get "roles/$role" -r healthdoc >/dev/null 2>&1; then
+    # stderr: ensure_keycloak_user returns the subject id on stdout, and a
+    # stray line here becomes part of that id.
+    echo "Creating missing realm role: $role" >&2
+    kc create roles -r healthdoc -s name="$role" >/dev/null
+  fi
+}
+
 ensure_keycloak_user() {
   local username="$1" first_name="$2" last_name="$3" roles="$4" subject role assigned
   subject=$(kc get users -r healthdoc -q exact=true -q username="$username" \
@@ -195,15 +214,30 @@ ensure_keycloak_user() {
   # token and could hide an authorization defect.
   assigned=$(kc get-roles -r healthdoc --uusername "$username" \
     --fields name --format csv --noquotes)
-  for role in superadmin receptionist doctor nurse lab_tech radiology_tech \
-    pharmacist emergency hod supervisor admin auditor patient; do
+  # Read the managed set from the realm rather than restating it. The previous
+  # hardcoded list was a fourth copy of the role names and silently stopped
+  # stripping any role added after it was written.
+  for role in $(kc get roles -r healthdoc --fields name --format csv --noquotes \
+      | grep -vE '^(default-roles-|offline_access$|uma_authorization$)'); do
     if [[ ",$roles," != *",$role,"* ]] && grep -Fxq "$role" <<< "$assigned"; then
       kc remove-roles -r healthdoc --uusername "$username" --rolename "$role" >/dev/null
     fi
   done
   IFS=',' read -r -a role_list <<< "$roles"
   for role in "${role_list[@]}"; do
+    ensure_realm_role "$role"
     kc add-roles -r healthdoc --uusername "$username" --rolename "$role" >/dev/null
+  done
+  # Verify the OUTCOME. An assignment that failed used to leave a user who
+  # could log in and had none of the access the login was created for, which
+  # presents as a broken application rather than a broken setup.
+  assigned=$(kc get-roles -r healthdoc --uusername "$username" \
+    --fields name --format csv --noquotes)
+  for role in "${role_list[@]}"; do
+    if ! grep -Fxq "$role" <<< "$assigned"; then
+      echo "Keycloak role assignment failed: $username is missing '$role'." >&2
+      exit 1
+    fi
   done
   kc get users -r healthdoc -q exact=true -q username="$username" \
     --fields id --format csv --noquotes | tail -n 1
@@ -222,6 +256,7 @@ PATIENT_SUB=$(ensure_keycloak_user dev.patient Dev Patient patient)
 # one — so none of it had ever been exercised by a human or a test.
 HOD_SUB=$(ensure_keycloak_user dev.hod Dev "Head of Department" hod)
 EMERGENCY_SUB=$(ensure_keycloak_user dev.emergency Dev "Emergency Registrar" emergency)
+BILLING_SUB=$(ensure_keycloak_user dev.billing Dev "Billing Desk" billing)
 SUPERVISOR_SUB=$(ensure_keycloak_user dev.supervisor Dev "Records Supervisor" supervisor)
 # A SECOND supervisor, because THID->UHID promotion is maker-checker: the
 # approver must not be the requester, and the unmerger must not be the
@@ -238,7 +273,7 @@ SUPERADMIN_SUB=$(ensure_keycloak_user dev.superadmin Dev "Platform Superadmin" s
 DEV_USERNAMES=(
   dev.receptionist dev.doctor dev.nurse dev.labtech dev.radiology
   dev.pharmacist dev.admin dev.auditor dev.patient dev.hod dev.emergency
-  dev.supervisor dev.supervisor2 dev.superadmin
+  dev.billing dev.supervisor dev.supervisor2 dev.superadmin
 )
 for username in "${DEV_USERNAMES[@]}"; do
   subject=$(kc get users -r healthdoc -q exact=true -q username="$username" \
@@ -262,6 +297,7 @@ docker compose -f infra/docker-compose.yml --env-file .env exec -T backend \
     --user "dev.patient=$PATIENT_SUB" \
     --user "dev.hod=$HOD_SUB" \
     --user "dev.emergency=$EMERGENCY_SUB" \
+    --user "dev.billing=$BILLING_SUB" \
     --user "dev.supervisor=$SUPERVISOR_SUB" \
     --user "dev.supervisor2=$SUPERVISOR2_SUB" \
     --user "dev.superadmin=$SUPERADMIN_SUB"
@@ -323,5 +359,5 @@ HealthDoc dev stack is up:
 Dev logins (Keycloak realm 'healthdoc', password 'devpass'):
   dev.receptionist / dev.doctor / dev.nurse / dev.labtech /
   dev.radiology / dev.pharmacist / dev.admin / dev.auditor / dev.patient / dev.hod /
-  dev.emergency / dev.supervisor / dev.supervisor2 / dev.superadmin
+  dev.billing / dev.emergency / dev.supervisor / dev.supervisor2 / dev.superadmin
 DONE

@@ -46,6 +46,7 @@ DISPLAY_NAMES = {
     "dev.patient": "Dev Patient",
     "dev.hod": "Dev Head of Department",
     "dev.emergency": "Dev Emergency Registrar",
+    "dev.billing": "Dev Billing Desk",
     "dev.supervisor": "Dev Records Supervisor",
     # Maker-checker needs a second pair of hands; see scripts/dev_setup.sh.
     "dev.supervisor2": "Dev Records Supervisor Two",
