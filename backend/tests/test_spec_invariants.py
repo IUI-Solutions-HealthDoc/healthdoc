@@ -199,3 +199,51 @@ def test_pr_checker_catches_known_violations(tmp_path):
                          capture_output=True, text=True).stdout
     assert "ENUM-WIDTH" in out
     assert "MIXIN" in out
+
+
+def test_pr_checker_finds_changed_files_from_a_subdirectory(tmp_path):
+    """Regression: CI runs this with `working-directory: backend`.
+
+    `git diff --name-only` prints repo-root-relative paths, so resolving them
+    against the current directory made every `exists()` false. The step printed
+    "no python files to check" and exited 0 on every pull request — a gate that
+    ran on nothing. Driving it through `changed_files()` (no explicit path
+    argument) from a subdirectory is the only shape that catches this; the
+    existing checker test passes a filename and never touches that branch.
+    """
+    import subprocess, sys, pathlib
+
+    checker = pathlib.Path(__file__).resolve().parents[1] / "scripts" / "pr_check.py"
+    repo = tmp_path / "repo"
+    (repo / "backend" / "app").mkdir(parents=True)
+
+    def git(*args):
+        subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+
+    git("init", "-q")
+    git("config", "user.email", "test@example.com")
+    git("config", "user.name", "Test")
+    (repo / "README.md").write_text("seed\n")
+    git("add", "-A")
+    git("commit", "-qm", "first")
+
+    # A file with a violation the checker is known to report, so a non-empty
+    # file list is visible in the output rather than merely implied.
+    (repo / "backend" / "app" / "models.py").write_text(
+        "from sqlalchemy import String\n"
+        "from sqlalchemy.orm import Mapped, mapped_column\n"
+        "class Thing(Base):\n"
+        "    status: Mapped[str] = mapped_column(String(30))\n"
+    )
+    git("add", "-A")
+    git("commit", "-qm", "second")
+
+    result = subprocess.run(
+        [sys.executable, str(checker)],
+        cwd=repo / "backend",
+        capture_output=True,
+        text=True,
+    )
+    assert "no python files to check" not in result.stdout, result.stdout
+    assert "1 file(s)" in result.stdout, result.stdout
+    assert "ENUM-WIDTH" in result.stdout, result.stdout
