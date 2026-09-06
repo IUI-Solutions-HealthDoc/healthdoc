@@ -123,7 +123,7 @@ class MedicationAdministration(Base, UUIDPk, Timestamps, Blame):
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     administered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
-    status: Mapped[str] = mapped_column(String(30), nullable=False)
+    status: Mapped[str] = mapped_column(String(50), nullable=False)
     dose_given: Mapped[str | None] = mapped_column(String(100), nullable=True)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -154,7 +154,7 @@ class NursingHandoverNote(Base, UUIDPk, Timestamps, Blame):
 
     admission_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("admissions.id", ondelete="RESTRICT"), nullable=False)
-    shift: Mapped[str] = mapped_column(String(30), nullable=False)
+    shift: Mapped[str] = mapped_column(String(50), nullable=False)
     situation: Mapped[str | None] = mapped_column(Text, nullable=True)
     background: Mapped[str | None] = mapped_column(Text, nullable=True)
     assessment: Mapped[str | None] = mapped_column(Text, nullable=True)
