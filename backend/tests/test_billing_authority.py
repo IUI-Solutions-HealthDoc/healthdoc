@@ -21,25 +21,25 @@ from app.main import app
 EXPECTED: dict[tuple[str, str], set[str]] = {
     # The counter: raise, issue, settle. Pharmacist is present but constrained
     # at runtime to invoices made only of dispensed medicines.
-    ("POST", "/api/v1/billing/visits/{visit_id}/invoice/build"): {"billing", "admin", "pharmacist"},
-    ("POST", "/api/v1/billing/invoices/{invoice_id}/issue"): {"billing", "admin", "pharmacist"},
-    ("POST", "/api/v1/billing/invoices/{invoice_id}/payments"): {"billing", "admin", "pharmacist"},
-    ("GET", "/api/v1/billing/invoices/{invoice_id}"): {"billing", "admin", "pharmacist"},
+    ("POST", "/billing/visits/{visit_id}/invoice/build"): {"billing", "admin", "pharmacist"},
+    ("POST", "/billing/invoices/{invoice_id}/issue"): {"billing", "admin", "pharmacist"},
+    ("POST", "/billing/invoices/{invoice_id}/payments"): {"billing", "admin", "pharmacist"},
+    ("GET", "/billing/invoices/{invoice_id}"): {"billing", "admin", "pharmacist"},
     # Desk-only reads.
-    ("GET", "/api/v1/billing/invoices"): {"billing", "admin"},
-    ("GET", "/api/v1/billing/visits/{visit_id}/invoice/preview"): {"billing", "admin"},
-    ("GET", "/api/v1/billing/visits/{visit_id}/pmjay-eligibility"): {"billing", "admin"},
+    ("GET", "/billing/invoices"): {"billing", "admin"},
+    ("GET", "/billing/visits/{visit_id}/invoice/preview"): {"billing", "admin"},
+    ("GET", "/billing/visits/{visit_id}/pmjay-eligibility"): {"billing", "admin"},
     # A refund must not be approved by the desk that raised it.
-    ("POST", "/api/v1/billing/payments/{payment_id}/refunds"): {"admin"},
+    ("POST", "/billing/payments/{payment_id}/refunds"): {"admin"},
     # Finance oversight, not counter work.
-    ("GET", "/api/v1/billing/mis/daily-revenue"): {"billing", "admin", "auditor"},
-    ("GET", "/api/v1/billing/mis/pending-invoices"): {"billing", "admin", "auditor"},
-    ("GET", "/api/v1/billing/mis/scheme-breakdown"): {"billing", "admin", "auditor"},
+    ("GET", "/billing/mis/daily-revenue"): {"billing", "admin", "auditor"},
+    ("GET", "/billing/mis/pending-invoices"): {"billing", "admin", "auditor"},
+    ("GET", "/billing/mis/scheme-breakdown"): {"billing", "admin", "auditor"},
     # Tariffs reprice every future invoice.
-    ("GET", "/api/v1/billing/charge-master"): {"billing", "admin", "auditor"},
-    ("POST", "/api/v1/billing/charge-master"): {"billing", "admin"},
-    ("POST", "/api/v1/billing/charge-master/{tariff_id}/deactivate"): {"billing", "admin"},
-    ("GET", "/api/v1/billing/ping"): {"admin"},
+    ("GET", "/billing/charge-master"): {"billing", "admin", "auditor"},
+    ("POST", "/billing/charge-master"): {"billing", "admin"},
+    ("POST", "/billing/charge-master/{tariff_id}/deactivate"): {"billing", "admin"},
+    ("GET", "/billing/ping"): {"admin"},
 }
 
 
@@ -66,21 +66,40 @@ def _roles_for(route: APIRoute) -> set[str]:
     return found
 
 
+def _normalise(path: str) -> str:
+    """Key on the router-relative path, not the absolute one.
+
+    Up to FastAPI 0.115 include_router() flattened routes into app.routes with
+    the mount prefix already applied, so `route.path` read
+    "/api/v1/billing/invoices". FastAPI 0.141 leaves the real APIRoutes on the
+    included router, where the same route reads "/billing/invoices". Requests
+    resolve identically either way — only introspection changed.
+
+    Keying on the absolute path therefore passes for whoever runs it locally
+    and fails for everyone else, which is exactly what this test did on its
+    first push. See _mounted_routes() in test_role_boundaries.py.
+    """
+    return path[len("/api/v1"):] if path.startswith("/api/v1") else path
+
+
 def _billing_routes() -> dict[tuple[str, str], APIRoute]:
+    seen: set[int] = set()
     collected: list[APIRoute] = []
 
-    def collect(router) -> None:
-        for route in getattr(router, "routes", []):
+    def collect(routes) -> None:
+        for route in routes:
+            if id(route) in seen:
+                continue
+            seen.add(id(route))
             if isinstance(route, APIRoute):
                 collected.append(route)
-                continue
-            inner = getattr(route, "original_router", None) or getattr(route, "app", None)
-            if inner is not None and hasattr(inner, "routes"):
-                collect(inner)
+            nested = getattr(route, "original_router", None)
+            if nested is not None:
+                collect(getattr(nested, "routes", ()))
 
-    collect(app)
+    collect(app.routes)
     return {
-        (method, route.path): route
+        (method, _normalise(route.path)): route
         for route in collected
         if "/billing" in route.path
         for method in route.methods - {"HEAD", "OPTIONS"}
