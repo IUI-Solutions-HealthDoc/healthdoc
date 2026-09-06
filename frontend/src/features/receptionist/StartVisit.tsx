@@ -8,6 +8,7 @@ import { ApiError, newIdempotencyKey } from "@/lib/api";
 import { createVisit, issueToken, listQueues } from "./api";
 import {
   BED_OCCUPYING_VISIT_TYPES,
+  TOKEN_ISSUING_VISIT_TYPES,
   VISIT_TYPE_LABELS,
   type Patient,
   type QueueSummary,
@@ -52,6 +53,13 @@ export function StartVisit({ patient }: { patient: VisitPatient }) {
   const visitKey = useMemo(() => newIdempotencyKey(), []);
   const tokenKey = useMemo(() => newIdempotencyKey(), []);
 
+  // Only an outpatient waits for a number to be called. This screen used to
+  // run the OPD pipeline for every visit type: it issued a corridor token to
+  // admissions and teleconsults, and — because the whole control was rendered
+  // only when a queue was open — it refused to create an IPD, day-care,
+  // EMERGENCY or teleconsult visit at all on a day nobody had opened one.
+  const needsToken = TOKEN_ISSUING_VISIT_TYPES.includes(visitType);
+
   useEffect(() => {
     let cancelled = false;
     listQueues()
@@ -73,7 +81,7 @@ export function StartVisit({ patient }: { patient: VisitPatient }) {
   }, []);
 
   async function start() {
-    if (!queueId) return;
+    if (needsToken && !queueId) return;
     let visitReady = Boolean(visit);
     setBusy(true);
     setError(null);
@@ -92,6 +100,7 @@ export function StartVisit({ patient }: { patient: VisitPatient }) {
         visitReady = true;
       }
 
+      if (!needsToken) return;
       const issued = await issueToken(
         { queue_id: queueId, visit_id: activeVisit.id, priority },
         tokenKey,
@@ -110,11 +119,20 @@ export function StartVisit({ patient }: { patient: VisitPatient }) {
     }
   }
 
-  if (token) {
+  // A visit type that takes no token is finished the moment the visit exists.
+  // Keyed on `token || visit`, because waiting for a token that is never
+  // coming left the desk staring at the form it had just submitted.
+  if (token || (visit && !needsToken)) {
     return (
       <div className="surface-card space-y-3 p-8 text-center">
-        <p className="text-sm text-muted-foreground">Token issued</p>
-        <p className="font-mono text-5xl font-bold">{token.token_display}</p>
+        <p className="text-sm text-muted-foreground">
+          {token ? "Token issued" : "Visit created"}
+        </p>
+        {token ? (
+          <p className="font-mono text-5xl font-bold">{token.token_display}</p>
+        ) : (
+          <p className="text-2xl font-semibold">{VISIT_TYPE_LABELS[visitType]}</p>
+        )}
         <p className="text-sm text-muted-foreground">
           {patient.full_name} · {patient.uhid ?? patient.thid}
         </p>
@@ -164,11 +182,22 @@ export function StartVisit({ patient }: { patient: VisitPatient }) {
         </p>
       ) : null}
 
-      {queues === null && !error && (
+      {needsToken && queues === null && !error && (
         <p className="text-sm text-muted-foreground">Loading today&apos;s queues…</p>
       )}
 
-      {queues !== null && queues.length === 0 && (
+      {!needsToken && (
+        <button
+          type="button"
+          onClick={() => void start()}
+          disabled={busy}
+          className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+        >
+          {busy ? "Starting…" : "Create visit"}
+        </button>
+      )}
+
+      {needsToken && queues !== null && queues.length === 0 && (
         <div className="space-y-2">
           <p className="text-sm text-muted-foreground">
             No open queues today. A queue has to be opened for a doctor before
@@ -180,7 +209,7 @@ export function StartVisit({ patient }: { patient: VisitPatient }) {
         </div>
       )}
 
-      {queues !== null && queues.length > 0 && (
+      {needsToken && queues !== null && queues.length > 0 && (
         <>
           <label className="block space-y-1 text-sm">
             <span className="text-muted-foreground">Doctor</span>

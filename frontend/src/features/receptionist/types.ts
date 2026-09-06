@@ -119,6 +119,10 @@ export type VisitType = "opd" | "ipd" | "day_care" | "emergency" | "teleconsult"
  *  drift. Mirrors VisitType.bed_occupying() on the backend. */
 export const BED_OCCUPYING_VISIT_TYPES: readonly VisitType[] = ["ipd", "day_care"];
 
+/** Visit types that take an OPD counter token — mirrors VisitType.token_issuing().
+ *  Everything else creates the visit and stops there; see StartVisit. */
+export const TOKEN_ISSUING_VISIT_TYPES: readonly VisitType[] = ["opd"];
+
 export const VISIT_TYPE_LABELS: Record<VisitType, string> = {
   opd: "OPD — outpatient",
   ipd: "IPD — admitted",

@@ -15,7 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.business_date import get_business_date
-from app.common.enums import OrderStatus, QueuePriority, QueueTokenStatus
+from app.common.enums import OrderStatus, QueuePriority, QueueTokenStatus, VisitType
 from app.common.redis import department_channel, queue_channel
 from app.departments.models import Department, Room
 from app.inventory.models import InventoryItem
@@ -114,6 +114,20 @@ async def get_doctor_worklist(
         query = query.where(Queue.doctor_user_id == caller_user_id)
     if token_id is not None:
         query = query.where(QueueToken.id == token_id)
+    else:
+        # "Today's worklist" was every token this doctor had ever been issued.
+        # Queues are opened per service_date, so yesterday's unfinished tokens
+        # kept appearing, and the Waiting / In Service counters — computed in
+        # the browser over exactly these rows — counted patients who had gone
+        # home days earlier. The list grows without bound otherwise.
+        #
+        # Deliberately NOT applied to the single-token lookup above: that one
+        # is addressed by id and already scoped to this doctor and facility,
+        # and a consultation open across the business-day boundary must not
+        # stop loading halfway through.
+        query = query.where(
+            Queue.service_date == await get_business_date(db, caller_facility_id)
+        )
 
     rows = (await db.execute(query)).all()
     return [
@@ -365,6 +379,20 @@ async def create_token(
 ) -> QueueToken:
     if visit_id is None:
         raise HTTPException(422, "visit_id is required to create a queue token")
+
+    # The visit was previously never loaded here, so this endpoint could not
+    # tell an outpatient from an admission, and never checked whose visit it
+    # was. 404 rather than 403 for another facility's row — a 403 confirms the
+    # row exists (see the convention note in CLAUDE.md).
+    visit = await db.get(Visit, visit_id)
+    if visit is None or visit.facility_id != caller_facility_id:
+        raise HTTPException(404, "Visit not found")
+    if visit.visit_type not in VisitType.token_issuing():
+        raise HTTPException(
+            422,
+            f"A {visit.visit_type} visit does not take an OPD counter token. "
+            "Only outpatients wait for a consulting room to call a number.",
+        )
 
     queue = await _get_scoped_queue(db, queue_id, caller_facility_id, for_update=True)
     if not queue.is_open:
