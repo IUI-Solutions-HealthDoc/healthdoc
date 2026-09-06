@@ -47,6 +47,8 @@ DISPLAY_NAMES = {
     "dev.hod": "Dev Head of Department",
     "dev.emergency": "Dev Emergency Registrar",
     "dev.supervisor": "Dev Records Supervisor",
+    # Maker-checker needs a second pair of hands; see scripts/dev_setup.sh.
+    "dev.supervisor2": "Dev Records Supervisor Two",
     "dev.superadmin": "Dev Platform Superadmin",
 }
 
