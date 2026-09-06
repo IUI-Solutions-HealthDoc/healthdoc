@@ -390,12 +390,20 @@ async def seed(users: list[tuple[str, str]]) -> None:
             await session.execute(
                 text(
                     """
-                    SELECT count(*) FROM charge_master
-                     WHERE facility_id = :facility_id
-                       AND charge_code = 'REGISTRATION'
-                       AND is_active
-                       AND effective_from <= CURRENT_DATE
-                       AND (effective_to IS NULL OR effective_to >= CURRENT_DATE)
+                    -- The facility's business date, not the server's. Postgres
+                    -- runs UTC here, so the server's own date between 00:00 and
+                    -- 05:30 IST is still yesterday — a tariff effective from
+                    -- today would read as not yet active, failing the seed for
+                    -- five and a half hours a day. Same rule the application
+                    -- uses (schema §3).
+                    SELECT count(*) FROM charge_master cm
+                     JOIN facilities f ON f.id = cm.facility_id
+                     WHERE cm.facility_id = :facility_id
+                       AND cm.charge_code = 'REGISTRATION'
+                       AND cm.is_active
+                       AND cm.effective_from <= (now() AT TIME ZONE f.timezone)::date
+                       AND (cm.effective_to IS NULL
+                            OR cm.effective_to >= (now() AT TIME ZONE f.timezone)::date)
                     """
                 ),
                 {"facility_id": FACILITY_ID},
