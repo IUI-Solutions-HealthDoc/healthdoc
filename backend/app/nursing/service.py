@@ -8,13 +8,22 @@ import uuid
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 
-from sqlalchemy import select
+from fastapi import HTTPException
+from sqlalchemy import or_, select
+from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.enums import MedicationAdministrationStatus
-from app.nursing.models import IntakeOutputRecord, MedicationAdministration, Vitals
+from app.nursing.models import (
+    IntakeOutputRecord,
+    MedicationAdministration,
+    NursingHandoverNote,
+    Vitals,
+)
 from app.orders.models import PrescriptionItem
+from app.users.models import User
 from app.nursing.schemas import (
+    HandoverNoteCreate,
     IntakeOutputCreate, MedicationAdministrationCreate, VitalsCreate,
 )
 
@@ -336,3 +345,129 @@ async def complete_order(
     await db.flush()
     await db.refresh(order)
     return order
+
+
+async def record_handover_note(
+    db: AsyncSession,
+    payload: HandoverNoteCreate,
+    *,
+    recorded_by: uuid.UUID,
+    facility_id: uuid.UUID,
+) -> NursingHandoverNote:
+    """Record one SBAR shift handover.
+
+    The receiving nurse is validated here rather than trusted from the body:
+    an id that is inactive, belongs to another facility or does not exist would
+    otherwise be stored as the person who accepted responsibility for a
+    patient, and the handover would name somebody who never took it.
+
+    Handing over to yourself is refused. It is the one case that looks like a
+    handover in every report and transfers nothing.
+    """
+    if payload.handed_over_to == recorded_by:
+        raise HTTPException(
+            422, "A handover must name a different nurse as the receiver."
+        )
+
+    # Through the ORM rather than raw SQL: `users.id` is a UUID column, and a
+    # textual comparison against it binds a string on SQLite and silently
+    # matches nothing — the same shape as the fixture trap in CLAUDE.md.
+    receiver = (
+        await db.execute(
+            select(User.id).where(
+                User.id == payload.handed_over_to,
+                User.facility_id == facility_id,
+                User.is_active.is_(True),
+            )
+        )
+    ).scalar_one_or_none()
+    # 404, not 403: a 403 would confirm the user exists at another facility.
+    if receiver is None:
+        raise HTTPException(404, "Receiving nurse not found")
+
+    note = NursingHandoverNote(
+        id=uuid.uuid4(),
+        admission_id=payload.admission_id,
+        shift=payload.shift.value,
+        situation=payload.situation,
+        background=payload.background,
+        assessment=payload.assessment,
+        recommendation=payload.recommendation,
+        handed_over_to=payload.handed_over_to,
+        created_by=recorded_by,
+    )
+    db.add(note)
+    await db.flush()
+    await db.refresh(note)
+    return note
+
+
+async def list_handover_notes(
+    db: AsyncSession, admission_id: uuid.UUID
+) -> list[dict]:
+    """Handovers for one admission, most recent first.
+
+    Names are resolved in the same query. The ward board renders a list of
+    these, and a per-row user fetch is the N+1 that makes a screen a nurse
+    refreshes constantly feel broken.
+    """
+    receiver = aliased(User)
+    author = aliased(User)
+    rows = (
+        await db.execute(
+            select(
+                NursingHandoverNote,
+                receiver.full_name.label("handed_over_to_name"),
+                author.full_name.label("created_by_name"),
+            )
+            .outerjoin(receiver, receiver.id == NursingHandoverNote.handed_over_to)
+            .outerjoin(author, author.id == NursingHandoverNote.created_by)
+            .where(NursingHandoverNote.admission_id == admission_id)
+            .order_by(NursingHandoverNote.created_at.desc())
+        )
+    ).all()
+    return [
+        {
+            "id": note.id,
+            "admission_id": note.admission_id,
+            "shift": note.shift,
+            "situation": note.situation,
+            "background": note.background,
+            "assessment": note.assessment,
+            "recommendation": note.recommendation,
+            "handed_over_to": note.handed_over_to,
+            "handed_over_to_name": receiver_name,
+            "created_by": note.created_by,
+            "created_by_name": author_name,
+            "created_at": note.created_at,
+        }
+        for note, receiver_name, author_name in rows
+    ]
+
+
+async def list_handover_candidates(
+    db: AsyncSession, *, facility_id: uuid.UUID, exclude_user_id: uuid.UUID,
+    search: str | None = None,
+) -> list[User]:
+    """Colleagues this nurse can hand over to.
+
+    Facility-scoped, active-only and self-excluding, because each of those is a
+    rule record_handover_note already enforces — a picker that offers a name the
+    write path will refuse is worse than an empty one.
+
+    Not filtered to users who hold `nurse`: roles live in Keycloak, not in
+    `users`, so answering that here would mean an Admin API round trip per
+    keystroke. The write path stays the enforcement point.
+    """
+    statement = select(User).where(
+        User.facility_id == facility_id,
+        User.id != exclude_user_id,
+        User.is_active.is_(True),
+    )
+    if search and search.strip():
+        term = f"%{search.strip()}%"
+        statement = statement.where(
+            or_(User.full_name.ilike(term), User.username.ilike(term))
+        )
+    statement = statement.order_by(User.full_name).limit(10)
+    return list((await db.execute(statement)).scalars().all())
