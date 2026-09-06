@@ -274,3 +274,10 @@ export interface CreateStockTransferInput {
   to_location_id: string;
   items: Array<{ item_id: string; batch_id: string; quantity: string }>;
 }
+
+/** A colleague offered as first approver on a stock adjustment. */
+export interface ApproverCandidate {
+  id: string;
+  full_name: string;
+  designation: string | null;
+}

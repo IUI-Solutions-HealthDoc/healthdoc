@@ -387,6 +387,26 @@ class SupplierListOut(BaseModel):
     items: list[SupplierOut]
 
 
+class ApproverCandidateOut(BaseModel):
+    """A colleague a pharmacist may nominate as first approver.
+
+    Deliberately narrower than `UserOut`. The adjustment screen needs a name to
+    put on a button; it does not need email, mobile, employee id or
+    registration number, and the pharmacist who owns that screen has no reason
+    to be handed the facility's staff directory to obtain one.
+    """
+
+    model_config = {"from_attributes": True}
+
+    id: UUID
+    full_name: str
+    designation: str | None
+
+
+class ApproverCandidateListOut(BaseModel):
+    items: list[ApproverCandidateOut]
+
+
 class StockLocationOut(BaseModel):
     model_config = {"from_attributes": True}
 
