@@ -2,7 +2,7 @@
 
 WHY THIS IS SEPARATE FROM seed_dev_data.py
 
-That script seeds the SCAFFOLDING a developer needs: one facility, thirteen
+That script seeds the SCAFFOLDING a developer needs: one facility, fourteen
 users, a department, a room, a roster, a tariff. This one seeds the WORK — a
 day of patients moving through OPD, IPD and day care with orders, results,
 prescriptions and theatre bookings behind them, so every role has something

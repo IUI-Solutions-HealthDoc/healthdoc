@@ -29,11 +29,13 @@ pytestmark = pytest.mark.asyncio
 TODAY = date.today()
 
 
-async def _token(db, queue, visit_id=None):
+async def _token(db, queue, opd_visit, visit_id=None):
+    # A real visit, not a fabricated uuid: create_token now loads it to check
+    # the visit type and whose facility it belongs to.
     return await service.create_token(
         db,
         queue_id=queue.id,
-        visit_id=visit_id or uuid.uuid4(),
+        visit_id=visit_id or (await opd_visit()).id,
         priority=QueuePriority.NORMAL.value,
         caller_facility_id=queue.facility_id,
     )
@@ -54,17 +56,17 @@ async def test_list_returns_todays_queue_with_who_and_where(db, seed, queue):
     assert row["now_serving"] is None
 
 
-async def test_waiting_count_is_the_number_a_walk_in_is_routed_by(db, seed, queue):
+async def test_waiting_count_is_the_number_a_walk_in_is_routed_by(db, seed, queue, opd_visit):
     """Included on the row deliberately: computing it client-side would mean a
     request per doctor on the first screen of every morning."""
-    await _token(db, queue)
-    await _token(db, queue)
+    await _token(db, queue, opd_visit)
+    await _token(db, queue, opd_visit)
 
     (row,) = await service.list_queues(db, queue.facility_id, TODAY)
     assert row["waiting_count"] == 2
 
 
-async def test_reception_queue_identifies_the_patient_attached_to_each_token(db, seed, queue):
+async def test_reception_queue_identifies_the_patient_attached_to_each_token(db, seed, queue, opd_visit):
     """A token number alone is not enough at a busy counter; reception must
     confirm the chart before changing its priority or answering a query."""
     dept, _room, doctor = seed
@@ -89,7 +91,7 @@ async def test_reception_queue_identifies_the_patient_attached_to_each_token(db,
     )
     db.add_all([patient, visit])
     await db.flush()
-    await _token(db, queue, visit.id)
+    await _token(db, queue, opd_visit, visit.id)
 
     result = await service.list_queue_tokens(db, queue.id, dept.facility_id)
 
@@ -187,7 +189,7 @@ async def test_opening_options_are_named_facility_scoped_available_roster_rows(d
     assert await service.list_queue_opening_options(db, dept.facility_id, TODAY) == []
 
 
-async def test_shortest_queue_first(db, seed, queue):
+async def test_shortest_queue_first(db, seed, queue, opd_visit):
     """The order a receptionist reads it in."""
     dept, _room, _doctor = seed
 
@@ -204,7 +206,45 @@ async def test_shortest_queue_first(db, seed, queue):
         room_id=None, display_label="Busy", service_date=TODAY,
         caller_facility_id=dept.facility_id,
     )
-    await _token(db, busy_queue)
+    await _token(db, busy_queue, opd_visit)
 
     rows = await service.list_queues(db, dept.facility_id, TODAY)
     assert [r["waiting_count"] for r in rows] == [0, 1]
+
+
+async def test_the_doctor_worklist_is_todays_only(db, seed, queue, opd_visit):
+    """"Today's worklist" was every token the doctor had ever been issued.
+
+    Queues are opened per service_date, so yesterday's unfinished tokens kept
+    appearing — and the Waiting / In Service counters are computed in the
+    browser over exactly these rows, so they counted patients who had gone
+    home days before.
+    """
+    _dept, _room, doctor = seed
+    today_token = await _token(db, queue, opd_visit)
+
+    yesterday_queue = await service.create_queue(
+        db,
+        department_id=queue.department_id,
+        doctor_user_id=doctor.id,
+        room_id=queue.room_id,
+        display_label="Yesterday",
+        service_date=date.today() - timedelta(days=1),
+        caller_facility_id=queue.facility_id,
+    )
+    stale_token = await _token(db, yesterday_queue, opd_visit)
+
+    rows = await service.get_doctor_worklist(db, doctor.id, queue.facility_id, ["doctor"])
+    listed = {row["id"] for row in rows}
+
+    assert today_token.id in listed
+    assert stale_token.id not in listed, (
+        "a token from a queue opened on an earlier day is not part of today's worklist"
+    )
+
+    # The single-token lookup stays unfiltered on purpose: a consultation open
+    # across the business-day boundary must not stop loading halfway through.
+    still_openable = await service.get_doctor_worklist(
+        db, doctor.id, queue.facility_id, ["doctor"], token_id=stale_token.id
+    )
+    assert [row["id"] for row in still_openable] == [stale_token.id]

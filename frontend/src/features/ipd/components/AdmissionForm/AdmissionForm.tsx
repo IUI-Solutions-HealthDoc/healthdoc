@@ -40,8 +40,15 @@ export default function AdmissionForm({
   // Reusing BedGrid instead of a separate dropdown component — filtered to
   // vacant beds in the selected ward, since admission can only go to a
   // vacant bed.
+  //
+  // `occupant` is checked as well as `status`, and it is the one that decides.
+  // The backend treats admissions as authoritative and `beds.status` as a
+  // mirror it keeps in the same transaction — see reconcile_bed_status(),
+  // which exists precisely because the two can drift apart. When they do, this
+  // filter used to offer a bed the server knows is occupied, and the admission
+  // came back 409 with nothing on screen to explain why.
   const vacantBedsInWard = beds.filter(
-    (bed) => bed.ward_id === wardId && bed.status === "vacant",
+    (bed) => bed.ward_id === wardId && bed.status === "vacant" && bed.occupant === null,
   );
 
   const handleReset = () => reset(DEFAULT_VALUES);

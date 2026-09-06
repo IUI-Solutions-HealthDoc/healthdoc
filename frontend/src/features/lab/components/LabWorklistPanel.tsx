@@ -13,6 +13,7 @@ import {
 import type { LabOrderItem, LabResult } from "@/features/lab/types";
 import { ApiError, formatDateTime } from "@/lib/api";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/AsyncState";
+import { useAuth } from "@/providers/auth-provider";
 
 const STATUS_FILTERS = [
   { value: "all", label: "All" },
@@ -71,6 +72,8 @@ function ResultHistory({ items }: { items: LabResult[] }) {
 }
 
 export function LabWorklistPanel() {
+  const { user } = useAuth();
+  const canManageResults = user?.role === "lab_tech";
   const [rows, setRows] = useState<LabOrderItem[] | null>(null);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -405,7 +408,13 @@ export function LabWorklistPanel() {
             <StatusChip status={selected.status} />
           </div>
 
-          {selected.status === "placed" ? (
+          {!canManageResults && (
+            <p className="text-sm text-muted-foreground">
+              Read-only result view. Sample collection, result entry and verification are handled by lab professionals.
+            </p>
+          )}
+
+          {canManageResults && selected.status === "placed" ? (
             <div className="space-y-3">
               <label className="block max-w-md space-y-1 text-sm">
                 <span className="text-muted-foreground">Sample barcode</span>
@@ -427,7 +436,7 @@ export function LabWorklistPanel() {
             </div>
           ) : null}
 
-          {selected.status === "in_progress" ? (
+          {canManageResults && selected.status === "in_progress" ? (
             <div className="space-y-4">
               <label className="block space-y-1 text-sm">
                 <span className="text-muted-foreground">Result data (JSON object)</span>
@@ -467,7 +476,7 @@ export function LabWorklistPanel() {
             </div>
           ) : null}
 
-          {selected.status === "completed" ? (
+          {canManageResults && selected.status === "completed" ? (
             <div className="space-y-3 rounded-md border border-warning bg-warning-muted p-4 text-sm">
               <p>
                 This preliminary result needs independent verification. The user who entered it is
@@ -489,7 +498,7 @@ export function LabWorklistPanel() {
               <p className="rounded-md bg-success-muted p-3 text-sm text-success">
                 Result verified and released.
               </p>
-              {currentResult?.status === "final" || currentResult?.status === "corrected" ? (
+              {canManageResults && (currentResult?.status === "final" || currentResult?.status === "corrected") ? (
                 <div className="space-y-3 rounded-md border border-border p-4">
                   <h3 className="font-medium">Amend released result</h3>
                   <p className="text-xs text-muted-foreground">

@@ -12,6 +12,7 @@ from app.common.idempotency import check_idempotency, hash_request_body, record_
 from app.common.modules import require_module
 from app.common.redis import stock_alert_channel, subscribe
 from app.pharmacy.schemas import (
+    ApproverCandidateListOut,
     GrnListOut,
     IndentListOut,
     AdjustmentListOut,
@@ -38,6 +39,7 @@ from app.pharmacy.schemas import (
     AdjustmentApprovalRequest,
 )
 from app.pharmacy.service import (
+    list_adjustment_candidates,
     list_grns,
     list_indents,
     list_adjustments,
@@ -524,6 +526,38 @@ async def approve_adjustment_endpoint(
         db, idempotency_key, _APPROVE_ADJUSTMENT_ENDPOINT, 200, response_body, current_user.id
     )
     return result
+
+
+@router.get(
+    "/adjustment-candidates",
+    response_model=ApproverCandidateListOut,
+    dependencies=[
+        Depends(require_module("pharmacy")),
+        Depends(require_roles("pharmacist", "admin")),
+    ],
+)
+async def list_adjustment_candidates_endpoint(
+    current_user: CurrentDbUser,
+    db: DbSession,
+    search: str | None = Query(
+        None, description="Matches full name or username. Case-insensitive, partial."
+    ),
+) -> ApproverCandidateListOut:
+    """First-approver candidates for a stock adjustment.
+
+    The adjustment screen used to call `GET /users` for this, which is gated
+    `admin` at the router. A pharmacist therefore got 403 on every keystroke,
+    and the screen's `.catch()` turned that into an empty result list — so the
+    role that owns maker-checker adjustments was told, silently and wrongly,
+    that no colleague by that name exists. A pharmacist needs a name to
+    nominate, not the staff directory, so this returns only that.
+    """
+    return await list_adjustment_candidates(
+        db,
+        facility_id=current_user.facility_id,
+        exclude_user_id=current_user.id,
+        search=search,
+    )
 
 
 @router.get(

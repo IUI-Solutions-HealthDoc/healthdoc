@@ -30,13 +30,35 @@
  * record that does not exist in the seed would not be — so no dashboard below
  * is given an id to fetch. Every path is a landing screen.
  */
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 import process from "node:process";
 
 import puppeteer from "puppeteer";
 
 const baseUrl = process.env.E2E_BASE_URL ?? "https://localhost";
 const requestedRole = process.env.E2E_ROLE;
+const allowRecovery = process.env.E2E_ALLOW_RECOVERY === "1";
 const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH ?? undefined;
+
+/**
+ * Optional evidence capture. A screenshot is NOT the assertion — every check
+ * below still decides pass or fail. The image is captured after those checks
+ * and stamped with their verdict, so a picture of a broken screen can never be
+ * filed as proof that the screen works. Capturing from inside the gate, rather
+ * than from a second harness, keeps the evidence from drifting away from the
+ * thing that was actually verified.
+ */
+const evidenceDir = process.env.E2E_EVIDENCE_DIR;
+const evidence = [];
+const warnings = [];
+const runId = process.env.E2E_RUN_ID;
+if (evidenceDir) {
+  await mkdir(evidenceDir, { recursive: true });
+  await writeFile(path.join(evidenceDir, "dashboards.json"), JSON.stringify({
+    runId, baseUrl, completed: false, fullRun: !requestedRole, recoveryAllowed: allowRecovery, screens: [],
+  }));
+}
 
 /**
  * Dashboards per role, as the sidebar offers them.
@@ -310,10 +332,13 @@ async function signIn(page, role) {
   await page.waitForSelector("#username", { timeout: 30_000 });
   await page.type("#username", role.username);
   await page.type("#password", "devpass");
-  await Promise.all([
+  const [loginResponse] = await Promise.all([
     page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 30_000 }),
     page.click("#kc-login"),
   ]);
+  if (loginResponse && loginResponse.status() >= 400) {
+    throw new Error(`Keycloak login navigation returned HTTP ${loginResponse.status()}`);
+  }
   await page.waitForFunction(
     (expected) => window.location.pathname === expected,
     { timeout: 60_000 },
@@ -324,12 +349,17 @@ async function signIn(page, role) {
   try {
     await page.waitForSelector("#main-content", { timeout: 60_000 });
   } catch (_error) {
-    // In the development stack, compiling many role routes back-to-back can
-    // restart Next after Keycloak has already completed the redirect. Reload
-    // the authenticated landing route once; a real auth/role defect still
-    // fails because the required content and sidebar remain mandatory.
+    if (!allowRecovery) throw _error;
+    // Preserve the recovery in evidence rather than guessing its cause or
+    // reporting a retry as a clean first load.
+    const state = await page.evaluate(() => ({
+      pathname: window.location.pathname,
+      readyState: document.readyState,
+      loadingWorkspace: document.body.textContent.includes("Loading your workspace"),
+    }));
+    warnings.push({ role: role.name, message: "Landing content missing after 60 seconds; reloaded once", ...state });
     console.warn(
-      `[${role.name}] landing page did not hydrate after login; reloading once`,
+      `[${role.name}] login did not reach workspace content; diagnostic reload requested`,
     );
     await page.reload({ waitUntil: "domcontentloaded", timeout: 60_000 });
     await page.waitForFunction(
@@ -491,15 +521,67 @@ async function openDashboard(page, role, dashboard) {
       return;
     } catch (error) {
       lastError = error;
-      if (attempt === 2) break;
+      if (!allowRecovery || attempt === 2) break;
+      warnings.push({
+        role: role.name, pathname: new URL(page.url()).pathname,
+        message: `Navigation to ${dashboard.path} did not settle; retried once`,
+      });
       console.warn(
-        `[${role.name}] ${dashboard.path} — navigation did not settle; retrying once ` +
-          `(the Next.js development server can restart after compiling many routes)`,
+        `[${role.name}] ${dashboard.path} — navigation did not settle; diagnostic retry requested`,
       );
       await delay(1_500);
     }
   }
   throw lastError;
+}
+
+function evidenceSlug(value) {
+  return value.replace(/^\//, "").replace(/[^a-zA-Z0-9]+/g, "-") || "index";
+}
+
+/**
+ * Record what this screen looked like at the moment it was judged.
+ *
+ * `failures` is passed in rather than recomputed so the verdict stored beside
+ * the image is the same verdict that gates the build.
+ */
+async function captureEvidence(page, role, dashboard, failures, observed) {
+  const file = `${role.name}__${evidenceSlug(dashboard.path)}.png`;
+  const entry = {
+    role: role.name,
+    username: role.username,
+    path: dashboard.path,
+    // The sidebar is what a user actually reads, so the report names each
+    // screen the way the product does instead of inventing a second vocabulary.
+    label: null,
+    screenshot: null,
+    passed: failures.length === 0,
+    failures: [...failures],
+    apiRequests: observed.started,
+    apiResponses: observed.responded,
+    apiFailures: observed.bad.length,
+    capturedAt: new Date().toISOString(),
+  };
+  try {
+    entry.label = await page.$eval(
+      `#workspace-sidebar a[href$="${dashboard.path}"]`,
+      (link) => link.textContent?.trim() || null,
+    );
+  } catch {
+    entry.label = null;
+  }
+  try {
+    await mkdir(evidenceDir, { recursive: true });
+    // Next's development overlay is our tooling, not the product. Hide it for
+    // the capture only — changing `devIndicators` would take it away from
+    // developers to tidy up a screenshot.
+    await page.addStyleTag({ content: "nextjs-portal{display:none!important}" });
+    await page.screenshot({ path: path.join(evidenceDir, file), fullPage: true });
+    entry.screenshot = file;
+  } catch (error) {
+    entry.captureError = error instanceof Error ? error.message : String(error);
+  }
+  evidence.push(entry);
 }
 
 async function exerciseDashboard(context, role, dashboard) {
@@ -642,8 +724,20 @@ async function exerciseDashboard(context, role, dashboard) {
         `response(s), ${observed.bad.length} failed`,
     );
     return { failures, observed, offeredNavigation };
+  } catch (error) {
+    // finally captures this list; letting the exception skip this assignment
+    // would stamp a timed-out screen PASS before the outer loop saw it fail.
+    failures.push(`Smoke could not finish: ${error instanceof Error ? error.message : error}`);
+    throw error;
   } finally {
     active = false;
+    if (evidenceDir) {
+      try {
+        await captureEvidence(page, role, dashboard, failures, observed);
+      } catch (error) {
+        console.warn(`[${role.name}] ${dashboard.path} — evidence capture failed: ${error}`);
+      }
+    }
     await page.close();
   }
 }
@@ -692,6 +786,10 @@ async function exerciseRole(browser, role) {
 const browser = await puppeteer.launch({
   headless: "new",
   executablePath,
+  // A clinical desktop, not puppeteer's 800x600 default. Below the 768px `md`
+  // breakpoint the sidebar collapses, so the small default was testing the
+  // mobile layout of a workstation application.
+  defaultViewport: { width: 1440, height: 900 },
   // The stack serves TLS with a self-signed certificate in dev and CI.
   args: ["--no-sandbox", "--ignore-certificate-errors"],
 });
@@ -718,6 +816,21 @@ try {
   }
 } finally {
   await browser.close();
+}
+
+if (evidenceDir) {
+  await mkdir(evidenceDir, { recursive: true });
+  await writeFile(
+    path.join(evidenceDir, "dashboards.json"),
+    `${JSON.stringify({
+      capturedAt: new Date().toISOString(), baseUrl, runId,
+      completed: true, fullRun: !requestedRole, recoveryAllowed: allowRecovery,
+      expectedScreens: selectedRoles.reduce((count, role) => count + role.dashboards.length, 0),
+      failures: allFailures, screens: evidence, warnings,
+    }, null, 2)}\n`,
+  );
+  const proved = evidence.filter((item) => item.passed).length;
+  console.log(`\nEvidence: ${proved}/${evidence.length} screen(s) captured as passing in ${evidenceDir}`);
 }
 
 if (allFailures.length > 0) {

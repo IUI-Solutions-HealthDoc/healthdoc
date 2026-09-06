@@ -329,7 +329,28 @@ def check_file(path: pathlib.Path) -> list[Finding]:
                         "schema §4A.1"))
     return f
 
+def repo_root() -> pathlib.Path:
+    """Anchor every path here, because CI does not run this from the repo root.
+
+    `git diff --name-only` always prints repo-root-relative paths, but the
+    backend job sets `working-directory: backend`. Every `exists()` below was
+    therefore false, the file list came back empty, and the step printed
+    "no python files to check" and exited 0 on every pull request — a gate
+    that ran on nothing for as long as it has existed.
+    """
+    try:
+        top = subprocess.run(["git", "rev-parse", "--show-toplevel"],
+                             capture_output=True, text=True).stdout.strip()
+        if top:
+            return pathlib.Path(top)
+    except Exception:
+        pass
+    # No git (a tarball export, say): fall back to this file's own location,
+    # which is <root>/backend/scripts/pr_check.py.
+    return pathlib.Path(__file__).resolve().parents[2]
+
 def changed_files() -> list[pathlib.Path]:
+    root = repo_root()
     try:
         base = subprocess.run(["git","merge-base","HEAD","origin/staging"],
                               capture_output=True, text=True).stdout.strip() or "HEAD~1"
@@ -337,12 +358,12 @@ def changed_files() -> list[pathlib.Path]:
                              capture_output=True, text=True).stdout.split()
     except Exception:
         out = []
-    return [pathlib.Path(p) for p in out if p.endswith(".py") and pathlib.Path(p).exists()]
+    return [root / p for p in out if p.endswith(".py") and (root / p).exists()]
 
 def main() -> int:
     args = sys.argv[1:]
     if args == ["--all"]:
-        files = list(pathlib.Path("backend").rglob("*.py"))
+        files = list((repo_root() / "backend").rglob("*.py"))
     elif args:
         files = [pathlib.Path(a) for a in args]
     else:

@@ -1,5 +1,5 @@
 import { BED_STATUS_STYLES } from "./constants";
-import { Bed, BED_STATUS_LABELS } from "./BedGrid.types";
+import { Bed, BED_STATUS_LABELS, type BedStatus } from "./BedGrid.types";
 
 type BedGridProps = {
   beds: Bed[];
@@ -29,6 +29,11 @@ export default function BedGrid({
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
       {beds.map((bed) => {
         const isSelected = bed.bed_id === selectedBedId;
+        // An occupant is proof of occupancy; `status` is a mirror that can
+        // drift from it. Printing "Vacant" in the corner of a card that names
+        // the patient lying in the bed is never the more useful of the two.
+        const effectiveStatus: BedStatus =
+          bed.occupant !== null && bed.status !== "occupied" ? "occupied" : bed.status;
 
         return (
           <div
@@ -63,9 +68,9 @@ export default function BedGrid({
               <h3 className="text-base font-semibold">{bed.bed_number}</h3>
 
               <span
-                className={`rounded-full px-2 py-1 text-xs font-medium ${BED_STATUS_STYLES[bed.status]}`}
+                className={`rounded-full px-2 py-1 text-xs font-medium ${BED_STATUS_STYLES[effectiveStatus]}`}
               >
-                {BED_STATUS_LABELS[bed.status]}
+                {BED_STATUS_LABELS[effectiveStatus]}
               </span>
             </div>
 

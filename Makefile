@@ -77,6 +77,11 @@ test-db-reset:    ## Drop and rebuild the test database (after editing a migrati
 
 test-pg: test-db  ## Run the tests that need real PostgreSQL: make test-pg k=late_utc
 	@cd backend && $(TEST_ENV) ../.venv/bin/pytest $(if $(k),-k "$(k)",) $(if $(p),$(p),tests/) -q
+# backend/pyproject.toml pins testpaths to backend/tests, so nothing under
+# scripts/ was ever collected — the guards on the role-evidence report existed
+# and ran nowhere. Skipped when p= names a specific file, so targeted runs stay
+# targeted.
+	@if [ -z "$(p)" ]; then .venv/bin/pytest scripts/tests -q; fi
 
 audit-deps:       ## CVE scan of backend + frontend dependencies (WASA gate)
 	@echo "== backend (pip-audit) =="

@@ -67,7 +67,9 @@ export default function AddIntakeOutputForm({
       title="Intake / Output Record"
       description="Record a single fluid intake or output entry. Log intake and output as separate entries."
     >
-      <form onSubmit={handleSubmit(submitHandler)} className="space-y-6">
+      {/* noValidate for the same reason as AddVitalsForm: zod owns validation,
+          and a native bubble the app cannot see is not a usable error. */}
+      <form onSubmit={handleSubmit(submitHandler)} className="space-y-6" noValidate>
         <div className="grid gap-5 md:grid-cols-2">
           <SelectField
             label="Entry Type"
@@ -82,7 +84,14 @@ export default function AddIntakeOutputForm({
           <NumberField
             label="Volume (mL)"
             placeholder="500"
-            registration={register("volume_ml", { valueAsNumber: true })}
+            // Same NaN trap as AddVitalsForm: a blank number input reads as
+            // NaN, which turns "Volume must be greater than 0" into a bare
+            // "Invalid input". volume_ml is required, so blank must reach zod
+            // as undefined for it to say so properly.
+            registration={register("volume_ml", {
+              setValueAs: (value: string) =>
+                value === "" || value === null ? undefined : Number(value),
+            })}
             error={errors.volume_ml}
           />
 

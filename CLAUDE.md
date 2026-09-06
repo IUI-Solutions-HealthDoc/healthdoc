@@ -14,12 +14,12 @@ make up           # subsequent starts
 make down
 ```
 
-`make setup` MUST end with `Seeded development facility and 13 authenticated
+`make setup` MUST end with `Seeded development facility and 14 authenticated
 users`. If it stops short, the accounts do not exist and every login fails —
 which presents as a wrong password, so people blame themselves before the
 script. It now verifies this and exits 1 naming the missing accounts.
 
-App at https://localhost (self-signed cert). All thirteen dev accounts use
+App at https://localhost (self-signed cert). All fourteen dev accounts use
 `devpass`; usernames and landing routes are in `docs/manual-test-guide.md`.
 
 ### Tests
@@ -73,9 +73,9 @@ When the honest answer is "I cannot do this here", say that — do not substitut
 a plausible value.
 
 **A control that dev cannot satisfy does not belong in the shared Keycloak
-realm.** Forcing TOTP sends all thirteen dev identities to an OTP enrolment
+realm.** Forcing TOTP sends all fourteen dev identities to an OTP enrolment
 screen; a strong password policy makes `kc set-password devpass` fail for all
-thirteen. Both are correct for production and both live in
+fourteen. Both are correct for production and both live in
 `scripts/deploy/render_keycloak_realm.py`, applied at render time.
 
 **UI containment is not authorization.** Six endpoints returned 200 to a role
@@ -95,16 +95,81 @@ exact field set or a parsed AST is both simpler and stricter.
 **`git fetch` fails but exits 0 in some sandboxes.** Always check ref dates
 before claiming a branch is behind.
 
-**A gate that passes vacuously is worse than no gate.** Three of these have now
-been found, all reporting success while checking nothing. `make contract`'s
-extractor used `\bapi(?:<[^;\n]*?>)?\(`, whose character class excluded every
-generic containing a `;` or a newline — six real calls were invisible while it
-printed "172 calls match". CI's `PR convention check` runs `pr_check.py` with
-`working-directory: backend`, where every repo-root-relative path from
-`git diff` fails an `exists()` test, so it prints "no python files to check"
-and exits 0. And `assert_audit_coverage()` is never called at all. When a
-check's output is a number, make something change that number and confirm the
-number moves.
+**A pipe hides the exit code you are reading.** `npm run x 2>&1 | tail -40`
+reports `tail`'s status, not the command's. A workflow run with three failures
+was read as green because of this. Read the summary line, or drop the pipe.
+
+**A screen that loads is not a screen that works, and the load check cannot
+tell you which.** All five defects found in the September role sweep sat behind
+screens whose every API call returned 200: a pharmacist's approver search
+403ing into an empty list, reception unable to create an IPD or EMERGENCY visit
+on a day with no OPD queue, `POST /queue/tokens` accepting any visit id from
+any facility, and a "Today's worklist" with no date filter that returned every
+token the doctor had ever been issued. Load checks are cheap and catch
+wired-to-nothing; only driving the write path catches these.
+
+**`.catch(() => setThings([]))` converts a refusal into an absence.** The
+adjustment screen's approver lookup did exactly this, so an admin-only 403
+presented as "no colleague by that name works here" — silent, plausible, and
+invisible to every gate. If a fetch can fail, the empty state and the failed
+state must not render the same.
+
+**A schema field with no rendered input can never be satisfied, and its error
+has nowhere to appear.** Three of these were found in one afternoon, and each
+one made a whole workflow impossible while looking completely normal.
+`AddVitalsForm` required `measured_at`, rendered no control for it and never
+set it, so zodResolver rejected every submission and Save Vitals did nothing at
+all — no request, no message. `DischargeForm` defaulted
+`destination_facility_id` to `""` against `z.string().uuid().optional()`, where
+`""` is neither a UUID nor absent, so no patient could be discharged by any
+route. If a schema field is required or constrained, either render it or set
+it; a field the user cannot see is a field they cannot fix.
+
+**An empty `<input type="number">` reads as NaN, not undefined.** With
+`{ valueAsNumber: true }`, every blank optional numeric field reached
+`z.number().optional()` as NaN and failed — so a nurse could not record a pulse
+without also filling in weight, height and both blood pressures, each rejected
+with a bare "Invalid input". Use `setValueAs` and map `""` to `undefined`.
+
+**A native `step` of 1 silently blocks decimals.** `NumberField` set
+`inputMode="decimal"` and no `step`, so 37.1 °C was invalid to the browser, the
+form never submitted, and nothing in the app said why — constraint validation
+reports through a native bubble the page cannot see. The forms now carry
+`noValidate` and let zod be the single validation authority, which is also the
+only layer that can render a message next to the field.
+
+**`beds.status` is a mirror of `admissions`, and mirrors drift.**
+`reconcile_bed_status()` exists to report the disagreement precisely because it
+happens. The admission bed picker filtered on the mirror and offered a bed an
+active admission already held; the server answered 409 and the screen showed
+nothing. Read occupancy from `occupant`, which comes from the admission.
+
+**`token_display` repeats.** It is allocated per department per business day,
+so several rows in one list can read `GENMED-002`. Key tests on the patient or
+the token id, never on the displayed number.
+
+**A gate that passes vacuously is worse than no gate.** Four of these have now
+been found, all reporting success while checking nothing. All four are closed;
+they are kept here because the shape recurs.
+
+1. `make contract`'s extractor used `\bapi(?:<[^;\n]*?>)?\(`, whose character
+   class excluded every generic containing a `;` or a newline — six real calls
+   were invisible while it printed "172 calls match".
+2. CI's `PR convention check` ran `pr_check.py` under
+   `working-directory: backend`, where every repo-root-relative path from
+   `git diff` failed an `exists()` test, so it printed "no python files to
+   check" and exited 0 on every pull request it ever ran. `pr_check.py` now
+   anchors on `git rev-parse --show-toplevel`.
+3. `assert_audit_coverage()` existed and was called from nowhere. It now runs
+   in `app.main`'s lifespan with a non-empty `AUDITABLE_MODULE_PREFIXES`.
+4. `scripts/tests/` was collected by nothing: `backend/pyproject.toml` pins
+   `testpaths = ["tests"]` and `make test-pg` runs pytest from `backend/`, so
+   eleven tests guarding the role-evidence report ran in no gate and in no CI
+   job. `make test-pg` now runs them too, on a full run.
+
+When a check's output is a number, make something change that number and
+confirm the number moves. When a check is a file, confirm something actually
+collects it.
 
 **A ✅ against a partial fix reads as a closed finding.** `wasa-readiness.md`
 said "M4 ✅ Five `/ping` stubs now require `admin`". True — and twenty existed,
@@ -168,7 +233,40 @@ the console shows `[HMR] connected`.
 
 ## Current state
 
-- 1155 tests passing; `pip-audit` and `npm audit` both clean.
+- 1226 backend tests passing in the 5–6 September retest (four existing ABDM
+  Pydantic alias warnings remain); 23 frontend tests and 11 evidence-report
+  regressions pass. `pip-audit` and `npm audit` both clean.
+  `shadcn` was the root of all three npm advisories (it dragged in express, the
+  MCP SDK and babel) and was a **production** dependency that nothing imported:
+  the 16 components under `src/components/ui/` are local source, and there is no
+  `components.json` for its CLI. Removing it cleared two advisories; the third,
+  `browserslist` via `eslint-config-next`, is pinned forward by an `overrides`
+  entry in `frontend/package.json`.
+- Per-role browser evidence lives in `docs/role-verification-evidence.md`,
+  generated by `scripts/build_role_evidence.py` from the three e2e harnesses.
+  47 screens across 13 roles and 41 workflow steps in the latest strict run.
+  Entries distinguish real writes/read-back from read-only tabs and access
+  refusals; they do not prove every button works. All nine workflow groups and
+  the superadmin isolation gate passed, with recovery disabled. The report
+  rejects incomplete/filtered/mixed runs and failed outcomes, not just failed
+  screenshots. `scripts/maintenance/
+  discharge_synthetic_admissions.py` frees beds a failed run left occupied.
+- **Login rate limiting had a real asset-budget defect.** Keycloak theme
+  fonts/JS/images spent the same bucket as credential requests; the retest
+  logged 21 refusals, including two login POSTs. `nginx.conf` now excludes only
+  GET/HEAD `/auth/resources/` assets from that bucket, retaining the auth
+  10r/s + burst-20 policy. A live 40-request asset burst returned 40×200, while
+  the same burst against a non-asset auth endpoint still triggered the limit.
+- Browser harness traps: `#main-content` exists on authenticated `/` before
+  the role redirect finishes; wait for the landing route. Also, navigating the
+  login tab can abort its mount-response bodies. Workflow checks now use a
+  separate tab in the same real SSO context. Recovery is diagnostic-only
+  (`E2E_ALLOW_RECOVERY=1`), never the default release gate.
+- **`dev.supervisor2` is the fourteenth account, and it is not padding.**
+  THID→UHID promotion is maker-checker: the approver must differ from the
+  requester and the unmerger from the approver. With one supervisor the only
+  reachable outcome was the refusal, so the approve and unmerge halves of that
+  flow had never been executed by anyone.
 - WASA cybersecurity track: **all findings closed**, including M3 — the CSP now
   carries a per-request nonce from `frontend/src/proxy.ts` instead of
   `'unsafe-inline'`, and every route renders `force-dynamic` because a nonce
@@ -279,9 +377,11 @@ ABHA is 404 `ABDM-1114`, a real answer that must not be logged as an outage.
 Credentials must never be committed and CI must never hold them; the client
 tests are fully mocked and stay that way.
 
-**Audit coverage is 17 of 98 models**, up from 8. `assert_audit_coverage()`
-still exists and is still never called, with `AUDITABLE_MODULE_PREFIXES` empty
-— so the guard checks nothing. Patient creation is now audited explicitly on
+**Audit coverage is 17 of 98 models**, up from 8. `assert_audit_coverage()` is
+now called from `app.main`'s lifespan and covers
+`app.integrations.abdm.hip` / `.hiu`; removing an opt-in in either package
+fails the boot, so the guard is non-vacuous — but it still only guards those
+two packages, and the other 81 models are outside its reach. Patient creation is now audited explicitly on
 both routes (`POST /patients` and `POST /emergency/patients`) rather than
 through the listener, because `update_patient()` already writes its own row and
 flipping the opt-in would double-write. Of the 12 models in `app.patients`,
