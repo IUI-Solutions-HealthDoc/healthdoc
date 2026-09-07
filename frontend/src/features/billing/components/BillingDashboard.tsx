@@ -7,6 +7,7 @@ import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 
 import { toast } from "@/components/ui/toast";
+import { useAuth } from "@/providers/auth-provider";
 import { meridian } from "@/styles/theme";
 import { createRefund, getInvoice } from "../api";
 import { useCollectPayment } from "../hooks/useCollectPayment";
@@ -26,11 +27,14 @@ import { SchemeSelector } from "./SchemeSelector";
 import "../receipt-print.css";
 
 export function BillingDashboard() {
+  const { user } = useAuth();
   const {
     invoices,
     loading: listLoading,
     error: listError,
     filters,
+    total,
+    setPage,
     setQuery,
     setStatus,
     refresh: refreshList,
@@ -93,7 +97,7 @@ export function BillingDashboard() {
           Billing
         </Typography>
         <Typography sx={{ m: 0, mt: 0.5, fontSize: "0.875rem", color: meridian.textSecondary }}>
-          Create invoices, collect payments, print receipts, and record reversals.
+          Build departmental charges, issue invoices, collect payments and print receipts.
         </Typography>
       </Box>
 
@@ -117,6 +121,10 @@ export function BillingDashboard() {
           query={filters.query ?? ""}
           status={filters.status ?? "all"}
           selectedId={selectedId}
+          page={filters.page ?? 1}
+          pageSize={filters.page_size ?? 20}
+          total={total}
+          onPageChange={setPage}
           onQueryChange={setQuery}
           onStatusChange={setStatus}
           onSelect={handleSelect}
@@ -143,7 +151,7 @@ export function BillingDashboard() {
             <Typography sx={{ color: meridian.textSecondary }}>Loading invoice…</Typography>
           ) : (
             <>
-              {!editor.canEdit ? (
+              {!editor.canBuild ? (
                 <Typography
                   sx={{
                     px: 2,
@@ -161,6 +169,9 @@ export function BillingDashboard() {
               ) : null}
 
               <InvoiceHeader invoice={editor.draft} />
+              <Typography sx={{ color: meridian.textSecondary, fontSize: "0.875rem" }}>
+                Charges and totals are server-calculated. Manual line, discount and scheme edits are unavailable.
+              </Typography>
 
               <Box
                 sx={{
@@ -196,15 +207,15 @@ export function BillingDashboard() {
                 onRemove={editor.removeItem}
               />
 
-              {editor.canEdit ? (
+              {editor.canBuild ? (
                 <Stack direction="row" useFlexGap sx={{ gap: 1.25, flexWrap: "wrap" }}>
                   <Button
                     variant="outlined"
-                    disabled={editor.busy || !editor.isDirty}
-                    onClick={() => void editor.saveDraft()}
+                    disabled={editor.busy}
+                    onClick={() => void editor.build()}
                     sx={{ textTransform: "none", fontWeight: 600, borderRadius: "10px" }}
                   >
-                    Save draft
+                    Build charges
                   </Button>
                   <Button
                     variant="outlined"
@@ -216,7 +227,7 @@ export function BillingDashboard() {
                   </Button>
                   <Button
                     variant="contained"
-                    disabled={editor.busy}
+                    disabled={editor.busy || !editor.canIssue}
                     onClick={() => {
                       editor.setPreviewOpen(true);
                       toast.info("Review totals", "Confirm Issue from the preview dialog");
@@ -227,6 +238,7 @@ export function BillingDashboard() {
                   </Button>
                 </Stack>
               ) : null}
+              {editor.buildMessage ? <Typography role="status">{editor.buildMessage}</Typography> : null}
 
               {showPayments ? (
                 <>
@@ -244,6 +256,7 @@ export function BillingDashboard() {
                   paidTotal={paymentsHook.paid_total}
                   refundedTotal={paymentsHook.refunded_total}
                   canCollect={canCollect}
+                  canRefund={user?.role === "admin"}
                   onCollect={async (body) => {
                     await collect.submit(body);
                   }}
@@ -269,7 +282,7 @@ export function BillingDashboard() {
               <InvoicePreviewModal
                 open={editor.previewOpen}
                 invoice={editor.draft}
-                canIssue={editor.canEdit}
+                canIssue={editor.canIssue}
                 busy={editor.busy}
                 onClose={() => editor.setPreviewOpen(false)}
                 onIssue={() => void editor.issue()}

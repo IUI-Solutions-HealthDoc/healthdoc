@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
@@ -155,7 +155,9 @@ IdempotencyKey = Annotated[str, Depends(_require_idempotency_key)]
 class ConsentRequestIn(BaseModel):
     patient_id: uuid.UUID | None = None
     abha_address: str = Field(min_length=1, max_length=120)
-    purpose_code: str
+    # Only this purpose has a product-supported outbound mapping. Do not
+    # record another purpose locally and silently ask the patient for CAREMGT.
+    purpose_code: Literal["CAREMGT"]
     hi_types: list[str]
     date_range_from: datetime
     date_range_to: datetime
@@ -208,6 +210,7 @@ async def create_consent_request(
             date_from=payload.date_range_from,
             date_to=payload.date_range_to,
             expiry=payload.requested_expiry,
+            purpose=gateway.PURPOSE_CARE_MANAGEMENT,
         ),
     )
     # The manager echoes its own id for the request. Without it the grant

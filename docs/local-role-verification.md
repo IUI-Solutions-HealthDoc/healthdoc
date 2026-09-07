@@ -1,8 +1,12 @@
 # Local role verification
 
-Current browser results are in **[role-verification-evidence.md](role-verification-evidence.md)**,
-generated from the runs themselves. This file records how that evidence is
-produced and the limits of its coverage.
+The earlier generated browser report is
+**[role-verification-evidence.md](role-verification-evidence.md)**.
+The newer **6–7 September billing/ABDM retest**, including failed development
+runs and the separate production-frontend preview, is tracked in
+**[billing-abdm-readiness-2026-09-06.md](billing-abdm-readiness-2026-09-06.md)**.
+Its evidence uses a separate directory so it cannot silently overwrite the older
+run. This file records how evidence is produced and the limits of its coverage.
 
 ## Producing it
 
@@ -79,9 +83,12 @@ must not see doctor-only radiology reporting actions.
 
 What is still not covered is every control on every screen. A workflow proves
 the path it walks; independent lab release needs a second lab-tech identity.
-A pharmacist's dispense, inventory approval chains, billing payments, staff
+A pharmacist's dispense, inventory approval chains, staff
 creation, full nursing eMAR/fluid-balance actions and exhaustive edge cases are
-not established by this suite.
+not established by this suite. Billing now has a real synthetic workflow for
+build/issue/payment/admin refund and role refusals; see the dated retest for its
+actual outcome, not just the existence of the test. The nursing workflow also
+includes SBAR handover creation/read-back; this is not every handover edge case.
 
 ## Retest fixes and checks — 5–6 September 2026
 

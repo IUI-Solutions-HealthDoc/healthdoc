@@ -136,3 +136,18 @@ def test_invoice_build_payment_replay_and_refund(client_as, seeded_patient_id):
     )
     assert refunded.status_code == 201, refunded.text
     assert refunded.json()["data"]["amount"] == "50.00"
+
+
+def test_invoice_search_filters_before_count_and_pagination(client_as, seeded_patient_id):
+    _, invoice_id = asyncio.run(_seed_billing_journey(seeded_patient_id))
+    clerk = client_as(BILLING)
+    detail = clerk.get(f"/api/v1/billing/invoices/{invoice_id}").json()["data"]
+    found = clerk.get("/api/v1/billing/invoices", params={"q": detail["invoice_number"], "page_size": 1})
+    assert found.status_code == 200
+    assert found.json()["data"]["total"] == 1
+    assert found.json()["data"]["items"][0]["id"] == str(invoice_id)
+    absent = clerk.get("/api/v1/billing/invoices", params={"q": f"absent-{uuid.uuid4()}"})
+    assert absent.json()["data"]["total"] == 0
+    assert absent.json()["data"]["items"] == []
+    wildcard = clerk.get("/api/v1/billing/invoices", params={"q": "%_"})
+    assert wildcard.json()["data"]["total"] == 0

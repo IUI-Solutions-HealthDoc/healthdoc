@@ -141,7 +141,7 @@ export type Refund = {
 
 /** POST /billing/invoices/{id}/payments — requires Idempotency-Key header on wire. */
 export type CollectPaymentInput = {
-  amount: Money | number;
+  amount: Money;
   mode: PaymentMode;
   currency?: string;
   collected_at?: string | null;
@@ -149,7 +149,7 @@ export type CollectPaymentInput = {
 
 /** POST /billing/payments/{id}/refunds — requires Idempotency-Key header on wire. */
 export type CreateRefundInput = {
-  amount: Money | number;
+  amount: Money;
   reason: string;
 };
 

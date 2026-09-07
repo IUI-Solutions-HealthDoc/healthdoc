@@ -56,7 +56,7 @@ from decimal import Decimal
 from datetime import date
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.context import AuditActor
@@ -247,6 +247,7 @@ async def _assert_payment_in_facility(db: AsyncSession, payment_id: uuid.UUID, f
 async def list_invoices(
     current_db_user: CurrentDbUser,
     status_filter: str | None = Query(None, alias="status"),
+    q: str | None = Query(None, max_length=120),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -254,15 +255,21 @@ async def list_invoices(
     filters = [Invoice.facility_id == current_db_user.facility_id]
     if status_filter:
         filters.append(Invoice.status == status_filter)
+    if q and q.strip():
+        filters.append(or_(*[
+            column.icontains(q.strip(), autoescape=True)
+            for column in (Invoice.invoice_number, Patient.full_name, Patient.uhid, Patient.thid)
+        ]))
 
     total = (
-        await db.execute(select(func.count()).select_from(Invoice).where(*filters))
+        await db.execute(select(func.count()).select_from(Invoice)
+                         .join(Patient, Patient.id == Invoice.patient_id).where(*filters))
     ).scalar_one()
     result = await db.execute(
         select(Invoice, Patient.full_name, Patient.uhid, Patient.thid)
         .join(Patient, Patient.id == Invoice.patient_id)
         .where(*filters)
-        .order_by(Invoice.created_at.desc())
+        .order_by(Invoice.created_at.desc(), Invoice.id.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
     )
