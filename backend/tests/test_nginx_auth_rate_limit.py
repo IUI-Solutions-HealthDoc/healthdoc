@@ -24,6 +24,13 @@ def test_read_only_theme_assets_do_not_spend_the_login_budget(method):
     assert any(re.search(pattern, key) for pattern in auth_map())
 
 
+@pytest.mark.parametrize("method", ["GET", "HEAD"])
+@pytest.mark.parametrize("step", [1, 2])
+def test_read_only_cookie_probe_pages_do_not_spend_the_login_budget(method, step):
+    key = f"{method}:/auth/realms/healthdoc/protocol/openid-connect/3p-cookies/step{step}.html"
+    assert any(re.search(pattern, key) for pattern in auth_map())
+
+
 @pytest.mark.parametrize("key", [
     "POST:/auth/realms/healthdoc/login-actions/authenticate",
     "POST:/auth/realms/healthdoc/protocol/openid-connect/token",
@@ -31,6 +38,12 @@ def test_read_only_theme_assets_do_not_spend_the_login_budget(method):
     "POST:/auth/resources/version/login/healthdoc/css/login.css",
     "GET:/auth/resources-pretend/login.css",
     "GET:/auth/admin/realms/healthdoc/users",
+    "POST:/auth/realms/healthdoc/protocol/openid-connect/3p-cookies/step1.html",
+    "POST:/auth/realms/healthdoc/protocol/openid-connect/3p-cookies/step2.html",
+    "GET:/auth/realms/healthdoc/protocol/openid-connect/3p-cookies/step3.html",
+    "GET:/auth/realms/healthdoc/protocol/openid-connect/3p-cookies/step1.html/token",
+    "GET:/auth/realms/healthdoc/protocol/openid-connect/3p-cookies-pretend/step1.html",
+    "GET:/auth/realms/healthdoc/protocol/openid-connect/token",
 ])
 def test_credentials_and_non_asset_requests_remain_limited(key):
     assert not any(re.search(pattern, key) for pattern in auth_map())

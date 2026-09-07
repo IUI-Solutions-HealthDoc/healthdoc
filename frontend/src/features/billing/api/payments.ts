@@ -68,7 +68,7 @@ export function collectPayment(
 ): Promise<Payment> {
   return api<Payment>(`/billing/invoices/${invoiceId}/payments`, {
     method: "POST",
-    body: JSON.stringify(input),
+    body: JSON.stringify({ ...input, amount: input.amount.amount }),
     idempotencyKey: newIdempotencyKey(),
   });
 }
@@ -89,7 +89,7 @@ export function createRefund(
 ): Promise<Refund> {
   return api<Refund>(`/billing/payments/${paymentId}/refunds`, {
     method: "POST",
-    body: JSON.stringify(input),
+    body: JSON.stringify({ ...input, amount: input.amount.amount }),
     idempotencyKey: newIdempotencyKey(),
   });
 }

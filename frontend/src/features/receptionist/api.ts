@@ -87,9 +87,15 @@ export function verifyAbhaEnrolmentOtp(
   mobile: string | null,
   idempotencyKey: string,
 ): Promise<AbhaIdentityLinked> {
+  // Patient storage uses E.164; the ABHA verify endpoint requires ten national
+  // digits. Normalize only this boundary, not registration/search storage.
+  const normalisedMobile = mobile ? normaliseIndianMobileInput(mobile) : null;
+  if (mobile && !normalisedMobile) {
+    throw new Error("Enter a valid Indian mobile number.");
+  }
   return api<AbhaIdentityLinked>("/abdm/abha/enrol/aadhaar/verify-otp", {
     method: "POST",
-    body: JSON.stringify({ session_id: sessionId, otp, mobile }),
+    body: JSON.stringify({ session_id: sessionId, otp, mobile: normalisedMobile?.slice(3) ?? null }),
     idempotencyKey,
   });
 }

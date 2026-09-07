@@ -78,9 +78,9 @@ async function field(page, label, value) {
 }
 
 async function muiField(page, label, value) {
-  await page.waitForFunction((wanted) => [...document.querySelectorAll("label")].some((l) => l.textContent?.trim() === wanted && l.control), { timeout: 30_000 }, label);
+  await page.waitForFunction((wanted) => [...document.querySelectorAll("label")].some((l) => l.textContent?.trim().replace(/\s*\*$/, "") === wanted.replace(/\s*\*$/, "") && l.control), { timeout: 30_000 }, label);
   await page.evaluate((wanted, next) => {
-    const control = [...document.querySelectorAll("label")].find((l) => l.textContent?.trim() === wanted)?.control;
+    const control = [...document.querySelectorAll("label")].find((l) => l.textContent?.trim().replace(/\s*\*$/, "") === wanted.replace(/\s*\*$/, ""))?.control;
     if (!control) throw new Error(`Missing labelled input: ${wanted}`);
     const prototype = control instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
     Object.getOwnPropertyDescriptor(prototype, "value").set.call(control, next);
@@ -191,7 +191,23 @@ async function withRole(username, run) {
   let page = await context.newPage();
   const errors = [];
   const captureError = (error) => errors.push(error.message);
-  page.on("pageerror", captureError);
+  const networkFailures = [];
+  function observeFailures(observedPage) {
+    observedPage.on("pageerror", captureError);
+    // Paths only: auth URLs carry codes/state in their query and clinical
+    // request bodies can contain patient data. Neither belongs in diagnostics.
+    observedPage.on("response", (response) => {
+      if (response.status() >= 400) networkFailures.push({
+        path: new URL(response.url()).pathname,
+        status: response.status(), type: response.request().resourceType(),
+      });
+    });
+    observedPage.on("requestfailed", (request) => networkFailures.push({
+      path: new URL(request.url()).pathname, type: request.resourceType(),
+      error: request.failure()?.errorText,
+    }));
+  }
+  observeFailures(page);
 
   // Capture the real access token from the Keycloak exchange, the same way
   // superadmin-isolation.smoke.mjs does. A raw fetch() from the page carries
@@ -251,7 +267,7 @@ async function withRole(username, run) {
     // patient portal's four mount reads). The workflow tab shares real SSO,
     // not injected tokens, and its response observers see only its own reads.
     page = await context.newPage();
-    page.on("pageerror", captureError);
+    observeFailures(page);
     page.on("response", captureToken);
     try {
       await run(page, { token: () => accessToken });
@@ -279,12 +295,89 @@ async function withRole(username, run) {
       throw error;
     }
     assert.deepEqual(errors, [], "Uncaught browser errors");
+  } catch (error) {
+    // Includes failures during the initial login, before run(page) starts.
+    // Expected role refusals can be present here; diagnostics are not a
+    // blanket assertion that every HTTP 4xx is a product failure.
+    console.error(`  network failures: ${JSON.stringify(networkFailures.slice(-20))}`);
+    console.error(`  browser errors: ${JSON.stringify(errors.slice(-10))}`);
+    throw error;
   } finally {
     await context.close();
   }
 }
 
 const workflows = {
+  async billing() {
+    const name = `Billing Test ${randomUUID().replace(/[0-9-]/g, "a")}`;
+    let visit;
+    let invoiceId;
+    let paymentId;
+    const openInvoice = async (page) => {
+      await open(page, "/billing");
+      const listing = await responseTo(page, "GET", "/billing/invoices", () => muiField(page, "Search invoices", name));
+      assert.equal(listing.total, 1, "Search must find the synthetic invoice across all pages");
+      invoiceId = listing.items[0].id;
+      return responseTo(page, "GET", `/billing/invoices/${invoiceId}`, async () => {
+        await page.waitForFunction((wanted) => [...document.querySelectorAll("button")].some((b) => b.textContent.includes(wanted)), {}, name);
+        await page.evaluate((wanted) => [...document.querySelectorAll("button")].find((b) => b.textContent.includes(wanted)).click(), name);
+      });
+    };
+    await withRole("dev.receptionist", async (page, auth) => {
+      await open(page, "/receptionist/registration");
+      await click(page, "No existing record — register new");
+      await field(page, "Full name *", name);
+      await field(page, "Sex *", "female");
+      await page.evaluate(() => {
+        const input = [...document.querySelectorAll('#main-content input[type="date"]')].at(-1);
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, "1990-01-01");
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      await responseTo(page, "POST", "/patients", () => click(page, "Register patient"), 201);
+      await field(page, "Visit type", "day_care");
+      visit = await responseTo(page, "POST", "/visits", () => click(page, "Create visit"), 201);
+      const denied = await page.evaluate(async (token) => (await fetch("/api/v1/billing/invoices", { headers: { Authorization: `Bearer ${token}` } })).status, auth.token());
+      assert.equal(denied, 403, "Reception cannot open the billing desk API");
+    });
+    await withRole("dev.billing", async (page, auth) => {
+      const initial = await openInvoice(page);
+      assert.equal(initial.visit_id, visit.id);
+      await text(page, "Build charges");
+      assert.equal(await page.$$eval("button", (buttons) => buttons.filter((b) => ["Save draft", "Add item", "Remove line"].includes(b.textContent.trim())).length), 0);
+      await transitionResponse(page, "POST", `/billing/visits/${visit.id}/invoice/build`, () => click(page, "Build charges"), "draft");
+      await text(page, "charge(s) added.");
+      await click(page, "Issue…");
+      await responseTo(page, "POST", `/billing/invoices/${invoiceId}/issue`, () => click(page, "Issue invoice"));
+      await click(page, "Collect payment");
+      await muiField(page, "Amount (₹)", "1.25");
+      const payment = await responseTo(page, "POST", `/billing/invoices/${invoiceId}/payments`, () => click(page, "Collect"), 201);
+      assert.equal(payment.amount, "1.25");
+      paymentId = payment.id;
+      await text(page, payment.receipt_number);
+      assert.equal(await page.$$eval("button", (buttons) => buttons.some((b) => b.textContent.trim() === "Reverse")), false, "Billing cannot approve refunds");
+      const denied = await page.evaluate(async ({ token, id }) => (await fetch(`/api/v1/billing/payments/${id}/refunds`, {
+        method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
+        body: JSON.stringify({ amount: "0.25", reason: "Synthetic authority check" }),
+      })).status, { token: auth.token(), id: payment.id });
+      assert.equal(denied, 403);
+      await record(page, { role: "billing", name: "Billing — build, issue and partial payment", detail: "Created a synthetic visit through reception, proved reception cannot bill, searched the complete invoice list, built server charges, issued with If-Match and collected ₹1.25 with an idempotency key. Billing has no refund button and its direct refund request is denied." });
+    });
+    await withRole("dev.admin", async (page) => {
+      const invoice = await openInvoice(page);
+      assert.equal(invoice.payments[0].id, paymentId);
+      await click(page, "Reverse");
+      await muiField(page, "Refund amount (₹)", "0.25");
+      await muiField(page, "Reason", "Synthetic browser partial refund");
+      const refund = await responseTo(page, "POST", `/billing/payments/${paymentId}/refunds`, () => click(page, "Confirm reversal"), 201);
+      assert.equal(refund.amount, "0.25");
+      await record(page, { role: "admin", name: "Billing — independent refund approval", detail: "A separate real admin session reversed ₹0.25 from the billing clerk's receipt through the browser; the refund amount persisted." });
+    });
+    await withRole("dev.pharmacist", async (page, auth) => {
+      await open(page, "/pharmacy/prescription-queue");
+      const denied = await page.evaluate(async ({ token, id }) => (await fetch(`/api/v1/billing/invoices/${id}`, { headers: { Authorization: `Bearer ${token}` } })).status, { token: auth.token(), id: invoiceId });
+      assert.equal(denied, 403, "Pharmacy cannot access a registration invoice");
+    });
+  },
   async inventory() {
     await withRole("dev.pharmacist", async (page) => {
       await open(page, "/inventory");

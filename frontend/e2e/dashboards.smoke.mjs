@@ -570,6 +570,7 @@ async function captureEvidence(page, role, dashboard, failures, observed) {
     apiRequests: observed.started,
     apiResponses: observed.responded,
     apiFailures: observed.bad.length,
+    assetFailures: observed.assetFailures,
     capturedAt: new Date().toISOString(),
   };
   try {
@@ -605,6 +606,7 @@ async function exerciseDashboard(context, role, dashboard) {
     bad: [],
     missingBearer: [],
     requests: [],
+    assetFailures: [],
   };
   let active = true;
 
@@ -622,6 +624,10 @@ async function exerciseDashboard(context, role, dashboard) {
     if (!active) return;
     const request = response.request();
     const url = new URL(response.url());
+    if (response.status() >= 400 && ["stylesheet", "script", "image", "font"].includes(request.resourceType())) {
+      // Path only: auth URLs and query strings can contain session secrets.
+      observed.assetFailures.push({ path: url.pathname, status: response.status(), type: request.resourceType() });
+    }
     if (!url.pathname.startsWith("/api/v1")) return;
     observed.responded += 1;
     const expected = isExpectedResponse(dashboard, request, url, response.status());
@@ -633,6 +639,9 @@ async function exerciseDashboard(context, role, dashboard) {
   page.on("requestfailed", (request) => {
     if (!active) return;
     const url = new URL(request.url());
+    if (["stylesheet", "script", "image", "font"].includes(request.resourceType())) {
+      observed.assetFailures.push({ path: url.pathname, status: "request_failed", type: request.resourceType() });
+    }
     if (!url.pathname.startsWith("/api/v1")) return;
     observed.requestFailed += 1;
     observed.bad.push(
