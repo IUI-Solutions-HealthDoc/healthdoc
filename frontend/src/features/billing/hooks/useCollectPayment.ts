@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 
 import { collectPayment, getInvoice } from "../api";
+import { getActionableErrorMessage } from "../lib/errors";
 import { toast } from "@/components/ui/toast";
 import type { CollectPaymentInput, InvoiceWithItems, Payment } from "../types";
 
@@ -28,7 +29,7 @@ export function useCollectPayment(
         onSaved?.(invoice, payment);
         return { payment, invoice };
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : "Payment failed");
+        toast.error(getActionableErrorMessage(e, "Payment failed"));
         throw e;
       } finally {
         setBusy(false);
