@@ -51,10 +51,14 @@ export function InvoiceListPanel({
         overflow: "hidden",
         display: "flex",
         flexDirection: "column",
-        minHeight: 420,
+        minHeight: 480,
+        height: { lg: "calc(100vh - 120px)" },
+        maxHeight: { lg: "calc(100vh - 120px)" },
+        position: { lg: "sticky" },
+        top: { lg: 84 },
       }}
     >
-      <Box sx={{ px: 2.5, pt: 2.25, pb: 1.75 }}>
+      <Box sx={{ px: 2.5, pt: 2.25, pb: 1.75, flexShrink: 0 }}>
         <Typography
           sx={{
             m: 0,
@@ -71,7 +75,7 @@ export function InvoiceListPanel({
         </Typography>
       </Box>
 
-      <Stack spacing={1.25} sx={{ px: 2.5, pb: 2 }}>
+      <Stack spacing={1.25} sx={{ px: 2.5, pb: 2, flexShrink: 0 }}>
         <TextField
           size="small"
           placeholder="Search UHID, name, INV-…"
@@ -97,7 +101,7 @@ export function InvoiceListPanel({
         </TextField>
       </Stack>
 
-      <Box sx={{ flex: 1, overflow: "auto", borderTop: `1px solid rgb(0 31 84 / 0.08)` }}>
+      <Box sx={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden", borderTop: `1px solid rgb(0 31 84 / 0.08)` }}>
         {loading ? (
           <Typography sx={{ p: 2.5, color: meridian.textSecondary, fontSize: "0.875rem" }}>
             Loading…
@@ -116,6 +120,8 @@ export function InvoiceListPanel({
                 sx={{
                   display: "block",
                   width: "100%",
+                  minWidth: 0,
+                  overflow: "hidden",
                   textAlign: "left",
                   textTransform: "none",
                   borderRadius: 0,
@@ -126,17 +132,48 @@ export function InvoiceListPanel({
                   "&:hover": { backgroundColor: "rgb(0 31 84 / 0.04)" },
                 }}
               >
-                <Stack direction="row" sx={{ justifyContent: "space-between", gap: 1, mb: 0.5 }}>
-                  <Typography sx={{ fontWeight: 700, fontSize: "0.875rem", color: meridian.textPrimary }}>
+                <Stack direction="row" sx={{ justifyContent: "space-between", alignItems: "center", gap: 1, mb: 0.5, minWidth: 0 }}>
+                  <Typography
+                    noWrap
+                    sx={{
+                      fontWeight: 700,
+                      fontSize: "0.875rem",
+                      color: meridian.textPrimary,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      minWidth: 0,
+                      flex: 1,
+                    }}
+                  >
                     {inv.patient?.full_name ?? inv.patient_id}
                   </Typography>
-                  <InvoiceStatusChip status={inv.status} />
+                  <Box sx={{ flexShrink: 0 }}>
+                    <InvoiceStatusChip status={inv.status} />
+                  </Box>
                 </Stack>
-                <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary }}>
+                <Typography
+                  noWrap
+                  sx={{
+                    fontSize: "0.75rem",
+                    color: meridian.textSecondary,
+                    fontFamily: "var(--font-ibm-plex-mono), monospace",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
                   {inv.invoice_number}
                 </Typography>
-                <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary }}>
-                  {inv.patient?.uhid} ·{" "}
+                <Typography
+                  noWrap
+                  sx={{
+                    fontSize: "0.75rem",
+                    color: meridian.textSecondary,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  {inv.patient?.uhid ?? "—"} ·{" "}
                   {inv.visit?.visit_type ? inv.visit.visit_type.toUpperCase() : "—"} ·{" "}
                   {formatINR(inv.net_amount)}
                 </Typography>
@@ -145,7 +182,7 @@ export function InvoiceListPanel({
           })
         )}
       </Box>
-      <Stack direction="row" sx={{ p: 1.5, gap: 1, alignItems: "center", justifyContent: "space-between" }}>
+      <Stack direction="row" sx={{ flexShrink: 0, p: 1.5, gap: 1, alignItems: "center", justifyContent: "space-between", borderTop: `1px solid rgb(0 31 84 / 0.06)` }}>
         <Button disabled={loading || page <= 1} onClick={() => onPageChange(page - 1)}>Previous</Button>
         <Typography variant="caption">Page {page} of {Math.max(1, Math.ceil(total / pageSize))} · {total} invoices</Typography>
         <Button disabled={loading || page * pageSize >= total} onClick={() => onPageChange(page + 1)}>Next</Button>

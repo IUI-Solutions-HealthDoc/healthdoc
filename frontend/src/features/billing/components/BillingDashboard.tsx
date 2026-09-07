@@ -110,7 +110,7 @@ export function BillingDashboard() {
       <Box
         sx={{
           display: "grid",
-          gridTemplateColumns: { xs: "1fr", lg: "320px 1fr" },
+          gridTemplateColumns: { xs: "1fr", lg: "360px 1fr" },
           gap: 2.5,
           alignItems: "start",
         }}
