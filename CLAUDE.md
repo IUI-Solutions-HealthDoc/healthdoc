@@ -281,8 +281,13 @@ the console shows `[HMR] connected`.
   carries a per-request nonce from `frontend/src/proxy.ts` instead of
   `'unsafe-inline'`, and every route renders `force-dynamic` because a nonce
   cannot be baked into prerendered HTML.
-- WASA ABDM track: **the M1/M2/M3 implementation is code-ready, but milestone
-  certification still requires real patient sandbox runs.** `hip/gateway.py`
+- WASA ABDM track: **M1/M2/M3 are not yet milestone-ready.** The 7 September
+  review found public callback HTTP 530/1033, missing OTP-relay configuration,
+  incomplete application-initiated linking and no complete HIU clinician
+  workflow. See `docs/billing-abdm-readiness-2026-09-06.md` and
+  `docs/ABDM-M1-M2-M3-Execution-Requirements-2026-09-07.md` for measured evidence
+  and prerequisites; code and sample validation are not a live round trip.
+  `hip/gateway.py`
   and `hiu/gateway.py` carry the outbound wire
   protocol (11 calls, every shape taken field-by-field from ABDM's official v3
   Postman collection) and the routers call them. Before this the ten
@@ -310,10 +315,11 @@ the console shows `[HMR] connected`.
   is hashed in Redis, expires after ten minutes, locks after five failures and
   is delivered through a deployment-owned HTTPS relay. There is deliberately
   no fixed development OTP. A real M2 run therefore needs
-  `ABDM_LINK_OTP_DELIVERY_URL` and its bearer token configured. The remaining
-  work is external evidence: run M1 with a consenting sandbox user, complete
-  M2 discovery/linking, and complete the M3 consent/data round trip while
-  retaining NHA milestone screenshots and request IDs.
+  `ABDM_LINK_OTP_DELIVERY_URL` and its bearer token configured. Remaining work
+  includes the product, ingress and durable-recovery gaps in the dated review,
+  as well as live M1 verification, M2 discovery/linking and M3 consent/data
+  exchange with a consenting sandbox participant. Retain redacted NHA
+  milestone screenshots and correlation IDs, never tokens or OTPs.
 
   `integrations/abdm/consent/` and `nhcx/` remain empty; consent artefact
   handling lives in `hip/` and `hiu/`, and NHCX is out of scope for this audit.
@@ -407,8 +413,9 @@ Every other branch of ours is merged; the teammates' branches are not ours to ju
 ## Working style that fits this codebase
 
 Comments here explain **why**, especially where the obvious choice is wrong —
-PKCS#1 v1.5 over OAEP because ABDM rejects OAEP, `python-jose` removed rather
-than upgraded because one CVE has no fix. Keep that. A comment saying what the
+OAEP SHA-1/MGF1 SHA-1 because the live ABHA certificate declares that algorithm
+(the earlier PKCS#1 v1.5 claim was wrong), `python-jose` removed rather than
+upgraded because one CVE has no fix. Keep that. A comment saying what the
 line does is noise; one saying why it is not the other thing saves the next
 person an hour.
 

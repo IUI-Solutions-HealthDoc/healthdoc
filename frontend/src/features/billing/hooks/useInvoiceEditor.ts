@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { issueInvoice } from "../api";
+import { buildVisitInvoice, getInvoice, issueInvoice } from "../api";
 import { fromMoney, toMoney } from "../lib/money";
 import { recomputeInvoiceTotals } from "../lib/calculations";
 import { toast } from "@/components/ui/toast";
@@ -31,13 +31,18 @@ export function useInvoiceEditor(
   const [draft, setDraft] = useState<InvoiceWithItems | null>(null);
   const [busy, setBusy] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [buildMessage, setBuildMessage] = useState<string | null>(null);
 
   useEffect(() => {
     setDraft(invoice ? structuredClone(invoice) : null);
     setPreviewOpen(false);
   }, [invoice]);
 
-  const canEdit = draft?.status === "draft";
+  // No backend supports manual financial edits. Drafts can be built and
+  // issued, not edited in browser-only state that will be discarded on issue.
+  const canEdit = false;
+  const canBuild = draft?.status === "draft";
+  const canIssue = canBuild && (draft?.items.length ?? 0) > 0;
   const schemeOption = optionFromSchemeCode(draft?.scheme_code ?? null);
 
   const isDirty = useMemo(() => {
@@ -105,8 +110,27 @@ export function useInvoiceEditor(
     );
   }, []);
 
+  const build = useCallback(async () => {
+    if (!draft || !canBuild) return;
+    setBusy(true);
+    setBuildMessage(null);
+    try {
+      const result = await buildVisitInvoice(draft.visit_id);
+      const next = await getInvoice(result.invoice_id);
+      setDraft(next);
+      onSaved?.(next);
+      setBuildMessage(`${result.lines_added} charge(s) added. ${result.lines_skipped_unpriced} unpriced charge(s) skipped.`);
+      if (result.lines_skipped_unpriced) toast.error("Some charges have no tariff. Resolve pricing before issuing.");
+      else toast.success("Charges built", "Review the refreshed totals before issuing");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Build failed");
+    } finally {
+      setBusy(false);
+    }
+  }, [canBuild, draft, onSaved]);
+
   const issue = useCallback(async () => {
-    if (!draft || !canEdit) return;
+    if (!draft || !canIssue) return;
     setBusy(true);
     try {
       // row_version is the concurrency guard: the server refuses a stale one
@@ -121,7 +145,7 @@ export function useInvoiceEditor(
     } finally {
       setBusy(false);
     }
-  }, [canEdit, draft, onSaved]);
+  }, [canIssue, draft, onSaved]);
 
   /**
    * addItem / patchItem / removeItem: manual line editing, refused.
@@ -157,6 +181,10 @@ export function useInvoiceEditor(
   return {
     draft,
     canEdit,
+    canBuild,
+    canIssue,
+    build,
+    buildMessage,
     busy,
     isDirty,
     schemeOption,

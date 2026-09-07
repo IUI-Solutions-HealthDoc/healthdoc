@@ -24,14 +24,13 @@ import json
 import logging
 
 import pytest
-from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 from app.integrations.abdm.client import AbdmResponse
 from app.integrations.abdm.identity import crypto, otp_session, service
 from app.integrations.abdm.identity.otp_session import (
     OtpPurpose,
-    OtpSession,
     OtpSessionMismatch,
     OtpSessionNotFound,
 )
@@ -117,7 +116,11 @@ def _gateway(monkeypatch, responses):
 
 
 def _decrypt(rsa_key, b64: str) -> str:
-    return rsa_key.decrypt(base64.b64decode(b64), padding.PKCS1v15()).decode()
+    # /abha/api/v3/profile/public/certificate, observed 2026-09-06:
+    # encryptionAlgorithm = RSA/ECB/OAEPWithSHA-1AndMGF1Padding.
+    return rsa_key.decrypt(base64.b64decode(b64), padding.OAEP(
+        mgf=padding.MGF1(hashes.SHA1()), algorithm=hashes.SHA1(), label=None,
+    )).decode()
 
 
 # ------------------------------------------------- the Aadhaar never travels raw
@@ -204,6 +207,25 @@ async def test_the_otp_is_encrypted_too(monkeypatch, rsa_key):
     otp_field = gw.last_body["authData"]["otp"]["otpValue"]
     assert "123456" not in json.dumps(gw.last_body)
     assert _decrypt(rsa_key, otp_field) == "123456"
+
+
+async def test_enrolment_mobile_is_national_digits_while_otp_is_encrypted(monkeypatch, rsa_key):
+    """Supplied M1 byAadhaar 200 sample: mobile is not RSA ciphertext."""
+    gw = _gateway(monkeypatch, [
+        {"txnId": "abdm-txn-1"},
+        {"ABHAProfile": {"ABHANumber": "91-1234-5678-9012"}, "token": "tok"},
+    ])
+    requested = await service.request_aadhaar_otp(
+        aadhaar=AADHAAR, facility_id=FACILITY_A, started_by=STAFF,
+    )
+    await service.enrol_by_aadhaar_otp(
+        session_id=requested.session_id, otp="123456", mobile="9876543210",
+        facility_id=FACILITY_A,
+    )
+    otp_payload = gw.last_body["authData"]["otp"]
+    assert otp_payload["mobile"] == "9876543210"
+    assert _decrypt(rsa_key, otp_payload["otpValue"]) == "123456"
+    assert "timeStamp" not in otp_payload  # Optional, not an invented null value.
 
 
 # ------------------------------------------------------------ scope and purpose
@@ -372,3 +394,55 @@ async def test_the_placeholder_is_treated_as_absent(monkeypatch):
 
     with pytest.raises(crypto.AbdmPublicKeyMissing):
         crypto.encrypt_for_abdm(AADHAAR)
+
+
+async def test_v3_login_uses_the_verified_account_not_enrolment_profile(monkeypatch):
+    """Shape from supplied M1 collection; identities/tokens are synthetic."""
+    _gateway(monkeypatch, [
+        {"txnId": "login-test"},
+        {"authResult": "success", "token": "synthetic-account-token", "accounts": [
+            {"ABHANumber": "91-1111-2222-3333", "preferredAbhaAddress": "test@sbx",
+             "name": "Synthetic Patient", "status": "ACTIVE"},
+        ]},
+    ])
+    request = await service.request_login_otp(
+        abha_number="91-1111-2222-3333", facility_id=FACILITY_A, started_by=STAFF,
+    )
+    result = await service.verify_login_otp(
+        session_id=request.session_id, otp="123456", facility_id=FACILITY_A,
+    )
+    assert result.abha_number == "91-1111-2222-3333"
+    assert result.abha_address == "test@sbx"
+    assert result.name == "Synthetic Patient"
+
+
+@pytest.mark.parametrize("auth_result,accounts", [
+    ("failed", [{"ABHANumber": "91-1111-2222-3333", "status": "ACTIVE"}]),
+    (None, [{"ABHANumber": "91-1111-2222-3333", "status": "ACTIVE"}]),
+    ("success", []),
+    ("success", [{"ABHANumber": "91-1111-2222-3333", "status": "DEACTIVATED"}]),
+    ("success", [{"ABHANumber": "91-1111-2222-3333", "status": "ACTIVE"}] * 2),
+])
+async def test_login_never_guesses_an_account_or_accepts_failed_auth(monkeypatch, auth_result, accounts):
+    _gateway(monkeypatch, [{"txnId": "login-test"},
+        {"authResult": auth_result, "token": "synthetic", "accounts": accounts}])
+    request = await service.request_login_otp(
+        abha_number="91-1111-2222-3333", facility_id=FACILITY_A, started_by=STAFF,
+    )
+    with pytest.raises(service.AbdmIdentityError):
+        await service.verify_login_otp(
+            session_id=request.session_id, otp="123456", facility_id=FACILITY_A,
+        )
+    await otp_session.load(request.session_id, facility_id=FACILITY_A, purpose=OtpPurpose.LOGIN_BY_ABHA)
+
+
+async def test_enrolment_address_list_becomes_a_scalar(monkeypatch):
+    _gateway(monkeypatch, [{"txnId": "enrol-test"}, {"tokens": {"token": "synthetic"},
+        "ABHAProfile": {"ABHANumber": "91-1111-2222-3333", "phrAddress": ["test@sbx"],
+                        "firstName": "Synthetic", "lastName": "Patient"}}])
+    request = await service.request_aadhaar_otp(aadhaar=AADHAAR, facility_id=FACILITY_A, started_by=STAFF)
+    result = await service.enrol_by_aadhaar_otp(
+        session_id=request.session_id, otp="123456", mobile=None, facility_id=FACILITY_A,
+    )
+    assert result.abha_address == "test@sbx"
+    assert result.name == "Synthetic Patient"

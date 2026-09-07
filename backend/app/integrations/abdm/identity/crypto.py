@@ -22,12 +22,11 @@ field was being handled.
 
 THE PADDING IS NOT A DETAIL
 
-ABDM specifies RSA with PKCS#1 v1.5 padding for this exchange. OAEP is the
-better scheme and is what you would reach for unprompted — and it produces
-ciphertext the gateway rejects. This is recorded here because the next person
-to read this file will recognise PKCS1v15 as the weaker option and be tempted
-to "fix" it; the interop constraint is the reason, and changing it breaks
-enrolment with an error that does not mention padding.
+The ABHA v3 public certificate endpoint explicitly publishes
+`RSA/ECB/OAEPWithSHA-1AndMGF1Padding` (verified 2026-09-06). Both the OAEP
+digest and MGF1 digest are SHA-1. This is a wire-protocol requirement, not a
+password hash. The previous PKCS#1 v1.5 claim was not backed by that endpoint;
+tests encrypting and decrypting with the same wrong padding hid the mismatch.
 
 KEY ROTATION
 
@@ -40,7 +39,7 @@ from __future__ import annotations
 
 import base64
 
-from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.x509 import load_pem_x509_certificate
 
@@ -99,9 +98,7 @@ def encrypt_for_abdm(value: str) -> str:
 
     ciphertext = _load_public_key().encrypt(
         value.encode(),
-        # See the module docstring: ABDM specifies PKCS#1 v1.5 here. OAEP is
-        # stronger and is rejected by the gateway.
-        padding.PKCS1v15(),
+        padding.OAEP(mgf=padding.MGF1(hashes.SHA1()), algorithm=hashes.SHA1(), label=None),
     )
     return base64.b64encode(ciphertext).decode()
 

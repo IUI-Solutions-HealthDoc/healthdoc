@@ -18,6 +18,10 @@ type Props = {
   query: string;
   status: InvoiceStatus | "all";
   selectedId: string | null;
+  page: number;
+  pageSize: number;
+  total: number;
+  onPageChange: (page: number) => void;
   onQueryChange: (q: string) => void;
   onStatusChange: (s: InvoiceStatus | "all") => void;
   onSelect: (id: string) => void;
@@ -29,6 +33,10 @@ export function InvoiceListPanel({
   query,
   status,
   selectedId,
+  page,
+  pageSize,
+  total,
+  onPageChange,
   onQueryChange,
   onStatusChange,
   onSelect,
@@ -59,7 +67,7 @@ export function InvoiceListPanel({
           Invoices
         </Typography>
         <Typography sx={{ m: 0, mt: 0.4, fontSize: "0.8125rem", color: meridian.textSecondary }}>
-          One invoice per visit — open a draft to edit
+          One invoice per visit — open a draft to build charges
         </Typography>
       </Box>
 
@@ -67,6 +75,8 @@ export function InvoiceListPanel({
         <TextField
           size="small"
           placeholder="Search UHID, name, INV-…"
+          label="Search invoices"
+          slotProps={{ htmlInput: { maxLength: 120 } }}
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}
         />
@@ -135,6 +145,11 @@ export function InvoiceListPanel({
           })
         )}
       </Box>
+      <Stack direction="row" sx={{ p: 1.5, gap: 1, alignItems: "center", justifyContent: "space-between" }}>
+        <Button disabled={loading || page <= 1} onClick={() => onPageChange(page - 1)}>Previous</Button>
+        <Typography variant="caption">Page {page} of {Math.max(1, Math.ceil(total / pageSize))} · {total} invoices</Typography>
+        <Button disabled={loading || page * pageSize >= total} onClick={() => onPageChange(page + 1)}>Next</Button>
+      </Stack>
     </Box>
   );
 }

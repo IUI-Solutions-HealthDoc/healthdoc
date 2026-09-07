@@ -1,0 +1,19 @@
+# LOCAL frontend-only production preview, over the existing dev backend/auth.
+# No new databases, migrations, production credentials or external deployment.
+# Build first; replacing this service interrupts any active local browser runs.
+#
+# docker compose --env-file .env -f infra/docker-compose.yml \
+#   -f infra/docker-compose.preview.yml up -d --build --no-deps frontend
+# docker compose --env-file .env -f infra/docker-compose.yml restart nginx
+# Restore hot reload: use the same up command WITHOUT this override, then
+# restart nginx so it resolves the recreated frontend's Docker address.
+services:
+  frontend:
+    image: healthdoc-frontend:local-preview
+    build:
+      target: prod
+      args:
+        NEXT_PUBLIC_API_BASE_URL: /api/v1
+        NEXT_PUBLIC_KEYCLOAK_URL: /auth
+    command: ["npm", "run", "start"]
+    volumes: !reset []

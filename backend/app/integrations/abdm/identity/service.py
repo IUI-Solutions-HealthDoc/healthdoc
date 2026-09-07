@@ -115,6 +115,32 @@ async def _post(path: str, payload: dict) -> AbdmResponse:
     )
 
 
+def _address(profile: dict) -> str | None:
+    """Enrolment returns phrAddress[], login returns preferredAbhaAddress.
+
+    A database scalar cannot hold the former. If there are multiple addresses
+    with no declared preference, leave it unset; choosing one is not our call.
+    """
+    preferred = profile.get("preferredAbhaAddress") or profile.get("abhaAddress")
+    if isinstance(preferred, str) and preferred.strip():
+        return preferred.strip()
+    addresses = profile.get("phrAddress")
+    if isinstance(addresses, str):
+        return addresses.strip() or None
+    if isinstance(addresses, list) and len(addresses) == 1 and isinstance(addresses[0], str):
+        return addresses[0].strip() or None
+    return None
+
+
+def _name(profile: dict) -> str | None:
+    if isinstance(profile.get("name"), str) and profile["name"].strip():
+        return profile["name"].strip()
+    return " ".join(
+        part.strip() for key in ("firstName", "middleName", "lastName")
+        if isinstance(part := profile.get(key), str) and part.strip()
+    ) or None
+
+
 # ------------------------------------------------------- enrol by Aadhaar
 
 
@@ -180,7 +206,6 @@ async def enrol_by_aadhaar_otp(
         "authData": {
             "authMethods": ["otp"],
             "otp": {
-                "timeStamp": None,
                 "txnId": session.abdm_txn_id,
                 "otpValue": encrypt_for_abdm(otp),
             },
@@ -188,7 +213,10 @@ async def enrol_by_aadhaar_otp(
         "consent": {"code": "abha-enrollment", "version": "1.4"},
     }
     if mobile:
-        payload["authData"]["otp"]["mobile"] = encrypt_for_abdm(mobile)
+        # Unlike loginId/otpValue, byAadhaar's mobile is ten national digits
+        # in the supplied M1 contract. TLS still protects the request; never log
+        # this payload. The public API validates the mobile format first.
+        payload["authData"]["otp"]["mobile"] = mobile
 
     body = (await _post(get_settings().abdm_path_enrol_by_aadhaar, payload)).body
     if not isinstance(body, dict):
@@ -207,9 +235,9 @@ async def enrol_by_aadhaar_otp(
         await otp_session.finish(session_id)
     return AbhaIssued(
         abha_number=abha_number,
-        abha_address=profile.get("phrAddress") or profile.get("abhaAddress"),
+        abha_address=_address(profile),
         linking_token=body.get("token") or body.get("tokens", {}).get("token"),
-        name=profile.get("name"),
+        name=_name(profile),
         gender=profile.get("gender"),
         date_of_birth=profile.get("dob") or profile.get("dateOfBirth"),
     )
@@ -274,7 +302,17 @@ async def verify_login_otp(
     if not isinstance(body, dict):
         raise AbdmIdentityError("abdm_bad_response", "gateway returned a non-object body")
 
-    profile = body.get("ABHAProfile") or body.get("abhaProfile") or {}
+    # M1 profile/login/verify has a different response from enrollment.
+    # An HTTP 200 can carry authResult=failed. Never fall back to an enrolment
+    # profile or guess between accounts when the login result is ambiguous.
+    if body.get("authResult") != "success":
+        raise AbdmIdentityError("abdm_auth_failed", "ABDM did not verify this OTP")
+    accounts = body.get("accounts")
+    if not isinstance(accounts, list) or len(accounts) != 1 or not isinstance(accounts[0], dict):
+        raise AbdmIdentityError("abdm_account_selection_required", "ABDM did not return one verified account")
+    profile = accounts[0]
+    if profile.get("status") != "ACTIVE":
+        raise AbdmIdentityError("abdm_account_inactive", "This ABHA account is not active")
     abha_number = profile.get("ABHANumber") or profile.get("abhaNumber")
     if not abha_number:
         raise AbdmIdentityError("abdm_no_abha_returned", "login completed without an ABHA number")
@@ -283,9 +321,9 @@ async def verify_login_otp(
         await otp_session.finish(session_id)
     return AbhaIssued(
         abha_number=abha_number,
-        abha_address=profile.get("phrAddress") or profile.get("abhaAddress"),
+        abha_address=_address(profile),
         linking_token=body.get("token") or body.get("tokens", {}).get("token"),
-        name=profile.get("name"),
+        name=_name(profile),
         gender=profile.get("gender"),
         date_of_birth=profile.get("dob") or profile.get("dateOfBirth"),
     )

@@ -44,10 +44,10 @@ export function SchemeSelector({
           color: meridian.textPrimary,
         }}
       >
-        Scheme selector
+        Invoice scheme
       </Typography>
       <Typography sx={{ m: 0, mb: 2, fontSize: "0.8125rem", color: meridian.textSecondary }}>
-        Sets invoices.scheme_code and scheme_adjustment (no scheme master)
+        {disabled ? "Read-only scheme recorded on this invoice." : "Choose the invoice scheme."}
       </Typography>
 
       <Stack direction="row" useFlexGap sx={{ gap: 1, flexWrap: "wrap", mb: 2 }}>

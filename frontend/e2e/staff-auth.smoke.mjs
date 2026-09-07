@@ -163,7 +163,8 @@ async function exerciseRole(browser, role) {
   });
   page.on("requestfailed", (request) => {
     console.error(
-      `[${role.name}:browser:requestfailed] ${request.method()} ${request.url()} ${request.failure()?.errorText ?? "unknown"}`,
+      // Auth query strings/fragments can carry state or authorization codes.
+      `[${role.name}:browser:requestfailed] ${request.method()} ${new URL(request.url()).pathname} ${request.failure()?.errorText ?? "unknown"}`,
     );
   });
   page.on("response", (response) => {

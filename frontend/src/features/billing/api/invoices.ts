@@ -102,9 +102,7 @@ function toInvoiceWithItems(detail: InvoiceDetail): InvoiceWithItems {
 /**
  * GET /billing/invoices — facility-scoped, server-side.
  *
- * `query` has no server equivalent and is applied to the loaded page only;
- * status and paging are real parameters. Stated rather than hidden — a search
- * box that silently misses page two is worse than one that says so.
+ * Search, status and paging are applied server-side, including the total.
  */
 export async function listInvoices(
   filters: InvoiceListFilters = {},
@@ -113,6 +111,7 @@ export async function listInvoices(
   params.set("page", String(filters.page ?? 1));
   params.set("page_size", String(Math.min(filters.page_size ?? 20, 100)));
   if (filters.status && filters.status !== "all") params.set("status", filters.status);
+  if (filters.query?.trim()) params.set("q", filters.query.trim());
 
   const page = await api<{
     items: InvoiceListRow[];
@@ -121,24 +120,13 @@ export async function listInvoices(
     total: number;
   }>(`/billing/invoices?${params.toString()}`);
 
-  const q = filters.query?.trim().toLowerCase() ?? "";
-  const rows = q
-    ? page.items.filter((r) =>
-        [r.invoice_number, r.patient_full_name, r.patient_identifier, r.scheme_code]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase()
-          .includes(q),
-      )
-    : page.items;
-
   return {
     page: page.page,
     page_size: page.page_size,
     total: page.total,
     // List rows carry no lines or payments — the endpoint does not join them
     // per row, deliberately. Open one to get them.
-    items: rows.map((r) => ({
+    items: page.items.map((r) => ({
       ...toInvoiceWithItems({
         ...r,
         facility_id: "",

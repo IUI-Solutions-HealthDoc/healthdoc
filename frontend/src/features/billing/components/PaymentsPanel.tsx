@@ -31,6 +31,7 @@ type Props = {
   paidTotal: Money;
   refundedTotal: Money;
   canCollect: boolean;
+  canRefund: boolean;
   onCollect: (body: CollectPaymentInput) => Promise<void>;
   onRefund: (paymentId: string, body: CreateRefundInput) => Promise<void>;
 };
@@ -44,6 +45,7 @@ export function PaymentsPanel({
   paidTotal,
   refundedTotal,
   canCollect,
+  canRefund,
   onCollect,
   onRefund,
 }: Props) {
@@ -156,7 +158,7 @@ export function PaymentsPanel({
                     >
                       Print
                     </Button>
-                    {p.status === "success" ? (
+                    {canRefund && p.status === "success" ? (
                       <Button
                         size="small"
                         variant="outlined"
@@ -194,7 +196,7 @@ export function PaymentsPanel({
       />
 
       <ReversalFormModal
-        open={Boolean(reverseTarget)}
+        open={canRefund && Boolean(reverseTarget)}
         payment={reverseTarget}
         busy={busy}
         onClose={() => setReverseTarget(null)}
