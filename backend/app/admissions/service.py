@@ -11,7 +11,7 @@ same reason app/pathology and app/radiology do it manually.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import and_, select
@@ -108,7 +108,7 @@ async def admit_patient(
 
     admission = Admission(
         id=uuid.uuid4(), visit_id=visit_id, patient_id=visit.patient_id, ward_id=ward_id, bed_id=bed_id,
-        admitted_at=admitted_at or datetime.now(timezone.utc), reason=reason, status="admitted",
+        admitted_at=admitted_at or datetime.now(UTC), reason=reason, status="admitted",
         created_by=created_by,
     )
     db.add(admission)
@@ -155,7 +155,7 @@ async def transfer_patient(
 
     db.add(PatientMovementLog(
         id=uuid.uuid4(), admission_id=admission.id, from_ward_id=old_ward_id, from_bed_id=old_bed_id,
-        to_ward_id=to_ward_id, to_bed_id=to_bed_id, moved_at=datetime.now(timezone.utc),
+        to_ward_id=to_ward_id, to_bed_id=to_bed_id, moved_at=datetime.now(UTC),
         reason=reason, moved_by=moved_by,
     ))
 
@@ -248,7 +248,7 @@ async def discharge_patient(
         raise TransferDestinationRequired()
 
     discharge = Discharge(
-        id=uuid.uuid4(), admission_id=admission.id, discharged_at=discharged_at or datetime.now(timezone.utc),
+        id=uuid.uuid4(), admission_id=admission.id, discharged_at=discharged_at or datetime.now(UTC),
         discharge_type=discharge_type, discharge_summary=discharge_summary, follow_up_date=follow_up_date,
         destination_facility_id=destination_facility_id, destination_facility_name=destination_facility_name,
         created_by=created_by,
@@ -268,6 +268,11 @@ async def discharge_patient(
     await db.flush()
 
     visit = await db.get(Visit, admission.visit_id)
+    if discharge.discharge_summary:
+        from app.integrations.abdm.hip.publisher import publish_document
+
+        await publish_document(db, kind="discharge", source_id=discharge.id,
+                               visit=visit, actor_id=created_by)
     await fhir_service.record_discharge_bundle(db, discharge, admission, visit.facility_id)
 
     await write_audit_log(

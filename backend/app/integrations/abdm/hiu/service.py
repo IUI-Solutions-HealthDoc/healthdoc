@@ -36,6 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.security import current_aes_key_version, decrypt_pii, encrypt_pii
 from app.integrations.abdm import hi_crypto
+from app.integrations.abdm.hiu import records
 from app.integrations.abdm.hiu.models import (
     AbdmConsentRequest,
     AbdmHiuConsentArtefact,
@@ -84,6 +85,7 @@ async def create_consent_request(
     date_range_to: datetime,
     requested_expiry: datetime,
     created_by: uuid.UUID,
+    request_id: uuid.UUID | None = None,
 ) -> AbdmConsentRequest:
     """Record the ask. The gateway call is the caller's next step.
 
@@ -100,8 +102,26 @@ async def create_consent_request(
         raise HiuError("no_hi_types", "At least one health-information type is required")
     if date_range_to < date_range_from:
         raise HiuError("invalid_range", "The requested period ends before it starts")
+    from app.integrations.abdm.fhir.builder import RECORD_TYPES
+    from app.patients.models import Patient
+
+    if not set(hi_types).issubset(RECORD_TYPES):
+        raise HiuError("unsupported_hi_type", "This record type is not supported")
+    if _aware(requested_expiry) <= datetime.now(UTC):
+        raise HiuError("invalid_expiry", "Consent expiry must be in the future")
+    patient = await db.get(Patient, patient_id) if patient_id else None
+    if (
+        patient is None
+        or patient.facility_id != facility_id
+        or patient.deleted_at is not None
+        or patient.merged_into_patient_id is not None
+        or patient.abha_linked_at is None
+        or patient.abha_address != abha_address
+    ):
+        raise HiuError("patient_binding_required", "Select a patient with a verified ABHA address")
 
     row = AbdmConsentRequest(
+        id=request_id or uuid.uuid4(),
         facility_id=facility_id,
         patient_id=patient_id,
         abha_address=abha_address,
@@ -134,24 +154,33 @@ async def record_artefact(
     """Store a granted or revoked artefact against the request that asked."""
     if status not in ("granted", "revoked", "expired"):
         raise HiuError("unknown_status", f"Unrecognised artefact status {status!r}")
+    if consent_request.facility_id != facility_id:
+        raise HiuError("consent_scope_mismatch", "Consent request is unavailable")
 
     existing = (
         await db.execute(
-            select(AbdmHiuConsentArtefact).where(
-                AbdmHiuConsentArtefact.consent_artefact_id == artefact_id
-            )
+            select(AbdmHiuConsentArtefact)
+            .where(AbdmHiuConsentArtefact.consent_artefact_id == artefact_id)
+            .with_for_update()
         )
     ).scalar_one_or_none()
 
     if existing is not None:
-        if existing.status == "revoked" and status == "granted":
-            raise HiuError("consent_revoked", "A revoked artefact cannot be re-granted")
+        if existing.facility_id != facility_id or existing.consent_request_id != consent_request.id:
+            raise HiuError("consent_scope_mismatch", "Consent artefact is unavailable")
+        if existing.status in {"revoked", "expired"} and status == "granted":
+            raise HiuError(f"consent_{existing.status}", "An ended artefact cannot be re-granted")
+        if status == "granted" and not hi_types and existing.expires_at is not None:
+            # A repeated announcement is not a fetched artefact. Do not erase
+            # the already-fetched scope and strand an active transfer.
+            return existing
         existing.status = status
-        existing.hi_types = hi_types
-        existing.date_range_from = date_range_from
-        existing.date_range_to = date_range_to
-        existing.expires_at = expires_at
-        existing.raw_artefact = raw
+        if status == "granted":
+            existing.hi_types = hi_types
+            existing.date_range_from = date_range_from
+            existing.date_range_to = date_range_to
+            existing.expires_at = expires_at
+            existing.raw_artefact = raw
         if status != "granted":
             # A revoked artefact must stop authorising in-flight requests too,
             # not merely future ones.
@@ -159,6 +188,7 @@ async def record_artefact(
         return existing
 
     artefact = AbdmHiuConsentArtefact(
+        id=uuid.uuid4(),
         facility_id=facility_id,
         consent_request_id=consent_request.id,
         consent_artefact_id=artefact_id,
@@ -170,7 +200,8 @@ async def record_artefact(
         raw_artefact=raw,
     )
     db.add(artefact)
-    consent_request.status = "granted" if status == "granted" else "revoked"
+    if consent_request.status == "requested":
+        consent_request.status = status
     await db.flush()
     return artefact
 
@@ -179,10 +210,14 @@ async def _expire_open_requests(db: AsyncSession, *, artefact_row_id: uuid.UUID)
     rows = (
         (
             await db.execute(
-                select(AbdmHiuHealthInformationRequest).where(
+                select(AbdmHiuHealthInformationRequest)
+                .where(
                     AbdmHiuHealthInformationRequest.artefact_id == artefact_row_id,
-                    AbdmHiuHealthInformationRequest.status.in_(("requested", "acknowledged")),
+                    AbdmHiuHealthInformationRequest.status.in_(
+                        ("requested", "acknowledged", "partial")
+                    ),
                 )
+                .with_for_update()
             )
         )
         .scalars()
@@ -192,6 +227,31 @@ async def _expire_open_requests(db: AsyncSession, *, artefact_row_id: uuid.UUID)
         row.status = "expired"
         row.failure_reason = "Consent artefact was revoked while this request was open"
         _clear_key(row)
+
+
+async def end_consent_request(db: AsyncSession, request: AbdmConsentRequest) -> None:
+    """A request-wide terminal notification need not enumerate every artefact."""
+    if request.status not in {"revoked", "expired", "denied", "failed"}:
+        return
+    artefacts = (
+        (
+            await db.execute(
+                select(AbdmHiuConsentArtefact)
+                .where(
+                    AbdmHiuConsentArtefact.facility_id == request.facility_id,
+                    AbdmHiuConsentArtefact.consent_request_id == request.id,
+                )
+                .order_by(AbdmHiuConsentArtefact.id)
+                .with_for_update()
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for artefact in artefacts:
+        if artefact.status != "revoked":
+            artefact.status = "revoked" if request.status == "revoked" else "expired"
+        await _expire_open_requests(db, artefact_row_id=artefact.id)
 
 
 def _clear_key(row: AbdmHiuHealthInformationRequest) -> None:
@@ -207,6 +267,7 @@ async def begin_hi_request(
     artefact: AbdmHiuConsentArtefact,
     created_by: uuid.UUID,
     now: datetime | None = None,
+    request_id: uuid.UUID | None = None,
 ) -> tuple[AbdmHiuHealthInformationRequest, dict]:
     """Mint key material for a data request and persist the private half safely.
 
@@ -216,10 +277,10 @@ async def begin_hi_request(
     """
     now = now or datetime.now(UTC)
 
-    if artefact.status != "granted":
+    if artefact.status != "granted" or artefact.facility_id != facility_id:
         raise HiuError("consent_not_valid", "The consent artefact is not in a granted state")
     expires_at = _aware(artefact.expires_at)
-    if expires_at is not None and expires_at <= now:
+    if expires_at is None or expires_at <= now:
         raise HiuError("consent_expired", "The consent artefact has expired")
 
     material = hi_crypto.generate_key_material()
@@ -231,7 +292,7 @@ async def begin_hi_request(
     # from the database first — one more round trip and one more failure mode,
     # and a failure mode the SQLite test fixture actually hits, so that shape
     # would be untestable as well as slower.
-    request_id = uuid.uuid4()
+    request_id = request_id or uuid.uuid4()
     version = current_aes_key_version()
 
     row = AbdmHiuHealthInformationRequest(
@@ -310,15 +371,16 @@ async def receive_bundle(
     media_type: str = "application/fhir+json",
     declared_checksum: str | None = None,
     now: datetime | None = None,
-) -> tuple[AbdmReceivedBundle, str]:
-    """Decrypt one pushed bundle and record that it arrived.
+) -> AbdmReceivedBundle:
+    """Authenticate, authorize and encrypt one external record at rest.
 
-    Returns the receipt row and the decrypted document, which the caller ships
-    through the outbox. The plaintext is deliberately NOT persisted here — the
-    receipt carries a sha256 so a later reader can prove which document this
-    row describes without this table holding clinical content.
+    Only a receipt leaves this function. Neither transport nor legacy callers
+    can accidentally forward decrypted clinical content into a general queue.
     """
     now = now or datetime.now(UTC)
+
+    if len(ciphertext_b64) > (records.MAX_DOCUMENT_BYTES + 16) * 4 // 3 + 4:
+        raise HiuError("document_too_large", "The pushed document exceeds the size limit")
 
     if _aware(request.key_expires_at) <= now:
         request.status = "expired"
@@ -389,7 +451,7 @@ async def receive_bundle(
         raise HiuError("unsupported_media", "Only application/fhir+json is accepted")
     try:
         parsed = json.loads(plaintext)
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, RecursionError) as exc:
         await _record_rejection(
             db,
             request=request,
@@ -422,7 +484,26 @@ async def receive_bundle(
             "invalid_fhir_bundle", "The decrypted document is not a FHIR document Bundle"
         )
 
+    try:
+        grant = await records.grant_for(db, request, now=now)
+        hi_type, document_at = records.validate_document(parsed, grant, care_context_reference)
+    except records.RecordRefused as exc:
+        await _record_rejection(
+            db,
+            request=request,
+            care_context_reference=care_context_reference,
+            page_number=page_number,
+            entry_index=entry_index,
+            media_type=media_type,
+            declared_checksum=declared_checksum,
+            content_sha256=digest_hex,
+            status="rejected",
+            reason=str(exc),
+        )
+        raise HiuError("document_not_authorised", str(exc)) from exc
+
     receipt = AbdmReceivedBundle(
+        id=uuid.uuid4(),
         facility_id=request.facility_id,
         hi_request_id=request.id,
         care_context_reference=care_context_reference,
@@ -432,11 +513,28 @@ async def receive_bundle(
         declared_checksum=declared_checksum,
         content_sha256=digest_hex,
         status="stored",
+        source_hip_id=grant.hip_id,
+        hi_type=hi_type,
+        document_at=document_at,
+        wire_sha256=records.wire_digest(
+            content=ciphertext_b64,
+            public_key=hip_public_key_b64,
+            nonce=hip_nonce_b64,
+            reference=care_context_reference,
+            media=media_type,
+            checksum=declared_checksum,
+        ),
+        content_key_version=current_aes_key_version(),
+    )
+    receipt.content_encrypted = encrypt_pii(
+        plaintext,
+        key_version=receipt.content_key_version,
+        associated_data=records.record_aad(receipt),
     )
     db.add(receipt)
     request.status = "partial"
     await db.flush()
-    return receipt, plaintext
+    return receipt
 
 
 async def complete_request(db: AsyncSession, *, request: AbdmHiuHealthInformationRequest) -> None:

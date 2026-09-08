@@ -52,6 +52,7 @@ const NAV_ITEMS: readonly NavItem[] = [
   { href: "/doctor/orders", label: "Orders", icon: FlaskConical, area: "clinical", roles: [ROLES.DOCTOR] },
   { href: "/doctor/prescriptions", label: "Prescriptions", icon: Pill, area: "clinical", roles: [ROLES.DOCTOR] },
   { href: "/doctor/results", label: "Results", icon: FileText, area: "clinical", roles: [ROLES.DOCTOR] },
+  { href: "/doctor/abdm", label: "ABDM external records", icon: FileText, area: "clinical", roles: [ROLES.DOCTOR] },
   { href: "/doctor/pharmacy-approvals", label: "Pharmacy approvals", icon: Pill, area: "clinical", roles: [ROLES.DOCTOR] },
   { href: "/nurse/ward-dashboard", label: "Ward dashboard", icon: Bed, area: "clinical", roles: [ROLES.NURSE] },
   { href: "/nurse/emar", label: "eMAR", icon: ClipboardList, area: "clinical", roles: [ROLES.NURSE] },

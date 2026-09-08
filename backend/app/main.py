@@ -253,6 +253,7 @@ _B1_ROUTERS = [
     # ready, which is the true statement and the one it retries against.
     "app.integrations.abdm.hip.router",
     "app.integrations.abdm.hiu.router",
+    "app.integrations.abdm.operations",
     "app.patients.portal_router",  # verified account-to-patient identity boundary (#228)
     "app.patients.portal_self_router",  # bound patient self-service reads (#228)
     # Break-glass (#391). This sat unregistered behind a note saying

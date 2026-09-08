@@ -179,6 +179,13 @@ do not merge out of order.**
 | 0058 | abdm_protocol_state | ALTER abdm_care_context_links, abdm_hiu_hi_requests, abdm_received_bundles | Durable v3 callback correlation and multi-page transfer state. |
 | 0059 | abdm_care_context_hi_type_narrow | ALTER abdm_care_contexts: hi_type CHECK narrowed to the 5 types fhir/builder.py can populate | Drop ImmunizationRecord/HealthDocumentRecord: storable-but-unbuildable types linked and discovered, then failed silently at transfer. Aligns the CHECK with the builder and validator; a drift test holds the three together. |
 | 0060 | nursing_handover_shift_check | ALTER nursing_handover_notes: CHECK on shift, widen to varchar(50); ALTER medication_administration: widen status to varchar(50) | 0050 created the column as a bare varchar(30). Every other enumerated column is varchar + CHECK via CheckedEnum.sql_check(); without it the database accepted "Morning" or "nite" while the API accepted three values, and the point of naming the shift is being able to ask who held a patient on nights. Table was empty — nothing could write to it. |
+| 0061 | abdm_transfer_scope | ALTER abdm_hip_hi_requests: persisted requested interval/types with all-or-none range CHECK | ABDM G1 — pre-migration rows keep unknown scope and cannot transfer until requested again. |
+| 0062 | abdm_document_contexts | ALTER abdm_care_contexts: finalized document_at | ABDM G2 — one finalized document per care context; legacy rows require explicit reconciliation. |
+| 0063 | abdm_durable_jobs | abdm_jobs | Dedicated identifier-only work queue with leases, backoff, dead letters and stable request IDs. |
+| 0064 | abdm_transfer_pages | abdm_hip_transfer_pages | Receiver-encrypted frozen pages and individual delivery progress for restart-safe transfers. |
+| 0065 | abdm_link_operations | ALTER abdm_care_context_links, abdm_jobs | Separate per-HI-type token/link correlations and short-lived encrypted link credentials. |
+| 0066 | abdm_received_record_store | ALTER abdm_received_bundles, abdm_jobs | Consent-bound encrypted external documents and durable HIU receipt notification; no historical import. |
+| 0067 | abdm_callback_replies | abdm_callback_replies, ALTER abdm_jobs | Transactional acknowledgement intent and stable consent-artefact fetch correlation; identifier-only reply metadata. |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -1685,20 +1692,77 @@ one wide table.
 The external callbacks are mounted on ABDM's exact `/api/v3/...` paths. Internal
 staff APIs remain under `/api/v1/abdm/...`.
 
-**abdm_care_contexts** (0055) — a unit of care that can be offered to an ABHA
+**abdm_jobs** (0063) — dedicated ABDM scheduling, not the general cloud outbox
+```
+facility_id UUID NOT NULL → facilities
+kind varchar(50) NOT NULL                        -- context_notify|hip_transfer|hip_notify|link_token|link_context|hiu_notify|hiu_consent|hiu_request|callback_ack|hiu_fetch
+target_id UUID NOT NULL                          -- kind-specific context/request ID
+status varchar(50) NOT NULL DEFAULT 'pending'     -- pending|leased|done|dead
+attempts integer NOT NULL DEFAULT 0
+available_at timestamptz NOT NULL
+lease_token UUID · lease_until timestamptz
+last_error text                                  -- bounded redacted error category
+```
+Stable UUID primary keys deduplicate `(kind, target_id)`. Leases use row locks,
+token fencing and heartbeat renewal. Expired leases are reclaimable; transport
+failures back off to a dead letter after five claims. A missing confirmed link
+defers notification without consuming transport retries. No clinical payloads,
+ABHA credentials or bearer tokens belong in this queue.
+
+**abdm_callback_replies** (0067) — committed reply intent, not a clinical inbox
+```
+facility_id UUID NOT NULL → facilities
+kind varchar(50) NOT NULL                        -- hip_consent|hip_request|hiu_consent
+gateway_request_id varchar(100) NOT NULL
+payload_sha256 varchar(64) NOT NULL              -- full parsed callback digest, not its content
+subject_ids jsonb NOT NULL                       -- consent/transaction correlation IDs only
+target_id UUID                                  -- kind-specific HIP transfer target
+```
+UUID keys deterministically bind facility, callback kind and inbound request ID.
+Replays with changed content are rejected. Reply jobs acknowledge only committed
+state and then schedule transfer/fetch jobs. Stable outbound request IDs survive
+retries. A fetch callback must match a dispatched `hiu_fetch` job and its artefact.
+Migration downgrade refuses when reply evidence or new-kind jobs exist; recovery
+requires review rather than silently discarding pending acknowledgements.
+
+**abdm_hip_transfer_pages** (0064) — frozen receiver-encrypted wire documents
+```
+facility_id UUID NOT NULL → facilities
+request_id UUID NOT NULL → abdm_hip_hi_requests
+context_id UUID NOT NULL → abdm_care_contexts
+page_number integer NOT NULL
+document_at timestamptz NOT NULL
+payload jsonb NOT NULL                           -- encrypted content + public key material + wire metadata
+delivered_at timestamptz
+UNIQUE (request_id, page_number)
+UNIQUE (request_id, context_id)
+```
+All pages commit before first delivery. Retries keep exact encrypted bytes,
+checksum, context identity and page count. A crash after remote acceptance but
+before local acknowledgement can replay a page: the receiver must deduplicate
+transaction/page/entry. The payload is excluded from the append-only audit log.
+
+**abdm_care_contexts** (0055, 0062) — one finalized document that can be offered to an ABHA
 ```
 patient_id UUID NOT NULL → patients · visit_id UUID → visits
 reference varchar(100) NOT NULL                   -- quoted back by ABDM forever; never recomputed
 display varchar(200) NOT NULL
-hi_type varchar(50) NOT NULL                      -- OPConsultation|Prescription|DiagnosticReport|DischargeSummary|ImmunizationRecord|HealthDocumentRecord|WellnessRecord
+hi_type varchar(50) NOT NULL                      -- OPConsultation|Prescription|DiagnosticReport|DischargeSummary|WellnessRecord (narrowed in 0059)
+document_at timestamptz                          -- finalized source time; NULL legacy rows cannot be shared
 facility_id UUID NOT NULL → facilities
 UNIQUE (patient_id, reference)                    -- two facilities may both hold a context for one person
 ```
+References are canonical `encounter/UUID`, `prescription/UUID`, `lab-result/UUID`,
+`radiology-report/UUID`, `discharge/UUID` or `wellness/UUID`. The source must
+resolve to this patient/facility/visit and its finalized date must match
+`document_at`. Migration 0062 does not infer document identities or dates from
+old visit-level contexts. Discovery and transfer exclude unresolved records.
 
 **abdm_care_context_links** (0055) — an ABHA address's claim on those contexts
 ```
 patient_id UUID NOT NULL → patients · abha_address varchar(120) NOT NULL
 link_ref_number varchar(120) · gateway_request_id varchar(100) · transaction_id varchar(120)
+token_request_id varchar(100) UNIQUE · link_token_encrypted bytea · token_use_until timestamptz
 care_context_references jsonb NOT NULL DEFAULT '[]' -- exact set approved during link-init
 status varchar(50) NOT NULL DEFAULT 'pending'     -- pending|confirmed|failed|expired
 failure_reason text · confirmed_at timestamptz · expires_at timestamptz
@@ -1720,15 +1784,20 @@ facility_id UUID NOT NULL → facilities
 what basis did you release this record", the answer must be the document we
 were given, not our reading of it.
 
-**abdm_hip_hi_requests** (0055) — a request for data and what we did about it
+**abdm_hip_hi_requests** (0055, 0061) — a request for data and what we did about it
 ```
 consent_artefact_id varchar(120) NOT NULL · transaction_id varchar(120) UNIQUE NOT NULL
 gateway_request_id varchar(100) · hiu_key_material jsonb NOT NULL   -- HIU's PUBLIC half only
 data_push_url text NOT NULL
+requested_from timestamptz · requested_to timestamptz · requested_hi_types jsonb
 status varchar(50) NOT NULL DEFAULT 'received'    -- received|refused|transferring|delivered|failed
 bundles_sent varchar(10) · failure_reason text · completed_at timestamptz
 facility_id UUID NOT NULL → facilities
 ```
+The three requested-scope fields are all NULL (refused/legacy request) or all
+present with `requested_from <= requested_to`. An accepted request stores its
+effective interval/types once; the worker must not substitute the wider consent
+range. Requests with unknown original scope fail closed and need a fresh request.
 There is no private-key column here and there must never be one: the HIP
 generates its keypair inside the push and discards it.
 
@@ -1786,11 +1855,18 @@ declared_checksum varchar(128)
 content_sha256 varchar(64) NOT NULL               -- of the DECRYPTED bundle
 status varchar(50) NOT NULL DEFAULT 'stored'      -- stored|undecipherable|rejected
 failure_reason text · facility_id UUID NOT NULL → facilities
+content_encrypted bytea · content_key_version smallint -- paired nullable; excluded from append-only audit
+wire_sha256 varchar(64)                           -- exact authenticated entry fingerprint for replay checks
+source_hip_id varchar(120) · hi_type varchar(50) · document_at timestamptz
+erased_at timestamptz
 UNIQUE (hi_request_id, page_number, entry_index)
 ```
-The decrypted bundle is not stored here; it takes the outbox path every other
-clinical document takes, and this row is the durable fact that it arrived —
-the same rule `fhir_bundle_transactions` follows.
+New external documents are AES-GCM encrypted here, bound to receipt/request/
+facility, and never enter the general outbox or local clinical Mongo store.
+Reads recheck current consent and the requesting clinician. Revocation or
+`dataEraseAt` blocks reads immediately; the dedicated worker clears cache bytes
+on its next cleanup cycle (normally within 60 seconds). Receipt metadata remains.
+Historical outbox/Mongo copies are not imported, erased or assumed safe by 0066.
 
 ### 0029–0031 — B1 auth / ABDM / sync tables
 

@@ -19,29 +19,26 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import CurrentDbUser, require_roles
 from app.common.db import get_db
+from app.integrations.abdm import jobs
 from app.integrations.abdm.callback_auth import verify_callback
-from app.integrations.abdm.client import (
-    AbdmAuthError,
-    AbdmNotConfigured,
-    AbdmRejected,
-    AbdmUnavailable,
-)
-from app.integrations.abdm.hiu import gateway, service
+from app.integrations.abdm.hiu import records, service
 from app.integrations.abdm.hiu.models import (
     AbdmConsentRequest,
     AbdmHiuConsentArtefact,
     AbdmHiuHealthInformationRequest,
+    AbdmReceivedBundle,
 )
+from app.patients.models import Patient
 
 log = logging.getLogger("healthdoc.abdm.hiu")
 
@@ -51,81 +48,6 @@ DbSession = Annotated[AsyncSession, Depends(get_db)]
 
 def _refusal(exc: service.HiuError, status: int = 409) -> HTTPException:
     return HTTPException(status, {"code": exc.code, "message": exc.message})
-
-
-async def _dispatch(row, coro):
-    """Send an outbound gateway call and record what happened on `row`.
-
-    The local row is written BEFORE the gateway is called and is kept even when
-    the call fails. That is deliberate: a consent request we attempted and could
-    not send is a fact the facility has to be able to show later, and deleting
-    it on failure would leave the operator's screen and the audit trail
-    disagreeing about whether anything happened.
-
-    The operator still gets an error — silently keeping a `failed` row and
-    returning 201 would be worse than either. Status codes distinguish whose
-    problem it is: 503 we are not configured, 502 the gateway did not answer or
-    refused.
-    """
-    try:
-        request_id, response = await coro
-    except AbdmNotConfigured as exc:
-        row.status = "failed"
-        row.failure_reason = "ABDM integration is not configured on this server"
-        raise HTTPException(
-            503,
-            {
-                "code": "abdm_not_configured",
-                "message": "This server is not configured to talk to ABDM.",
-            },
-        ) from exc
-    except AbdmUnavailable as exc:
-        row.status = "failed"
-        row.failure_reason = "ABDM gateway did not respond"
-        raise HTTPException(
-            502,
-            {
-                "code": "abdm_unavailable",
-                "message": "The ABDM gateway did not respond. The request was not sent.",
-            },
-        ) from exc
-    except AbdmAuthError as exc:
-        # Ours to fix, not the caller's. Never surfaced as "try again".
-        row.status = "failed"
-        row.failure_reason = "ABDM rejected this facility's credentials"
-        log.error("ABDM rejected our credentials on an HIU call")
-        raise HTTPException(
-            502,
-            {
-                "code": "abdm_auth_failed",
-                "message": "ABDM rejected this server's credentials.",
-            },
-        ) from exc
-    except AbdmRejected as exc:
-        # Status only in the reason. The gateway's body echoes identifiers we
-        # just sent, including the ABHA address.
-        row.status = "failed"
-        row.failure_reason = f"ABDM declined the request ({exc.status_code})"
-        raise HTTPException(
-            502,
-            {
-                "code": "abdm_rejected",
-                "message": f"ABDM declined the request ({exc.status_code}).",
-            },
-        ) from exc
-    except (gateway.HiuIdentityNotConfigured, gateway.DataPushUrlNotConfigured) as exc:
-        row.status = "failed"
-        row.failure_reason = str(exc)
-        raise HTTPException(
-            503,
-            {
-                "code": "abdm_not_configured",
-                "message": str(exc),
-            },
-        ) from exc
-
-    row.gateway_request_id = request_id
-    return response
 
 
 def _require_idempotency_key(
@@ -182,7 +104,44 @@ async def create_consent_request(
     idempotency_key: IdempotencyKey,
     db: DbSession,
 ) -> ConsentRequestOut:
-    """Ask the consent manager for access to a patient's records elsewhere."""
+    """Durably queue an ask; requested is not evidence of patient approval."""
+    patient = (
+        await db.execute(
+            select(Patient)
+            .where(
+                Patient.id == payload.patient_id,
+                Patient.facility_id == current_db_user.facility_id,
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if patient is None:
+        raise HTTPException(404, {"code": "not_found", "message": "Patient unavailable"})
+    ident = uuid.uuid5(
+        uuid.NAMESPACE_URL,
+        f"healthdoc:hiu-consent:{current_db_user.facility_id}:{current_db_user.id}:{idempotency_key}",
+    )
+    existing = await db.get(AbdmConsentRequest, ident)
+    if existing:
+        if (
+            existing.patient_id != payload.patient_id
+            or existing.abha_address != payload.abha_address
+            or existing.hi_types != payload.hi_types
+            or existing.purpose_code != payload.purpose_code
+            or records.aware(existing.date_range_from) != records.aware(payload.date_range_from)
+            or records.aware(existing.date_range_to) != records.aware(payload.date_range_to)
+            or records.aware(existing.requested_expiry) != records.aware(payload.requested_expiry)
+        ):
+            raise HTTPException(
+                409,
+                {
+                    "code": "idempotency_key_reuse",
+                    "message": "The request changed; start a new request",
+                },
+            )
+        return ConsentRequestOut(
+            id=existing.id, status=existing.status, abha_address=existing.abha_address
+        )
     try:
         row = await service.create_consent_request(
             db,
@@ -195,31 +154,13 @@ async def create_consent_request(
             date_range_to=payload.date_range_to,
             requested_expiry=payload.requested_expiry,
             created_by=current_db_user.id,
+            request_id=ident,
         )
     except service.HiuError as exc:
         raise _refusal(exc, status=400) from exc
 
-    # Until this call existed the row was written and nothing was ever asked of
-    # the consent manager — the request sat at "requested" forever and no
-    # patient was ever shown anything to approve.
-    response = await _dispatch(
-        row,
-        gateway.request_consent(
-            abha_address=payload.abha_address,
-            hi_types=payload.hi_types,
-            date_from=payload.date_range_from,
-            date_to=payload.date_range_to,
-            expiry=payload.requested_expiry,
-            purpose=gateway.PURPOSE_CARE_MANAGEMENT,
-        ),
-    )
-    # The manager echoes its own id for the request. Without it the grant
-    # callback, which arrives days later carrying only that id, cannot be
-    # matched to this row.
-    body = response.body if isinstance(response.body, dict) else {}
-    consent_request_id = body.get("consentRequestId") or body.get("id")
-    if isinstance(consent_request_id, str):
-        row.consent_request_id = consent_request_id
+    row.gateway_request_id = str(jobs.job_id("hiu_consent", row.id))
+    await jobs.enqueue(db, kind="hiu_consent", target_id=row.id, facility_id=row.facility_id)
 
     return ConsentRequestOut(id=row.id, status=row.status, abha_address=row.abha_address)
 
@@ -297,22 +238,45 @@ async def request_health_information(
     """
     artefact = (
         await db.execute(
-            select(AbdmHiuConsentArtefact).where(
+            select(AbdmHiuConsentArtefact)
+            .join(
+                AbdmConsentRequest,
+                AbdmConsentRequest.id == AbdmHiuConsentArtefact.consent_request_id,
+            )
+            .where(
                 AbdmHiuConsentArtefact.id == artefact_id,
                 AbdmHiuConsentArtefact.facility_id == current_db_user.facility_id,
+                AbdmConsentRequest.created_by == current_db_user.id,
             )
+            .with_for_update(of=AbdmHiuConsentArtefact)
         )
     ).scalar_one_or_none()
     if artefact is None:
         # 404, not 403 — another facility's artefact must not be confirmable.
         raise HTTPException(404, {"code": "not_found", "message": "No such consent artefact"})
 
+    ident = uuid.uuid5(
+        uuid.NAMESPACE_URL,
+        f"healthdoc:hiu-data:{current_db_user.facility_id}:{current_db_user.id}:{idempotency_key}",
+    )
+    existing = await db.get(AbdmHiuHealthInformationRequest, ident)
+    if existing:
+        if existing.artefact_id != artefact_id:
+            raise HTTPException(
+                409,
+                {
+                    "code": "idempotency_key_reuse",
+                    "message": "The request changed; start a new request",
+                },
+            )
+        return HiRequestOut(id=existing.id, status=existing.status, key_material={})
     try:
         row, wire = await service.begin_hi_request(
             db,
             facility_id=current_db_user.facility_id,
             artefact=artefact,
             created_by=current_db_user.id,
+            request_id=ident,
         )
     except service.HiuError as exc:
         raise _refusal(exc, status=403) from exc
@@ -334,25 +298,12 @@ async def request_health_information(
             },
         )
 
-    # The key material was minted and stored and then went nowhere. Sending it
-    # is what makes the HIP encrypt a bundle to our public key and push it to
-    # the callback below.
-    #
-    # The date range is taken from the ARTEFACT, not from the original consent
-    # request: the manager may grant less than was asked for, and asking for
-    # the wider range is refused with a message that does not say which field
-    # was too wide.
-    await _dispatch(
-        row,
-        gateway.request_health_information(
-            consent_id=artefact.consent_artefact_id,
-            date_from=artefact.date_range_from,
-            date_to=artefact.date_range_to,
-            dh_public_key=row.public_key_b64,
-            key_expiry=row.key_expires_at,
-            nonce=row.nonce_b64,
-        ),
-    )
+    try:
+        await records.grant_for(db, row, now=datetime.now(UTC))
+    except records.RecordRefused as exc:
+        raise HTTPException(409, {"code": "consent_not_valid", "message": str(exc)}) from exc
+    row.gateway_request_id = str(jobs.job_id("hiu_request", row.id))
+    await jobs.enqueue(db, kind="hiu_request", target_id=row.id, facility_id=row.facility_id)
 
     return HiRequestOut(id=row.id, status=row.status, key_material=wire)
 
@@ -360,6 +311,229 @@ async def request_health_information(
 # =============================================================================
 # Gateway / HIP callbacks — NO user, fail closed
 # =============================================================================
+
+
+class ReceivedRecordOut(BaseModel):
+    id: uuid.UUID
+    hi_type: str | None
+    source_hip_id: str | None
+    document_at: datetime | None
+    status: str
+    available: bool
+
+
+class TransferStatusOut(BaseModel):
+    id: uuid.UUID
+    status: str
+    delivery_status: str | None
+    received_pages: int
+    expected_pages: int | None
+    records: list[ReceivedRecordOut]
+
+
+class ConsentStatusOut(BaseModel):
+    id: uuid.UUID
+    status: str
+    delivery_status: str | None
+    hi_types: list[str]
+    date_range_from: datetime
+    date_range_to: datetime
+    requested_expiry: datetime
+    artefacts: list[ArtefactOut]
+    transfers: list[TransferStatusOut]
+
+
+class WorkspaceOut(BaseModel):
+    patient_id: uuid.UUID
+    patient_name: str
+    abha_address: str | None
+    identity_verified: bool
+    requests: list[ConsentStatusOut]
+    next_offset: int | None
+
+
+@router.get(
+    "/patients/{patient_id}/workspace",
+    response_model=WorkspaceOut,
+    dependencies=[Depends(require_roles("doctor"))],
+)
+async def patient_workspace(
+    patient_id: uuid.UUID,
+    current_db_user: CurrentDbUser,
+    db: DbSession,
+    limit: int = Query(default=20, ge=1, le=50),
+    offset: int = Query(default=0, ge=0),
+) -> WorkspaceOut:
+    patient = (
+        await db.execute(
+            select(Patient).where(
+                Patient.id == patient_id,
+                Patient.facility_id == current_db_user.facility_id,
+                Patient.deleted_at.is_(None),
+                Patient.merged_into_patient_id.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
+    if patient is None:
+        raise HTTPException(404, {"code": "not_found", "message": "Patient unavailable"})
+    rows = list(
+        (
+            await db.execute(
+                select(AbdmConsentRequest)
+                .where(
+                    AbdmConsentRequest.facility_id == current_db_user.facility_id,
+                    AbdmConsentRequest.patient_id == patient_id,
+                    AbdmConsentRequest.created_by == current_db_user.id,
+                )
+                .order_by(AbdmConsentRequest.created_at.desc(), AbdmConsentRequest.id)
+                .limit(limit + 1)
+                .offset(offset)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    output = []
+    now = datetime.now(UTC)
+    for row in rows[:limit]:
+        artefacts = list(
+            (
+                await db.execute(
+                    select(AbdmHiuConsentArtefact).where(
+                        AbdmHiuConsentArtefact.consent_request_id == row.id,
+                        AbdmHiuConsentArtefact.facility_id == current_db_user.facility_id,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        transfers = list(
+            (
+                await db.execute(
+                    select(AbdmHiuHealthInformationRequest)
+                    .where(
+                        AbdmHiuHealthInformationRequest.artefact_id.in_([a.id for a in artefacts]),
+                        AbdmHiuHealthInformationRequest.facility_id == current_db_user.facility_id,
+                    )
+                    .order_by(AbdmHiuHealthInformationRequest.created_at.desc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        transfer_output = []
+        for transfer in transfers:
+            can_read = True
+            try:
+                await records.grant_for(db, transfer, now=now)
+            except records.RecordRefused:
+                can_read = False
+            receipts = (
+                (
+                    await db.execute(
+                        select(AbdmReceivedBundle)
+                        .where(
+                            AbdmReceivedBundle.hi_request_id == transfer.id,
+                            AbdmReceivedBundle.facility_id == current_db_user.facility_id,
+                        )
+                        .order_by(AbdmReceivedBundle.page_number, AbdmReceivedBundle.entry_index)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            job = await db.get(jobs.AbdmJob, jobs.job_id("hiu_request", transfer.id))
+            transfer_output.append(
+                TransferStatusOut(
+                    id=transfer.id,
+                    status=transfer.status,
+                    delivery_status=job.status if job else None,
+                    received_pages=len(transfer.received_pages or []),
+                    expected_pages=transfer.expected_page_count,
+                    records=[
+                        ReceivedRecordOut(
+                            id=r.id,
+                            hi_type=r.hi_type,
+                            source_hip_id=r.source_hip_id,
+                            document_at=r.document_at,
+                            status=r.status,
+                            available=can_read
+                            and r.status == "stored"
+                            and r.content_encrypted is not None
+                            and r.erased_at is None,
+                        )
+                        for r in receipts
+                    ],
+                )
+            )
+        job = await db.get(jobs.AbdmJob, jobs.job_id("hiu_consent", row.id))
+        output.append(
+            ConsentStatusOut(
+                id=row.id,
+                status=row.status,
+                delivery_status=job.status if job else None,
+                hi_types=row.hi_types,
+                date_range_from=row.date_range_from,
+                date_range_to=row.date_range_to,
+                requested_expiry=row.requested_expiry,
+                artefacts=[
+                    ArtefactOut(
+                        id=a.id,
+                        consent_artefact_id=a.consent_artefact_id,
+                        status=a.status
+                        if a.expires_at and records.aware(a.expires_at) > now
+                        else "expired",
+                        hi_types=a.hi_types,
+                        expires_at=a.expires_at,
+                    )
+                    for a in artefacts
+                ],
+                transfers=transfer_output,
+            )
+        )
+    return WorkspaceOut(
+        patient_id=patient.id,
+        patient_name=patient.full_name,
+        abha_address=patient.abha_address,
+        identity_verified=patient.abha_linked_at is not None and bool(patient.abha_address),
+        requests=output,
+        next_offset=offset + limit if len(rows) > limit else None,
+    )
+
+
+@router.get(
+    "/records/{record_id}", response_model=dict, dependencies=[Depends(require_roles("doctor"))]
+)
+async def view_received_record(
+    record_id: uuid.UUID, current_db_user: CurrentDbUser, db: DbSession, response: Response
+) -> dict:
+    try:
+        bundle = await records.read_record(
+            db, record_id, facility_id=current_db_user.facility_id, actor_id=current_db_user.id
+        )
+    except records.RecordRefused as exc:
+        raise HTTPException(
+            404,
+            {
+                "code": "record_unavailable",
+                "message": "This external record is unavailable under your current consent",
+            },
+        ) from exc
+    from app.audit.actions import AuditAction
+    from app.audit.service import write_audit_log
+
+    await write_audit_log(
+        db,
+        facility_id=current_db_user.facility_id,
+        user_id=current_db_user.id,
+        action=AuditAction.VIEW,
+        resource_type="abdm_received_bundles",
+        resource_id=record_id,
+        reason="Consent-governed external record view",
+    )
+    response.headers["Cache-Control"] = "no-store, private"
+    return bundle
 
 
 class TransferIn(BaseModel):
@@ -391,7 +565,7 @@ async def receive_transfer(
         raise HTTPException(404, {"code": "unknown_transaction", "message": "Unknown transaction"})
 
     try:
-        receipt, plaintext = await service.receive_bundle(
+        receipt = await service.receive_bundle(
             db,
             request=request,
             ciphertext_b64=payload.ciphertext,
@@ -405,12 +579,6 @@ async def receive_transfer(
         # recorded against the request.
         raise _refusal(exc, status=422) from exc
 
-    # The decrypted document does not go in the response, a log, or this table.
-    # It goes to the outbox like every other clinical document; the receipt is
-    # the durable fact that it arrived.
-    log.info(
-        "ABDM transfer accepted for request %s (%d bytes decrypted)",
-        request.id,
-        len(plaintext),
-    )
+    # External content stays in the encrypted consent-bound store.
+    log.info("ABDM transfer accepted for request %s", request.id)
     return {"received": str(receipt.id), "status": receipt.status}

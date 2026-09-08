@@ -268,7 +268,8 @@ class HiuHealthInformationOnRequestCallback(WireModel):
 
 
 class TransferEntry(WireModel):
-    content: str
+    # Base64 of at most 2 MiB of document data plus its GCM tag.
+    content: str = Field(min_length=1, max_length=2796232)
     media: str
     checksum: str | None = None
     care_context_reference: str | None = Field(default=None, alias="careContextReference")

@@ -26,7 +26,7 @@ else's work" and that work has landed):
 import asyncio
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from statistics import mean, median
 from typing import Annotated
 
@@ -205,7 +205,7 @@ async def collect_sample(
 
     item.status = "in_progress"
     item.barcode = payload.barcode
-    item.collected_at = payload.collected_at or datetime.now(timezone.utc)
+    item.collected_at = payload.collected_at or datetime.now(UTC)
 
     await _write_audit_log(db, table_name="lab_order_items", row_id=item.id,
                             action="update", actor_id=current_db_user.id,
@@ -414,6 +414,10 @@ async def verify_result(
     await db.flush()
     await db.refresh(current)
 
+    from app.integrations.abdm.hip.publisher import publish_order_document
+
+    await publish_order_document(db, kind="lab-result", source_id=current.id,
+                                 order_id=item.order_id, actor_id=current_db_user.id)
     tat_delta = current.updated_at - (item.collected_at or item.created_at)
     result_out = LabResultOut.model_validate(current)
     result_out.tat_minutes = int(tat_delta.total_seconds() // 60)
@@ -434,7 +438,7 @@ async def amend_result(
     current_user=Depends(require_roles("lab_tech")),
 
 ):
-    await _get_scoped_lab_item(
+    item = await _get_scoped_lab_item(
         db, item_id, current_db_user.facility_id, for_update=True
     )
     current = (await db.execute(
@@ -451,6 +455,7 @@ async def amend_result(
     await db.flush()
 
     amended = LabResult(
+        id=uuid.uuid4(),
         lab_order_item_id=item_id,
         version=current.version + 1,
         is_current=True,
@@ -467,6 +472,10 @@ async def amend_result(
                             facility_id=current_db_user.facility_id)
     await db.flush()
     await db.refresh(amended)
+    from app.integrations.abdm.hip.publisher import publish_order_document
+
+    await publish_order_document(db, kind="lab-result", source_id=amended.id,
+                                 order_id=item.order_id, actor_id=current_db_user.id)
     return amended
 
 
