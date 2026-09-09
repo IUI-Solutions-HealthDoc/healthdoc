@@ -1,6 +1,7 @@
 # ABDM local verification and recovery
 
-Updated: 9 September 2026. Work branch: `fix/abdm-milestone-closure`.
+Updated: 9 September 2026. PR #537 merged into staging; current follow-up:
+`fix/abdm-historical-registration`.
 This is an engineering runbook, **not evidence of NHA milestone approval**.
 The status table in [the gap report](bahmni-abdm-m1-m2-m3-gap-analysis-2026-09-08.md)
 distinguishes implementation from unproven deployment and clinical behaviour.
@@ -113,8 +114,16 @@ with `apply:true` only for approved rows. The response distinguishes `eligible`,
 This operation only fills missing dates on existing, unambiguous canonical source
 references. It does not create missing historical contexts, invent source authors,
 rewrite an adopted date, reinterpret `visit/...`, widen confirmed links, or repair
-legacy transfer requests with unknown scope. Those need separate reviewed work.
-Do not run the old `scripts/maintenance/backfill_care_contexts.py` unchanged.
+legacy transfer requests with unknown scope.
+
+For **missing** contexts, a separate preview-first maintenance CLI is now built:
+[explicit historical registration](abdm-historical-backfill.md). It accepts only
+named patient/document pairs for one named facility and active operator, refuses
+the whole batch if any source is unsafe, and atomically creates contexts, audit
+records and notification jobs. It does not rewrite an existing context or start
+delivery. The original all-facility script was archived and replaced, not run.
+No application-data manifest has been applied. Execute only after facility
+review, backup and approval, with the worker stopped.
 
 ## 4. Browser action-level verification
 
