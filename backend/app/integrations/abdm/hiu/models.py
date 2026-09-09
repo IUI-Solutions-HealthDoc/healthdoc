@@ -190,10 +190,9 @@ class AbdmHiuHealthInformationRequest(Base, UUIDPk, Timestamps, Blame):
 class AbdmReceivedBundle(Base, UUIDPk, Timestamps):
     """One care context's worth of data that arrived from a HIP.
 
-    The decrypted bundle is NOT stored here. It goes to the same outbox path
-    every other clinical document takes, and this row is the durable fact that
-    it arrived — the pattern fhir/models.py already set, and for the same
-    reason: a Mongo outage must not lose the record that a transfer happened.
+    Content is encrypted here with row/facility/request-bound AES-GCM, never
+    copied into the general outbox or clinical Mongo collections. Every read
+    must recheck the originating consent and requesting clinician.
     """
 
     __tablename__ = "abdm_received_bundles"
@@ -218,11 +217,23 @@ class AbdmReceivedBundle(Base, UUIDPk, Timestamps):
     content_sha256 = Column(String(64), nullable=False)
     status = Column(String(50), nullable=False, server_default="stored")
     failure_reason = Column(Text, nullable=True)
+    content_encrypted = Column(LargeBinary, nullable=True)
+    content_key_version = Column(SmallInteger, nullable=True)
+    wire_sha256 = Column(String(64), nullable=True)
+    source_hip_id = Column(String(120), nullable=True)
+    hi_type = Column(String(50), nullable=True)
+    document_at = Column(DateTime(timezone=True), nullable=True)
+    erased_at = Column(DateTime(timezone=True), nullable=True)
 
     __audit_resource_type__ = "abdm_received_bundles"
     __audit_facility_id_field__ = "facility_id"
+    __audit_exclude_fields__ = ("content_encrypted", "content_key_version")
 
     __table_args__ = (
+        CheckConstraint(
+            "(content_encrypted IS NULL) = (content_key_version IS NULL)",
+            name="abdm_received_content_key_pair",
+        ),
         CheckConstraint(
             "status IN ('stored','undecipherable','rejected')", name="abdm_received_bundle_status"
         ),

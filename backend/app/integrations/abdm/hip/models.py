@@ -22,6 +22,8 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -59,6 +61,9 @@ class AbdmCareContext(Base, UUIDPk, Timestamps, Blame):
     #: is silently dropped by the gateway rather than rejected, which presents
     #: later as "the record was shared but the HIU cannot see it".
     hi_type = Column(String(50), nullable=False)
+    # Pre-document contexts stay NULL until explicitly reconciled. No migration
+    # may guess a document identity or publication time from the visit date.
+    document_at = Column(DateTime(timezone=True), nullable=True)
 
     __audit_resource_type__ = "abdm_care_contexts"
     __audit_facility_id_field__ = "facility_id"
@@ -114,6 +119,9 @@ class AbdmCareContextLink(Base, UUIDPk, Timestamps):
     abha_address = Column(String(120), nullable=False)
     link_ref_number = Column(String(120), nullable=True)
     gateway_request_id = Column(String(100), nullable=True)
+    token_request_id = Column(String(100), nullable=True)
+    link_token_encrypted = Column(LargeBinary, nullable=True)
+    token_use_until = Column(DateTime(timezone=True), nullable=True)
     transaction_id = Column(String(120), nullable=True)
     care_context_references = Column(JSONB, nullable=False, server_default="[]")
     status = Column(String(50), nullable=False, server_default="pending")
@@ -124,6 +132,7 @@ class AbdmCareContextLink(Base, UUIDPk, Timestamps):
     expires_at = Column(DateTime(timezone=True), nullable=True)
 
     __audit_resource_type__ = "abdm_care_context_links"
+    __audit_exclude_fields__ = ("link_token_encrypted",)
     __audit_facility_id_field__ = "facility_id"
     __audit_patient_id_field__ = "patient_id"
 
@@ -135,6 +144,7 @@ class AbdmCareContextLink(Base, UUIDPk, Timestamps):
         Index("ix_abdm_links_abha_address", "abha_address"),
         Index("ix_abdm_links_ref", "link_ref_number"),
         Index("ix_abdm_links_transaction", "transaction_id"),
+        Index("ix_abdm_links_token_request", "token_request_id", unique=True),
         Index("ix_abdm_links_patient_id", "patient_id"),
     )
 
@@ -200,6 +210,11 @@ class AbdmHipHealthInformationRequest(Base, UUIDPk, Timestamps):
 
     hiu_key_material = Column(JSONB, nullable=False)
     data_push_url = Column(Text, nullable=False)
+    # Nullable only for pre-0061 requests whose original scope is unknowable.
+    # Such rows must fail closed, never be reconstructed from a wider grant.
+    requested_from = Column(DateTime(timezone=True), nullable=True)
+    requested_to = Column(DateTime(timezone=True), nullable=True)
+    requested_hi_types = Column(JSONB(none_as_null=True), nullable=True)
     status = Column(String(50), nullable=False, server_default="received")
     bundles_sent = Column(String(10), nullable=True)
     failure_reason = Column(Text, nullable=True)
@@ -211,8 +226,46 @@ class AbdmHipHealthInformationRequest(Base, UUIDPk, Timestamps):
     __table_args__ = (
         UniqueConstraint("transaction_id", name="uq_abdm_hip_hi_transaction"),
         CheckConstraint(
+            "(requested_from IS NULL AND requested_to IS NULL AND requested_hi_types IS NULL) "
+            "OR (requested_from IS NOT NULL AND requested_to IS NOT NULL "
+            "AND requested_hi_types IS NOT NULL AND requested_from <= requested_to)",
+            name="abdm_hip_request_scope",
+        ),
+        CheckConstraint(
             "status IN ('received','refused','transferring','delivered','failed')",
             name="abdm_hip_hi_status",
         ),
         Index("ix_abdm_hip_hi_facility_id", "facility_id"),
+    )
+
+
+class AbdmHipTransferPage(Base, UUIDPk, Timestamps):
+    """Frozen receiver-encrypted wire page. Retries never rebuild clinical facts."""
+
+    __tablename__ = "abdm_hip_transfer_pages"
+    facility_id = Column(
+        UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False
+    )
+    request_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("abdm_hip_hi_requests.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    context_id = Column(
+        UUID(as_uuid=True), ForeignKey("abdm_care_contexts.id", ondelete="RESTRICT"), nullable=False
+    )
+    page_number = Column(Integer, nullable=False)
+    document_at = Column(DateTime(timezone=True), nullable=False)
+    payload = Column(JSONB, nullable=False)
+    delivered_at = Column(DateTime(timezone=True), nullable=True)
+    __audit_resource_type__ = "abdm_hip_transfer_pages"
+    __audit_facility_id_field__ = "facility_id"
+    __audit_exclude_fields__ = ("payload",)
+    __table_args__ = (
+        UniqueConstraint("request_id", "page_number", name="uq_abdm_hip_page_number"),
+        UniqueConstraint("request_id", "context_id", name="uq_abdm_hip_page_context"),
+        CheckConstraint("page_number >= 0", name="abdm_hip_page_number"),
+        Index("ix_abdm_hip_transfer_pages_facility_id", "facility_id"),
+        Index("ix_abdm_hip_transfer_pages_request_id", "request_id"),
+        Index("ix_abdm_hip_transfer_pages_context_id", "context_id"),
     )

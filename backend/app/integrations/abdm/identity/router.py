@@ -332,19 +332,7 @@ async def _persist_verified_identity(
     issued: identity_service.AbhaIssued,
 ) -> uuid.UUID:
     """Bind a successful OTP result without ever exposing its token to a client."""
-    session = await otp_session.load(
-        session_id,
-        facility_id=str(current_db_user.facility_id),
-        purpose=purpose,
-    )
-    if session.started_by != str(current_db_user.id) or not session.patient_id:
-        raise HTTPException(
-            404,
-            {
-                "code": "otp_session_not_found",
-                "message": "This OTP session has expired or does not exist",
-            },
-        )
+    session = await _bound_otp_session(db, current_db_user, session_id, purpose)
     if not issued.linking_token:
         raise HTTPException(
             502,
@@ -393,8 +381,55 @@ async def _persist_verified_identity(
         payload={"abha_number": normalised},
         sensitivity="important",
     )
-    await otp_session.finish(session_id)
+    # Consume proof only after the identity and its event are durable. A failed
+    # database commit must not destroy the patient's successful OTP session.
+    await db.commit()
+    try:
+        await otp_session.finish(session_id)
+    except Exception:
+        # Redis still expires this session; do not tell the desk a committed
+        # identity write failed. Never log the credential or transaction id.
+        log.error("ABHA identity committed; OTP session cleanup failed")
     return patient.id
+
+
+async def _bound_otp_session(
+    db: AsyncSession, actor: CurrentDbUser, session_id: str, purpose: OtpPurpose
+) -> otp_session.OtpSession:
+    refusal = HTTPException(
+        404,
+        {
+            "code": "otp_session_not_found",
+            "message": "This OTP session has expired or does not exist",
+        },
+    )
+    try:
+        session = await otp_session.load(
+            session_id, facility_id=str(actor.facility_id), purpose=purpose
+        )
+    except (OtpSessionNotFound, OtpSessionMismatch) as exc:
+        raise refusal from exc
+    if session.started_by != str(actor.id) or not session.patient_id:
+        raise refusal
+    try:
+        patient_id = uuid.UUID(session.patient_id)
+    except ValueError as exc:
+        raise refusal from exc
+    patient = (
+        await db.execute(
+            select(Patient)
+            .where(
+                Patient.id == patient_id,
+                Patient.facility_id == actor.facility_id,
+                Patient.deleted_at.is_(None),
+                Patient.merged_into_patient_id.is_(None),
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if patient is None:
+        raise refusal
+    return session
 
 
 @router.post(
@@ -454,6 +489,11 @@ async def enrol_verify_otp(
 ) -> AbhaIssuedOut:
     """Present the OTP and receive a newly created ABHA."""
     try:
+        # Check ownership BEFORE spending an OTP at the gateway, not only
+        # after it has already been consumed by a different staff account.
+        await _bound_otp_session(
+            db, current_db_user, payload.session_id, OtpPurpose.ENROL_BY_AADHAAR
+        )
         issued = await identity_service.enrol_by_aadhaar_otp(
             session_id=payload.session_id,
             otp=payload.otp,
@@ -560,6 +600,7 @@ async def login_verify_otp(
 ) -> AbhaIssuedOut:
     """The OTP proves the patient holds this ABHA."""
     try:
+        await _bound_otp_session(db, current_db_user, payload.session_id, OtpPurpose.LOGIN_BY_ABHA)
         issued = await identity_service.verify_login_otp(
             session_id=payload.session_id,
             otp=payload.otp,

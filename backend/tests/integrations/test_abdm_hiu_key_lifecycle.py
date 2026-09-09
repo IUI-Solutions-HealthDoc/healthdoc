@@ -20,17 +20,19 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from cryptography.exceptions import InvalidTag
-from sqlalchemy import select, text
+from sqlalchemy import select
 
 from app.common.security import decrypt_pii
 from app.integrations.abdm import hi_crypto
 from app.integrations.abdm.hip import service as hip_service
-from app.integrations.abdm.hiu import service
+from app.integrations.abdm.hiu import records, service
 from app.integrations.abdm.hiu.models import (
     AbdmConsentRequest,
     AbdmHiuConsentArtefact,
     AbdmReceivedBundle,
 )
+from app.patients.models import Patient
+from app.users.models import Facility
 
 NOW = datetime(2026, 8, 29, 12, 0, tzinfo=UTC)
 FACILITY = uuid.uuid4()
@@ -38,22 +40,53 @@ ACTOR = uuid.uuid4()
 
 
 @pytest.fixture
-async def hiu_db(db):
-    await db.execute(
-        text(
-            "INSERT INTO facilities (id, code, name, state_code, timezone, is_active) "
-            "VALUES (:id, 'HIUF1', 'Test', 'DL', 'Asia/Kolkata', 1)"
-        ),
-        {"id": str(FACILITY)},
+async def hiu_db(db, monkeypatch):
+    from types import SimpleNamespace
+
+    from app.integrations.abdm.hiu import worker
+
+    db.add(
+        Facility(
+            id=FACILITY,
+            code="HIUF1",
+            name="Test",
+            state_code="DL",
+            timezone="Asia/Kolkata",
+            is_active=True,
+            hfr_facility_id="TEST-HFR",
+        )
+    )
+    await db.flush()
+    monkeypatch.setattr(
+        worker, "get_settings", lambda: SimpleNamespace(abdm_hfr_facility_id="TEST-HFR")
     )
     return db
 
 
 async def _granted_artefact(db, *, status="granted", expires=None):
+    patient = (
+        await db.execute(select(Patient).where(Patient.abha_address == "someone@sbx"))
+    ).scalar_one_or_none()
+    if patient is None:
+        patient = Patient(
+            id=uuid.uuid4(),
+            facility_id=FACILITY,
+            uhid="HIU-TEST",
+            full_name="Synthetic Patient",
+            age_years=30,
+            sex="other",
+            identity_path="abdm",
+            created_by=ACTOR,
+            abha_address="someone@sbx",
+            abha_number="12345678901234",
+            abha_linked_at=NOW,
+        )
+        db.add(patient)
+        await db.flush()
     request = AbdmConsentRequest(
         id=uuid.uuid4(),
         facility_id=FACILITY,
-        patient_id=None,
+        patient_id=patient.id,
         abha_address="someone@sbx",
         purpose_code="CAREMGT",
         hi_types=["OPConsultation"],
@@ -82,7 +115,15 @@ async def _granted_artefact(db, *, status="granted", expires=None):
         date_range_from=NOW - timedelta(days=30),
         date_range_to=NOW,
         expires_at=expires if expires is not None else NOW + timedelta(days=30),
-        raw_artefact={},
+        raw_artefact={
+            "consentDetail": {
+                "patient": {"id": "someone@sbx"},
+                "hip": {"id": "TEST-EXTERNAL-HIP"},
+                "careContexts": [
+                    {"patientReference": "TEST-PATIENT", "careContextReference": "visit-1"}
+                ],
+            }
+        },
     )
     db.add(artefact)
     await db.flush()
@@ -210,7 +251,8 @@ async def test_completing_a_transfer_destroys_the_key(hiu_db):
     assert row.key_version is None
 
 
-async def test_revoking_the_artefact_kills_open_requests_and_their_keys(hiu_db):
+@pytest.mark.parametrize("request_status", ["requested", "acknowledged", "partial"])
+async def test_revoking_the_artefact_kills_open_requests_and_their_keys(hiu_db, request_status):
     """A revocation has to reach requests already in flight, not just future
     ones — otherwise revoking consent leaves a live key that still opens data."""
     artefact = await _granted_artefact(hiu_db)
@@ -222,6 +264,8 @@ async def test_revoking_the_artefact_kills_open_requests_and_their_keys(hiu_db):
         now=NOW,
     )
     request = await hiu_db.get(AbdmConsentRequest, artefact.consent_request_id)
+    row.status = request_status
+    await hiu_db.flush()
 
     await service.record_artefact(
         hiu_db,
@@ -282,7 +326,30 @@ async def test_a_bundle_encrypted_as_a_hip_would_opens_through_the_hiu_service(h
         "resourceType": "Bundle",
         "type": "document",
         "id": "b1",
-        "entry": [{"resource": {"resourceType": "Composition", "status": "final"}}],
+        "entry": [
+            {
+                "resource": {
+                    "resourceType": "Composition",
+                    "status": "final",
+                    "date": NOW.isoformat(),
+                    "meta": {
+                        "profile": [
+                            "https://nrces.in/ndhm/fhir/r4/StructureDefinition/OPConsultRecord"
+                        ]
+                    },
+                    "subject": {"reference": "Patient/p1"},
+                }
+            },
+            {
+                "resource": {
+                    "resourceType": "Patient",
+                    "id": "p1",
+                    "identifier": [
+                        {"system": "https://healthid.abdm.gov.in", "value": "12345678901234"}
+                    ],
+                }
+            },
+        ],
     }
     ciphertext, hip_wire, digest = hip_service.encrypt_bundle_for_hiu(
         bundle,
@@ -290,7 +357,7 @@ async def test_a_bundle_encrypted_as_a_hip_would_opens_through_the_hiu_service(h
         hiu_nonce_b64=wire["nonce"],
     )
 
-    receipt, plaintext = await service.receive_bundle(
+    receipt = await service.receive_bundle(
         hiu_db,
         request=row,
         ciphertext_b64=ciphertext,
@@ -300,7 +367,11 @@ async def test_a_bundle_encrypted_as_a_hip_would_opens_through_the_hiu_service(h
         now=NOW,
     )
 
-    assert json.loads(plaintext) == bundle
+    assert (
+        await records.read_record(hiu_db, receipt.id, facility_id=FACILITY, actor_id=ACTOR, now=NOW)
+        == bundle
+    )
+    assert b'"resourceType"' not in bytes(receipt.content_encrypted)
     assert receipt.status == "stored"
     assert receipt.content_sha256 == digest
     # One valid entry is not enough to close a paginated transaction.  The

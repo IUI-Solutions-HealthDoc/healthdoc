@@ -36,11 +36,17 @@ from app.common.db import get_db
 from app.integrations.abdm.callback_auth import verify_callback
 from app.integrations.abdm.client import AbdmError
 from app.integrations.abdm.hip import gateway, service
+from app.integrations.abdm.hip.documents import (
+    DocumentUnavailable,
+    resolve_context_document,
+    resolve_document,
+)
 from app.integrations.abdm.hip.models import (
     AbdmCareContext,
     AbdmCareContextLink,
     AbdmHipHealthInformationRequest,
 )
+from app.integrations.abdm.hip.publisher import publish_document
 from app.opd.models import Visit
 from app.patients.models import Patient
 from app.users.models import Facility
@@ -122,7 +128,12 @@ async def _facility_for_hfr_id(db: AsyncSession, hfr_id: str) -> uuid.UUID:
 class CareContextIn(BaseModel):
     patient_id: uuid.UUID
     visit_id: uuid.UUID | None = None
-    reference: str = Field(min_length=1, max_length=100)
+    reference: str = Field(
+        min_length=1,
+        max_length=100,
+        description="Finalized source: encounter/UUID, prescription/UUID, lab-result/UUID, "
+        "radiology-report/UUID, discharge/UUID or wellness/UUID. Visit-wide references are not shareable.",
+    )
     display: str = Field(min_length=1, max_length=200)
     hi_type: str
 
@@ -198,17 +209,25 @@ async def create_care_context(
                 },
             )
 
-    context = AbdmCareContext(
-        facility_id=current_db_user.facility_id,
-        patient_id=payload.patient_id,
-        visit_id=payload.visit_id,
-        reference=payload.reference,
+    try:
+        source = await resolve_document(
+            db,
+            reference=payload.reference,
+            hi_type=payload.hi_type,
+            patient_id=payload.patient_id,
+            facility_id=current_db_user.facility_id,
+            visit_id=payload.visit_id,
+        )
+    except DocumentUnavailable as exc:
+        raise HTTPException(422, {"code": "document_unavailable", "message": str(exc)}) from exc
+    context = await publish_document(
+        db,
+        kind=source.kind,
+        source_id=source.source_id,
+        visit=source.visit,
+        actor_id=current_db_user.id,
         display=payload.display,
-        hi_type=payload.hi_type,
-        created_by=current_db_user.id,
     )
-    db.add(context)
-    await db.flush()
     return CareContextOut(
         id=context.id,
         reference=context.reference,
@@ -249,6 +268,11 @@ async def notify_care_context(
     if context is None:
         # 404 not 403, the same rule as everywhere else here.
         raise HTTPException(404, {"code": "not_found", "message": "No such care context"})
+
+    try:
+        await resolve_context_document(db, context)
+    except DocumentUnavailable as exc:
+        raise HTTPException(409, {"code": "document_unavailable", "message": str(exc)}) from exc
 
     link = (
         (
@@ -302,6 +326,161 @@ class LinkOut(BaseModel):
     abha_address: str
     status: str
     failure_reason: str | None
+    care_context_references: list[str] = Field(default_factory=list)
+
+
+class LinkDocumentsIn(BaseModel):
+    context_ids: list[uuid.UUID] = Field(min_length=1, max_length=50)
+
+
+@router.post(
+    "/patients/{patient_id}/links",
+    status_code=202,
+    response_model=list[LinkOut],
+    dependencies=[Depends(require_roles("doctor", "receptionist", "admin"))],
+)
+async def initiate_links(
+    patient_id: uuid.UUID,
+    payload: LinkDocumentsIn,
+    current_db_user: CurrentDbUser,
+    idempotency_key: IdempotencyKey,
+    db: DbSession,
+) -> list[LinkOut]:
+    from app.common.idempotency import (
+        check_idempotency,
+        hash_request_body,
+        record_idempotent_response,
+    )
+    from app.integrations.abdm.hip.linking import initiate
+
+    patient = (
+        await db.execute(
+            select(Patient)
+            .where(
+                Patient.id == patient_id,
+                Patient.facility_id == current_db_user.facility_id,
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if patient is None:
+        raise HTTPException(404, {"code": "not_found", "message": "No such patient"})
+    endpoint = f"POST /abdm/hip/patients/{patient_id}/links"
+    replay = await check_idempotency(
+        db, idempotency_key, endpoint, hash_request_body(payload), current_db_user.id
+    )
+    if replay is not None:
+        ids = [uuid.UUID(value) for value in replay.response_body["link_ids"]]
+        links = (
+            (
+                await db.execute(
+                    select(AbdmCareContextLink).where(
+                        AbdmCareContextLink.id.in_(ids),
+                        AbdmCareContextLink.facility_id == current_db_user.facility_id,
+                        AbdmCareContextLink.patient_id == patient_id,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return [
+            LinkOut(
+                id=link.id,
+                abha_address=link.abha_address,
+                status=link.status,
+                failure_reason=link.failure_reason,
+                care_context_references=link.care_context_references or [],
+            )
+            for link in links
+        ]
+    try:
+        links = await initiate(
+            db,
+            patient=patient,
+            context_ids=payload.context_ids,
+            idempotency_key=f"{current_db_user.id}:{idempotency_key}",
+        )
+    except DocumentUnavailable as exc:
+        raise HTTPException(422, {"code": "documents_unavailable", "message": str(exc)}) from exc
+    await record_idempotent_response(
+        db,
+        idempotency_key,
+        endpoint,
+        202,
+        {"link_ids": [str(link.id) for link in links]},
+        current_db_user.id,
+    )
+    return [
+        LinkOut(
+            id=link.id,
+            abha_address=link.abha_address,
+            status=link.status,
+            failure_reason=link.failure_reason,
+            care_context_references=link.care_context_references or [],
+        )
+        for link in links
+    ]
+
+
+@router.get(
+    "/patients/{patient_id}/care-contexts",
+    response_model=list[CareContextOut],
+    dependencies=[Depends(require_roles("doctor", "receptionist", "admin"))],
+)
+async def list_patient_contexts(
+    patient_id: uuid.UUID,
+    current_db_user: CurrentDbUser,
+    db: DbSession,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[CareContextOut]:
+    if limit < 1 or limit > 100 or offset < 0:
+        raise HTTPException(
+            422, {"code": "invalid_page", "message": "Limit must be 1–100 and offset non-negative"}
+        )
+    patient = (
+        await db.execute(
+            select(Patient.id).where(
+                Patient.id == patient_id,
+                Patient.facility_id == current_db_user.facility_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if patient is None:
+        raise HTTPException(404, {"code": "not_found", "message": "No such patient"})
+    rows = (
+        (
+            await db.execute(
+                select(AbdmCareContext)
+                .where(
+                    AbdmCareContext.patient_id == patient_id,
+                    AbdmCareContext.facility_id == current_db_user.facility_id,
+                    AbdmCareContext.document_at.is_not(None),
+                )
+                .order_by(AbdmCareContext.document_at.desc(), AbdmCareContext.id)
+                .limit(limit)
+                .offset(offset)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    result = []
+    for context in rows:
+        try:
+            await resolve_context_document(db, context)
+        except DocumentUnavailable:
+            continue
+        result.append(
+            CareContextOut(
+                id=context.id,
+                reference=context.reference,
+                display=context.display,
+                hi_type=context.hi_type,
+            )
+        )
+    return result
 
 
 @router.get(
@@ -330,7 +509,11 @@ async def list_links(
     )
     return [
         LinkOut(
-            id=r.id, abha_address=r.abha_address, status=r.status, failure_reason=r.failure_reason
+            id=r.id,
+            abha_address=r.abha_address,
+            status=r.status,
+            failure_reason=r.failure_reason,
+            care_context_references=r.care_context_references or [],
         )
         for r in rows
     ]
@@ -508,6 +691,7 @@ async def hi_request(
         hiu_key_material=payload.key_material,
         data_push_url=payload.data_push_url,
         gateway_request_id=payload.gateway_request_id,
+        authorisation=authorisation,
     )
 
     contexts = await service.list_care_contexts_for_transfer(
