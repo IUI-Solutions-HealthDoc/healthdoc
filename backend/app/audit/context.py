@@ -15,6 +15,8 @@ isolated values even though they all run in the same process.
 from __future__ import annotations
 
 import contextvars
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -36,6 +38,16 @@ _actor_var: contextvars.ContextVar[AuditActor | None] = contextvars.ContextVar(
 
 def set_current_actor(actor: AuditActor) -> None:
     _actor_var.set(actor)
+
+
+@contextmanager
+def actor_context(actor: AuditActor) -> Iterator[None]:
+    """Attribute privileged maintenance writes without leaking into later work."""
+    token = _actor_var.set(actor)
+    try:
+        yield
+    finally:
+        _actor_var.reset(token)
 
 
 def get_current_actor() -> AuditActor | None:

@@ -4,19 +4,21 @@ Review date: 8 September 2026. HealthDoc baseline: `a9d7cc4600bbe1610c15e383e215
 
 ## Implementation update — 9 September 2026
 
-Work is now on `fix/abdm-milestone-closure`. The sections below
-describe the original audit baseline; use this update for implementation status.
+PR #537 (`fix/abdm-milestone-closure`) merged into staging after all four active
+CI checks passed. Follow-up historical registration work is on
+`fix/abdm-historical-registration`. The sections below describe the original
+audit baseline; use this update for implementation status.
 The user selected **one finalized document per care context**, not an entire visit.
 
 | Finding | Implemented locally | Still required before closure |
 |---|---|---|
 | G1 | Migration 0061 stores exact accepted request scope. Workers recheck consent, linked context, source final/current state and key expiry between pages. Unknown legacy scope fails closed. Local populated-copy rehearsal and application upgrade through 0067 passed. | Production rehearsal/deployment and live scope evidence. An in-flight page cannot be recalled. |
-| G2/G3 | Canonical, exact-document exporters; migration 0062 document dates; transactional producers on consultation closure, finalized prescriptions, lab verification/amendment, imaging sign-off and discharge. Admin reconciliation previews explicit existing canonical context IDs and only fills a missing verified date. | Clinical authorship/finalization approval; safe creation of missing historical contexts; real workflow-generated FHIR validation. No automatic legacy backfill was run. |
+| G2/G3 | Canonical, exact-document exporters; migration 0062 document dates; transactional producers on consultation closure, finalized prescriptions, lab verification/amendment, imaging sign-off and discharge. Admin reconciliation previews explicit existing canonical context IDs and only fills a missing verified date. Follow-up CLI creates explicitly selected missing historical contexts: preview first, facility/operator-bound, source-author-preserving and all-or-nothing, with audited durable jobs. | Clinical authorship/finalization approval; approved historical manifest/execution; real workflow-generated FHIR validation. No application-data backfill was run. |
 | G4 | Staff linking API and doctor document-selection UI; one link operation per HI type; separate token-generation/link callback IDs; encrypted, expiring HIP credentials; queued retries and stable idempotency keys. | Live token and grouped-link callback round trip. Account/enrolment credentials still need M1 purpose/expiry cleanup; they are not used as HIP link tokens by the new flow. |
 | G5 | Migrations 0063/0064 add leased jobs and persisted receiver-encrypted pages. Polling worker, heartbeat/fencing, idempotent operator retry and separate transfer notifications. Migration 0067 adds durable HIP consent/data-request and HIU consent acknowledgements; follow-on transfer/fetch jobs wait for successful acknowledgement. Replies contain IDs/digests, not patient content. | Discovery/link/Scan-and-Share response durability and recovery after a missing/negative asynchronous fetch callback remain; full process-crash deployment rehearsal is not completed. |
 | G6/G7 | Migration 0066 protected received-content store; bounded parsing; patient/context/type/date binding; encrypted content with row-bound authentication; no new plaintext clinical outbox writes. Read APIs enforce facility, requesting clinician and current permission. | Full NRCeS/terminology validation and external HIP interoperability; historical plaintext outbox remediation; approved archive/backup retention. Strict ABHA patient-identifier validation may need an agreed mapping for external HIPs using only local identifiers. |
 | G8 | Partial requests included in key cleanup; scheduled expiry/content erasure; link-token expiry; request-wide revocation clears open transfer keys even without an artefact list. Late callbacks cannot reopen completed transfers or revoked/expired consent. | Worker must actually run continuously. PostgreSQL receiver-versus-reaper contention and populated restore/cleanup rehearsal still need dedicated proof. |
-| G9 | `/doctor/abdm`: patient search, consent request/status, granted-data request, record viewer and document linking. `/admin/abdm-sync`: paginated delivery jobs and retry. | Visible browser action-level verification against a migrated application; clinical usability review. Viewer is read-only, not an automatic clinical import. Only the requesting clinician can read external content. |
+| G9 | `/doctor/abdm`: patient search, consent request/status, granted-data request, record viewer and document linking. `/admin/abdm-sync`: paginated delivery jobs and retry. Hosted CI now includes both pages in the role/screen matrix; 49 role/screen entries across 14 roles passed. | Browser action-level ABDM verification against a migrated application; clinical usability review. The new CI entries prove screen loading, not an external consent/data round trip. Viewer is read-only, not automatic clinical import. Only the requesting clinician can read external content. |
 | G10 | HIU callback queries lock and scope correlation to the configured facility; fetched grants must match a dispatched fetch job and cannot change patient/HIU or widen the request. HIU outbound jobs refuse a different/unconfigured facility. Direct pushes remain transaction/crypto-bound. | NHA-approved ingress/source trust and actual service-to-facility mapping. Headers alone do not authenticate a gateway. Outbound routing is still a single configured HIP/HIU, not a multi-facility registry. |
 | G11 | OTP completion verifies staff/facility/active-patient ownership before calling ABDM. Identity/event commit precedes local session consumption. | Mobile verification continuation; address selection/creation; account credential purpose/expiry; persisted Scan-and-Share reception queue; checklist-confirmed profile/card scope and browser tests. |
 | G12/G13 | No claim of external closure. Existing OTP relay adapter and FHIR tooling remain available. | Authorized participant, approved SMS relay, assigned checklist/HI types, registry and clinical approvals, live M1/M2/M3 evidence and NHA assessment. |
@@ -45,18 +47,24 @@ fields being populated does not prove that their values are verified.
 
 ### Verification actually run
 
-- **1,443 backend tests + 14 script tests passed** in the latest `make test-pg`
+- **1,490 backend tests + 14 script tests passed** in the latest `make test-pg`
   run on 9 September. The isolated **healthdoc_test** schema is at `0067`.
   The suite mixes SQLite unit fixtures and real PostgreSQL tests; it is
   not accurate to call every test a PostgreSQL test. New real-PG tests prove
   competing claims, `SKIP LOCKED`, duplicate enqueue and stale-worker fencing.
 - The full gate includes durable acknowledgement/retry/fetch-correlation tests.
   Four existing Pydantic alias warnings remain.
+- Historical registration adds **45 regressions**, including three real-PG tests
+  for observed lock contention, all-or-nothing savepoint rollback and CLI
+  rollback after a simulated commit failure. All six canonical reference kinds
+  are covered. No historical application records or live gateway were used.
 - The latest full run includes the final lock-order and two PostgreSQL
   reply-reservation/rollback regressions (previously verified in a 46-test run).
-- Frontend: **29 tests**, `npm run typecheck`, and **205 matched API calls** in
-  `make contract`. The 9 September production build passed. No visible
-  browser verification of this new workspace has been completed.
+- Frontend at merged PR #537: **34 tests**, typecheck and production build passed.
+  The latest contract run matched **205 API calls**. Hosted browser CI passed
+  **49 role/screen entries across 14 roles**: the doctor ABDM page had 2/2
+  responses and the admin ABDM page 3/3, with zero failed requests. These new
+  entries are screen-load evidence, not action-level M1/M2/M3 evidence.
 - Mutation check: changing only the prescription selector to an encounter-wide
   selector in an isolated Python process makes the new regression fail. Source
   files and the running app were not modified for this mutation.
@@ -67,6 +75,9 @@ fields being populated does not prove that their values are verified.
   `git diff --check` passes. A broader lint of touched legacy clinical modules
   still reports existing FastAPI-default/exception-style findings, so this is
   **not** a whole-backend lint-clean claim.
+- The historical follow-up's five Python files pass Ruff; its three non-test
+  Python files pass the explicit PR scan with zero blockers/warnings. No schema,
+  route or frontend changes are introduced by that follow-up.
 - Migration integrity: **74 migrations, linear chain, head 0067**. The explicit
   PR convention scan includes uncommitted files and reports no blockers;
   callback/OTP idempotency-convention warnings remain. The default PR scan says
@@ -91,9 +102,13 @@ requests with NULL original scope need a fresh external request; **do not fill
 them from the broader grant**. Do not blindly downgrade after adopting these
 fields, because downgrade discards their scope metadata.
 
-The user's uncommitted `scripts/maintenance/backfill_care_contexts.py` was left
-untouched and was not run. It does not yet populate the new document contract or
-solve the actor/facility issue identified in G2; running it is not the next step.
+The original `scripts/maintenance/backfill_care_contexts.py` was privately
+archived and replaced, not executed. Its replacement requires explicit records,
+facility and operator, previews by default, and rejects an entire batch when a
+record is refused. It preserves source authors, writes source-derived dates and
+queues notification jobs without sending HTTP or creating links.
+See [historical registration runbook](abdm-historical-backfill.md).
+Application-data execution and starting delivery still need separate approval.
 
 Next implementation sequence: (1) M1 continuation and credential lifecycle,
 then the persisted Scan-and-Share reception workflow; (2) durable remaining

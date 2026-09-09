@@ -248,9 +248,16 @@ the console shows `[HMR] connected`.
   linking, durable delivery jobs/frozen encrypted transfer pages, protected HIU
   record storage, a read-only `/doctor/abdm` workspace and admin job operations.
   Consent/transfer callbacks now enforce facility scope and monotonic terminal
-  states; OTP ownership is checked before the gateway call. The full gate passed
-  1443 backend tests and 14 script tests. Frontend: 29 tests, typecheck, production
-  build and 205 contract calls.
+  states; OTP ownership is checked before the gateway call. PR #537 merged into
+  staging with four active CI checks green. Frontend: 34 tests, typecheck,
+  production build, 205 contract calls and 49 role/screen entries across 14 roles.
+  New ABDM pages have screen-load evidence, not a live milestone round trip.
+  Follow-up branch `fix/abdm-historical-registration` replaces the unsafe
+  all-facility backfill with explicit, preview-first facility/operator/document
+  manifests. It preserves source authors, atomically registers contexts/audits/
+  jobs and does not send HTTP. The full gate now passes 1490 backend + 14 script
+  tests, including 45 new regressions (three real-PG). See
+  `docs/abdm-historical-backfill.md`. No application-data backfill was run.
   Migration 0067 adds committed acknowledgement intents for HIP consent/data and
   HIU consent callbacks, followed by durable transfer/fetch jobs with correlation.
   **The approved local application upgrade 0060 → 0067 passed after backup and
