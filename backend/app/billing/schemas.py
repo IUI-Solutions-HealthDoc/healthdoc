@@ -293,14 +293,14 @@ class TariffCreate(BaseModel):
     """A new tariff row. Never an edit of an existing one — see
     billing.service.create_tariff for why a price change must be a new row."""
 
-    charge_code: str = Field(..., max_length=30,
+    charge_code: str = Field(..., min_length=1, max_length=30,
                              description="Stable across price changes, e.g. REGISTRATION, CBC.")
     description: str = Field(..., min_length=1)
     charge_category: str = Field(..., description="registration | consultation | lab | radiology "
                                                   "| pharmacy | procedure | ipd_stay | blood | other")
-    unit_price: Decimal = Field(..., ge=0, decimal_places=2)
-    effective_from: date = Field(..., description="Must be after the current row's effective_from; "
-                                                  "back-dating would change what past invoices resolve to.")
+    unit_price: Decimal = Field(..., ge=0, max_digits=12, decimal_places=2)
+    effective_from: date = Field(..., description="Must be after the latest version's effective_from, "
+                                                  "including retired history; back-dating is refused.")
     scheme_code: str | None = Field(
         default=None, max_length=30,
         description="NULL is the general tariff. A scheme rate (PMJAY etc.) wins over it "
@@ -313,6 +313,16 @@ class TariffCreate(BaseModel):
         if v not in ChargeCategory.values():
             raise ValueError(f"charge_category must be one of: {sorted(ChargeCategory.values())}")
         return v
+
+    @field_validator("charge_code", "description", "scheme_code", mode="before")
+    @classmethod
+    def _clean_tariff_text(cls, value, info):
+        if not isinstance(value, str):
+            return value
+        if any(ord(character) < 32 or ord(character) == 127 for character in value):
+            raise ValueError("Control characters are not allowed")
+        value = value.strip()
+        return None if info.field_name == "scheme_code" and not value else value
 
 
 class TariffOut(BaseModel):

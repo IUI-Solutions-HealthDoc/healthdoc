@@ -38,8 +38,8 @@ export function TariffForm({ revision, onClose, onSaved }: {
     try { await createTariff(review, actionKey); onSaved(); }
     catch (error) {
       setError(error instanceof Error ? error.message : "The tariff could not be saved.");
-      // These existing routes do not implement replay. An ambiguous failure
-      // requires reading the catalogue, not another speculative POST.
+      // Even with server replay, this UI requires a fresh catalogue read
+      // after an ambiguous failure before the operator changes another price.
     } finally { saving.current = false; setBusy(false); }
   }
 

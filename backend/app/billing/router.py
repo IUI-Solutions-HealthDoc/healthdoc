@@ -52,10 +52,10 @@ pulled in locally.
 """
 
 import uuid
-from decimal import Decimal
 from datetime import date
+from decimal import Decimal
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -64,7 +64,6 @@ from app.audit.deps import get_current_actor_dependency
 from app.auth.deps import AuthUser, CurrentDbUser, require_roles
 from app.billing import service
 from app.billing.models import Invoice, InvoiceItem, Payment, Refund
-from app.common.enums import ChargeCategory
 from app.billing.schemas import (
     DailyRevenueResponse,
     InvoiceBuildRequest,
@@ -73,20 +72,23 @@ from app.billing.schemas import (
     InvoiceLineOut,
     InvoiceListItemOut,
     InvoiceListOut,
-    PaymentWithRefundsOut,
-    RefundOnPaymentOut,
     InvoicePreviewResponse,
     PaymentCreate,
     PaymentOut,
+    PaymentWithRefundsOut,
     PendingInvoicesResponse,
     PMJAYEligibilityResponse,
     RefundCreate,
+    RefundOnPaymentOut,
     RefundOut,
     SchemeBreakdownResponse,
     TariffCreate,
     TariffOut,
 )
+from app.billing.tariff_safety import reserve_tariff_write
 from app.common.db import get_db
+from app.common.enums import ChargeCategory
+from app.common.idempotency import record_idempotent_response
 from app.patients.models import Patient
 
 router = APIRouter(prefix="/billing", tags=["billing"])
@@ -731,6 +733,8 @@ async def list_tariffs(
 )
 async def create_tariff(
     payload: TariffCreate,
+    current_db_user: CurrentDbUser,
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key", max_length=255),
     db: AsyncSession = Depends(get_db),
     user: AuthUser = Depends(require_roles(*_TARIFF_ADMIN_ROLES)),
 ) -> TariffOut:
@@ -740,10 +744,17 @@ async def create_tariff(
     invoice already raised against that row — invoice_items.charge_master_id
     would then point at a tariff that no longer says what the patient paid.
     """
-    facility_id = await service.facility_id_for_user(db, keycloak_sub=user.sub)
-    actor_id = await service.resolve_actor_user_id(
-        db, keycloak_sub=user.sub, fallback_id=getattr(user, "id", None)
+    key = _require_idempotency_key(idempotency_key)
+    if not key.strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Idempotency-Key must not be blank.")
+    facility_id, actor_id = current_db_user.facility_id, current_db_user.id
+    endpoint = "POST /billing/charge-master"
+    cached = await reserve_tariff_write(
+        db, key=key, endpoint=endpoint, actor_id=actor_id, facility_id=facility_id,
+        body=payload.model_dump(mode="json"),
     )
+    if cached is not None:
+        return TariffOut.model_validate(cached.response_body)
     try:
         tariff_id = await service.create_tariff(
             db,
@@ -766,25 +777,44 @@ async def create_tariff(
         db, facility_id, charge_code=payload.charge_code, active_only=False
     )
     created = next(r for r in rows if r.id == tariff_id)
-    return TariffOut.model_validate(created, from_attributes=True)
+    result = TariffOut.model_validate(created, from_attributes=True)
+    await record_idempotent_response(db, key, endpoint, 201, result.model_dump(mode="json"), actor_id)
+    return result
 
 
 @router.post(
     "/charge-master/{tariff_id}/deactivate",
     status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
     summary="Retire a tariff (is_active = false; never deleted)",
 )
 async def deactivate_tariff(
     tariff_id: uuid.UUID,
     current_db_user: CurrentDbUser,
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key", max_length=255),
     db: AsyncSession = Depends(get_db),
     user: AuthUser = Depends(require_roles(*_TARIFF_ADMIN_ROLES)),
 ) -> None:
     """The row is kept: invoice_items.charge_master_id points at it, and a line
     whose tariff has vanished cannot be explained to a patient or an auditor."""
-    actor_id = await service.resolve_actor_user_id(
-        db, keycloak_sub=user.sub, fallback_id=getattr(user, "id", None)
+    # Check ownership before consulting replay; retired rows still exist.
+    found = (await db.execute(select(service.charge_master_t.c.id).where(
+        service.charge_master_t.c.id == tariff_id,
+        service.charge_master_t.c.facility_id == current_db_user.facility_id,
+    ))).scalar_one_or_none()
+    if found is None:
+        raise _NOT_FOUND
+    key = _require_idempotency_key(idempotency_key)
+    if not key.strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Idempotency-Key must not be blank.")
+    actor_id = current_db_user.id
+    endpoint = "POST /billing/charge-master/{tariff_id}/deactivate"
+    cached = await reserve_tariff_write(
+        db, key=key, endpoint=endpoint, actor_id=actor_id, facility_id=current_db_user.facility_id,
+        body={"tariff_id": str(tariff_id)},
     )
+    if cached is not None:
+        return
     if not await service.deactivate_tariff(
         db, tariff_id, updated_by=actor_id, facility_id=current_db_user.facility_id
     ):
@@ -792,3 +822,4 @@ async def deactivate_tariff(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="tariff not found or already inactive",
         )
+    await record_idempotent_response(db, key, endpoint, 204, {}, actor_id)
