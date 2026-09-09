@@ -266,6 +266,7 @@ const ROLE_DASHBOARDS = [
       { path: "/admin/maintenance", expectCalls: true },
       { path: "/reports", expectCalls: true },
       { path: "/billing", expectCalls: true },
+      { path: "/billing/tariffs", expectCalls: true, requiredRequests: [{ method: "GET", path: "/api/v1/billing/charge-master" }] },
     ],
   },
   {
@@ -276,6 +277,7 @@ const ROLE_DASHBOARDS = [
     landingPath: "/billing",
     dashboards: [
       { path: "/billing", expectCalls: true },
+      { path: "/billing/tariffs", expectCalls: true, requiredRequests: [{ method: "GET", path: "/api/v1/billing/charge-master" }] },
       { path: "/reports", expectCalls: true },
     ],
   },
