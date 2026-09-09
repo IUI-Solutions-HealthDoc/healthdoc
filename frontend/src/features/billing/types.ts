@@ -39,17 +39,16 @@ export type ChargeMaster = {
   charge_code: string;
   description: string;
   charge_category: ChargeCategory;
-  unit_price: Money;
+  unit_price: string;
   /** null = general tariff; "PMJAY" etc. = scheme rate */
   scheme_code: string | null;
   effective_from: string;
   effective_to: string | null;
   is_active: boolean;
-  created_by: string;
-  updated_by: string | null;
-  created_at: string;
-  updated_at: string;
 };
+
+export type TariffCreateInput = Pick<ChargeMaster,
+  "charge_code" | "description" | "charge_category" | "unit_price" | "effective_from" | "scheme_code">;
 
 export type Invoice = {
   id: string;

@@ -7,11 +7,15 @@
 **Implementation follow-up:** initial F01/F05 fixes are on
 `fix/billing-tariffs-patient-safety`; see
 [changes, verification and deployment requirements](billing-patient-safety-fixes-2026-09-09.md).
-The original findings below describe the reviewed baseline. This does not
-close F02's tariff-maintenance UI, the other work packages or ABDM certification.
+The original findings below describe the reviewed baseline. The later
+[F02 tariff-management implementation](tariff-management-2026-09-09.md) adds the
+catalogue UI and real workflow checks; deployment, approved configuration and
+server concurrent-revision/replay hardening remain explicit. Other work packages
+and ABDM certification are not closed by these changes.
 The subsequent [local browser acceptance report](billing-patient-safety-browser-acceptance-2026-09-09.md)
-records the tested paths and remaining limits. This branch is being submitted
-to staging for review, not merged into production.
+records the tested paths and remaining limits. The original fixes merged into
+staging in PR #541; invoice-switch follow-up is PR #543. Tariff work is submitted
+for staging review on `feat/billing-tariff-management`, not deployed to production.
 
 ## 1. Read this first
 

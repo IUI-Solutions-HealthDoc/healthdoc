@@ -17,6 +17,11 @@ adds seven delayed-response browser checks and a fresh real-API billing/refund
 workflow. Its billing-only screen sweep is not a replacement for the full-role
 manifest. The new branch's CI step has not yet run on GitHub.
 
+The [tariff-management follow-up](tariff-management-2026-09-09.md) adds the
+billing/admin catalogue route and nine real-login workflow checks, including
+independent admin retirement and receptionist API refusals. The source matrix
+now has 51 entries; this addition does not establish a new full-role run.
+
 ## Producing it
 
 ```bash
