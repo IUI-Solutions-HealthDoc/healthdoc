@@ -8,6 +8,10 @@ runs and the separate production-frontend preview, is tracked in
 Its evidence uses a separate directory so it cannot silently overwrite the older
 run. This file records how evidence is produced and the limits of its coverage.
 
+The **9 September billing-tariff/patient-switch acceptance** is tracked in
+[its dated report](billing-patient-safety-browser-acceptance-2026-09-09.md),
+with separate evidence, newly reproduced defects and explicit coverage limits.
+
 ## Producing it
 
 ```bash

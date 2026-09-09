@@ -55,6 +55,9 @@ class ChargeLine(BaseModel):
     amount: Money
     priced: bool = Field(True, description="False if no tariff was found — never written to invoice_items.")
     pricing_note: str | None = Field(None, description="Set when priced=False.")
+    charge_master_id: uuid.UUID | None = Field(None, description="Exact tariff version pinned at accrual; null for batch-priced pharmacy.")
+    charge_code: str | None = None
+    pricing_date: date | None = Field(None, description="Recorded visit's facility-local date used for tariff selection.")
 
 
 class InvoicePreviewResponse(BaseModel):
@@ -158,6 +161,7 @@ class InvoiceLineOut(BaseModel):
     charge_category: str
     reference_type: str | None
     reference_id: uuid.UUID | None
+    charge_master_id: uuid.UUID | None
     description: str
     quantity: Decimal
     unit_price: Money

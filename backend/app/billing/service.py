@@ -70,7 +70,8 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from zoneinfo import ZoneInfo
 
@@ -84,11 +85,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit.actions import AuditAction
 from app.audit.service import write_audit_log
 from app.billing.models import Invoice, InvoiceItem, Payment, Refund
-from app.billing.pricing import (
-    price_lab_test,
-    price_pharmacy_batch,
-    price_radiology_modality,
-)
+from app.billing.pricing import price_pharmacy_batch
 from app.billing.schemas import (
     ChargeLine,
     DailyRevenuePoint,
@@ -123,6 +120,10 @@ def _money(value: Decimal) -> Decimal:
 # ---------------------------------------------------------------------
 
 encounters_t = sa.table("encounters", sa.column("id"), sa.column("visit_id"))
+visits_t = sa.table(
+    "visits", sa.column("id"), sa.column("facility_id"), sa.column("patient_id"),
+    sa.column("visit_date", sa.DateTime(timezone=True)),
+)
 orders_t = sa.table("orders", sa.column("id"), sa.column("encounter_id"))
 
 lab_order_items_t = sa.table(
@@ -277,7 +278,7 @@ async def _already_billed_reference_ids(
     return set(result.scalars().all())
 
 
-async def _insert_invoice_item(db: AsyncSession, line: "ChargeLine", invoice_id: uuid.UUID) -> bool:
+async def _insert_invoice_item(db: AsyncSession, line: ChargeLine, invoice_id: uuid.UUID) -> bool:
     """
     Insert one InvoiceItem inside its own SAVEPOINT. Returns True if the
     line was actually added, False if it was skipped as a (likely
@@ -307,6 +308,7 @@ async def _insert_invoice_item(db: AsyncSession, line: "ChargeLine", invoice_id:
                     quantity=line.quantity,
                     unit_price=line.unit_price,
                     amount=line.amount,
+                    charge_master_id=line.charge_master_id,
                 )
             )
             await db.flush()
@@ -315,7 +317,64 @@ async def _insert_invoice_item(db: AsyncSession, line: "ChargeLine", invoice_id:
     return True
 
 
-async def _aggregate_lab_charges(db: AsyncSession, visit_id: uuid.UUID, invoice_id: uuid.UUID) -> list[ChargeLine]:
+@dataclass(frozen=True)
+class _TariffContext:
+    facility_id: uuid.UUID
+    business_date: date
+    scheme_code: str | None
+
+
+async def _tariff_context(db: AsyncSession, visit_id: uuid.UUID, invoice_id: uuid.UUID) -> _TariffContext:
+    # Use the recorded visit instant in the facility's timezone, not the date
+    # of a later build/retry. This is the same visit-business-date basis used
+    # by registration; no new tariff date is supplied by the browser.
+    row = (await db.execute(
+        sa.select(
+            Invoice.facility_id, Invoice.scheme_code,
+            sa.cast(sa.func.timezone(facilities_t.c.timezone, visits_t.c.visit_date), sa.Date).label("business_date"),
+        )
+        .select_from(Invoice)
+        .join(visits_t, visits_t.c.id == Invoice.visit_id)
+        .join(facilities_t, facilities_t.c.id == Invoice.facility_id)
+        .where(
+            Invoice.id == invoice_id, Invoice.visit_id == visit_id,
+            visits_t.c.facility_id == Invoice.facility_id,
+            visits_t.c.patient_id == Invoice.patient_id,
+        )
+    )).one_or_none()
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Invoice visit not found.")
+    return _TariffContext(row.facility_id, row.business_date, row.scheme_code)
+
+
+async def _department_charge(
+    db: AsyncSession, context: _TariffContext, *, category: ChargeCategory,
+    code: str, reference_type: str, reference_id: uuid.UUID, description: str,
+) -> ChargeLine:
+    # Existing natural source codes are the catalogue keys: lab test_code and
+    # radiology modality (e.g. CBC / xray). Never infer a tariff from free-text
+    # scan_type, normalize into another code, or fall back to a sample price.
+    tariff = await charge_for(
+        db, context.facility_id, code, context.business_date,
+        scheme_code=context.scheme_code, charge_category=category.value,
+    )
+    price = _money(Decimal(tariff.unit_price)) if tariff is not None else Decimal("0.00")
+    return ChargeLine(
+        charge_category=category, reference_type=reference_type, reference_id=reference_id,
+        description=description, quantity=Decimal("1"), unit_price=price, amount=price,
+        priced=tariff is not None,
+        pricing_note=None if tariff is not None else (
+            f"No active {category.value} tariff for charge code {code!r} "
+            f"on visit date {context.business_date.isoformat()}. Configure the facility catalogue."
+        ),
+        charge_master_id=tariff.id if tariff is not None else None,
+        charge_code=code, pricing_date=context.business_date,
+    )
+
+
+async def _aggregate_lab_charges(
+    db: AsyncSession, visit_id: uuid.UUID, invoice_id: uuid.UUID, context: _TariffContext,
+) -> list[ChargeLine]:
     billed = await _already_billed_reference_ids(db, invoice_id, "lab_order_items")
 
     stmt = (
@@ -342,25 +401,20 @@ async def _aggregate_lab_charges(db: AsyncSession, visit_id: uuid.UUID, invoice_
     for row in result:
         if row.id in billed:
             continue
-        price = price_lab_test(row.test_code)
-        unit_price = price.unit_price if price.unit_price is not None else Decimal("0")
         lines.append(
-            ChargeLine(
-                charge_category=ChargeCategory.LAB,
+            await _department_charge(
+                db, context, category=ChargeCategory.LAB, code=row.test_code,
                 reference_type="lab_order_items",
                 reference_id=row.id,
                 description=row.test_name,
-                quantity=Decimal("1"),
-                unit_price=_money(unit_price),
-                amount=_money(unit_price),
-                priced=price.unit_price is not None,
-                pricing_note=price.note,
             )
         )
     return lines
 
 
-async def _aggregate_radiology_charges(db: AsyncSession, visit_id: uuid.UUID, invoice_id: uuid.UUID) -> list[ChargeLine]:
+async def _aggregate_radiology_charges(
+    db: AsyncSession, visit_id: uuid.UUID, invoice_id: uuid.UUID, context: _TariffContext,
+) -> list[ChargeLine]:
     billed = await _already_billed_reference_ids(db, invoice_id, "radiology_order_items")
 
     stmt = (
@@ -391,19 +445,12 @@ async def _aggregate_radiology_charges(db: AsyncSession, visit_id: uuid.UUID, in
     for row in result:
         if row.id in billed:
             continue
-        price = price_radiology_modality(row.modality)
-        unit_price = price.unit_price if price.unit_price is not None else Decimal("0")
         lines.append(
-            ChargeLine(
-                charge_category=ChargeCategory.RADIOLOGY,
+            await _department_charge(
+                db, context, category=ChargeCategory.RADIOLOGY, code=row.modality,
                 reference_type="radiology_order_items",
                 reference_id=row.id,
                 description=row.scan_type,
-                quantity=Decimal("1"),
-                unit_price=_money(unit_price),
-                amount=_money(unit_price),
-                priced=price.unit_price is not None,
-                pricing_note=price.note,
             )
         )
     return lines
@@ -463,8 +510,9 @@ async def aggregate_unbilled_charges(db: AsyncSession, visit_id: uuid.UUID, invo
     # price) exists anywhere in the schema yet. Left out rather than
     # guessed; flagged again here since this is the one function that
     # decides "everything chargeable for this visit."
-    lab = await _aggregate_lab_charges(db, visit_id, invoice_id)
-    radiology = await _aggregate_radiology_charges(db, visit_id, invoice_id)
+    context = await _tariff_context(db, visit_id, invoice_id)
+    lab = await _aggregate_lab_charges(db, visit_id, invoice_id, context)
+    radiology = await _aggregate_radiology_charges(db, visit_id, invoice_id, context)
     pharmacy = await _aggregate_pharmacy_charges(db, visit_id, invoice_id)
     return lab + radiology + pharmacy
 
@@ -648,6 +696,9 @@ async def build_invoice(
                     "charge_category": getattr(line.charge_category, "value", line.charge_category),
                     "reference_type": line.reference_type,
                     "reference_id": str(line.reference_id),
+                    "charge_master_id": str(line.charge_master_id) if line.charge_master_id else None,
+                    "charge_code": line.charge_code,
+                    "pricing_date": line.pricing_date.isoformat() if line.pricing_date else None,
                     "amount": str(line.amount),
                 }
                 for line in added_lines
@@ -801,6 +852,7 @@ async def charge_for(
     business_date: date,
     *,
     scheme_code: str | None = None,
+    charge_category: str | None = None,
 ) -> sa.Row | None:
     """The tariff in force for one charge_code at this facility on this date.
 
@@ -832,6 +884,7 @@ async def charge_for(
         .where(
             charge_master_t.c.facility_id == facility_id,
             charge_master_t.c.charge_code == charge_code,
+            sa.true() if charge_category is None else charge_master_t.c.charge_category == charge_category,
             charge_master_t.c.is_active.is_(True),
             charge_master_t.c.effective_from <= business_date,
             sa.or_(
@@ -1121,7 +1174,7 @@ async def record_payment(
         # version.
         collected_at = datetime.fromisoformat(body.collected_at.replace("Z", "+00:00"))
     else:
-        collected_at = datetime.now(timezone.utc)
+        collected_at = datetime.now(UTC)
 
     payment = Payment(
         receipt_number=receipt_number,
@@ -1253,7 +1306,7 @@ async def create_refund(
         amount=amount,
         reason=body.reason,
         approved_by=actor_user_id,
-        refunded_at=datetime.now(timezone.utc),
+        refunded_at=datetime.now(UTC),
         created_by=actor_user_id,
     )
     db.add(refund)
@@ -1488,7 +1541,7 @@ async def get_pending_invoices(db: AsyncSession, facility_id: uuid.UUID) -> Pend
 
     return PendingInvoicesResponse(
         facility_id=facility_id,
-        as_of=datetime.now(timezone.utc).isoformat(),
+        as_of=datetime.now(UTC).isoformat(),
         count=len(items),
         total_balance_due=_money(total_balance),
         items=items,

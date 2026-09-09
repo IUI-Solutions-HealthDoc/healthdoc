@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from datetime import date
 from decimal import Decimal
 
 import pytest
@@ -27,9 +28,38 @@ from fastapi import HTTPException
 from app.billing import service
 from app.billing.schemas import PaymentCreate, RefundCreate
 from app.common.enums import PaymentMode
-from tests.billing.conftest import seed_draft_invoice, seed_facility, seed_patient, seed_user, seed_visit
+from tests.billing.conftest import (
+    seed_draft_invoice,
+    seed_facility,
+    seed_patient,
+    seed_user,
+    seed_visit,
+)
 
 pytestmark = pytest.mark.asyncio
+
+
+async def _seed_cbc_tariff(db, facility_id, actor):
+    """Explicit financial fixture; never seed prices as a side effect of a result."""
+    # HTTP journey tests share their committed synthetic facility. Reusing the
+    # exact fixture is safe; accepting an arbitrary existing price is not.
+    existing = await service.list_charge_master(db, facility_id, charge_code="CBC")
+    if existing:
+        assert len(existing) == 1
+        assert existing[0].unit_price == Decimal("300.00")
+        assert existing[0].effective_from == date(2000, 1, 1)
+        assert existing[0].scheme_code is None
+        return
+    await service.create_tariff(
+        db, facility_id=facility_id, charge_code="CBC", description="Synthetic CBC",
+        charge_category="lab", unit_price=Decimal("300.00"),
+        effective_from=date(2000, 1, 1), created_by=actor,
+    )
+
+
+@pytest.fixture(autouse=True)
+async def configured_tariff(db, facility, user):
+    await _seed_cbc_tariff(db, facility, user)
 
 
 async def _seed_billable_lab_charge(db, *, visit_id: uuid.UUID, test_code: str = "CBC") -> uuid.UUID:
@@ -112,7 +142,7 @@ class TestBuildInvoice:
 
         assert result.lines_added == 1
         assert result.lines_skipped_unpriced == 1
-        assert result.gross_amount == Decimal("300.00")  # CBC tariff, see pricing.py
+        assert result.gross_amount == Decimal("300.00")  # explicitly configured fixture
         assert result.status == "draft"
 
     async def test_dry_run_writes_nothing(self, db, visit, user, draft_invoice):
@@ -168,6 +198,7 @@ class TestConcurrentBuildInvoice:
                 facility = await seed_facility(session)
                 patient = await seed_patient(session, facility_id=facility)
                 user = await seed_user(session, facility_id=facility)
+                await _seed_cbc_tariff(session, facility, user)
                 visit = await seed_visit(session, facility_id=facility, patient_id=patient)
                 draft_invoice = await seed_draft_invoice(
                     session, facility_id=facility, patient_id=patient,
