@@ -10,11 +10,10 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from tests._lab_seed import TEST_DATABASE_URL
 from tests.billing.conftest import seed_draft_invoice, seed_visit
-from tests.billing.test_billing_flows import _seed_billable_lab_charge
+from tests.billing.test_billing_flows import _seed_billable_lab_charge, _seed_cbc_tariff
 from tests.integration.conftest import (
     ADMIN,
     BILLING,
-    RECEPTIONIST,
     TEST_FACILITY_ID,
 )
 
@@ -39,6 +38,7 @@ async def _seed_billing_journey(patient_id: str) -> tuple[uuid.UUID, uuid.UUID]:
                 created_by=actor_id,
             )
             await _seed_billable_lab_charge(db, visit_id=visit_id, test_code="CBC")
+            await _seed_cbc_tariff(db, TEST_FACILITY_ID, actor_id)
             await db.commit()
             return visit_id, invoice_id
     finally:
@@ -79,12 +79,20 @@ def test_invoice_build_payment_replay_and_refund(client_as, seeded_patient_id):
     # carries the authority to raise and settle their invoice.
     clerk = client_as(BILLING)
 
+    preview = clerk.get(f"/api/v1/billing/visits/{visit_id}/invoice/preview")
+    assert preview.status_code == 200
+    tariff_id = preview.json()["data"]["new_charge_lines"][0]["charge_master_id"]
+    assert tariff_id
+
     response = clerk.post(
         f"/api/v1/billing/visits/{visit_id}/invoice/build",
         json={"dry_run": False},
     )
     assert response.status_code == 200, response.text
     assert response.json()["data"]["gross_amount"] == "300.00"
+    detail = clerk.get(f"/api/v1/billing/invoices/{invoice_id}")
+    assert detail.status_code == 200
+    assert detail.json()["data"]["lines"][0]["charge_master_id"] == tariff_id
 
     # Was: asyncio.run(_issue_invoice(invoice_id)) — a raw
     # "UPDATE invoices SET status='issued'" against its own engine, because no

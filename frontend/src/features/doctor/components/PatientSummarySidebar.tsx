@@ -74,35 +74,6 @@ export interface PatientSummarySidebarProps {
  * three separate reads — a token carries token columns, not clinical facts.
  */
 export function PatientSummarySidebar({ token }: PatientSummarySidebarProps) {
-  const [patient, setPatient] = React.useState<Patient | null>(null);
-  const [history, setHistory] = React.useState<PatientHistoryEntry[]>([]);
-  const [allergies, setAllergies] = React.useState<Allergy[]>([]);
-
-  const patientId = token?.patient_id ?? null;
-
-  React.useEffect(() => {
-    if (!patientId) {
-      setPatient(null);
-      setHistory([]);
-      setAllergies([]);
-      return;
-    }
-    let alive = true;
-    void Promise.all([
-      getPatient(patientId),
-      getPatientHistory(patientId),
-      listAllergies(patientId),
-    ]).then(([p, h, a]) => {
-      if (!alive) return;
-      setPatient(p);
-      setHistory(h);
-      setAllergies(a);
-    });
-    return () => {
-      alive = false;
-    };
-  }, [patientId]);
-
   if (!token) {
     return (
       <Box sx={doctorPanelSx}>
@@ -114,6 +85,51 @@ export function PatientSummarySidebar({ token }: PatientSummarySidebarProps) {
       </Box>
     );
   }
+
+  // Re-mount before rendering a different patient, not in a later effect that
+  // can briefly paint the old patient's allergies beneath the new token.
+  return <PatientSummary key={token.patient_id} token={token} />;
+}
+
+type ReadState<T> = { status: "loading" | "error" } | { status: "ready"; data: T };
+
+function PatientSummary({ token }: { token: QueueToken }) {
+  const [patientRead, setPatientRead] = React.useState<ReadState<Patient>>({ status: "loading" });
+  const [historyRead, setHistoryRead] = React.useState<ReadState<PatientHistoryEntry[]>>({ status: "loading" });
+  const [allergiesRead, setAllergiesRead] = React.useState<ReadState<Allergy[]>>({ status: "loading" });
+  const [attempt, setAttempt] = React.useState(0);
+  const patientId = token.patient_id;
+
+  React.useEffect(() => {
+    let alive = true;
+    // Independent outcomes: an allergy failure must not hide successful
+    // demographics, or turn unknown clinical history into an empty history.
+    void getPatient(patientId).then(
+      (data) => { if (alive) setPatientRead(data ? { status: "ready", data } : { status: "error" }); },
+      () => { if (alive) setPatientRead({ status: "error" }); },
+    );
+    void getPatientHistory(patientId).then(
+      (data) => { if (alive) setHistoryRead({ status: "ready", data }); },
+      () => { if (alive) setHistoryRead({ status: "error" }); },
+    );
+    void listAllergies(patientId).then(
+      (data) => { if (alive) setAllergiesRead({ status: "ready", data }); },
+      () => { if (alive) setAllergiesRead({ status: "error" }); },
+    );
+    return () => { alive = false; };
+  }, [patientId, attempt]);
+
+  function retry() {
+    setPatientRead({ status: "loading" });
+    setHistoryRead({ status: "loading" });
+    setAllergiesRead({ status: "loading" });
+    setAttempt((previous) => previous + 1);
+  }
+
+  const patient = patientRead.status === "ready" ? patientRead.data : null;
+  const history = historyRead.status === "ready" ? historyRead.data : [];
+  const allergies = allergiesRead.status === "ready" ? allergiesRead.data : [];
+  const failed = [patientRead, historyRead, allergiesRead].some((read) => read.status === "error");
 
   const canConsult = CONSULTABLE.includes(token.status);
   const lastVisit = history[0];
@@ -132,6 +148,11 @@ export function PatientSummarySidebar({ token }: PatientSummarySidebarProps) {
       <Divider />
 
       <Stack spacing={1.5}>
+        {patientRead.status !== "ready" ? (
+          <Typography role={patientRead.status === "error" ? "alert" : "status"} sx={{ fontSize: "0.8125rem", color: meridian.textSecondary }}>
+            {patientRead.status === "error" ? "Patient details unavailable. Showing queue details only." : "Loading patient details…"}
+          </Typography>
+        ) : null}
         <Field label="Token" value={token.token_display} />
         {/* A THID-only patient has no UHID yet — name the identifier being shown. */}
         <Field
@@ -142,14 +163,18 @@ export function PatientSummarySidebar({ token }: PatientSummarySidebarProps) {
           label="Age / Sex"
           value={formatAgeSex(patient?.age_years ?? token.age_years, patient?.sex ?? token.sex)}
         />
-        <Field label="Last Visit" value={lastVisit ? lastVisit.visit_date : "First visit"} />
+        <Field label="Last Visit" value={historyRead.status === "loading" ? "Loading…" : historyRead.status === "error" ? "Unavailable" : lastVisit ? lastVisit.visit_date : "First visit"} />
       </Stack>
 
       <Divider />
 
       <Box>
         <Typography sx={{ ...labelSx, mb: 1 }}>Known Allergies</Typography>
-        {allergies.length > 0 ? (
+        {allergiesRead.status !== "ready" ? (
+          <Typography role={allergiesRead.status === "error" ? "alert" : "status"} sx={{ fontSize: "0.8125rem", color: meridian.textSecondary }}>
+            {allergiesRead.status === "error" ? "Allergy status unavailable. Retry before relying on this summary." : "Loading allergies…"}
+          </Typography>
+        ) : allergies.length > 0 ? (
           <Stack spacing={0.75}>
             {allergies.map((a) => (
               <AllergyRow key={a.id} allergy={a} />
@@ -164,7 +189,11 @@ export function PatientSummarySidebar({ token }: PatientSummarySidebarProps) {
 
       <Box>
         <Typography sx={{ ...labelSx, mb: 1 }}>Previous Diagnoses</Typography>
-        {history.length > 0 ? (
+        {historyRead.status !== "ready" ? (
+          <Typography role={historyRead.status === "error" ? "alert" : "status"} sx={{ fontSize: "0.8125rem", color: meridian.textSecondary }}>
+            {historyRead.status === "error" ? "Clinical history unavailable." : "Loading clinical history…"}
+          </Typography>
+        ) : history.some((visit) => visit.diagnoses.length > 0) ? (
           <Stack spacing={0.5}>
             {history.flatMap((v) =>
               v.diagnoses.map((d) => (
@@ -183,6 +212,10 @@ export function PatientSummarySidebar({ token }: PatientSummarySidebarProps) {
           </Typography>
         )}
       </Box>
+
+      {failed ? (
+        <Button onClick={retry} variant="outlined">Retry patient summary</Button>
+      ) : null}
 
       {canConsult ? (
         <>

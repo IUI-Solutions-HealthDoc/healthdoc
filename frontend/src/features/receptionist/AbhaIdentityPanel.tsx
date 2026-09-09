@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { ApiError, newIdempotencyKey } from "@/lib/api";
 
@@ -20,7 +20,13 @@ interface Props {
 }
 
 export function AbhaIdentityPanel({ patient }: Props) {
-  const [flow, setFlow] = useState<Flow>(patient.abha_number ? "existing" : "existing");
+  // Keep the boundary here, not only at one call site: every consumer must
+  // discard the previous patient's OTP, success and identifier before paint.
+  return <PatientAbhaIdentity key={patient.id} patient={patient} />;
+}
+
+function PatientAbhaIdentity({ patient }: Props) {
+  const [flow, setFlow] = useState<Flow>("existing");
   const [identifier, setIdentifier] = useState(patient.abha_number ?? "");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [maskedMobile, setMaskedMobile] = useState<string | null>(null);
@@ -29,6 +35,39 @@ export function AbhaIdentityPanel({ patient }: Props) {
   const [linked, setLinked] = useState<AbhaIdentityLinked | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const lifecycle = useRef({ active: false, generation: 0, pending: false });
+
+  useEffect(() => {
+    const current = lifecycle.current;
+    current.active = true;
+    return () => {
+      current.active = false;
+      current.generation += 1;
+      current.pending = false;
+    };
+  }, []);
+
+  function beginRequest(): number | null {
+    if (!lifecycle.current.active || lifecycle.current.pending) return null;
+    lifecycle.current.pending = true;
+    return ++lifecycle.current.generation;
+  }
+
+  function isCurrent(generation: number): boolean {
+    return lifecycle.current.active && lifecycle.current.generation === generation;
+  }
+
+  function resetSession() {
+    lifecycle.current.generation += 1;
+    lifecycle.current.pending = false;
+    setBusy(false);
+    setSessionId(null);
+    setMaskedMobile(null);
+    setOtp("");
+    setMobile("");
+    setLinked(null);
+    setError(null);
+  }
 
   const digits = digitsOnly(identifier);
   const identifierValid = flow === "existing" ? isValidAbhaInput(identifier) : digits.length === 12;
@@ -37,13 +76,9 @@ export function AbhaIdentityPanel({ patient }: Props) {
   const mobileValid = !mobile.trim() || mobileNormalised !== null;
 
   function changeFlow(next: Flow) {
+    resetSession();
     setFlow(next);
     setIdentifier(next === "existing" ? (patient.abha_number ?? "") : "");
-    setSessionId(null);
-    setMaskedMobile(null);
-    setOtp("");
-    setMobile("");
-    setError(null);
   }
 
   async function requestOtp() {
@@ -51,19 +86,25 @@ export function AbhaIdentityPanel({ patient }: Props) {
       setError(flow === "existing" ? "Enter a valid 14-digit ABHA number." : "Enter a valid 12-digit Aadhaar number.");
       return;
     }
+    const generation = beginRequest();
+    if (generation === null) return;
     setBusy(true);
     setError(null);
     try {
       const result = flow === "existing"
         ? await requestAbhaLoginOtp(patient.id, identifier, newIdempotencyKey())
         : await requestAbhaEnrolmentOtp(patient.id, identifier, newIdempotencyKey());
+      if (!isCurrent(generation)) return;
       setSessionId(result.session_id);
       setMaskedMobile(result.masked_mobile);
       if (flow === "new") setIdentifier("");
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "ABDM could not send the OTP. Try again.");
+      if (isCurrent(generation)) setError(reason instanceof ApiError ? reason.message : "ABDM could not send the OTP. Try again.");
     } finally {
-      setBusy(false);
+      if (isCurrent(generation)) {
+        lifecycle.current.pending = false;
+        setBusy(false);
+      }
     }
   }
 
@@ -72,20 +113,30 @@ export function AbhaIdentityPanel({ patient }: Props) {
       setError("Enter the OTP sent to the patient before continuing.");
       return;
     }
+    const generation = beginRequest();
+    if (generation === null) return;
     setBusy(true);
     setError(null);
     try {
       const result = flow === "existing"
         ? await verifyAbhaLoginOtp(sessionId, otp, newIdempotencyKey())
         : await verifyAbhaEnrolmentOtp(sessionId, otp, mobileNormalised, newIdempotencyKey());
+      if (!isCurrent(generation)) return;
+      if (!result.linked || result.linked_patient_id !== patient.id) {
+        setError("ABDM did not confirm identity binding for this patient. Restart verification.");
+        return;
+      }
       setLinked(result);
       setOtp("");
       setMobile("");
       setSessionId(null);
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "ABDM could not verify the OTP. Try again.");
+      if (isCurrent(generation)) setError(reason instanceof ApiError ? reason.message : "ABDM could not verify the OTP. Try again.");
     } finally {
-      setBusy(false);
+      if (isCurrent(generation)) {
+        lifecycle.current.pending = false;
+        setBusy(false);
+      }
     }
   }
 
@@ -141,7 +192,7 @@ export function AbhaIdentityPanel({ patient }: Props) {
           ) : null}
           <div className="flex gap-3">
             <button type="button" disabled={busy || !otpValid || !mobileValid} onClick={() => void verifyOtp()} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{busy ? "Verifying…" : "Verify and link"}</button>
-            <button type="button" disabled={busy} onClick={() => { setSessionId(null); setOtp(""); setError(null); }} className="text-sm underline">Start again</button>
+            <button type="button" disabled={busy} onClick={() => changeFlow(flow)} className="text-sm underline">Start again</button>
           </div>
         </div>
       )}

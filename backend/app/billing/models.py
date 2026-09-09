@@ -169,9 +169,8 @@ class Invoice(UUIDPk, Blame, Timestamps, Base):
 class ChargeMaster(UUIDPk, Blame, Timestamps, Base):
     """Effective-dated tariff catalogue — schema §3 0033.
 
-    Created by 0033 and had no ORM model until #389, which is why nothing read
-    it: `pricing.py` still carries hardcoded fallbacks with a comment saying it
-    would query charge_master "once 0033 lands". It landed; nothing followed up.
+    Created by 0033; registration and automatic departmental accrual resolve
+    these rows and pin the chosen version onto invoice_items.
 
     `charge_code` is stable across price changes and is what a line means
     conceptually; a new price is a NEW ROW with a later `effective_from`, never
@@ -204,7 +203,7 @@ class ChargeMaster(UUIDPk, Blame, Timestamps, Base):
     __table_args__ = (
         CheckConstraint("unit_price >= 0", name="unit_price_non_negative"),
         CheckConstraint(
-            "effective_to IS NULL OR effective_to > effective_from",
+            "effective_to IS NULL OR effective_to >= effective_from",
             name="effective_range"),
         CheckConstraint(
             "charge_category IN ('registration','consultation','lab','radiology',"
@@ -264,8 +263,8 @@ class InvoiceItem(UUIDPk, Base):
     #: conceptually; this pins which version of the price was actually charged,
     #: so a later tariff revision cannot silently rewrite history.
     #:
-    #: Nullable because lines predating 0033, and any priced by pricing.py's
-    #: hardcoded fallbacks rather than the tariff, have no row to point at.
+    #: Nullable for historical pre-catalogue charges and batch-priced pharmacy.
+    #: New lab/radiology accrual must pin the effective catalogue row.
     #: Added here in #389 — 0033 created the column and the ORM never gained it,
     #: so it was invisible to every model-driven test.
     charge_master_id: Mapped[uuid.UUID | None] = mapped_column(

@@ -186,6 +186,7 @@ do not merge out of order.**
 | 0065 | abdm_link_operations | ALTER abdm_care_context_links, abdm_jobs | Separate per-HI-type token/link correlations and short-lived encrypted link credentials. |
 | 0066 | abdm_received_record_store | ALTER abdm_received_bundles, abdm_jobs | Consent-bound encrypted external documents and durable HIU receipt notification; no historical import. |
 | 0067 | abdm_callback_replies | abdm_callback_replies, ALTER abdm_jobs | Transactional acknowledgement intent and stable consent-artefact fetch correlation; identifier-only reply metadata. |
+| 0068 | tariff_inclusive_dates | ALTER charge_master | Permit one-day inclusive tariff periods; no price/data rewrite; guarded downgrade. |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -2027,10 +2028,23 @@ effective_from  date NOT NULL · effective_to date NULL
 is_active       boolean NOT NULL DEFAULT true
 UNIQUE (facility_id, charge_code, scheme_code, effective_from)
 INDEX ix_charge_master_lookup (facility_id, charge_code, scheme_code, effective_from DESC)
-CHECK (effective_to IS NULL OR effective_to > effective_from)
+CHECK (effective_to IS NULL OR effective_to >= effective_from) -- 0068; inclusive dates
 ```
 
 Also in 0033: `ALTER TABLE invoice_items ADD COLUMN charge_master_id UUID NULL → charge_master`.
+
+**0068 correction:** the resolver treats both dates as inclusive and a revision
+closes the previous price the day before the new price starts. Therefore a
+one-day tariff has `effective_to = effective_from` and is valid. The previous
+strict `>` check rejected next-day revisions. Downgrade refuses while such
+rows exist instead of deleting financial history.
+
+Automatic lab/radiology accrual now resolves the exact lab `test_code` or
+radiology `modality` against the matching category, facility and invoice scheme
+on the recorded visit's facility-local date. It pins `charge_master_id` and the
+Decimal price. This retains modality-level imaging pricing, not a new
+per-procedure tariff catalogue. Missing tariffs remain explicit unpriced preview
+lines and are skipped by the existing builder, never inserted as zero charges.
 
 **Accrual rules:**
 

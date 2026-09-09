@@ -54,7 +54,7 @@ export function BillingDashboard() {
   );
 
   const editor = useInvoiceEditor(invoice, onSaved);
-  const paymentsHook = useInvoicePayments(selectedId);
+  const paymentsHook = useInvoicePayments(selectedId, invoice?.row_version);
   const { refresh: refreshPayments } = paymentsHook;
 
   const onPaymentSaved = useCallback(
@@ -248,6 +248,7 @@ export function BillingDashboard() {
                   </Typography>
                 ) : null}
                 <PaymentsPanel
+                  key={`${editor.draft.id}:${editor.draft.row_version}`}
                   invoice={editor.draft}
                   payments={paymentsHook.payments}
                   loading={paymentsHook.loading}
@@ -255,8 +256,8 @@ export function BillingDashboard() {
                   balanceDue={paymentsHook.balance_due}
                   paidTotal={paymentsHook.paid_total}
                   refundedTotal={paymentsHook.refunded_total}
-                  canCollect={canCollect}
-                  canRefund={user?.role === "admin"}
+                  canCollect={canCollect && !paymentsHook.loading && !paymentsHook.error}
+                  canRefund={user?.role === "admin" && !paymentsHook.loading && !paymentsHook.error}
                   onCollect={async (body) => {
                     await collect.submit(body);
                   }}

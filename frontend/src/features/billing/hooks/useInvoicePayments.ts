@@ -1,10 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import { getInvoiceBalance, listPayments } from "../api";
-import { balanceDue, paidTotal } from "../lib/calculations";
-import { moneyZero } from "../lib/money";
+import { getInvoiceDetail } from "../api";
+import { DEFAULT_CURRENCY, moneyZero } from "../lib/money";
 import type { InvoiceBalance, PaymentWithRefunds } from "../types";
 
 const emptyBalance = (): InvoiceBalance => ({
@@ -14,56 +13,57 @@ const emptyBalance = (): InvoiceBalance => ({
   balance_due: moneyZero(),
 });
 
-export function useInvoicePayments(invoiceId: string | null) {
-  const [payments, setPayments] = useState<PaymentWithRefunds[]>([]);
-  const [balance, setBalance] = useState<InvoiceBalance>(emptyBalance);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+type Snapshot = {
+  scope: string;
+  payments: PaymentWithRefunds[];
+  balance: InvoiceBalance;
+  loading: boolean;
+  error: string | null;
+};
+
+export function useInvoicePayments(invoiceId: string | null, revision = 0) {
+  const scope = `${invoiceId ?? "none"}:${revision}`;
+  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const generation = useRef(0);
 
   const refresh = useCallback(async () => {
-    if (!invoiceId) {
-      setPayments([]);
-      setBalance(emptyBalance());
-      setError(null);
-      return;
-    }
-    setLoading(true);
-    setError(null);
+    const request = ++generation.current;
+    if (!invoiceId) { setSnapshot(null); return; }
+    const initial = { scope, payments: [], balance: emptyBalance(), loading: true, error: null };
+    setSnapshot(initial);
     try {
-      const [rows, bal] = await Promise.all([
-        listPayments(invoiceId),
-        getInvoiceBalance(invoiceId),
-      ]);
-      setPayments(rows);
-      setBalance(bal);
+      // One response owns both receipts and their balance. Two independent
+      // reads could straddle a payment/refund and disagree with each other.
+      const detail = await getInvoiceDetail(invoiceId);
+      if (generation.current !== request) return;
+      const money = (amount: string) => ({ amount, currency: DEFAULT_CURRENCY });
+      setSnapshot({ scope, payments: detail.payments, loading: false, error: null, balance: {
+        net_amount: money(detail.net_amount), paid_total: money(detail.total_paid),
+        refunded_total: money(detail.total_refunded), balance_due: money(detail.balance_due),
+      } });
     } catch (reason) {
-      setPayments([]);
-      setBalance(emptyBalance());
-      setError(reason instanceof Error ? reason.message : "Failed to load payment history");
-    } finally {
-      setLoading(false);
+      if (generation.current === request) setSnapshot({ ...initial, loading: false,
+        error: reason instanceof Error ? reason.message : "Failed to load payment history" });
     }
-  }, [invoiceId]);
+  }, [invoiceId, scope]);
 
   useEffect(() => {
     void refresh();
+    return () => { generation.current += 1; };
   }, [refresh]);
 
-  const derived = useMemo(() => {
-    const flatRefunds = payments.flatMap((p) => p.refunds);
-    return {
-      paid_total: paidTotal(payments),
-      balance_due: balanceDue(balance.net_amount, payments, flatRefunds),
-    };
-  }, [payments, balance.net_amount]);
+  // Invalidate during render, before the effect: the old ₹50 balance must
+  // not authorize a payment against a newly built ₹463.27 invoice.
+  const current = snapshot?.scope === scope ? snapshot : null;
+  const balance = current?.balance ?? emptyBalance();
 
   return {
-    payments,
-    loading,
-    error,
+    payments: current?.payments ?? [],
+    loading: Boolean(invoiceId) && (current?.loading ?? true),
+    error: current?.error ?? null,
     balance,
-    paid_total: balance.paid_total ?? derived.paid_total,
-    balance_due: balance.balance_due ?? derived.balance_due,
+    paid_total: balance.paid_total,
+    balance_due: balance.balance_due,
     refunded_total: balance.refunded_total,
     refresh,
   };
