@@ -375,6 +375,11 @@ async def create_prescription(
 
     interaction_warnings = check_interactions(resolved_ingredient_codes)
     warnings.extend(interaction_warnings)
+    if encounter.ended_at is not None:
+        from app.integrations.abdm.hip.publisher import publish_document
+
+        await publish_document(db, kind="prescription", source_id=prescription.id,
+                               visit=visit, actor_id=created_by)
     return prescription, warnings
 
 

@@ -7,7 +7,6 @@ camelCase bodies and empty 202 responses follow the NHA reference wrapper.
 
 from __future__ import annotations
 
-import json
 import logging
 import uuid
 from collections import defaultdict
@@ -20,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.config import get_settings
 from app.common.db import get_db
+from app.integrations.abdm import callback_replies
 from app.integrations.abdm.callback_auth import (
     GatewayCallback,
     hip_gateway_callback,
@@ -47,13 +47,14 @@ from app.integrations.abdm.contracts_v3 import (
 from app.integrations.abdm.hip import gateway as hip_gateway
 from app.integrations.abdm.hip import link_otp
 from app.integrations.abdm.hip import service as hip_service
+from app.integrations.abdm.hip.documents import DocumentUnavailable, resolve_context_document
 from app.integrations.abdm.hip.models import (
     AbdmCareContext,
     AbdmCareContextLink,
     AbdmHipConsentArtefact,
     AbdmHipHealthInformationRequest,
 )
-from app.integrations.abdm.hiu import gateway as hiu_gateway
+from app.integrations.abdm.hiu import records as hiu_records
 from app.integrations.abdm.hiu import service as hiu_service
 from app.integrations.abdm.hiu.models import (
     AbdmConsentRequest,
@@ -61,7 +62,8 @@ from app.integrations.abdm.hiu.models import (
     AbdmHiuHealthInformationRequest,
     AbdmReceivedBundle,
 )
-from app.outbox import service as outbox_service
+from app.integrations.abdm.jobs import AbdmJob
+from app.integrations.abdm.jobs import job_id as durable_job_id
 from app.patients import service as patient_service
 from app.patients.models import Patient
 from app.users.models import Facility, User
@@ -146,10 +148,20 @@ async def _contexts(
     stmt = select(AbdmCareContext).where(
         AbdmCareContext.facility_id == facility_id,
         AbdmCareContext.patient_id == patient_id,
+        AbdmCareContext.document_at.is_not(None),
     )
     if references is not None:
         stmt = stmt.where(AbdmCareContext.reference.in_(references))
-    return list((await db.execute(stmt)).scalars().all())
+    contexts = []
+    for context in (await db.execute(stmt)).scalars().all():
+        try:
+            await resolve_context_document(db, context)
+        except DocumentUnavailable:
+            # Do not advertise a legacy, draft or superseded record that the
+            # transfer worker will rightly refuse after the patient links it.
+            continue
+        contexts.append(context)
+    return contexts
 
 
 def _groups(patient: Patient, contexts: list[AbdmCareContext]) -> list[dict]:
@@ -377,35 +389,28 @@ async def generated_link_token(
         return _accepted()
     link = (
         await db.execute(
-            select(AbdmCareContextLink).where(
-                AbdmCareContextLink.gateway_request_id == payload.response.request_id,
-                AbdmCareContextLink.status == "pending",
+            select(AbdmCareContextLink)
+            .where(
+                AbdmCareContextLink.token_request_id == payload.response.request_id,
+                AbdmCareContextLink.facility_id == await _facility_id(db),
             )
+            .with_for_update()
         )
     ).scalar_one_or_none()
     if link is None:
         raise HTTPException(404, {"code": "link_not_found", "message": "Link request not found"})
+    if link.status != "pending":
+        return _accepted()
     if payload.error is not None or not payload.link_token:
         link.status = "failed"
         link.failure_reason = payload.error.code if payload.error else "missing_link_token"
         return _accepted()
-    patient = await db.get(Patient, link.patient_id)
-    rows = await _contexts(
-        db,
-        facility_id=link.facility_id,
-        patient_id=link.patient_id,
-        references=set(link.care_context_references or []),
-    )
-    groups = _groups(patient, rows) if patient is not None else []
-    for group in groups:
-        request_id, _ = await hip_gateway.link_care_contexts(
-            abha_address=link.abha_address,
-            link_token=payload.link_token,
-            display=group["display"],
-            care_contexts=group["careContexts"],
-            hi_type=group["hiType"],
-        )
-        link.gateway_request_id = request_id
+    from app.integrations.abdm.hip.linking import accept_token
+
+    try:
+        await accept_token(db, link, payload.link_token, payload.abha_address)
+    except DocumentUnavailable as exc:
+        raise HTTPException(422, {"code": "link_token_mismatch", "message": str(exc)}) from exc
     return _accepted()
 
 
@@ -421,15 +426,20 @@ async def on_care_context(
         return _accepted()
     link = (
         await db.execute(
-            select(AbdmCareContextLink).where(
-                AbdmCareContextLink.gateway_request_id == payload.response.request_id
+            select(AbdmCareContextLink)
+            .where(
+                AbdmCareContextLink.gateway_request_id == payload.response.request_id,
+                AbdmCareContextLink.facility_id == await _facility_id(db),
             )
+            .with_for_update()
         )
     ).scalar_one_or_none()
-    if link is not None:
+    if link is not None and link.status == "pending":
         link.status = "failed" if payload.error else "confirmed"
         link.failure_reason = payload.error.code if payload.error else None
         link.confirmed_at = None if payload.error else datetime.now(UTC)
+        link.link_token_encrypted = None
+        link.token_use_until = None
     return _accepted()
 
 
@@ -623,12 +633,13 @@ async def hip_consent_notify(
         expires_at=detail.permission.data_erase_at,
         raw=raw_dict(payload),
     )
-    await _outbound(
-        "HIP consent acknowledgement",
-        hip_gateway.acknowledge_consent_notification(
-            consent_id=payload.notification.consent_id,
-            gateway_request_id=callback.request_id,
-        ),
+    await callback_replies.schedule(
+        db,
+        facility_id=facility_id,
+        kind="hip_consent",
+        gateway_request_id=callback.request_id,
+        payload=payload,
+        subject_ids=[payload.notification.consent_id],
     )
     return _accepted()
 
@@ -646,10 +657,12 @@ async def hip_health_information_request(
     consent_id = payload.hi_request.consent.id
     artefact = (
         await db.execute(
-            select(AbdmHipConsentArtefact).where(
+            select(AbdmHipConsentArtefact)
+            .where(
                 AbdmHipConsentArtefact.facility_id == facility_id,
                 AbdmHipConsentArtefact.consent_artefact_id == consent_id,
             )
+            .with_for_update()
         )
     ).scalar_one_or_none()
     if artefact is None:
@@ -664,6 +677,27 @@ async def hip_health_information_request(
         )
     ).scalar_one_or_none()
     if already is not None:
+        if (
+            already.facility_id != facility_id
+            or already.consent_artefact_id != consent_id
+            or already.data_push_url != str(payload.hi_request.data_push_url)
+            or already.hiu_key_material
+            != payload.hi_request.key_material.model_dump(mode="json", by_alias=True)
+            or hiu_service._aware(already.requested_from)
+            != hiu_service._aware(payload.hi_request.date_range.from_)
+            or hiu_service._aware(already.requested_to)
+            != hiu_service._aware(payload.hi_request.date_range.to)
+        ):
+            raise HTTPException(409, {"code": "transaction_replay_conflict"})
+        await callback_replies.schedule(
+            db,
+            facility_id=facility_id,
+            kind="hip_request",
+            gateway_request_id=callback.request_id,
+            payload=payload,
+            subject_ids=[payload.transaction_id],
+            target_id=already.id,
+        )
         return _accepted()
     try:
         authorisation = await hip_service.authorise_hi_request(
@@ -684,30 +718,26 @@ async def hip_health_information_request(
         hiu_key_material=payload.hi_request.key_material.model_dump(mode="json", by_alias=True),
         data_push_url=str(payload.hi_request.data_push_url),
         gateway_request_id=callback.request_id,
-    )
-    contexts = await hip_service.list_care_contexts_for_transfer(
-        db,
-        facility_id=facility_id,
-        abha_address=artefact.abha_address,
         authorisation=authorisation,
     )
-    row.bundles_sent = str(len(contexts))
+    row.bundles_sent = "0"
     row.status = "transferring"
-    await db.flush()
-    await _outbound(
-        "HIP health-information acknowledgement",
-        hip_gateway.acknowledge_hi_request(
-            transaction_id=payload.transaction_id,
-            gateway_request_id=callback.request_id,
-        ),
+    ack_id = await callback_replies.schedule(
+        db,
+        facility_id=facility_id,
+        kind="hip_request",
+        gateway_request_id=callback.request_id,
+        payload=payload,
+        subject_ids=[payload.transaction_id],
+        target_id=row.id,
     )
-    # The worker opens its own session. Commit the durable request before it
-    # can start; otherwise a fast BackgroundTask can legitimately observe no
-    # row and drop a transfer that the gateway already saw acknowledged.
+    # Acknowledgement intent and request become durable together. The reply
+    # worker creates the transfer job only after the gateway acknowledges it.
     await db.commit()
-    from app.integrations.abdm.hip.worker import transfer_transaction
+    from app.integrations.abdm.job_runner import run_once
 
-    background_tasks.add_task(transfer_transaction, payload.transaction_id)
+    background_tasks.add_task(run_once, ack_id)
+    background_tasks.add_task(run_once, durable_job_id("hip_transfer", row.id))
     return _accepted()
 
 
@@ -717,11 +747,31 @@ async def hip_health_information_request(
 async def _consent_request_by_gateway_id(
     db: AsyncSession, request_id: str
 ) -> AbdmConsentRequest | None:
+    facility_id = await _facility_id(db)
     return (
         await db.execute(
-            select(AbdmConsentRequest).where(AbdmConsentRequest.gateway_request_id == request_id)
+            select(AbdmConsentRequest)
+            .where(
+                AbdmConsentRequest.gateway_request_id == request_id,
+                AbdmConsentRequest.facility_id == facility_id,
+            )
+            .with_for_update()
         )
     ).scalar_one_or_none()
+
+
+def _advance_consent_status(row: AbdmConsentRequest, status: str) -> bool:
+    """Callbacks can arrive out of order. A terminal decision never reopens."""
+    allowed = {
+        "requested": {"granted", "denied", "expired", "revoked", "failed"},
+        "granted": {"expired", "revoked"},
+    }
+    if status == row.status:
+        return True
+    if status in allowed.get(row.status, set()):
+        row.status = status
+        return True
+    return False
 
 
 @router.post("/api/v3/hiu/consent/request/on-init", status_code=202)
@@ -738,10 +788,14 @@ async def consent_on_init(
             404, {"code": "consent_request_not_found", "message": "Consent request not found"}
         )
     if payload.error:
-        row.status = "failed"
-        row.failure_reason = payload.error.code or "ABDM rejected consent request"
+        if row.status == "requested" and row.consent_request_id is None:
+            row.status = "failed"
+            row.failure_reason = payload.error.code or "ABDM rejected consent request"
     elif payload.consent_request:
-        row.consent_request_id = payload.consent_request.id
+        if row.consent_request_id not in {None, payload.consent_request.id}:
+            raise HTTPException(409, {"code": "consent_correlation_conflict"})
+        if row.status not in {"failed", "denied", "expired", "revoked"}:
+            row.consent_request_id = payload.consent_request.id
     return _accepted()
 
 
@@ -758,16 +812,13 @@ async def consent_on_status(
         raise HTTPException(
             404, {"code": "consent_request_not_found", "message": "Consent request not found"}
         )
-    if payload.error:
-        row.status = "failed"
-        row.failure_reason = payload.error.code or "Consent status failed"
-    elif payload.consent_request:
+    # A failed status lookup is not the patient's revocation or denial.
+    if not payload.error and payload.consent_request:
+        if payload.consent_request.id not in {None, row.consent_request_id}:
+            raise HTTPException(409, {"code": "consent_correlation_conflict"})
         status = payload.consent_request.status.lower()
-        row.status = (
-            status
-            if status in {"requested", "granted", "denied", "expired", "revoked", "failed"}
-            else row.status
-        )
+        if _advance_consent_status(row, status):
+            await hiu_service.end_consent_request(db, row)
     return _accepted()
 
 
@@ -779,11 +830,15 @@ async def hiu_consent_notify(
 ) -> Response:
     if callback.replayed:
         return _accepted()
+    facility_id = await _facility_id(db)
     row = (
         await db.execute(
-            select(AbdmConsentRequest).where(
-                AbdmConsentRequest.consent_request_id == payload.notification.consent_request_id
+            select(AbdmConsentRequest)
+            .where(
+                AbdmConsentRequest.consent_request_id == payload.notification.consent_request_id,
+                AbdmConsentRequest.facility_id == facility_id,
             )
+            .with_for_update()
         )
     ).scalar_one_or_none()
     if row is None:
@@ -791,11 +846,13 @@ async def hiu_consent_notify(
             404, {"code": "consent_request_not_found", "message": "Consent request not found"}
         )
     status = payload.notification.status.lower()
-    row.status = (
-        status if status in {"granted", "denied", "expired", "revoked", "failed"} else row.status
-    )
+    applicable = _advance_consent_status(row, status)
+    if applicable:
+        await hiu_service.end_consent_request(db, row)
     for reference in payload.notification.consent_artefacts:
-        await hiu_service.record_artefact(
+        if not applicable:
+            continue  # Still acknowledge late notifications; never restore permission.
+        await _record_hiu_artefact(
             db,
             facility_id=row.facility_id,
             consent_request=row,
@@ -809,19 +866,14 @@ async def hiu_consent_notify(
             expires_at=None,
             raw=raw_dict(payload),
         )
-        if status == "granted":
-            await _outbound(
-                "consent artefact fetch",
-                hiu_gateway.fetch_consent_artefact(consent_id=reference.id),
-            )
-    for reference in payload.notification.consent_artefacts:
-        await _outbound(
-            "HIU consent acknowledgement",
-            hiu_gateway.acknowledge_consent_notification(
-                consent_id=reference.id,
-                gateway_request_id=callback.request_id,
-            ),
-        )
+    await callback_replies.schedule(
+        db,
+        facility_id=facility_id,
+        kind="hiu_consent",
+        gateway_request_id=callback.request_id,
+        payload=payload,
+        subject_ids=[reference.id for reference in payload.notification.consent_artefacts],
+    )
     return _accepted()
 
 
@@ -838,10 +890,12 @@ async def consent_on_fetch(
             422, {"code": "consent_fetch_failed", "message": "Consent artefact was not returned"}
         )
     detail = payload.consent.consent_detail
+    facility_id = await _facility_id(db)
     existing = (
         await db.execute(
             select(AbdmHiuConsentArtefact).where(
-                AbdmHiuConsentArtefact.consent_artefact_id == detail.consent_id
+                AbdmHiuConsentArtefact.consent_artefact_id == detail.consent_id,
+                AbdmHiuConsentArtefact.facility_id == facility_id,
             )
         )
     ).scalar_one_or_none()
@@ -850,8 +904,53 @@ async def consent_on_fetch(
             404,
             {"code": "consent_artefact_not_found", "message": "Consent artefact was not announced"},
         )
-    request_row = await db.get(AbdmConsentRequest, existing.consent_request_id)
-    await hiu_service.record_artefact(
+    expected_fetch = durable_job_id("hiu_fetch", existing.id)
+    fetch_job = await db.get(AbdmJob, expected_fetch)
+    if (
+        payload.response.request_id != str(expected_fetch)
+        or fetch_job is None
+        or fetch_job.facility_id != facility_id
+        or fetch_job.attempts < 1
+    ):
+        raise HTTPException(409, {"code": "consent_fetch_correlation_mismatch"})
+    # Same lock order as revocation: request, artefact, then transfer rows.
+    # Fetch-vs-revoke must not deadlock with each transaction holding one side.
+    request_row = (
+        await db.execute(
+            select(AbdmConsentRequest)
+            .where(
+                AbdmConsentRequest.id == existing.consent_request_id,
+                AbdmConsentRequest.facility_id == facility_id,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if request_row is None or request_row.facility_id != facility_id:
+        raise HTTPException(404, {"code": "consent_request_not_found"})
+    await db.refresh(existing, with_for_update=True)
+    if existing.status in {"revoked", "expired"} or request_row.status in {
+        "revoked",
+        "expired",
+        "denied",
+        "failed",
+    }:
+        return _accepted()
+    if (
+        detail.patient.id != request_row.abha_address
+        or detail.hiu.id != callback.recipient_id
+        or not detail.hi_types
+        or not set(detail.hi_types).issubset(request_row.hi_types)
+        or detail.permission.date_range.from_ > detail.permission.date_range.to
+        or hiu_service._aware(detail.permission.date_range.from_)
+        < hiu_service._aware(request_row.date_range_from)
+        or hiu_service._aware(detail.permission.date_range.to)
+        > hiu_service._aware(request_row.date_range_to)
+        or hiu_service._aware(detail.permission.data_erase_at)
+        > hiu_service._aware(request_row.requested_expiry)
+    ):
+        raise HTTPException(422, {"code": "consent_scope_mismatch"})
+    await _record_hiu_artefact(
         db,
         facility_id=existing.facility_id,
         consent_request=request_row,
@@ -866,6 +965,13 @@ async def consent_on_fetch(
     return _accepted()
 
 
+async def _record_hiu_artefact(db: AsyncSession, **kwargs):
+    try:
+        return await hiu_service.record_artefact(db, **kwargs)
+    except hiu_service.HiuError as exc:
+        raise HTTPException(409, {"code": exc.code, "message": exc.message}) from exc
+
+
 @router.post("/api/v3/hiu/health-information/on-request", status_code=202)
 async def hiu_health_information_on_request(
     payload: HiuHealthInformationOnRequestCallback,
@@ -874,17 +980,25 @@ async def hiu_health_information_on_request(
 ) -> Response:
     if callback.replayed:
         return _accepted()
+    facility_id = await _facility_id(db)
     row = (
         await db.execute(
-            select(AbdmHiuHealthInformationRequest).where(
-                AbdmHiuHealthInformationRequest.gateway_request_id == payload.response.request_id
+            select(AbdmHiuHealthInformationRequest)
+            .where(
+                AbdmHiuHealthInformationRequest.gateway_request_id == payload.response.request_id,
+                AbdmHiuHealthInformationRequest.facility_id == facility_id,
             )
+            .with_for_update()
         )
     ).scalar_one_or_none()
     if row is None:
         raise HTTPException(
             404, {"code": "hi_request_not_found", "message": "Health-information request not found"}
         )
+    if payload.hi_request and row.transaction_id not in {None, payload.hi_request.transaction_id}:
+        raise HTTPException(409, {"code": "transaction_correlation_conflict"})
+    if row.status != "requested":
+        return _accepted()
     if payload.error or payload.hi_request is None:
         row.status = "failed"
         row.failure_reason = payload.error.code if payload.error else "missing_hi_request"
@@ -892,6 +1006,8 @@ async def hiu_health_information_on_request(
         row.transaction_id = payload.hi_request.transaction_id
         status = payload.hi_request.session_status.upper()
         row.status = "acknowledged" if status == "ACKNOWLEDGED" else "failed"
+    if row.status == "failed":
+        hiu_service._clear_key(row)
     return _accepted()
 
 
@@ -903,16 +1019,56 @@ async def receive_health_information(
     """Direct HIP→HIU push: authorised by transaction and authenticated crypto."""
     request = (
         await db.execute(
-            select(AbdmHiuHealthInformationRequest).where(
-                AbdmHiuHealthInformationRequest.transaction_id == payload.transaction_id
-            )
+            select(AbdmHiuHealthInformationRequest)
+            .where(AbdmHiuHealthInformationRequest.transaction_id == payload.transaction_id)
+            .with_for_update()
         )
     ).scalar_one_or_none()
     if request is None:
         raise HTTPException(404, {"code": "unknown_transaction", "message": "Unknown transaction"})
+    # A replay must contain the exact accepted page. A changed ciphertext or a
+    # previously rejected entry is never upgraded to success.
+    existing_entries = list(
+        (
+            await db.execute(
+                select(AbdmReceivedBundle)
+                .where(
+                    AbdmReceivedBundle.hi_request_id == request.id,
+                    AbdmReceivedBundle.page_number == payload.page_number,
+                )
+                .order_by(AbdmReceivedBundle.entry_index)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if payload.page_number in (request.received_pages or []):
+        if (
+            request.expected_page_count != payload.page_count
+            or len(existing_entries) != len(payload.entries)
+            or any(
+                row.status != "stored"
+                or row.wire_sha256
+                != hiu_records.wire_digest(
+                    content=entry.content,
+                    public_key=payload.key_material.dh_public_key.key_value,
+                    nonce=payload.key_material.nonce,
+                    reference=entry.care_context_reference,
+                    media=entry.media,
+                    checksum=entry.checksum,
+                )
+                for row, entry in zip(existing_entries, payload.entries, strict=False)
+            )
+        ):
+            raise HTTPException(
+                409,
+                {
+                    "code": "page_replay_changed",
+                    "message": "Received page does not match its earlier delivery",
+                },
+            )
+        return _accepted()
     if request.status not in {"requested", "acknowledged", "partial"}:
-        if request.status == "received":
-            return _accepted()
         raise HTTPException(
             409, {"code": "transaction_closed", "message": "Transaction is not accepting data"}
         )
@@ -921,6 +1077,7 @@ async def receive_health_information(
     if (
         artefact is None
         or artefact.status != "granted"
+        or artefact_expiry is None
         or (
             artefact_expiry is not None
             and (artefact_expiry if artefact_expiry.tzinfo else artefact_expiry.replace(tzinfo=UTC))
@@ -950,11 +1107,10 @@ async def receive_health_information(
             422, {"code": "sender_key_expired", "message": "Sender key material has expired"}
         )
 
-    statuses: list[dict[str, str]] = []
     for index, entry in enumerate(payload.entries):
         duplicate = (
             await db.execute(
-                select(AbdmReceivedBundle.id).where(
+                select(AbdmReceivedBundle).where(
                     AbdmReceivedBundle.hi_request_id == request.id,
                     AbdmReceivedBundle.page_number == payload.page_number,
                     AbdmReceivedBundle.entry_index == index,
@@ -963,7 +1119,7 @@ async def receive_health_information(
         ).scalar_one_or_none()
         if duplicate is None:
             try:
-                receipt, plaintext = await hiu_service.receive_bundle(
+                await hiu_service.receive_bundle(
                     db,
                     request=request,
                     ciphertext_b64=entry.content,
@@ -981,25 +1137,21 @@ async def receive_health_information(
                 # push indistinguishable from one that never arrived.
                 await db.commit()
                 raise HTTPException(422, {"code": exc.code, "message": exc.message}) from exc
-            await outbox_service.enqueue(
-                db,
-                aggregate_type="abdm_received_fhir_bundle",
-                aggregate_id=str(receipt.id),
-                event_type="abdm_fhir_bundle_received",
-                payload={
-                    "transaction_id": payload.transaction_id,
-                    "care_context_reference": entry.care_context_reference,
-                    "bundle": json.loads(plaintext),
+        elif duplicate.status != "stored" or duplicate.wire_sha256 != hiu_records.wire_digest(
+            content=entry.content,
+            public_key=key.dh_public_key.key_value,
+            nonce=key.nonce,
+            reference=entry.care_context_reference,
+            media=entry.media,
+            checksum=entry.checksum,
+        ):
+            raise HTTPException(
+                409,
+                {
+                    "code": "entry_replay_changed",
+                    "message": "Entry is rejected or does not match its earlier delivery; start a new transfer",
                 },
-                sensitivity="critical",
             )
-        statuses.append(
-            {
-                "careContextReference": entry.care_context_reference or "",
-                "hiStatus": "OK",
-                "description": "Received and authenticated",
-            }
-        )
 
     pages = set(request.received_pages or [])
     pages.add(payload.page_number)
@@ -1007,47 +1159,9 @@ async def receive_health_information(
     if len(pages) == payload.page_count:
         request.status = "received"
         await hiu_service.complete_request(db, request=request)
-        received_contexts = list(
-            (
-                await db.execute(
-                    select(AbdmReceivedBundle.care_context_reference)
-                    .where(
-                        AbdmReceivedBundle.hi_request_id == request.id,
-                        AbdmReceivedBundle.status == "stored",
-                    )
-                    .order_by(
-                        AbdmReceivedBundle.page_number,
-                        AbdmReceivedBundle.entry_index,
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-        # The receipt is transaction-wide.  Reporting only the last page made
-        # a successful multi-page transfer appear partially received.
-        statuses = [
-            {
-                "careContextReference": reference or "",
-                "hiStatus": "OK",
-                "description": "Received and authenticated",
-            }
-            for reference in dict.fromkeys(received_contexts)
-        ]
-        hip_id = ""
-        raw = artefact.raw_artefact if artefact is not None else {}
-        try:
-            hip_id = raw["consentDetail"]["hip"]["id"]
-        except (KeyError, TypeError):
-            hip_id = get_settings().abdm_hip_id
-        await _outbound(
-            "HIU transfer receipt",
-            hiu_gateway.notify_hi_receipt(
-                consent_id=artefact.consent_artefact_id,
-                transaction_id=payload.transaction_id,
-                session_status="TRANSFERRED",
-                hip_id=hip_id,
-                status_responses=statuses,
-            ),
-        )
+        from app.integrations.abdm.jobs import enqueue
+
+        # Persist reception and retryable notification atomically. A gateway
+        # outage must not roll back the accepted document or retain its key.
+        await enqueue(db, kind="hiu_notify", target_id=request.id, facility_id=request.facility_id)
     return _accepted()

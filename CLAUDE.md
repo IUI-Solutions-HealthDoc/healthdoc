@@ -243,6 +243,27 @@ the console shows `[HMR] connected`.
 
 ## Current state
 
+- **ABDM closure branch (9 September)**: `fix/abdm-milestone-closure`
+  adds exact finalized-document contexts, transactional publication, per-type HIP
+  linking, durable delivery jobs/frozen encrypted transfer pages, protected HIU
+  record storage, a read-only `/doctor/abdm` workspace and admin job operations.
+  Consent/transfer callbacks now enforce facility scope and monotonic terminal
+  states; OTP ownership is checked before the gateway call. The full gate passed
+  1443 backend tests and 14 script tests. Frontend: 29 tests, typecheck, production
+  build and 205 contract calls.
+  Migration 0067 adds committed acknowledgement intents for HIP consent/data and
+  HIU consent callbacks, followed by durable transfer/fetch jobs with correlation.
+  **The approved local application upgrade 0060 → 0067 passed after backup and
+  populated-copy restore/migration: all 121 original tables / 10,912 rows stayed
+  identical. Backup retained under ignored `backups/`; disposable clone removed.
+  The delivery worker remains stopped. This is not a production rehearsal.**
+  The worker override is opt-in and can send queued work when started. Remaining
+  M1 continuations, remaining discovery/link/profile reply and callback-timeout
+  recovery, approved ingress/registry
+  mapping, clinical decisions and live external evidence are explicit in
+  `docs/bahmni-abdm-m1-m2-m3-gap-analysis-2026-09-08.md` and
+  `docs/abdm-local-verification-and-recovery.md`. Do not use older paragraphs below
+  as current proof of certification or deployment.
 - 1226 backend tests passing in the 5–6 September retest (four existing ABDM
   Pydantic alias warnings remain); 23 frontend tests and 11 evidence-report
   regressions pass. `pip-audit` and `npm audit` both clean.

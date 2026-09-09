@@ -1,0 +1,19 @@
+# Opt-in worker for local sandbox runs; apply migrations before starting it.
+# docker compose --env-file .env -f infra/docker-compose.yml -f infra/docker-compose.abdm-worker.yml up -d abdm-worker
+services:
+  abdm-worker:
+    build:
+      context: ../backend
+      target: dev
+    env_file: ../.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    volumes:
+      - ../backend:/code
+    command: ["python", "-m", "app.integrations.abdm.job_runner"]
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy

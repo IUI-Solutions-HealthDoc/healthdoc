@@ -24,7 +24,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.integrations.abdm import hi_crypto
@@ -132,6 +132,10 @@ async def authorise_hi_request(
     grant_to = _aware(artefact.date_range_to)
     req_from = _aware(requested_from)
     req_to = _aware(requested_to)
+    if grant_from is None or grant_to is None or grant_from > grant_to:
+        raise HipError("consent_range_unknown", "Consent has no usable date range")
+    if req_from is not None and req_to is not None and req_from > req_to:
+        raise HipError("invalid_range", "Requested period ends before it starts")
 
     # A request that reaches outside the granted window is refused, not
     # silently clipped. Clipping would hand back a shorter history than was
@@ -184,10 +188,12 @@ async def record_consent_notification(
     ).scalar_one_or_none()
 
     if existing is not None:
+        if existing.facility_id != facility_id or existing.abha_address != abha_address:
+            raise HipError("consent_scope_mismatch", "Consent artefact is unavailable")
         # Revocation is terminal. A later 'granted' for the same artefact id is
         # not a reinstatement — ABDM issues a NEW artefact for that — so
         # accepting one would let a replayed notification undo a revocation.
-        if existing.status == "revoked" and status == "granted":
+        if existing.status in {"revoked", "expired"} and status == "granted":
             raise HipError("consent_revoked", "A revoked artefact cannot be re-granted")
         existing.status = status
         existing.raw_artefact = raw
@@ -196,6 +202,7 @@ async def record_consent_notification(
         return existing
 
     artefact = AbdmHipConsentArtefact(
+        id=uuid.uuid4(),
         facility_id=facility_id,
         consent_artefact_id=artefact_id,
         abha_address=abha_address,
@@ -229,7 +236,9 @@ async def list_care_contexts_for_transfer(
     links = list(
         (
             await db.execute(
-                select(AbdmCareContextLink).where(
+                select(AbdmCareContextLink)
+                .execution_options(populate_existing=True)
+                .where(
                     AbdmCareContextLink.facility_id == facility_id,
                     AbdmCareContextLink.abha_address == abha_address,
                     AbdmCareContextLink.status == "confirmed",
@@ -239,10 +248,6 @@ async def list_care_contexts_for_transfer(
         .scalars()
         .all()
     )
-    linked_references = {
-        str(reference) for link in links for reference in (link.care_context_references or [])
-    }
-
     # The artefact names the exact care contexts the patient authorised. A
     # valid consent for one consultation is not authority for every linked
     # consultation at this facility.
@@ -253,8 +258,16 @@ async def list_care_contexts_for_transfer(
         for item in (detail.get("careContexts") or [])
         if item.get("careContextReference")
     }
-    permitted_references = linked_references & consented_references
-    if not permitted_references:
+    # References are unique per patient, not per facility. Keep the verified
+    # patient binding when intersecting references so a collision cannot share
+    # a different patient's record.
+    permitted_contexts = {
+        (link.patient_id, str(reference))
+        for link in links
+        for reference in (link.care_context_references or [])
+        if str(reference) in consented_references
+    }
+    if not permitted_contexts:
         return []
 
     stmt = (
@@ -262,15 +275,20 @@ async def list_care_contexts_for_transfer(
         .join(Visit, Visit.id == AbdmCareContext.visit_id)
         .where(
             AbdmCareContext.facility_id == facility_id,
-            AbdmCareContext.reference.in_(permitted_references),
+            Visit.facility_id == facility_id,
+            Visit.patient_id == AbdmCareContext.patient_id,
+            tuple_(AbdmCareContext.patient_id, AbdmCareContext.reference).in_(permitted_contexts),
             AbdmCareContext.hi_type.in_(authorisation.hi_types),
+            AbdmCareContext.document_at.is_not(None),
         )
     )
     if authorisation.date_range_from is not None:
-        stmt = stmt.where(Visit.visit_date >= authorisation.date_range_from)
+        stmt = stmt.where(AbdmCareContext.document_at >= authorisation.date_range_from)
     if authorisation.date_range_to is not None:
-        stmt = stmt.where(Visit.visit_date <= authorisation.date_range_to)
-    return list((await db.execute(stmt)).scalars().unique().all())
+        stmt = stmt.where(AbdmCareContext.document_at <= authorisation.date_range_to)
+    return list(
+        (await db.execute(stmt.execution_options(populate_existing=True))).scalars().unique().all()
+    )
 
 
 def encrypt_bundle_for_hiu(
@@ -311,6 +329,7 @@ async def record_hi_request(
     hiu_key_material: dict,
     data_push_url: str,
     gateway_request_id: str | None,
+    authorisation: Authorisation | None = None,
 ) -> AbdmHipHealthInformationRequest:
     """Durable record that a request arrived, written before any data moves."""
     # Explicit id, for the same reason hiu/service.py gives: the caller updates
@@ -327,6 +346,9 @@ async def record_hi_request(
         hiu_key_material=hiu_key_material,
         data_push_url=data_push_url,
         gateway_request_id=gateway_request_id,
+        requested_from=authorisation.date_range_from if authorisation else None,
+        requested_to=authorisation.date_range_to if authorisation else None,
+        requested_hi_types=authorisation.hi_types if authorisation else None,
         status="received",
     )
     db.add(row)

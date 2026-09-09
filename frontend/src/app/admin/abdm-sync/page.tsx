@@ -10,6 +10,7 @@ import {
 } from "@/features/receptionist/types";
 import { searchPatients } from "@/features/receptionist/api";
 import { ApiError } from "@/lib/api";
+import { AbdmDeliveryJobs } from "@/features/admin/AbdmDeliveryJobs";
 
 export default function Page() {
   const [uhid, setUhid] = useState("");
@@ -91,6 +92,7 @@ export default function Page() {
 
   return (
     <div className="space-y-8 p-6">
+      <AbdmDeliveryJobs />
       <div>
         <h1 className="text-3xl font-semibold">ABDM identity links</h1>
         <p className="mt-2 max-w-3xl text-sm text-muted-foreground">

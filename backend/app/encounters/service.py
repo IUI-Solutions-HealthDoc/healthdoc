@@ -10,16 +10,16 @@ in this codebase, confirmed unrelated to business logic)."""
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.opd.models import Diagnosis, DoctorReview, Encounter, Visit
-from app.users.models import User
 from app.encounters.schemas import DiagnosisCreate, EncounterCreate, EncounterUpdate
+from app.opd.models import Diagnosis, DoctorReview, Encounter, Visit
 from app.queue import service as queue_service
+from app.users.models import User
 
 
 class VisitNotFound(Exception):
@@ -221,9 +221,13 @@ async def update_encounter(
     # attribute after flush, and response serialization would then attempt an
     # implicit async SELECT outside greenlet_spawn. Set it explicitly so the
     # returned clinical row is complete without hidden I/O.
-    encounter.updated_at = datetime.now(timezone.utc)
+    encounter.updated_at = datetime.now(UTC)
     encounter.row_version += 1
     await db.flush()
+    if closing_now:
+        from app.integrations.abdm.hip.publisher import publish_encounter
+
+        await publish_encounter(db, encounter, actor_id)
     return encounter
 
 
@@ -317,7 +321,7 @@ async def update_review_status(
     if notes is not None:
         review.notes = notes
     if new_status == "signed_off":
-        review.signed_off_at = datetime.now(timezone.utc)
+        review.signed_off_at = datetime.now(UTC)
 
     await db.flush()
     return review

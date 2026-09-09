@@ -3,7 +3,7 @@ radiology module router - issue #203: order receive + scheduling;
 radiologist draft + sign-off.
 """
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
@@ -198,7 +198,7 @@ async def schedule_scan(
             },
         )
 
-    if payload.scheduled_at < datetime.now(timezone.utc):
+    if payload.scheduled_at < datetime.now(UTC):
         raise HTTPException(
             status_code=422,
             detail={
@@ -236,7 +236,7 @@ async def reschedule_scan(
                 "message": "Only a scheduled, unperformed scan can be rescheduled.",
             },
         )
-    if payload.scheduled_at < datetime.now(timezone.utc):
+    if payload.scheduled_at < datetime.now(UTC):
         raise HTTPException(
             status_code=422,
             detail={
@@ -321,7 +321,7 @@ async def mark_scan_complete(
     if item.status != "scheduled":
         raise HTTPException(status_code=409, detail="Item must be scheduled before marking scan complete")
 
-    item.scan_completed_at = payload.completed_at or datetime.now(timezone.utc)
+    item.scan_completed_at = payload.completed_at or datetime.now(UTC)
     item.status = "scanned"
 
     await _write_audit_log(db, table_name="radiology_order_items", row_id=item.id,
@@ -466,6 +466,7 @@ async def sign_off_radiology_report(
     await db.flush()
 
     new_report = RadiologyReport(
+        id=uuid.uuid4(),
         radiology_order_item_id=item_id,
         version=current.version + 1,
         is_current=True,
@@ -484,6 +485,10 @@ async def sign_off_radiology_report(
     await db.flush()
     await db.refresh(new_report)
 
+    from app.integrations.abdm.hip.publisher import publish_order_document
+
+    await publish_order_document(db, kind="radiology-report", source_id=new_report.id,
+                                 order_id=item.order_id, actor_id=current_db_user.id)
     tat_delta = new_report.created_at - (item.scan_completed_at or item.created_at)
     report_out = RadiologyReportOut.model_validate(new_report)
     report_out.tat_minutes = int(tat_delta.total_seconds() // 60)

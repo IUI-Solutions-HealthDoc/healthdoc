@@ -8,7 +8,7 @@ from fastapi import HTTPException
 
 from app.auth.deps import DbUser
 from app.integrations.abdm.hip.router import CareContextIn, create_care_context
-from app.opd.models import Visit
+from app.opd.models import Encounter, Visit
 from app.patients.models import Patient
 from app.users.models import Facility, User
 
@@ -84,11 +84,22 @@ async def _seed_scope(db):
 @pytest.mark.asyncio
 async def test_care_context_accepts_only_a_visit_for_the_scoped_patient(db):
     caller, patient_a, _patient_b, visit_a, _visit_b = await _seed_scope(db)
+    encounter = Encounter(
+        id=uuid.uuid4(),
+        visit_id=visit_a.id,
+        facility_id=caller.facility_id,
+        provider_user_id=caller.id,
+        started_at=visit_a.visit_date,
+        ended_at=datetime.now(UTC),
+        created_by=caller.id,
+    )
+    db.add(encounter)
+    await db.flush()
     result = await create_care_context(
         CareContextIn(
             patient_id=patient_a.id,
             visit_id=visit_a.id,
-            reference=f"visit-{visit_a.id}",
+            reference=f"encounter/{encounter.id}",
             display="OP consultation",
             hi_type="OPConsultation",
         ),

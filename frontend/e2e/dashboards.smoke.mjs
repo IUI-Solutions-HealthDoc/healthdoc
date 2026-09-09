@@ -106,6 +106,12 @@ const ROLE_DASHBOARDS = [
       { path: "/doctor/orders", expectCalls: true },
       { path: "/doctor/prescriptions", expectCalls: true },
       { path: "/doctor/results", expectCalls: true },
+      {
+        path: "/doctor/abdm",
+        // Patient-scoped reads start only after an explicit patient search.
+        expectCalls: false,
+        expectedText: "ABDM external records",
+      },
       { path: "/doctor/pharmacy-approvals", expectCalls: true },
       { path: "/lab", expectCalls: true },
       { path: "/radiology", expectCalls: true },
@@ -235,9 +241,12 @@ const ROLE_DASHBOARDS = [
       { path: "/admin/departments", expectCalls: true },
       { path: "/admin/permissions", expectCalls: true },
       { path: "/admin/account-requests", expectCalls: true },
-      // Search-driven: the API is intentionally not called until an admin
-      // supplies a patient identifier. A zero-call mount is correct here.
-      { path: "/admin/abdm-sync", expectCalls: false },
+      {
+        path: "/admin/abdm-sync",
+        // Identity search is lazy, but the delivery queue loads on mount.
+        expectCalls: true,
+        requiredRequests: [{ method: "GET", path: "/api/v1/abdm/operations/jobs" }],
+      },
       { path: "/audit-viewer", expectCalls: true },
       {
         path: "/admin/data-protection",

@@ -14,6 +14,7 @@ import ipaddress
 import json
 import logging
 import socket
+import uuid
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlparse
@@ -28,13 +29,16 @@ from app.common.db import SessionLocal
 from app.integrations.abdm.fhir.builder import build_clinical_bundle
 from app.integrations.abdm.hip import gateway as hip_gateway
 from app.integrations.abdm.hip import service as hip_service
+from app.integrations.abdm.hip.documents import DocumentUnavailable, resolve_context_document
 from app.integrations.abdm.hip.models import (
     AbdmCareContext,
     AbdmHipConsentArtefact,
     AbdmHipHealthInformationRequest,
+    AbdmHipTransferPage,
 )
+from app.integrations.abdm.jobs import enqueue, job_id
 from app.nursing.models import Vitals
-from app.opd.models import Diagnosis, Encounter, Visit
+from app.opd.models import Diagnosis
 from app.orders.models import Order, Prescription, PrescriptionItem
 from app.pathology.models import LabOrderItem, LabResult
 from app.patients.models import Patient
@@ -49,6 +53,10 @@ _MAX_ATTEMPTS = 3
 
 class TransferError(RuntimeError):
     """A safe operational reason why a transfer could not be completed."""
+
+
+class TransientTransferError(TransferError):
+    """A transport outage; retry the frozen page, not a newly built document."""
 
 
 def _aware(value: datetime | None) -> datetime | None:
@@ -116,47 +124,46 @@ async def _clinical_facts(
 ) -> dict[str, Any]:
     """Read the exact rows that substantiate one care-context document."""
     patient = await db.get(Patient, context.patient_id)
-    visit = await db.get(Visit, context.visit_id) if context.visit_id else None
-    if patient is None or visit is None:
-        raise TransferError("Care context is not attached to a patient visit")
-
-    encounters = list(
-        (
-            await db.execute(
-                select(Encounter)
-                .where(Encounter.visit_id == visit.id)
-                .order_by(Encounter.started_at.asc().nulls_last(), Encounter.created_at.asc())
-            )
-        )
-        .scalars()
-        .all()
-    )
-    if not encounters:
-        raise TransferError("Care context has no clinical encounter")
-    primary = encounters[-1]
-    practitioner = await db.get(User, primary.provider_user_id)
+    if patient is None or context.facility_id != facility.id:
+        raise TransferError("Care context is not attached to this facility's patient")
+    try:
+        source = await resolve_context_document(db, context)
+    except DocumentUnavailable as exc:
+        raise TransferError(str(exc)) from exc
+    visit, primary = source.visit, source.encounter
+    encounters = [primary] if primary is not None else []
+    practitioner = await db.get(User, source.author_id)
     if practitioner is None or not practitioner.registration_number:
-        raise TransferError("Encounter author has no verified registration number")
+        raise TransferError("Document author has no registration number")
     if not facility.hfr_facility_id:
         raise TransferError("Facility has no HFR identifier")
 
-    encounter_ids = [row.id for row in encounters]
+    # Only the selected consultation/wellness record owns encounter-wide facts.
+    # A prescription or report must not absorb its siblings from the same visit.
+    encounter_ids = (
+        [row.id for row in encounters] if source.kind in {"encounter", "wellness"} else []
+    )
     diagnoses = list(
         (await db.execute(select(Diagnosis).where(Diagnosis.encounter_id.in_(encounter_ids))))
         .scalars()
         .all()
     )
-    allergies = list(
-        (
-            await db.execute(
-                select(Allergy).where(
-                    Allergy.patient_id == patient.id,
-                    Allergy.status == "active",
+    allergies = (
+        list(
+            (
+                await db.execute(
+                    select(Allergy).where(
+                        Allergy.patient_id == patient.id,
+                        Allergy.status == "active",
+                        Allergy.created_at <= source.authored_at,
+                    )
                 )
             )
+            .scalars()
+            .all()
         )
-        .scalars()
-        .all()
+        if source.kind == "encounter"
+        else []
     )
     vitals = list(
         (
@@ -165,6 +172,7 @@ async def _clinical_facts(
                 .where(
                     Vitals.patient_id == patient.id,
                     Vitals.encounter_id.in_(encounter_ids),
+                    Vitals.measured_at <= source.authored_at,
                 )
                 .order_by(Vitals.measured_at.asc())
             )
@@ -173,10 +181,14 @@ async def _clinical_facts(
         .all()
     )
 
-    prescriptions = list(
-        (await db.execute(select(Prescription).where(Prescription.encounter_id.in_(encounter_ids))))
-        .scalars()
-        .all()
+    prescriptions = (
+        list(
+            (await db.execute(select(Prescription).where(Prescription.id == source.source_id)))
+            .scalars()
+            .all()
+        )
+        if source.kind == "prescription"
+        else []
     )
     prescription_ids = [row.id for row in prescriptions]
     prescription_items = (
@@ -195,45 +207,57 @@ async def _clinical_facts(
         else []
     )
 
-    lab_rows = list(
-        (
-            await db.execute(
-                select(LabOrderItem, LabResult)
-                .join(Order, Order.id == LabOrderItem.order_id)
-                .join(LabResult, LabResult.lab_order_item_id == LabOrderItem.id)
-                .where(
-                    Order.encounter_id.in_(encounter_ids),
-                    LabResult.is_current.is_(True),
-                    LabResult.status.in_(("final", "corrected")),
+    lab_rows = (
+        list(
+            (
+                await db.execute(
+                    select(LabOrderItem, LabResult)
+                    .join(Order, Order.id == LabOrderItem.order_id)
+                    .join(LabResult, LabResult.lab_order_item_id == LabOrderItem.id)
+                    .where(
+                        LabResult.id == source.source_id,
+                        LabResult.is_current.is_(True),
+                        LabResult.status.in_(("final", "corrected")),
+                    )
                 )
-            )
-        ).all()
+            ).all()
+        )
+        if source.kind == "lab-result"
+        else []
     )
-    radiology_rows = list(
-        (
-            await db.execute(
-                select(RadiologyOrderItem, RadiologyReport)
-                .join(Order, Order.id == RadiologyOrderItem.order_id)
-                .join(
-                    RadiologyReport,
-                    RadiologyReport.radiology_order_item_id == RadiologyOrderItem.id,
+    radiology_rows = (
+        list(
+            (
+                await db.execute(
+                    select(RadiologyOrderItem, RadiologyReport)
+                    .join(Order, Order.id == RadiologyOrderItem.order_id)
+                    .join(
+                        RadiologyReport,
+                        RadiologyReport.radiology_order_item_id == RadiologyOrderItem.id,
+                    )
+                    .where(
+                        RadiologyReport.id == source.source_id,
+                        RadiologyReport.is_current.is_(True),
+                        RadiologyReport.status.in_(("final", "corrected")),
+                    )
                 )
-                .where(
-                    Order.encounter_id.in_(encounter_ids),
-                    RadiologyReport.is_current.is_(True),
-                    RadiologyReport.status.in_(("final", "corrected")),
-                )
-            )
-        ).all()
+            ).all()
+        )
+        if source.kind == "radiology-report"
+        else []
     )
 
     discharge_row = (
-        await db.execute(
-            select(Admission, Discharge)
-            .join(Discharge, Discharge.admission_id == Admission.id)
-            .where(Admission.visit_id == visit.id)
-        )
-    ).first()
+        (
+            await db.execute(
+                select(Admission, Discharge)
+                .join(Discharge, Discharge.admission_id == Admission.id)
+                .where(Discharge.id == source.source_id)
+            )
+        ).first()
+        if source.kind == "discharge"
+        else None
+    )
 
     observation_names = (
         ("height_cm", "Height", "cm"),
@@ -276,7 +300,7 @@ async def _clinical_facts(
             "kind": "lab",
             "test_code": item.test_code,
             "name": item.test_name,
-            "issued": result.created_at,
+            "issued": source.authored_at,
             "conclusion": result.remarks,
             "observations": _result_observations(
                 item.test_name, result.result_data or {}, result.id
@@ -302,16 +326,14 @@ async def _clinical_facts(
 
     note_parts = []
     for label, value in (
-        ("Subjective", primary.subjective),
-        ("Objective", primary.objective),
-        ("Assessment", primary.assessment),
-        ("Plan", primary.plan),
+        ("Subjective", primary.subjective if primary else None),
+        ("Objective", primary.objective if primary else None),
+        ("Assessment", primary.assessment if primary else None),
+        ("Plan", primary.plan if primary else None),
     ):
         if value:
             note_parts.append(f"{label}: {value}")
-    authored_at = _aware(
-        primary.ended_at or primary.started_at or visit.visit_date
-    ) or datetime.now(UTC)
+    authored_at = source.authored_at
     encounter_status = "discharged" if discharge_row else visit.status
     encounter_class = "IMP" if discharge_row else "AMB"
 
@@ -336,11 +358,11 @@ async def _clinical_facts(
             "hfr_id": facility.hfr_facility_id,
         },
         "encounter": {
-            "id": visit.id,
+            "id": primary.id if primary else visit.id,
             "status": encounter_status,
             "class": encounter_class,
             "patient_name": patient.full_name,
-            "start": visit.visit_date,
+            "start": primary.started_at if primary else discharge_row[0].admitted_at,
             "end": discharge_row[1].discharged_at if discharge_row else primary.ended_at,
         },
         "authored_at": authored_at,
@@ -393,7 +415,7 @@ async def _clinical_facts(
         )
     elif context.hi_type == "DischargeSummary":
         if discharge_row is None or not discharge_row[1].discharge_summary:
-            raise TransferError("Discharge context has no signed discharge summary")
+            raise TransferError("Discharge context has no finalized discharge summary")
         common["care_plan"] = discharge_row[1].discharge_summary
     elif context.hi_type == "WellnessRecord":
         common.update(
@@ -437,7 +459,7 @@ async def _post_page(url: str, payload: dict[str, Any]) -> None:
                 last_error = exc
             if attempt + 1 < _MAX_ATTEMPTS:
                 await asyncio.sleep(0.25 * (2**attempt))
-    raise TransferError("HIU data push failed after bounded retries") from last_error
+    raise TransientTransferError("HIU data push failed after bounded retries") from last_error
 
 
 async def _notify_gateway(
@@ -454,6 +476,7 @@ async def _notify_gateway(
                 transaction_id=row.transaction_id,
                 session_status=session_status,
                 status_responses=statuses,
+                request_id=str(job_id("hip_notify", row.id)),
             )
             return
         except Exception as exc:  # outbound client normalises gateway errors
@@ -463,7 +486,7 @@ async def _notify_gateway(
     raise TransferError("ABDM transfer notification failed after bounded retries") from last_error
 
 
-async def transfer_transaction(transaction_id: str) -> None:
+async def transfer_transaction(transaction_id: str, *, retry_transport: bool = False) -> None:
     """Complete one previously acknowledged HIP transfer transaction."""
     statuses: list[dict[str, str]] = []
     async with SessionLocal() as db:
@@ -480,6 +503,8 @@ async def transfer_transaction(transaction_id: str) -> None:
         if row.status == "delivered":
             return
         try:
+            if row.requested_from is None or row.requested_to is None or not row.requested_hi_types:
+                raise TransferError("Original transfer scope is unavailable; request data again")
             push_url = await _validate_data_push_url(row.data_push_url)
             artefact = (
                 await db.execute(
@@ -495,9 +520,9 @@ async def transfer_transaction(transaction_id: str) -> None:
                 db,
                 facility_id=row.facility_id,
                 consent_artefact_id=row.consent_artefact_id,
-                requested_hi_types=list(artefact.hi_types or []),
-                requested_from=artefact.date_range_from,
-                requested_to=artefact.date_range_to,
+                requested_hi_types=list(row.requested_hi_types),
+                requested_from=row.requested_from,
+                requested_to=row.requested_to,
             )
             contexts = await hip_service.list_care_contexts_for_transfer(
                 db,
@@ -511,35 +536,101 @@ async def transfer_transaction(transaction_id: str) -> None:
             if facility is None:
                 raise TransferError("Facility no longer exists")
             hiu_public, hiu_nonce, key_expiry = _hiu_key_material(row)
-            for page_number, context in enumerate(contexts):
-                facts = await _clinical_facts(db, context, facility=facility)
-                bundle = build_clinical_bundle(context.hi_type, **facts)
-                ciphertext, key_material, checksum = hip_service.encrypt_bundle_for_hiu(
-                    bundle,
-                    hiu_public_key_b64=hiu_public,
-                    hiu_nonce_b64=hiu_nonce,
+            pages = list(
+                (
+                    await db.execute(
+                        select(AbdmHipTransferPage)
+                        .where(
+                            AbdmHipTransferPage.request_id == row.id,
+                        )
+                        .order_by(AbdmHipTransferPage.page_number)
+                    )
                 )
-                key_material["dhPublicKey"]["expiry"] = key_expiry
-                await _post_page(
-                    push_url,
-                    {
-                        "pageNumber": page_number,
-                        "pageCount": len(contexts),
-                        "transactionId": row.transaction_id,
-                        "entries": [
-                            {
-                                "content": ciphertext,
-                                "media": _FHIR_MEDIA,
-                                "checksum": checksum,
-                                "careContextReference": context.reference,
-                            }
-                        ],
-                        "keyMaterial": key_material,
-                    },
+                .scalars()
+                .all()
+            )
+            if not pages:
+                # Freeze every page before the first HTTP call. A later process
+                # uses these exact encrypted bytes, IDs and pageCount.
+                for page_number, context in enumerate(contexts):
+                    facts = await _clinical_facts(db, context, facility=facility)
+                    bundle = build_clinical_bundle(context.hi_type, **facts)
+                    ciphertext, key_material, checksum = hip_service.encrypt_bundle_for_hiu(
+                        bundle,
+                        hiu_public_key_b64=hiu_public,
+                        hiu_nonce_b64=hiu_nonce,
+                    )
+                    key_material["dhPublicKey"]["expiry"] = key_expiry
+                    pages.append(
+                        AbdmHipTransferPage(
+                            id=uuid.uuid4(),
+                            request_id=row.id,
+                            facility_id=row.facility_id,
+                            context_id=context.id,
+                            document_at=context.document_at,
+                            page_number=page_number,
+                            payload={
+                                "pageNumber": page_number,
+                                "pageCount": len(contexts),
+                                "transactionId": row.transaction_id,
+                                "entries": [
+                                    {
+                                        "content": ciphertext,
+                                        "media": _FHIR_MEDIA,
+                                        "checksum": checksum,
+                                        "careContextReference": context.reference,
+                                    }
+                                ],
+                                "keyMaterial": key_material,
+                            },
+                        )
+                    )
+                db.add_all(pages)
+                await db.commit()
+            for page in pages:
+                reference = page.payload["entries"][0]["careContextReference"]
+                if page.delivered_at is not None:
+                    statuses.append(
+                        {
+                            "careContextReference": reference,
+                            "hiStatus": "OK",
+                            "description": "FHIR document transferred",
+                        }
+                    )
+                    continue
+                # A revocation can arrive while a previous HTTP page is in flight.
+                # Refresh ORM state, not just SELECT the cached identity-map row.
+                await db.refresh(artefact)
+                current_authorisation = await hip_service.authorise_hi_request(
+                    db,
+                    facility_id=row.facility_id,
+                    consent_artefact_id=row.consent_artefact_id,
+                    requested_hi_types=list(row.requested_hi_types),
+                    requested_from=row.requested_from,
+                    requested_to=row.requested_to,
                 )
+                current_contexts = await hip_service.list_care_contexts_for_transfer(
+                    db,
+                    facility_id=row.facility_id,
+                    abha_address=artefact.abha_address,
+                    authorisation=current_authorisation,
+                )
+                current_context = next(
+                    (item for item in current_contexts if item.id == page.context_id), None
+                )
+                if current_context is None or _aware(current_context.document_at) != _aware(
+                    page.document_at
+                ):
+                    raise TransferError("Care context is no longer authorised for transfer")
+                await resolve_context_document(db, current_context)
+                _hiu_key_material(row)
+                await _post_page(push_url, page.payload)
+                page.delivered_at = datetime.now(UTC)
+                row.bundles_sent = str(sum(item.delivered_at is not None for item in pages))
+                await db.commit()
                 statuses.append(
                     {
-                        "careContextReference": context.reference,
+                        "careContextReference": reference,
                         "hiStatus": "OK",
                         "description": "FHIR document transferred",
                     }
@@ -548,38 +639,64 @@ async def transfer_transaction(transaction_id: str) -> None:
             row.bundles_sent = str(len(statuses))
             row.failure_reason = None
             row.completed_at = datetime.now(UTC)
+            await enqueue(db, kind="hip_notify", target_id=row.id, facility_id=row.facility_id)
             await db.commit()
-            try:
-                await _notify_gateway(
-                    row,
-                    session_status="TRANSFERRED",
-                    statuses=statuses,
-                )
-            except TransferError as exc:
-                # The HIU already authenticated and accepted every page.  A
-                # later gateway-notification outage must not rewrite that
-                # clinical fact as "failed" or trigger a contradictory FAILED
-                # notification.  Keep it delivered and leave an operational
-                # reason for a notifier/reconciliation job to retry.
-                row.failure_reason = str(exc)[:500]
-                await db.commit()
-                log.exception("ABDM data was delivered but the gateway notification failed")
         except Exception as exc:
-            safe_reason = str(exc)[:500] or type(exc).__name__
+            if retry_transport and isinstance(exc, TransientTransferError):
+                row.failure_reason = "Data push pending retry"
+                await db.commit()
+                raise
+            safe_reason = (
+                str(exc)[:500]
+                if isinstance(exc, TransferError | hip_service.HipError)
+                else "Document preparation failed"
+            )
             row.status = "failed"
             row.failure_reason = safe_reason
             row.completed_at = datetime.now(UTC)
+            await enqueue(db, kind="hip_notify", target_id=row.id, facility_id=row.facility_id)
             await db.commit()
-            failed_statuses = statuses or [
+            log.error("ABDM transfer failed (%s)", type(exc).__name__)
+
+
+async def notify_transaction(request_id: uuid.UUID) -> None:
+    async with SessionLocal() as db:
+        row = await db.get(AbdmHipHealthInformationRequest, request_id)
+        if row is None or row.status not in {"delivered", "failed"}:
+            raise TransferError("Transfer has no terminal delivery result")
+        pages = (
+            (
+                await db.execute(
+                    select(AbdmHipTransferPage)
+                    .where(
+                        AbdmHipTransferPage.request_id == row.id,
+                    )
+                    .order_by(AbdmHipTransferPage.page_number)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        statuses = [
+            {
+                "careContextReference": p.payload["entries"][0]["careContextReference"],
+                "hiStatus": "OK" if p.delivered_at else "ERRORED",
+                "description": "FHIR document transferred"
+                if p.delivered_at
+                else "Document not transferred",
+            }
+            for p in pages
+        ]
+        if not statuses:
+            statuses = [
                 {
                     "careContextReference": "",
                     "hiStatus": "ERRORED",
                     "description": "Health information transfer failed",
                 }
             ]
-            try:
-                await _notify_gateway(row, session_status="FAILED", statuses=failed_statuses)
-            except TransferError:
-                log.exception("ABDM transfer failed and failure notification could not be sent")
-            else:
-                log.error("ABDM transfer failed (%s)", type(exc).__name__)
+        await _notify_gateway(
+            row,
+            session_status="TRANSFERRED" if row.status == "delivered" else "FAILED",
+            statuses=statuses,
+        )

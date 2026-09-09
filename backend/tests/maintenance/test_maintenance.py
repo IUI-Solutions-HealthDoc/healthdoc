@@ -19,7 +19,7 @@ from app.auth.deps import (
 )
 from app.common.db import get_db
 from app.departments.models import Department
-from app.maintenance import service
+from app.maintenance import schemas, service
 from app.maintenance.router import router as maintenance_router
 from app.maintenance.schemas import MaintenanceLogCreate
 from app.users.models import Facility
@@ -149,14 +149,33 @@ async def test_list_filters_and_orders_newest_performed_first(db, seed):
     "overrides",
     [
         {"downtime_minutes": -1},
-        {"performed_at": datetime.now(UTC) + timedelta(minutes=1)},
-        {"performed_at": datetime.now().replace(tzinfo=None)},
+        {"performed_at": datetime(2026, 1, 1)},
         {"machine_id": "   "},
     ],
 )
 def test_create_contract_rejects_invalid_evidence(overrides):
     with pytest.raises(ValidationError):
         _payload(uuid.uuid4(), **overrides)
+
+
+@pytest.mark.parametrize("offset_microseconds", [-1, 0, 1])
+def test_performed_at_boundary_uses_a_fixed_validation_clock(monkeypatch, offset_microseconds):
+    # Collection can precede this test by minutes in CI. A timestamp created
+    # in parametrize must not age from invalid-future into valid-past.
+    now = datetime(2026, 9, 8, 12, tzinfo=UTC)
+
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now.astimezone(tz) if tz else now.replace(tzinfo=None)
+
+    monkeypatch.setattr(schemas, "datetime", FixedDateTime)
+    performed_at = now + timedelta(microseconds=offset_microseconds)
+    if offset_microseconds > 0:
+        with pytest.raises(ValidationError, match="cannot be in the future"):
+            _payload(uuid.uuid4(), performed_at=performed_at)
+    else:
+        assert _payload(uuid.uuid4(), performed_at=performed_at).performed_at == performed_at
 
 
 def _http_client(db, *, actor, roles: list[str]) -> httpx.AsyncClient:
