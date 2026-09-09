@@ -9,7 +9,7 @@ import Typography from "@mui/material/Typography";
 
 import { Modal } from "@/components/ui/Modal";
 import { listChargeMaster } from "../api/chargeMaster";
-import { fromMoney } from "../lib/money";
+import { formatMoney } from "@/lib/api";
 import type { AddInvoiceItemInput, ChargeMaster } from "../types";
 
 type Props = {
@@ -26,11 +26,13 @@ export function AddInvoiceItemModal({ open, onClose, onSave, scheme_code }: Prop
   const [quantity, setQuantity] = useState(1);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
     setLoading(true);
+    setError(null);
     void listChargeMaster({ active_only: true, scheme_code: "all" }).then((rows) => {
       if (cancelled) return;
       // Prefer general tariffs; include scheme match when invoice has scheme
@@ -47,8 +49,9 @@ export function AddInvoiceItemModal({ open, onClose, onSave, scheme_code }: Prop
       );
       setTariffs(list);
       setChargeMasterId(list[0]?.id ?? "");
-      setLoading(false);
-    });
+    }).catch((error: unknown) => {
+      if (!cancelled) setError(error instanceof Error ? error.message : "Could not load tariffs.");
+    }).finally(() => { if (!cancelled) setLoading(false); });
     return () => {
       cancelled = true;
     };
@@ -75,10 +78,12 @@ export function AddInvoiceItemModal({ open, onClose, onSave, scheme_code }: Prop
         charge_category: selected.charge_category,
         description: selected.description,
         quantity,
-        unit_price: selected.unit_price,
+        unit_price: { amount: selected.unit_price, currency: "INR" },
         charge_master_id: selected.id,
       });
       reset();
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Could not add the item.");
     } finally {
       setSaving(false);
     }
@@ -108,6 +113,7 @@ export function AddInvoiceItemModal({ open, onClose, onSave, scheme_code }: Prop
       }
     >
       <Stack spacing={2} sx={{ pt: 1 }}>
+        {error ? <Typography role="alert" color="error">{error}</Typography> : null}
         <Typography sx={{ fontSize: "0.8125rem", color: "text.secondary" }}>
           Prices come from charge_master (0033). Missing tariff → BE returns 409
           no_tariff on accrual.
@@ -123,15 +129,14 @@ export function AddInvoiceItemModal({ open, onClose, onSave, scheme_code }: Prop
         >
           {tariffs.map((t) => (
             <MenuItem key={t.id} value={t.id}>
-              {t.charge_code} — {t.description} (₹{fromMoney(t.unit_price).toFixed(2)}
+              {t.charge_code} — {t.description} ({formatMoney(t.unit_price)}
               {t.scheme_code ? ` · ${t.scheme_code}` : ""})
             </MenuItem>
           ))}
         </TextField>
         {selected ? (
           <Typography sx={{ fontSize: "0.8125rem" }}>
-            Category: {selected.charge_category} · Unit: ₹
-            {fromMoney(selected.unit_price).toFixed(2)}
+            Category: {selected.charge_category} · Unit: {formatMoney(selected.unit_price)}
           </Typography>
         ) : null}
         <TextField

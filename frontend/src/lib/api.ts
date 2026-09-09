@@ -93,6 +93,10 @@ export async function api<T>(path: string, init: ApiOptions = {}): Promise<T> {
     },
   });
 
+  // Retirement/delete routes legitimately return no representation. Do not
+  // report a completed mutation as a failure because there is no JSON to parse.
+  if (res.status === 204) return undefined as T;
+
   let body: Envelope<T>;
   try {
     body = (await res.json()) as Envelope<T>;

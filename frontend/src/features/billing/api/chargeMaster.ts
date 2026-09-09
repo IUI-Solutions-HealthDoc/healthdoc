@@ -13,29 +13,30 @@
  * `pricing_note` when no tariff was found.
  */
 import { api } from "@/lib/api";
-import type { ChargeMaster } from "../types";
+import type { ChargeMaster, TariffCreateInput } from "../types";
 
 export interface ChargeMasterListFilters {
-  /** Effective-dated rows only. Applied client-side — see below. */
+  /** Server-side active flag, not whether a tariff is effective today. */
   active_only?: boolean;
+  charge_code?: string;
   scheme_code?: string | "all";
 }
 
 /**
  * GET /billing/charge-master — the facility's tariff rows.
  *
- * The endpoint takes no filters. `active_only` and `scheme_code` narrow the
- * fetched list here, which is safe because the response is not paginated: the
- * catalogue is per-facility and small, so this filters the whole set rather
- * than one page of it. That is the difference between this and the paginated
- * searches elsewhere, where client-side filtering silently hides matches.
+ * The API client unwraps Envelope.data, which is an array, not { items }.
+ * active_only and charge_code are server filters; scheme filtering applies
+ * to the complete unpaginated result. Active is not the same as effective today.
  */
 export async function listChargeMaster(
   filters: ChargeMasterListFilters = {},
 ): Promise<ChargeMaster[]> {
-  const response = await api<{ items: ChargeMaster[] }>("/billing/charge-master");
-  let rows = response.items;
-  if (filters.active_only) rows = rows.filter((r) => r.is_active !== false);
+  const params = new URLSearchParams({ active_only: String(filters.active_only ?? true) });
+  if (filters.charge_code) params.set("charge_code", filters.charge_code);
+  const response = await api<ChargeMaster[]>(`/billing/charge-master?${params}`);
+  if (!Array.isArray(response)) throw new Error("The tariff catalogue returned an invalid response. Reload and try again.");
+  let rows = response;
   if (filters.scheme_code && filters.scheme_code !== "all") {
     rows = rows.filter((r) => r.scheme_code === filters.scheme_code);
   }
@@ -49,6 +50,20 @@ export async function listChargeMaster(
  * small enough per facility that a second round trip would buy nothing.
  */
 export async function getChargeMaster(tariffId: string): Promise<ChargeMaster | null> {
-  const rows = await listChargeMaster();
+  const rows = await listChargeMaster({ active_only: false });
   return rows.find((row) => row.id === tariffId) ?? null;
+}
+
+// The current tariff routes do not implement server-side idempotency replay.
+// Carry the action key for tracing, but never automatically retry these writes.
+export function createTariff(body: TariffCreateInput, actionKey: string): Promise<ChargeMaster> {
+  return api<ChargeMaster>("/billing/charge-master", {
+    method: "POST", body: JSON.stringify(body), idempotencyKey: actionKey,
+  });
+}
+
+export function deactivateTariff(id: string, actionKey: string): Promise<void> {
+  return api<void>(`/billing/charge-master/${encodeURIComponent(id)}/deactivate`, {
+    method: "POST", idempotencyKey: actionKey,
+  });
 }

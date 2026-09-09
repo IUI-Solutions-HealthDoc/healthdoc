@@ -66,6 +66,7 @@ const NAV_ITEMS: readonly NavItem[] = [
   { href: "/pharmacy/dispense", label: "Dispense", icon: Package, area: "clinical", roles: [ROLES.PHARMACIST] },
   { href: "/inventory", label: "Inventory", icon: Package, area: "clinical", roles: [ROLES.PHARMACIST, ROLES.HOD] },
   { href: "/billing", label: "Billing", icon: Receipt, area: "finance", roles: [ROLES.BILLING, ROLES.ADMIN] },
+  { href: "/billing/tariffs", label: "Tariff catalogue", icon: Receipt, area: "finance", roles: [ROLES.BILLING, ROLES.ADMIN] },
   { href: "/reports", label: "Reports", icon: BarChart3, area: "finance", roles: [ROLES.SUPERVISOR, ROLES.BILLING, ROLES.ADMIN, ROLES.AUDITOR] },
   { href: "/audit-viewer", label: "Audit trail", icon: Shield, area: "audit", roles: [ROLES.ADMIN, ROLES.AUDITOR] },
   { href: "/patient-portal", label: "My health record", icon: UserRound, area: "patient", roles: [ROLES.PATIENT] },
@@ -225,7 +226,10 @@ export default function Sidebar({ open, setOpen }: SidebarProps) {
                     const Icon = item.icon;
                     const active =
                       pathname === item.href ||
-                      (item.href !== "/" && pathname.startsWith(`${item.href}/`));
+                      (item.href !== "/" && pathname.startsWith(`${item.href}/`) &&
+                        !filtered.some((other) => other.href !== item.href &&
+                          other.href.startsWith(`${item.href}/`) &&
+                          (pathname === other.href || pathname.startsWith(`${other.href}/`))));
                     return (
                       <Link
                         key={item.href}
