@@ -22,6 +22,10 @@ billing/admin catalogue route and nine real-login workflow checks, including
 independent admin retirement and receptionist API refusals. The source matrix
 now has 51 entries; this addition does not establish a new full-role run.
 
+The [tariff write-safety follow-up](tariff-write-safety-2026-09-09.md) adds exact
+request replay checks to that browser journey (ten checks), backed by observed
+PostgreSQL contention and rollback tests. It does not expand the screen sweep.
+
 ## Producing it
 
 ```bash
