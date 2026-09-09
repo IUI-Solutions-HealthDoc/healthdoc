@@ -271,6 +271,16 @@ jobs:
         working-directory: frontend
         run: npm run test:dashboards
 
+      # Real sign-in and rendered billing UI, with all financial responses
+      # intercepted to prove delayed reads/writes cannot cross invoice scope.
+      # This is not a live payment or ABDM sandbox gate.
+      - name: Invoice selection and delayed-response safety
+        working-directory: frontend
+        env:
+          E2E_RUN_ID: invoice-switch-${{ github.run_id }}-${{ github.run_attempt }}
+          E2E_EVIDENCE_DIR: ${{ runner.temp }}/healthdoc-e2e/invoice-switch
+        run: npm run test:invoice-switch
+
       # #464's acceptance criterion: a real browser journey proving the
       # superadmin workspace is isolated. Checks the API layer as well as the
       # redirect, because a route that redirects the UI and still answers 200

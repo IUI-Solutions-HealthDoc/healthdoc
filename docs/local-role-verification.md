@@ -12,6 +12,11 @@ The **9 September billing-tariff/patient-switch acceptance** is tracked in
 [its dated report](billing-patient-safety-browser-acceptance-2026-09-09.md),
 with separate evidence, newly reproduced defects and explicit coverage limits.
 
+The subsequent [invoice-switch safety pass](invoice-switch-safety-2026-09-09.md)
+adds seven delayed-response browser checks and a fresh real-API billing/refund
+workflow. Its billing-only screen sweep is not a replacement for the full-role
+manifest. The new branch's CI step has not yet run on GitHub.
+
 ## Producing it
 
 ```bash

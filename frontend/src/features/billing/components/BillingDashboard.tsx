@@ -27,7 +27,6 @@ import { SchemeSelector } from "./SchemeSelector";
 import "../receipt-print.css";
 
 export function BillingDashboard() {
-  const { user } = useAuth();
   const {
     invoices,
     loading: listLoading,
@@ -41,41 +40,6 @@ export function BillingDashboard() {
   } = useInvoices({ status: "all" });
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [refundBusy, setRefundBusy] = useState(false);
-
-  const { invoice, setInvoice, loading: detailLoading, error: detailError } = useInvoiceDetail(selectedId);
-
-  const onSaved = useCallback(
-    (next: InvoiceWithItems) => {
-      setInvoice(next);
-      void refreshList();
-    },
-    [refreshList, setInvoice],
-  );
-
-  const editor = useInvoiceEditor(invoice, onSaved);
-  const paymentsHook = useInvoicePayments(selectedId, invoice?.row_version);
-  const { refresh: refreshPayments } = paymentsHook;
-
-  const onPaymentSaved = useCallback(
-    (next: InvoiceWithItems) => {
-      setInvoice(next);
-      void refreshList();
-      void refreshPayments();
-    },
-    [refreshList, refreshPayments, setInvoice],
-  );
-
-  const collect = useCollectPayment(selectedId, (inv) => onPaymentSaved(inv));
-
-  const canCollect =
-    !!editor.draft &&
-    (editor.draft.status === "issued" || editor.draft.status === "partially_paid");
-
-  const showPayments =
-    !!editor.draft &&
-    editor.draft.status !== "draft" &&
-    editor.draft.status !== "cancelled";
 
   const handleSelect = (id: string) => {
     setSelectedId(id);
@@ -130,168 +94,202 @@ export function BillingDashboard() {
           onSelect={handleSelect}
         />
 
-        <Stack spacing={2.5}>
-          {!selectedId ? (
-            <Box
-              sx={{
-                borderRadius: "16px",
-                border: `1px dashed ${meridian.border}`,
-                p: 4,
-                textAlign: "center",
-                color: meridian.textSecondary,
-              }}
-            >
-              Select an invoice from the list to open the builder.
-            </Box>
-          ) : detailError ? (
-            <Typography role="alert" sx={{ color: meridian.danger }}>
-              {detailError}
-            </Typography>
-          ) : detailLoading || !editor.draft ? (
-            <Typography sx={{ color: meridian.textSecondary }}>Loading invoice…</Typography>
-          ) : (
-            <>
-              {!editor.canBuild ? (
-                <Typography
-                  sx={{
-                    px: 2,
-                    py: 1.25,
-                    borderRadius: "12px",
-                    backgroundColor: "#e8eef5",
-                    color: meridian.brandPrimary,
-                    fontSize: "0.875rem",
-                    fontWeight: 600,
-                  }}
-                >
-                  This invoice is not a draft — financial fields are read-only. Use Payments to
-                  collect or reverse.
-                </Typography>
-              ) : null}
-
-              <InvoiceHeader invoice={editor.draft} />
-              <Typography sx={{ color: meridian.textSecondary, fontSize: "0.875rem" }}>
-                Charges and totals are server-calculated. Manual line, discount and scheme edits are unavailable.
-              </Typography>
-
-              <Box
-                sx={{
-                  display: "grid",
-                  gridTemplateColumns: { xs: "1fr", md: "1.2fr 0.8fr" },
-                  gap: 2.5,
-                }}
-              >
-                <SchemeSelector
-                  value={editor.schemeOption}
-                  schemeAdjustment={editor.schemeAdjustmentNumber}
-                  disabled={!editor.canEdit || editor.busy}
-                  onChange={editor.setScheme}
-                  onSchemeAdjustmentChange={editor.setSchemeAdjustment}
-                />
-                <InvoiceTotals
-                  gross_amount={editor.draft.gross_amount}
-                  discount_amount={editor.draft.discount_amount}
-                  scheme_adjustment={editor.draft.scheme_adjustment}
-                  net_amount={editor.draft.net_amount}
-                  canEdit={editor.canEdit}
-                  onDiscountChange={editor.setDiscount}
-                />
-              </Box>
-
-              <LineItemsEditor
-                items={editor.draft.items}
-                canEdit={editor.canEdit}
-                busy={editor.busy}
-                scheme_code={editor.draft.scheme_code}
-                onAdd={editor.addItem}
-                onPatch={editor.patchItem}
-                onRemove={editor.removeItem}
-              />
-
-              {editor.canBuild ? (
-                <Stack direction="row" useFlexGap sx={{ gap: 1.25, flexWrap: "wrap" }}>
-                  <Button
-                    variant="outlined"
-                    disabled={editor.busy}
-                    onClick={() => void editor.build()}
-                    sx={{ textTransform: "none", fontWeight: 600, borderRadius: "10px" }}
-                  >
-                    Build charges
-                  </Button>
-                  <Button
-                    variant="outlined"
-                    disabled={editor.busy}
-                    onClick={() => editor.setPreviewOpen(true)}
-                    sx={{ textTransform: "none", fontWeight: 600, borderRadius: "10px" }}
-                  >
-                    Preview
-                  </Button>
-                  <Button
-                    variant="contained"
-                    disabled={editor.busy || !editor.canIssue}
-                    onClick={() => {
-                      editor.setPreviewOpen(true);
-                      toast.info("Review totals", "Confirm Issue from the preview dialog");
-                    }}
-                    sx={{ textTransform: "none", fontWeight: 600, borderRadius: "10px" }}
-                  >
-                    Issue…
-                  </Button>
-                </Stack>
-              ) : null}
-              {editor.buildMessage ? <Typography role="status">{editor.buildMessage}</Typography> : null}
-
-              {showPayments ? (
-                <>
-                {paymentsHook.error ? (
-                  <Typography role="alert" sx={{ color: meridian.danger, fontSize: "0.875rem" }}>
-                    {paymentsHook.error}
-                  </Typography>
-                ) : null}
-                <PaymentsPanel
-                  key={`${editor.draft.id}:${editor.draft.row_version}`}
-                  invoice={editor.draft}
-                  payments={paymentsHook.payments}
-                  loading={paymentsHook.loading}
-                  busy={collect.busy || refundBusy}
-                  balanceDue={paymentsHook.balance_due}
-                  paidTotal={paymentsHook.paid_total}
-                  refundedTotal={paymentsHook.refunded_total}
-                  canCollect={canCollect && !paymentsHook.loading && !paymentsHook.error}
-                  canRefund={user?.role === "admin" && !paymentsHook.loading && !paymentsHook.error}
-                  onCollect={async (body) => {
-                    await collect.submit(body);
-                  }}
-                  onRefund={async (paymentId, body) => {
-                    setRefundBusy(true);
-                    try {
-                      // Returns the refund alone; re-read the invoice for the
-                      // new balance rather than assuming it.
-                      const refund = await createRefund(paymentId, body);
-                      toast.success("Payment reversed", refund.refund_number);
-                      if (selectedId) onPaymentSaved(await getInvoice(selectedId));
-                    } catch (e) {
-                      toast.error(e instanceof Error ? e.message : "Reversal failed");
-                      throw e;
-                    } finally {
-                      setRefundBusy(false);
-                    }
-                  }}
-                />
-                </>
-              ) : null}
-
-              <InvoicePreviewModal
-                open={editor.previewOpen}
-                invoice={editor.draft}
-                canIssue={editor.canIssue}
-                busy={editor.busy}
-                onClose={() => editor.setPreviewOpen(false)}
-                onIssue={() => void editor.issue()}
-              />
-            </>
-          )}
-        </Stack>
+        <InvoiceWorkspace key={selectedId ?? "none"} selectedId={selectedId} refreshList={refreshList} />
       </Box>
     </Box>
+  );
+}
+
+function InvoiceWorkspace({ selectedId, refreshList }: {
+  selectedId: string | null;
+  refreshList: () => Promise<void>;
+}) {
+  // All invoice-specific state shares this keyed lifetime: detail, editor,
+  // preview, collection and reversal. A response may finish for the previous
+  // invoice, but it cannot update the next invoice's workspace or dialogs.
+  const { user } = useAuth();
+  const [refundBusy, setRefundBusy] = useState(false);
+  const { invoice, setInvoice, loading: detailLoading, error: detailError, refresh } = useInvoiceDetail(selectedId);
+  const onSaved = useCallback((next: InvoiceWithItems) => {
+    setInvoice(next);
+    void refreshList();
+  }, [refreshList, setInvoice]);
+  const editor = useInvoiceEditor(invoice, onSaved);
+  const paymentsHook = useInvoicePayments(selectedId, invoice?.row_version);
+  const { refresh: refreshPayments } = paymentsHook;
+  const onPaymentSaved = useCallback((next: InvoiceWithItems) => {
+    setInvoice(next);
+    void refreshList();
+    void refreshPayments();
+  }, [refreshList, refreshPayments, setInvoice]);
+  const collect = useCollectPayment(selectedId, onPaymentSaved);
+  const canCollect = !!editor.draft &&
+    (editor.draft.status === "issued" || editor.draft.status === "partially_paid");
+  const showPayments = !!editor.draft &&
+    editor.draft.status !== "draft" && editor.draft.status !== "cancelled";
+
+  return (
+    <Stack spacing={2.5} component="section" aria-label="Invoice details">
+      {!selectedId ? (
+        <Box
+          sx={{
+            borderRadius: "16px",
+            border: `1px dashed ${meridian.border}`,
+            p: 4,
+            textAlign: "center",
+            color: meridian.textSecondary,
+          }}
+        >
+          Select an invoice from the list to open the builder.
+        </Box>
+      ) : detailError ? (
+        <Box>
+          <Typography role="alert" sx={{ color: meridian.danger }}>{detailError}</Typography>
+          <Button onClick={() => void refresh()}>Retry invoice</Button>
+        </Box>
+      ) : detailLoading || !editor.draft || editor.draft.id !== selectedId ? (
+        <Typography sx={{ color: meridian.textSecondary }}>Loading invoice…</Typography>
+      ) : (
+        <>
+          {!editor.canBuild ? (
+            <Typography
+              sx={{
+                px: 2,
+                py: 1.25,
+                borderRadius: "12px",
+                backgroundColor: "#e8eef5",
+                color: meridian.brandPrimary,
+                fontSize: "0.875rem",
+                fontWeight: 600,
+              }}
+            >
+              This invoice is not a draft — financial fields are read-only. Use Payments to
+              collect or reverse.
+            </Typography>
+          ) : null}
+
+          <InvoiceHeader invoice={editor.draft} />
+          <Typography sx={{ color: meridian.textSecondary, fontSize: "0.875rem" }}>
+            Charges and totals are server-calculated. Manual line, discount and scheme edits are unavailable.
+          </Typography>
+
+          <Box
+            sx={{
+              display: "grid",
+              gridTemplateColumns: { xs: "1fr", md: "1.2fr 0.8fr" },
+              gap: 2.5,
+            }}
+          >
+            <SchemeSelector
+              value={editor.schemeOption}
+              schemeAdjustment={editor.schemeAdjustmentNumber}
+              disabled={!editor.canEdit || editor.busy}
+              onChange={editor.setScheme}
+              onSchemeAdjustmentChange={editor.setSchemeAdjustment}
+            />
+            <InvoiceTotals
+              gross_amount={editor.draft.gross_amount}
+              discount_amount={editor.draft.discount_amount}
+              scheme_adjustment={editor.draft.scheme_adjustment}
+              net_amount={editor.draft.net_amount}
+              canEdit={editor.canEdit}
+              onDiscountChange={editor.setDiscount}
+            />
+          </Box>
+
+          <LineItemsEditor
+            items={editor.draft.items}
+            canEdit={editor.canEdit}
+            busy={editor.busy}
+            scheme_code={editor.draft.scheme_code}
+            onAdd={editor.addItem}
+            onPatch={editor.patchItem}
+            onRemove={editor.removeItem}
+          />
+
+          {editor.canBuild ? (
+            <Stack direction="row" useFlexGap sx={{ gap: 1.25, flexWrap: "wrap" }}>
+              <Button
+                variant="outlined"
+                disabled={editor.busy}
+                onClick={() => void editor.build()}
+                sx={{ textTransform: "none", fontWeight: 600, borderRadius: "10px" }}
+              >
+                Build charges
+              </Button>
+              <Button
+                variant="outlined"
+                disabled={editor.busy}
+                onClick={() => editor.setPreviewOpen(true)}
+                sx={{ textTransform: "none", fontWeight: 600, borderRadius: "10px" }}
+              >
+                Preview
+              </Button>
+              <Button
+                variant="contained"
+                disabled={editor.busy || !editor.canIssue}
+                onClick={() => {
+                  editor.setPreviewOpen(true);
+                  toast.info("Review totals", "Confirm Issue from the preview dialog");
+                }}
+                sx={{ textTransform: "none", fontWeight: 600, borderRadius: "10px" }}
+              >
+                Issue…
+              </Button>
+            </Stack>
+          ) : null}
+          {editor.buildMessage ? <Typography role="status">{editor.buildMessage}</Typography> : null}
+
+          {showPayments ? (
+            <>
+            {paymentsHook.error ? (
+              <Typography role="alert" sx={{ color: meridian.danger, fontSize: "0.875rem" }}>
+                {paymentsHook.error}
+              </Typography>
+            ) : null}
+            <PaymentsPanel
+              key={`${editor.draft.id}:${editor.draft.row_version}`}
+              invoice={editor.draft}
+              payments={paymentsHook.payments}
+              loading={paymentsHook.loading}
+              busy={collect.busy || refundBusy}
+              balanceDue={paymentsHook.balance_due}
+              paidTotal={paymentsHook.paid_total}
+              refundedTotal={paymentsHook.refunded_total}
+              canCollect={canCollect && !paymentsHook.loading && !paymentsHook.error}
+              canRefund={user?.role === "admin" && !paymentsHook.loading && !paymentsHook.error}
+              onCollect={async (body) => {
+                await collect.submit(body);
+              }}
+              onRefund={async (paymentId, body) => {
+                setRefundBusy(true);
+                try {
+                  // Returns the refund alone; re-read the invoice for the
+                  // new balance rather than assuming it.
+                  const refund = await createRefund(paymentId, body);
+                  toast.success("Payment reversed", refund.refund_number);
+                  if (selectedId) onPaymentSaved(await getInvoice(selectedId));
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : "Reversal failed");
+                  throw e;
+                } finally {
+                  setRefundBusy(false);
+                }
+              }}
+            />
+            </>
+          ) : null}
+
+          <InvoicePreviewModal
+            open={editor.previewOpen}
+            invoice={editor.draft}
+            canIssue={editor.canIssue}
+            busy={editor.busy}
+            onClose={() => editor.setPreviewOpen(false)}
+            onIssue={() => void editor.issue()}
+          />
+        </>
+      )}
+    </Stack>
   );
 }

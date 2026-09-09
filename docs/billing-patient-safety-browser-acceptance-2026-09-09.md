@@ -176,10 +176,11 @@ unexpected ones, so no external OTP is sent by this test.
 4. The screen sweep does not prove every mutation: full pharmacy dispensing,
    inventory approval chains, staff administration, nursing eMAR/fluid balance,
    and exhaustive failure/concurrency scenarios need action-level checks.
-5. Billing selection races across two different invoices and every refund/
-   receipt edge case are not established by the single-invoice tariff journey.
-   Payment-hook stale-response regressions are not a whole billing workspace
-   patient-switch sign-off.
+5. The subsequent [invoice-switch follow-up](invoice-switch-safety-2026-09-09.md)
+   reproduces and fixes the cross-invoice workspace race, with seven browser
+   delay checks and a fresh real billing/refund regression. Those are separate
+   results, not part of this tariff run. Exhaustive refund/receipt concurrency
+   and edge cases remain open.
 6. Print smoke renders minimal synthetic markup with the application's print
    CSS. Actual prescription/report/receipt contents, pagination and physical
    printer output still need review. Axe checks cover only visited states,
