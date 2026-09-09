@@ -13,6 +13,7 @@
     "test:dashboards": "node e2e/dashboards.smoke.mjs",
     "test:workflows": "node e2e/workflows.smoke.mjs",
     "test:patient-switch": "node e2e/patient-switch.smoke.mjs",
+    "test:invoice-switch": "node e2e/invoice-switch.smoke.mjs",
     "test:billing-tariffs": "node e2e/billing-tariffs.smoke.mjs",
     "test:print": "node e2e/print-pdf.smoke.mjs",
     "demo:record": "node e2e/demo-recordings.mjs",
