@@ -26,13 +26,19 @@ const BLOCKED_COPY: Record<RecordAccessBlockedReason, string> = {
  * record and is stopped here. Wrap whatever reads the record; children render
  * only once access is allowed, by consent or by an open grant.
  */
-export function BreakGlassGate({
-  patient,
-  children,
-}: {
+type Props = {
   patient: QueueToken | null;
   children: React.ReactNode;
-}) {
+};
+
+export function BreakGlassGate(props: Props) {
+  // Consent, emergency grants and the confirmation dialog belong to one
+  // patient. A late access result must never unlock a different patient's
+  // children, even temporarily while that patient's own check is pending.
+  return <PatientRecordGate key={props.patient?.patient_id ?? "none"} {...props} />;
+}
+
+function PatientRecordGate({ patient, children }: Props) {
   const {
     loading,
     submitting,
