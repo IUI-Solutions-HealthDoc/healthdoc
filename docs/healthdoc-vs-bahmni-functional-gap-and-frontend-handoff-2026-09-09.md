@@ -276,6 +276,21 @@ survives reload and audit attribution. A screen-only eMAR test is insufficient.
 
 ### F04 — External referral results have no frontend intake/read-back [P1; confirmed gap]
 
+**10 September implementation update — partial, not closed:**
+`feat/external-referral-results` now implements encounter-scoped summary intake,
+outside-result history, patient/order isolation, validation and exact-key
+retries. It also exposes order fulfilment mode and fixes cross-facility result
+replay. See [the implementation and acceptance report](external-referral-results-2026-09-10.md).
+The follow-up adds a paginated cross-encounter inbox on Results review (including
+completed visits), attachment upload/authorized temporary download controls,
+and separate public HTTPS MinIO signing configuration. These have offline
+regression coverage, not a new live acceptance run. Public storage hostname/TLS,
+unknown-upload reconciliation, durable referred-test descriptions and a real
+persisted browser journey remain outstanding. The original findings and broader
+acceptance criteria below are retained as the historical and unfinished scope.
+The latest browser repeat also caught an unresolved React render-depth error;
+the first slice is not yet browser-accepted or ready to publish.
+
 **Evidence:** `backend/app/orders/router.py` provides POST/GET
 `/orders/{order_id}/external-results`. The service validates referral state and
 file/patient/facility, records provider/summary/date/file and completes the order.

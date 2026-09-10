@@ -57,7 +57,7 @@ from app.audit.actions import AuditAction
 from app.audit.service import audited_mutation
 from app.common.config import get_settings
 from app.common.enums import FileAction
-from app.files.minio_client import ensure_bucket, get_minio_client
+from app.files.minio_client import ensure_bucket, get_download_client, get_minio_client
 from app.files.models import FileAccessLog, FileRecord
 from app.patients.models import Patient
 
@@ -237,7 +237,7 @@ async def get_download_url(
         )
 
     def _presign() -> str:
-        return get_minio_client().presigned_get_object(
+        return get_download_client().presigned_get_object(
             record.bucket, record.object_key, expires=timedelta(seconds=PRESIGNED_URL_EXPIRY_SECONDS),
         )
 

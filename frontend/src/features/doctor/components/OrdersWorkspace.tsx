@@ -13,7 +13,11 @@ export interface OrdersWorkspaceProps {
 }
 
 /** Standalone /doctor/orders view — the same Orders panel used in the consultation. */
-export function OrdersWorkspace({ context }: OrdersWorkspaceProps) {
+export function OrdersWorkspace(props: OrdersWorkspaceProps) {
+  return <EncounterWorkspace key={`${props.context.patient_id}:${props.context.visit_id}`} {...props} />;
+}
+
+function EncounterWorkspace({ context }: OrdersWorkspaceProps) {
   const { encounter, loading, error } = usePersistedEncounter(context);
 
   if (loading) return <CircularProgress size={28} />;
@@ -25,13 +29,10 @@ export function OrdersWorkspace({ context }: OrdersWorkspaceProps) {
       </Alert>
     );
   }
-  if (encounter.ended_at) {
-    return <Alert severity="info">This consultation is completed; new orders are locked.</Alert>;
-  }
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
-      <OrdersPanel encounter={encounter} />
+      <OrdersPanel encounter={encounter} patientLabel={`${context.patient_name} · ${context.uhid || context.patient_id}`} />
     </Box>
   );
 }

@@ -1,7 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
+import Tab from "@mui/material/Tab";
+import Tabs from "@mui/material/Tabs";
 import Typography from "@mui/material/Typography";
 
 import { meridian } from "@/styles/theme";
@@ -9,13 +12,27 @@ import { doctorPageHeaderSx } from "../panelSx";
 import { useResults } from "../hooks/useResults";
 import { ResultDetailPanel } from "./ResultDetailPanel";
 import { ResultsWorklistPanel } from "./ResultsWorklistPanel";
+import { ExternalReferralInbox } from "./ExternalReferralInbox";
+
+export function ResultsWorkspace() {
+  const [source, setSource] = useState("local");
+  return <Box>
+    <Tabs value={source} onChange={(_event, value: string) => setSource(value)} aria-label="Results source" sx={{ mb: 2 }}>
+      <Tab id="local-results-tab" aria-controls="local-results-panel" value="local" label="Local results" />
+      <Tab id="external-results-tab" aria-controls="external-results-panel" value="external" label="External referrals" />
+    </Tabs>
+    <Box role="tabpanel" id={`${source}-results-panel`} aria-labelledby={`${source}-results-tab`}>
+      {source === "local" ? <LocalResultsWorkspace /> : <ExternalReferralInbox />}
+    </Box>
+  </Box>;
+}
 
 /**
  * Week 5 — result viewers + doctor sign-off. Stacked single-purpose panels,
  * same treatment as the consultation screen: worklist on top, the opened
  * result below it.
  */
-export function ResultsWorkspace() {
+function LocalResultsWorkspace() {
   const {
     items,
     counts,

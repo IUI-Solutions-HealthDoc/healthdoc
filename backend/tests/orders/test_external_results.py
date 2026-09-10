@@ -259,6 +259,53 @@ async def test_external_result_endpoint_is_idempotent(db, seed, encounter, patie
     assert len(history) == 1
 
 
+async def test_external_result_replay_rechecks_current_facility(db, seed, encounter, patient):
+    from types import SimpleNamespace
+
+    _dept, _room, doctor = seed
+    order = await _external_order(db, encounter, patient, doctor)
+    headers = {"Idempotency-Key": "moved-external-result"}
+    async with _http_client(db, doctor=doctor, roles=["doctor"]) as client:
+        original = await client.post(f"/orders/{order.id}/external-results", headers=headers,
+                                     json={"summary": "Private outside report"})
+        assert original.status_code == 201
+    moved = SimpleNamespace(id=doctor.id, keycloak_sub=doctor.keycloak_sub,
+                            username=doctor.username, facility_id=uuid.uuid4())
+    async with _http_client(db, doctor=moved, roles=["doctor"]) as client:
+        replay = await client.post(f"/orders/{order.id}/external-results", headers=headers,
+                                   json={"summary": "Private outside report"})
+    assert replay.status_code == 404
+    assert "Private outside report" not in replay.text
+
+
+@pytest.mark.parametrize("key,status", [(None, 400), (" ", 400), ("x" * 256, 422)])
+async def test_external_result_requires_bounded_nonblank_action_key(db, seed, encounter, patient, key, status):
+    _dept, _room, doctor = seed
+    order = await _external_order(db, encounter, patient, doctor)
+    async with _http_client(db, doctor=doctor, roles=["doctor"]) as client:
+        response = await client.post(f"/orders/{order.id}/external-results",
+                                     headers={"Idempotency-Key": key} if key else {},
+                                     json={"summary": "No unkeyed write"})
+    assert response.status_code == status
+    assert await service.list_external_results(db, order_id=order.id, facility_id=doctor.facility_id) == []
+
+
+async def test_order_reads_expose_external_fulfilment_and_completion(db, seed, encounter, patient):
+    _dept, _room, doctor = seed
+    order = await _external_order(db, encounter, patient, doctor)
+    async with _http_client(db, doctor=doctor, roles=["doctor"]) as client:
+        read = await client.get(f"/orders/{order.id}")
+        assert read.json()["fulfilment_mode"] == "external_referral"
+        assert read.json()["completed_at"] is None
+        created = await client.post(f"/orders/{order.id}/external-results",
+                                    headers={"Idempotency-Key": "readback"}, json={"summary": "Outside report"})
+        assert created.status_code == 201
+        listed = await client.get("/orders", params={"encounter_id": str(encounter.id)})
+        row = next(item for item in listed.json()["items"] if item["id"] == str(order.id))
+        assert row["fulfilment_mode"] == "external_referral"
+        assert row["status"] == "completed" and row["completed_at"] is not None
+
+
 async def test_external_result_endpoint_hides_missing_or_cross_facility_file(
     db, seed, encounter, patient
 ):
@@ -309,3 +356,38 @@ async def test_external_result_endpoint_hides_missing_or_cross_facility_file(
     for response in (missing_response, cross_facility_response):
         assert response.status_code == 404
         assert response.json() == {"detail": "result_file_not_found"}
+
+
+@pytest.mark.parametrize("erased", [False, True])
+async def test_external_result_attachment_receipt_and_erasure_guard(db, seed, encounter, patient, erased):
+    from datetime import UTC, datetime
+
+    doctor = seed[2]
+    order = await _external_order(db, encounter, patient, doctor)
+    attachment = FileRecord(
+        id=uuid.uuid4(), bucket="hd-files", object_key=f"test/{uuid.uuid4()}.pdf",
+        original_name="outside.pdf", content_type="application/pdf", size_bytes=100,
+        sha256="c" * 64, owner_module="orders", facility_id=doctor.facility_id,
+        patient_id=patient.id, uploaded_by=doctor.id, sensitivity="sensitive", scan_status="skipped",
+    )
+    if erased:
+        attachment.erased_at = datetime.now(UTC)
+        attachment.erasure_reason = "Synthetic erasure test"
+        attachment.erased_by = doctor.id
+    db.add(attachment)
+    await db.flush()
+    async with _http_client(db, doctor=doctor, roles=["doctor"]) as client:
+        payload = {"summary": "Outside report", "result_file_id": str(attachment.id)}
+        headers = {"Idempotency-Key": "outside-file-receipt"}
+        response = await client.post(f"/orders/{order.id}/external-results", json=payload, headers=headers)
+        if erased:
+            assert response.status_code == 422
+            assert response.json()["detail"]["code"] == "result_file_erased"
+            assert order.completed_at is None
+        else:
+            assert response.status_code == 201, response.text
+            assert response.json()["result_file_id"] == str(attachment.id)
+            retry = await client.post(f"/orders/{order.id}/external-results", json=payload, headers=headers)
+            assert retry.status_code == 201 and retry.json()["id"] == response.json()["id"]
+            history = (await client.get(f"/orders/{order.id}/external-results")).json()["items"]
+            assert len(history) == 1 and history[0]["result_file_id"] == str(attachment.id)
