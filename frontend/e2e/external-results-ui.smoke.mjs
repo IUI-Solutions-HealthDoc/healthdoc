@@ -82,10 +82,35 @@ try {
   await click(page, "Record outside result"); await waitText("Enter the outside result summary."); assert.equal(posts.length, 0);
   await evidence("Empty summary and absent patient confirmation block the browser write");
   await field(page, "Outside provider (optional)", "Synthetic Outside Provider");
-  await page.locator("textarea").fill("Synthetic external result summary — not a clinical report.");
+  const initialSummary = "Synthetic external result summary — not a clinical report.";
+  const continuation = "\n" + "Synthetic continuation for keyboard regression. ".repeat(20).trimEnd();
+  const summary = initialSummary + continuation;
+  const summarySelector = 'textarea:not([aria-hidden="true"])';
+  await page.$eval(summarySelector, (input) => {
+    const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set;
+    // A burst of input events makes pending lower-priority form updates visible
+    // without depending on machine speed or adding sleeps to the test.
+    for (let length = 1; length <= 128; length++) {
+      setValue.call(input, "x".repeat(length));
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    setValue.call(input, "");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  assert.deepEqual(errors, [], "A burst of input events must not produce a runtime error");
+  // Locator.fill switches long strings to a single synthetic input event.
+  // Exercise actual, zero-delay keystrokes: repeated controlled MUI updates
+  // previously raised Maximum update depth exceeded during summary entry.
+  // Retain the original short locator interaction as well as the long typing.
+  await page.locator(summarySelector).fill(initialSummary);
+  await page.type(summarySelector, continuation);
+  assert.deepEqual(errors, [], "Typing must not produce a runtime error");
+  assert.equal(await page.$eval(summarySelector, (node) => node.value), summary, "Every typed character must survive rendering");
+  await evidence("Long multiline keyboard entry preserves every character without a runtime error");
   await page.click('input[type="checkbox"]');
   await click(page, "Record outside result"); await waitText("The original entry is locked for a safe retry.");
   assert.equal(posts.length, 1); assert.equal(await page.$eval("textarea", (node) => node.disabled), true);
+  assert.equal(posts[0].body.summary, summary, "The submitted summary must match the displayed draft");
   await evidence("Ambiguous submission locks the original result for an exact retry");
   await click(page, "Retry same result"); await waitText("Result recorded for"); await waitText("Synthetic external result summary");
   assert.equal(posts.length, 2); assert.deepEqual(posts[0], posts[1]); assert.equal(rows.length, 1);
@@ -94,6 +119,15 @@ try {
   assert.ok((await page.$eval("#main-content", (node) => node.textContent)).includes("Result recorded for"));
   await evidence("Failed history refresh retains the confirmed write receipt");
   failRead = false; await click(page, "Refresh result history"); await waitText("Synthetic external result summary");
+  await click(page, "Record another result / correction");
+  await page.waitForSelector(summarySelector);
+  assert.equal(await page.$eval(summarySelector, (node) => node.value), "");
+  for (const fieldId of [`${orderId}-provider`, `${orderId}-observed`]) {
+    assert.equal(await page.$eval(`[id="${fieldId}"]`, (node) => node.value), "");
+  }
+  assert.equal(await page.$eval('input[type="checkbox"]', (node) => node.checked), false);
+  assert.equal(posts.length, 2);
+  await evidence("A deliberate correction mounts an empty draft without resubmitting the saved entry");
   await open(page, "/doctor/orders"); await click(page, "Outside results"); await waitText("Synthetic external result summary");
   assert.equal(posts.length, 2); await evidence("Reload reads existing history without submitting another result");
   order.status = "cancelled";
