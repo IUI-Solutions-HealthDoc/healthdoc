@@ -66,6 +66,11 @@ or real ABDM transaction is claimed for this frontend change.
 
 ## Deployment and remaining limits
 
+The subsequent [tariff write-safety follow-up](tariff-write-safety-2026-09-09.md)
+implements server replay and transaction-level serialization with 31 PostgreSQL
+regressions and ten browser checks. It remains a separate local branch, not part
+of this UI PR. Item 3 below describes the UI PR's baseline, not that follow-up.
+
 1. The application remains on migration **0067**. Apply/rehearse **0068** through
    the reviewed deployment process before relying on next-day revisions that
    close the old version on its start date. Browser acceptance here uses a

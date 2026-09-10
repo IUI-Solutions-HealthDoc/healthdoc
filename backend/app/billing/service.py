@@ -1674,31 +1674,40 @@ async def create_tariff(
     open rows would make charge_for()'s answer depend on ordering, and the
     older price would still be reachable.
 
-    Rejects an effective_from that is not after the current row's start:
-    back-dating a price change would alter what past invoices resolve to.
+    Rejects an effective_from that is not after the latest historical version,
+    including retired rows. A retired date is not a reusable version slot.
     """
+    from app.billing.tariff_safety import lock_tariff_family
+
+    await lock_tariff_family(db, facility_id, charge_code, scheme_code)
     current = await db.execute(
-        sa.select(charge_master_t.c.id, charge_master_t.c.effective_from)
+        sa.select(charge_master_t.c.id, charge_master_t.c.effective_from,
+                  charge_master_t.c.effective_to, charge_master_t.c.is_active)
         .where(
             charge_master_t.c.facility_id == facility_id,
             charge_master_t.c.charge_code == charge_code,
             charge_master_t.c.scheme_code.is_(scheme_code)
             if scheme_code is None else charge_master_t.c.scheme_code == scheme_code,
-            charge_master_t.c.is_active.is_(True),
-            charge_master_t.c.effective_to.is_(None),
         )
         .order_by(charge_master_t.c.effective_from.desc())
-        .limit(1)
     )
-    open_row = current.first()
+    versions = current.all()
+    # A retired row still owns its historical version date. Reusing it is a
+    # duplicate for a general scheme too, even though SQL NULL is not equal.
+    if versions and effective_from <= versions[0].effective_from:
+        raise TariffOverlap(
+            f"effective_from {effective_from} must be after the latest tariff version's "
+            f"{versions[0].effective_from}; retired history cannot be reused or back-dated"
+        )
+    open_rows = [row for row in versions if row.is_active and row.effective_to is None]
+    if len(open_rows) > 1 or any(
+        row.is_active and row.effective_to is not None and row.effective_to >= effective_from
+        for row in versions
+    ):
+        raise TariffOverlap("Existing tariff ranges overlap this revision; review the catalogue before changing prices")
+    open_row = open_rows[0] if open_rows else None
 
     if open_row is not None:
-        if effective_from <= open_row.effective_from:
-            raise TariffOverlap(
-                f"effective_from {effective_from} is not after the current tariff's "
-                f"{open_row.effective_from}; back-dating would change what invoices "
-                f"already raised resolve to"
-            )
         await db.execute(
             sa.update(charge_master_t)
             .where(charge_master_t.c.id == open_row.id)
@@ -1740,6 +1749,21 @@ async def deactivate_tariff(
     refuses rather than raising a zero-rupee invoice. A cross-facility denial
     of service through a single admin endpoint.
     """
+    from app.billing.tariff_safety import lock_tariff_family
+
+    row = (
+        await db.execute(
+            sa.select(charge_master_t.c.charge_code, charge_master_t.c.scheme_code).where(
+                charge_master_t.c.id == tariff_id,
+                charge_master_t.c.facility_id == facility_id,
+            )
+        )
+    ).first()
+    if row is None:
+        return False
+    # Identity is immutable. Recheck is_active in the UPDATE after obtaining
+    # the same family lock used by creation and supersession.
+    await lock_tariff_family(db, facility_id, row.charge_code, row.scheme_code)
     result = await db.execute(
         sa.update(charge_master_t)
         .where(
