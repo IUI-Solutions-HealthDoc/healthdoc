@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
@@ -33,6 +34,10 @@ class OrderOut(BaseModel):
     order_type: str
     priority: str
     status: str
+    # None means an old idempotency snapshot predating this field. Clients
+    # must re-read the order, never guess that a missing mode is internal.
+    fulfilment_mode: Literal["internal", "external_referral"] | None = None
+    completed_at: datetime | None = None
     ordered_at: datetime
     created_at: datetime
     updated_at: datetime
@@ -41,6 +46,21 @@ class OrderOut(BaseModel):
 
 class OrderListOut(BaseModel):
     items: list[OrderOut]
+
+
+class ExternalReferralOut(OrderOut):
+    patient_name: str
+    patient_identifier: str | None
+    visit_number: str
+    result_count: int
+    last_received_at: datetime | None
+
+
+class ExternalReferralListOut(BaseModel):
+    items: list[ExternalReferralOut]
+    total: int
+    limit: int
+    offset: int
 
 
 class ExternalResultCreate(BaseModel):

@@ -73,7 +73,7 @@ export function ConsultationWorkspace({ context }: ConsultationWorkspaceProps) {
         <>
           <VitalsPanel encounter={encounter} />
           <DiagnosesPanel encounter={encounter} />
-          <OrdersPanel encounter={encounter} />
+          <OrdersPanel encounter={encounter} patientLabel={`${context.patient_name} · ${context.uhid || context.patient_id}`} />
           <PrescriptionWorkspace context={context} encounter={encounter} />
         </>
       ) : !ended ? (

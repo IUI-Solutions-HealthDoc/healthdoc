@@ -355,6 +355,8 @@ export interface PlacedOrder {
   order_type: OrderType;
   priority: OrderPriority;
   status: OrderStatus;
+  fulfilment_mode: "internal" | "external_referral" | null;
+  completed_at: string | null;
   ordered_at: string;
   /** LAB-… / RAD-… from the department detail row. */
   accession_number?: string;

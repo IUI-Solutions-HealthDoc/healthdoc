@@ -281,6 +281,16 @@ jobs:
           E2E_EVIDENCE_DIR: ${{ runner.temp }}/healthdoc-e2e/invoice-switch
         run: npm run test:invoice-switch
 
+      # Real Keycloak/rendered MUI, simulated clinical transport. A burst of
+      # input events must not trip React's render-depth guard; exact retries
+      # and correction/patient draft boundaries remain part of the same gate.
+      - name: External result input and retry safety
+        working-directory: frontend
+        env:
+          E2E_RUN_ID: external-results-${{ github.run_id }}-${{ github.run_attempt }}
+          E2E_EVIDENCE_DIR: ${{ runner.temp }}/healthdoc-e2e/external-results
+        run: npm run test:external-results-ui
+
       # Each run creates its own synthetic tariff code; no hospital fee
       # schedule is revised. Includes real 204 retirement and role refusals.
       - name: Tariff maintenance workflow

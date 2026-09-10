@@ -14,7 +14,9 @@ from app.auth.deps import CurrentDbUser, require_roles
 from app.common.db import get_db
 from app.common.idempotency import check_idempotency, hash_request_body, record_idempotent_response
 from app.orders import results_worklist, service
+from app.orders.external_referrals import ReferralState, list_external_referrals
 from app.orders.schemas import (
+    ExternalReferralListOut,
     ExternalResultCreate,
     ExternalResultListOut,
     ExternalResultOut,
@@ -141,6 +143,22 @@ async def get_results_worklist(
     )
 
 
+@router.get("/external-referrals", response_model=ExternalReferralListOut,
+            dependencies=[Depends(require_roles("doctor", "admin"))])
+async def get_external_referrals(
+    current_db_user: CurrentDbUser,
+    db: DbSession,
+    state: Annotated[ReferralState, Query()] = "pending",
+    limit: Annotated[int, Query(ge=1, le=100)] = 25,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> ExternalReferralListOut:
+    """Pending/completed referrals across visits, including closed encounters."""
+    return await list_external_referrals(
+        db, caller_id=current_db_user.id, facility_id=current_db_user.facility_id,
+        caller_roles=current_db_user.roles, state=state, limit=limit, offset=offset,
+    )
+
+
 @router.post(
     "/{order_id}/external-results",
     response_model=ExternalResultOut,
@@ -153,10 +171,15 @@ async def create_external_result(
     current_db_user: CurrentDbUser,
     db: DbSession,
     idempotency_key: Annotated[
-        str | None, Header(alias="Idempotency-Key")
+        str | None, Header(alias="Idempotency-Key", max_length=255)
     ] = None,
 ) -> ExternalResultOut:
-    if not idempotency_key:
+    # An idempotency response is still patient data. Recheck ownership before
+    # replay so an account moved between facilities cannot read its old work.
+    order = await service.get_order(db, order_id)
+    if order is None or order.facility_id != current_db_user.facility_id:
+        raise HTTPException(http_status.HTTP_404_NOT_FOUND, detail="order_not_found")
+    if not idempotency_key or not idempotency_key.strip():
         raise HTTPException(
             status_code=http_status.HTTP_400_BAD_REQUEST,
             detail="Idempotency-Key header is required",

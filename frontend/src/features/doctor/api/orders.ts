@@ -15,6 +15,8 @@ interface OrderResponse {
   order_number: string;
   ordered_at: string;
   status: OrderStatus;
+  fulfilment_mode: "internal" | "external_referral" | null;
+  completed_at: string | null;
   order_type: DraftOrder["order_type"];
   priority: DraftOrder["priority"];
 }
@@ -54,6 +56,8 @@ export async function listOrders(encounterId: string): Promise<PlacedOrder[]> {
       order_type: order.order_type,
       priority: order.priority,
       status: order.status,
+      fulfilment_mode: order.fulfilment_mode ?? null,
+      completed_at: order.completed_at ?? null,
       ordered_at: order.ordered_at,
       item_label:
         procedure?.procedure_name ??
@@ -127,7 +131,7 @@ export async function placeOrder(
     throw new Error(`Ordering ${draft.order_type} is not supported in this workflow.`);
   }
 
-  const header = await createOrder(
+  let header = await createOrder(
     {
       encounter_id: context.encounter_id,
       patient_id: context.patient_id,
@@ -142,6 +146,25 @@ export async function placeOrder(
       : draft.order_type === "radiology"
         ? draft.scan_type?.trim() || "Radiology study"
         : draft.procedure_name?.trim() || "Procedure";
+
+  // Legacy replay snapshots predate fulfilment_mode. Read the actual order
+  // before calling a department; absence must never mean "internal".
+  if (!header.fulfilment_mode) {
+    header = await api<OrderResponse>(`/orders/${encodeURIComponent(header.id)}`);
+  }
+  const base = {
+    id: header.id, order_number: header.order_number, order_type: header.order_type,
+    priority: header.priority, status: header.status, ordered_at: header.ordered_at,
+    fulfilment_mode: header.fulfilment_mode ?? null, completed_at: header.completed_at ?? null,
+    item_label: label,
+  };
+  if (header.fulfilment_mode === "external_referral") {
+    // No local accession or department item is promised for outside care.
+    return { ...base, detail_status: "header_only" };
+  }
+  if (header.fulfilment_mode !== "internal") {
+    return { ...base, detail_status: "failed", detail_error: "Fulfilment could not be confirmed. Refresh orders; do not reorder." };
+  }
 
   try {
     const detail = draft.order_type === "lab"
@@ -172,24 +195,14 @@ export async function placeOrder(
           );
 
     return {
-      id: header.id,
-      order_number: header.order_number,
-      order_type: draft.order_type,
-      priority: draft.priority,
-      status: header.status,
-      ordered_at: header.ordered_at,
+      ...base,
       accession_number: "accession_number" in detail ? detail.accession_number : undefined,
       item_label: label,
       detail_status: "complete",
     };
   } catch (error) {
     return {
-      id: header.id,
-      order_number: header.order_number,
-      order_type: draft.order_type,
-      priority: draft.priority,
-      status: header.status,
-      ordered_at: header.ordered_at,
+      ...base,
       item_label: label,
       detail_status: "failed",
       detail_error: error instanceof Error ? error.message : "Department item creation failed",
