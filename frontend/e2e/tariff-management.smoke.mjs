@@ -17,6 +17,7 @@ await save();
 const browser = await puppeteer.launch({ headless: true, acceptInsecureCerts: true,
   defaultViewport: { width: 1600, height: 1000 }, executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined, args: ["--no-sandbox"] });
 let page, desk, posts = 0;
+const writeRequests = [];
 async function capture(name) {
   const screenshot = `tariffs__${report.checks.length + 1}.png`;
   await page.screenshot({ path: path.join(evidenceDir, screenshot), fullPage: true });
@@ -56,7 +57,12 @@ try {
   page.on("request", (r) => {
     if (new URL(r.url()).pathname.startsWith("/api/v1/billing/charge-master")) {
       assert.match(r.headers().authorization ?? "", /^Bearer /);
-      if (r.method() === "POST") posts++;
+      if (r.method() === "POST") {
+        posts++;
+        writeRequests.push({ path: new URL(r.url()).pathname.replace("/api/v1", ""),
+          body: r.postData() ? JSON.parse(r.postData()) : undefined,
+          key: r.headers()["idempotency-key"] });
+      }
     }
   });
   await open(page, "/billing/tariffs"); await page.waitForSelector('table[aria-label="Tariff versions"]');
@@ -69,6 +75,12 @@ try {
   let rows = await tariffs(); assert.equal(rows.length, 1); assert.equal(rows[0].unit_price, "71.23");
   const originalId = rows[0].id;
   await capture("Billing creates an exact-decimal general tariff through the real API");
+
+  const creation = writeRequests[0]; assert.ok(creation.key);
+  const replayed = await desk.api("POST", creation.path, creation.body, 201, { "Idempotency-Key": creation.key });
+  assert.equal(replayed.id, originalId); assert.equal((await tariffs()).length, 1);
+  await desk.api("POST", creation.path, { ...creation.body, unit_price: "99.00" }, 409, { "Idempotency-Key": creation.key });
+  await capture("Exact browser request replay returns its original tariff; changed-body key reuse is refused");
 
   await rowAction("2030-01-10", "Revise");
   await field(page, "Unit price (₹)", "81.45"); await field(page, "Effective from", "2030-01-12");
@@ -96,10 +108,13 @@ try {
   await page.waitForFunction(() => !document.querySelector('[role="dialog"]'));
   await page.waitForSelector('table[aria-label="Tariff versions"]');
   assert.equal((await tariffs()).find((r) => r.id === replacement.id).is_active, false);
+  const retirement = writeRequests.find((r) => r.path.endsWith(`/${replacement.id}/deactivate`));
+  assert.ok(retirement.key);
+  await desk.api("POST", retirement.path, undefined, 204, { "Idempotency-Key": retirement.key });
   const historyRead = page.waitForResponse((r) => r.request().method() === "GET" && r.url().includes("charge-master?active_only=false"));
   await page.evaluate(() => [...document.querySelectorAll("label")].find((l) => l.textContent.includes("Include retired tariffs")).click());
   await historyRead; await page.waitForFunction(() => document.querySelector("tbody")?.textContent.includes("Retired"));
-  await capture("Retirement accepts real bodyless 204 and retired history loads from the server");
+  await capture("Retirement and exact retry both return bodyless 204; history remains retained");
 
   let failRead = true;
   await page.setRequestInterception(true);

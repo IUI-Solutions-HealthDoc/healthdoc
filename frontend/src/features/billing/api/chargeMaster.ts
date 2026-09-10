@@ -54,8 +54,9 @@ export async function getChargeMaster(tariffId: string): Promise<ChargeMaster | 
   return rows.find((row) => row.id === tariffId) ?? null;
 }
 
-// The current tariff routes do not implement server-side idempotency replay.
-// Carry the action key for tracing, but never automatically retry these writes.
+// Keep the action key stable: the server replays the committed result for the
+// same actor/key/body. The UI still requires read-back after an ambiguous error
+// instead of automatically retrying a price change.
 export function createTariff(body: TariffCreateInput, actionKey: string): Promise<ChargeMaster> {
   return api<ChargeMaster>("/billing/charge-master", {
     method: "POST", body: JSON.stringify(body), idempotencyKey: actionKey,
