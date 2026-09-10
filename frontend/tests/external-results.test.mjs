@@ -71,7 +71,7 @@ function harness() {
   const calls = []; let keys = 0, saved = 0;
   const request = (name) => (...args) => new Promise((resolve, reject) => calls.push({ name, args, resolve, reject }));
   const ui = componentHarness((deps) => {
-    for (const name of ["Alert", "Box", "Stack", "TextField", "Typography"]) deps[`@mui/material/${name}`] = { default: name };
+    for (const name of ["Alert", "Box", "Stack", "OutlinedInput", "InputLabel", "FormHelperText", "Typography"]) deps[`@mui/material/${name}`] = { default: name };
     deps["@/components/ui/Button"] = { Button: "button" };
     deps["@/lib/api"] = { ApiError: class extends Error {}, formatDateTime: (v) => v,
       getUserFacingError: (_e, fallback) => fallback, newIdempotencyKey: () => `key-${++keys}` };
@@ -94,12 +94,29 @@ function fill(ui, props, summary = "Outside summary") {
 }
 function submit(ui, props) { nodes(ui.render(props)).find((node) => node.props?.component === "form").props.onSubmit({ preventDefault() {} }); }
 
+test("referral draft fields keep explicit labels, required state and linked validation feedback", async () => {
+  const ui = harness(), props = ui.props("A");
+  ui.render(props); ui.effects(); ui.calls[0].resolve([]); await flush();
+  submit(ui, props);
+  const tree = nodes(ui.render(props));
+  const inputs = tree.filter((node) => node.type === "OutlinedInput");
+  assert.equal(inputs.length, 3);
+  for (const input of inputs) {
+    assert.ok(tree.some((node) => node.type === "InputLabel" && node.props.htmlFor === input.props.id && content(node) === input.props.label));
+    assert.equal(input.props.value, "");
+  }
+  const summary = inputs.find((node) => node.props.label === "Outside result summary");
+  assert.equal(summary.props.required, true);
+  assert.equal(summary.props.error, true);
+  assert.ok(tree.some((node) => node.props.id === summary.props["aria-describedby"] && /Enter the outside result summary/.test(content(node))));
+});
+
 test("form errors stop writes, failed history is not an empty list, and unknown/cancelled orders cannot be submitted", async () => {
   const ui = harness(), props = ui.props("A");
   ui.render(props); ui.effects(); ui.calls[0].resolve([]); await flush();
   submit(ui, props);
   assert.equal(ui.calls.filter((c) => c.name === "save").length, 0);
-  assert.ok(nodes(ui.render(props)).some((node) => node.props?.helperText === "Enter the outside result summary."));
+  assert.match(content(ui.render(props)), /Enter the outside result summary\./);
   assert.match(content(ui.render(props)), /Confirm the patient/);
   button(ui.render(props), "Refresh result history").props.onClick();
   ui.calls[1].reject(new Error("failed")); await flush();

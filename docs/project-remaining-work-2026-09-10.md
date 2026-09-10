@@ -7,15 +7,17 @@ production release or ABDM-certified product**. A percentage would be misleading
 the comparison backlog mixes defects, missing workflows, external certification,
 deployment tests and optional Bahmni-scale products.
 
-GitHub checked today: staging `48dd47d` contains tariff safety (#547); main
-`56e079b` contains its staging promotion (#548). There were zero open GitHub
+GitHub checked today: staging `ea909f9` contains referrals (#549) and tariff safety (#547); main
+`56e079b` contains the tariff staging promotion (#548), not #549's referrals.
+There were zero open GitHub
 issues or PRs before this session. That empty issue list does not close the
 untracked work below. Referral code is now committed (`45fa36d`), integrated
 with staging (`ae824a9`) and published in
 [PR #549 → staging](https://github.com/IUI-Solutions-HealthDoc/healthdoc/pull/549).
-It was created as draft, subsequently marked ready outside this session, and
-has four active CI checks passing. **Its browser acceptance is still blocked.**
-This session does not merge to staging or main or deploy production.
+It was created as draft, subsequently marked ready and merged outside this
+session with four active CI checks passing. The later result-input fix and
+this status document follow on `fix/external-result-input`; they were absent
+from #549's merge. This session does not merge to staging/main or deploy production.
 
 This is a status reconciliation against current source and the 9 September
 [full functional handoff](healthdoc-vs-bahmni-functional-gap-and-frontend-handoff-2026-09-09.md),
@@ -27,8 +29,10 @@ Fresh publication checks: **1,573 backend + 14 script tests passed**; the local
 real-Keycloak role sweep passed **50/51 screens** (admin data-protection timeout).
 The separate admin retry passed **12/12**, including that page; this establishes
 successful loads across all listed screens, not an entirely clean single sweep.
-The referral UI fault test still fails on a React render-depth error while typing
-the summary, although its seven workflow assertions pass. Visible Chrome opened
+The referral UI fault test initially failed on a React render-depth error while
+typing. The scoped fix now passes **9/9 browser checks twice**, including a
+previously failing deterministic input burst, exact retries and correction
+resets. Frontend **83 tests**, typecheck, scoped lint and the production build pass. Visible Chrome opened
 the actual doctor results list and empty referral inbox after a transient 502
 reload. Those checks do not prove all actions, uploads or ABDM round trips.
 
@@ -57,7 +61,7 @@ reload. Those checks do not prove all actions, uploads or ABDM round trips.
 
 | Priority / work | What remains | Closure evidence / dependency |
 |---|---|---|
-| **P0 — current change acceptance (F04)** | Diagnose prior React render-depth error; test inbox, uploads, receipt retry and downloads in the browser; persist specific referred test/study descriptions; reconcile unknown uploads. | Repeated clean browser runs plus synthetic PostgreSQL/MinIO journey; public storage hostname/TLS/region. Summary-only intake is not a locally verified clinical report. |
+| **P0 — current change acceptance (F04)** | Publish/review the tested input fix; test populated inbox, actual uploads and downloads; persist specific referred test/study descriptions; reconcile unknown uploads. | Input/retry fault gate now passes 9/9 twice. Still requires a synthetic PostgreSQL/MinIO journey and public storage hostname/TLS/region. Summary-only intake is not a locally verified clinical report. |
 | **P0 — M1 identity continuation (A01–A04)** | Separate credential purpose/expiry and secure continuation state; mobile OTP continuation; ABHA address selection/creation; persistent Scan-and-Share reception tickets. Profile/card only if assigned. | Required creation/existing-ABHA cases, wrong/expired OTP, retries, patient switch, correct local binding and the same ticket at reception/PHR. Actual participant/OTP required for external proof. |
 | **P0 — remaining M2/M3 reliability (A05/A06/A09/A10)** | Durable discovery/link/profile replies and missing-callback timeout recovery; clinical sign-off/version/author rules; remove active legacy plaintext clinical outbox producers safely; historical cleanup and revocation/receiver races. | Process-crash/timeout/retry tests, actual workflow-generated FHIR validation, correct source authors, no new unprotected clinical payloads, restore cannot revive revoked access. Clinical/retention decisions required. |
 | **P0 — live ABDM acceptance (A08/A11/A12)** | Approved callback ingress and registry mapping; OTP relay; controlled worker activation; approved history manifests; independent HIP/HIU/PHR M1–M3 runs and redacted case evidence. | Assigned NHA checklist, consenting sandbox participant, counterpart, verified identities and clinical approval. No certification claim from local mocks or CI alone. |
@@ -87,8 +91,9 @@ the assigned checklist and real clinical source workflows, not guessed records.
 
 ## Practical sequence
 
-1. Finish #549 acceptance and reviewed staging integration. Keep runtime or
-   storage configuration failures visible, not waived to get a green label.
+1. Review the post-#549 input fix, then finish persisted referral/attachment
+   acceptance. Keep storage/configuration failures visible, not waived to get
+   a green label.
 2. Implement A01–A04 as one coherent M1 lifecycle. In parallel organizational
    work, obtain the checklist, participant, SMS relay and ingress/registry approval.
 3. Close remaining callback recovery and plaintext outbox paths; agree clinical

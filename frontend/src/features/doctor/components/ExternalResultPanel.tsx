@@ -4,7 +4,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
-import TextField from "@mui/material/TextField";
+import FormHelperText from "@mui/material/FormHelperText";
+import InputLabel from "@mui/material/InputLabel";
+import OutlinedInput from "@mui/material/OutlinedInput";
 import Typography from "@mui/material/Typography";
 import { Button } from "@/components/ui/Button";
 import { ApiError, formatDateTime, getUserFacingError, newIdempotencyKey } from "@/lib/api";
@@ -18,6 +20,25 @@ interface Props {
   patientId: string;
   patientLabel?: string;
   onSaved: () => void;
+}
+
+/** Explicit label/helper wiring keeps the MUI outline without FormControl's
+ * redundant filled-state updates on each input event. In the installed runtime
+ * those pending updates can hit React's render-depth guard during rapid input.
+ * Values remain controlled, including patient switches and correction resets. */
+function DraftField({ id, label, value, onChange, disabled, error, helperText, multiline = false, required = false, type = "text" }: {
+  id: string; label: string; value: string; onChange: (value: string) => void;
+  disabled: boolean; error?: string; helperText?: string; multiline?: boolean; required?: boolean; type?: string;
+}) {
+  const help = error || helperText;
+  return <Box sx={{ display: "inline-flex", flexDirection: "column", position: "relative", minWidth: 0 }}>
+    <InputLabel htmlFor={id} variant="outlined" shrink required={required} disabled={disabled} error={!!error}
+      sx={{ position: "absolute", left: 0, top: 0 }}>{label}</InputLabel>
+    <OutlinedInput id={id} label={label} notched fullWidth value={value} type={type}
+      required={required} disabled={disabled} error={!!error} multiline={multiline} minRows={multiline ? 4 : undefined}
+      aria-describedby={help ? `${id}-help` : undefined} onChange={(event) => onChange(event.target.value)} />
+    {help && <FormHelperText id={`${id}-help`} variant="outlined" error={!!error} disabled={disabled}>{help}</FormHelperText>}
+  </Box>;
 }
 
 export function ExternalResultPanel(props: Props) {
@@ -116,9 +137,9 @@ function ResultSession({ order, patientId, patientLabel, onSaved }: Props) {
     </> : <Box component="form" noValidate onSubmit={(event) => { event.preventDefault(); void submit(); }}>
       <Stack spacing={2}>
         {writeError && <Alert severity="error">{writeError}{attempt && " The original entry is locked for a safe retry. Leaving this patient or reloading loses that retry key; inspect history before entering it again."}</Alert>}
-        <TextField label="Outside provider (optional)" value={form.provider_name} disabled={!!attempt} error={!!errors.provider_name} helperText={errors.provider_name} onChange={(e) => setForm({ ...form, provider_name: e.target.value })} />
-        <TextField label="Observed date (optional)" type="date" value={form.observed_on} disabled={!!attempt} slotProps={{ inputLabel: { shrink: true } }} error={!!errors.observed_on} helperText={errors.observed_on} onChange={(e) => setForm({ ...form, observed_on: e.target.value })} />
-        <TextField label="Outside result summary" required multiline minRows={4} value={form.summary} disabled={!!attempt} error={!!errors.summary} helperText={errors.summary || "Transcribe the outside report accurately. This is not local verification."} onChange={(e) => setForm({ ...form, summary: e.target.value })} />
+        <DraftField id={`${order.id}-provider`} label="Outside provider (optional)" value={form.provider_name} disabled={!!attempt} error={errors.provider_name} onChange={(value) => setForm((current) => ({ ...current, provider_name: value }))} />
+        <DraftField id={`${order.id}-observed`} label="Observed date (optional)" type="date" value={form.observed_on} disabled={!!attempt} error={errors.observed_on} onChange={(value) => setForm((current) => ({ ...current, observed_on: value }))} />
+        <DraftField id={`${order.id}-summary`} label="Outside result summary" required multiline value={form.summary} disabled={!!attempt} error={errors.summary} helperText="Transcribe the outside report accurately. This is not local verification." onChange={(value) => setForm((current) => ({ ...current, summary: value }))} />
         <ExternalResultUpload patientId={patientId} disabled={!!attempt || loading || !!readError} onChange={setAttachment} />
         <label><input type="checkbox" checked={confirmed} disabled={!!attempt} onChange={(e) => setConfirmed(e.target.checked)} /> I confirm this result belongs to the patient and order shown above.</label>
         {errors.confirmed && <Alert severity="error">{errors.confirmed}</Alert>}

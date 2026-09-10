@@ -13,9 +13,11 @@ commit/publication and a live local browser retest. Implementation `45fa36d`
 and staging integration `ae824a9` were pushed in
 [PR #549 → staging](https://github.com/IUI-Solutions-HealthDoc/healthdoc/pull/549).
 The PR was created as draft with the runtime blocker disclosed; it was later
-marked ready outside this session. All four active CI checks passed on
-`ae824a9` (Electron packaging skipped), but browser acceptance is still blocked.
-No merge command was issued. This is **partial F04**, not closure of all referrals.
+marked ready and merged outside this session as staging `ea909f9`. All four
+active CI checks passed on `ae824a9` (Electron packaging skipped), but that
+merge did **not** contain the subsequent input fix or project status document.
+Those follow up on **`fix/external-result-input`**. No merge command was issued
+by this session. This is **partial F04**, not closure of all referrals.
 
 ## Implemented
 
@@ -88,7 +90,46 @@ Builder skill guided the input, ownership, replay and failure-path checks.
 
 ## Verification and limits
 
+### Runtime fix after #549 merged — current evidence
+
+The result-entry failure is now fixed in the scoped form. A burst of 128 input
+events reproduced `Maximum update depth exceeded` before the fix, removing the
+timing dependence that let some ordinary typing runs pass. Diagnostics found
+pending MUI `FormControl` updates. Changing to uncontrolled `TextField` inputs
+also failed, this time directly in `FormControl.onFilled`; that attempted change
+was replaced, not shipped.
+
+The final form retains **controlled values** and the same MUI outline components,
+with explicit labels/helper IDs rather than `TextField`'s implicit `FormControl`.
+This removes the redundant filled-state update path without a framework upgrade,
+vendor patch, slower typing, suppressed errors or altered clinical permissions.
+Patient/order keys, validation and frozen retry payloads remain unchanged.
+
+- Strengthened rendered-browser gate: **9/9 passed twice**, no page errors.
+  Includes the formerly failing burst, original short `Locator.fill`, long
+  zero-delay multiline keystrokes, exact displayed/submitted text, ambiguous
+  response retry, receipt preservation and fresh empty correction inputs.
+- Frontend tests: **83 passed**, typecheck, scoped ESLint and a fresh production
+  build passed.
+- The browser regression is now an explicit step in the existing
+  `nurse-auth-e2e` CI job; no second infrastructure stack or skip was introduced.
+- Passing evidence: `docs/evidence/pr549-input-outlined-after-20260910/` and
+  `docs/evidence/pr549-input-outlined-repeat-20260910/`. Failing baseline:
+  `docs/evidence/pr549-input-burst-before-20260910/`. Temporary component-lane
+  diagnostic instrumentation was removed. Screenshots were visually inspected.
+- The final label-position adjustment was followed by another **9/9 pass** in
+  `docs/evidence/external-result-input-final-20260910/`; its screenshot confirms
+  the labels align with their outlines and errors remain adjacent to the field.
+
+These tests render real local MUI/Next.js and authenticate through Keycloak but
+simulate clinical responses. **Populated inbox, actual PostgreSQL/MinIO upload,
+attachment download and clinical sign-off acceptance remain separate work.**
+This is a local input fix, not evidence that every other MUI form has been
+stress-tested or that the entire referral journey is production-ready.
+
 ### Publication retest — integrated with staging
+
+Historical evidence before the scoped input fix above:
 
 - `make test-pg`: **1,573 backend tests and 14 script tests passed**; migration
   checker reports 75 linear migrations through `0068`, downgrades present.
@@ -131,7 +172,7 @@ above is the latest browser evidence.
 | Typecheck and scoped ESLint | Passed |
 | Ruff on new backend modules/config/schemas/tests | Passed |
 | Contract matrix | 214 frontend calls match OpenAPI |
-| Live browser, new production build, real MinIO/PG round trip | **Not rerun for this follow-up**; the earlier browser runtime blocker is still open |
+| Live browser, new production build, real MinIO/PG round trip | At this earlier checkpoint, not rerun; the runtime blocker was open. See the newer scoped fix above. |
 
 The inbox tests were first run before implementation and failed on the missing
 endpoint. Query-validation assertions also verify that 422 identifies the query
@@ -153,26 +194,25 @@ URL construction/signing configuration, **not** a deployed certificate/proxy.
 | Ruff on changed schemas and order tests | Passed; no whole-backend lint-clean claim |
 | Rendered browser UI acceptance | Initial run passed seven checks; **latest repeat failed overall** on a React runtime error despite seven workflow assertions passing |
 
-### Open runtime blocker — do not publish as browser-accepted
+### Earlier runtime blocker — resolved by the scoped follow-up above
 
 The final repeat emitted **“Maximum update depth exceeded”**. The harness
 correctly exited nonzero and left `completed: false`, `passed: false`. The
-seven successful workflow assertions do not overrule that failure. The cause
-is **not yet identified**; static inspection of the new hooks did not establish
-a render loop, and no speculative library or application patch was made.
+seven successful workflow assertions did not overrule that failure. At that
+point the cause was not established by static hook inspection. The subsequent
+burst-input regression and MUI-wrapper fix above supersede that diagnosis status.
 
 The harness now captures each page error's stack and last completed check in
 `browserErrors` so the next reproduction can identify the owning component.
 An earlier diagnostic run was blocked by the approval service's usage limit.
 Execution was restored during publication; the repeat reproduced the error and
 captured the stack described above. That access problem is no longer the blocker.
-No claim of a clean latest browser run is made. Changing input speed or suppressing
-page errors without establishing the cause would not constitute a fix.
+That failed evidence remains intact. Changing input speed or suppressing page
+errors would not constitute a fix; neither was used in the scoped follow-up.
 
 The first-slice production build/typecheck passed, but neither proves runtime render
-stability. Regardless of the PR's externally changed ready/draft flag, retain the
-merge blocker pending diagnosis and a clean repeated browser run. Use a **new**
-evidence directory to preserve the failed run when reproducing.
+stability. The old merge-ready flag was not acceptance evidence. Fresh repeated
+browser runs are now recorded above, and a new directory preserves each result.
 
 The two initial backend regressions failed before the fixes: a moved-facility
 retry returned 201, and the order response omitted fulfilment mode. The patient
@@ -196,8 +236,8 @@ and seven screenshots. No tokens or action keys are written to evidence.
 
 ## Remaining before F04 can close
 
-1. **Browser render-depth failure and real persisted acceptance.** Diagnose the
-   existing runtime error, then exercise the new Results tab/inbox and attachments
+1. **Real persisted acceptance.** With the result-input runtime error fixed,
+   exercise the new Results tab/inbox and attachments
    against real PostgreSQL and MinIO. The existing simulated UI harness does not
    yet cover the new inbox or upload/download controls. Use a dedicated synthetic
    referral facility, not toggling a hospital's active modules. Include wrong,
