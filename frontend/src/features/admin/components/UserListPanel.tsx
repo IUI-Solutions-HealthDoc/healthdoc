@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Box from "@mui/material/Box";
 import MenuItem from "@mui/material/MenuItem";
 import Stack from "@mui/material/Stack";
@@ -35,6 +36,18 @@ export function UserListPanel({
   const filterValue =
     activeFilter === null ? "all" : activeFilter ? "active" : "inactive";
 
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 8;
+
+  // Reset to page 1 on search or filter change
+  useEffect(() => {
+    setPage(1);
+  }, [query, activeFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(users.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const paginatedUsers = users.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
   return (
     <Box
       sx={{
@@ -43,7 +56,7 @@ export function UserListPanel({
         overflow: "hidden",
         display: "flex",
         flexDirection: "column",
-        minHeight: 420,
+        minHeight: 480,
         height: "100%",
       }}
     >
@@ -57,10 +70,10 @@ export function UserListPanel({
             letterSpacing: "-0.02em",
           }}
         >
-          Directory
+          Staff Directory
         </Typography>
         <Typography sx={{ m: 0, mt: 0.4, fontSize: "0.8125rem", color: meridian.textSecondary }}>
-          Search and manage staff accounts for this facility.
+          Search and manage staff profiles for this facility ({users.length} total).
         </Typography>
       </Box>
 
@@ -87,17 +100,17 @@ export function UserListPanel({
         </TextField>
       </Stack>
 
-      <Box sx={{ flex: 1, overflowY: "auto", borderTop: `1px solid ${meridian.border}`, maxHeight: 520 }}>
+      <Box sx={{ flex: 1, overflowY: "auto", borderTop: `1px solid ${meridian.border}`, maxHeight: 460 }}>
         {loading ? (
           <Typography sx={{ p: 2.5, fontSize: "0.875rem", color: meridian.textSecondary }}>
-            Loading…
+            Loading staff profiles…
           </Typography>
-        ) : users.length === 0 ? (
+        ) : paginatedUsers.length === 0 ? (
           <Typography sx={{ p: 2.5, fontSize: "0.875rem", color: meridian.textSecondary }}>
             No users found.
           </Typography>
         ) : (
-          users.map((u) => {
+          paginatedUsers.map((u) => {
             const selected = u.id === selectedId;
             return (
               <Box
@@ -153,6 +166,59 @@ export function UserListPanel({
           })
         )}
       </Box>
+
+      {/* Pagination Footer */}
+      {users.length > PAGE_SIZE && (
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            px: 2,
+            py: 1.5,
+            borderTop: `1px solid ${meridian.border}`,
+            bgcolor: "#fafbfc",
+          }}
+        >
+          <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary }}>
+            Page {currentPage} of {totalPages}
+          </Typography>
+          <Stack direction="row" spacing={1}>
+            <button
+              type="button"
+              disabled={currentPage <= 1}
+              onClick={() => setPage((p: number) => Math.max(1, p - 1))}
+              style={{
+                padding: "4px 10px",
+                fontSize: "0.75rem",
+                borderRadius: "6px",
+                border: `1px solid ${meridian.border}`,
+                backgroundColor: "#fff",
+                cursor: currentPage <= 1 ? "not-allowed" : "pointer",
+                opacity: currentPage <= 1 ? 0.5 : 1,
+              }}
+            >
+              Prev
+            </button>
+            <button
+              type="button"
+              disabled={currentPage >= totalPages}
+              onClick={() => setPage((p: number) => Math.min(totalPages, p + 1))}
+              style={{
+                padding: "4px 10px",
+                fontSize: "0.75rem",
+                borderRadius: "6px",
+                border: `1px solid ${meridian.border}`,
+                backgroundColor: "#fff",
+                cursor: currentPage >= totalPages ? "not-allowed" : "pointer",
+                opacity: currentPage >= totalPages ? 0.5 : 1,
+              }}
+            >
+              Next
+            </button>
+          </Stack>
+        </Box>
+      )}
     </Box>
   );
 }

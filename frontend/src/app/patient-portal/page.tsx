@@ -41,11 +41,17 @@ function UnboundPortal() {
 
 export default function Page() {
   const [view, setView] = useState<ViewState>({ status: "loading" });
+  const [historyPage, setHistoryPage] = useState(1);
+  const [consentPage, setConsentPage] = useState(1);
+  const HISTORY_PAGE_SIZE = 6;
+  const CONSENT_PAGE_SIZE = 5;
 
   const load = useCallback(async () => {
     setView({ status: "loading" });
     try {
       setView({ status: "ready", data: await getPortalDashboard() });
+      setHistoryPage(1);
+      setConsentPage(1);
     } catch (error) {
       if (
         error instanceof ApiError &&
@@ -65,6 +71,14 @@ export default function Page() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const consents = view.status === "ready" ? view.data.consents : [];
+  const totalConsentPages = Math.max(1, Math.ceil(consents.length / CONSENT_PAGE_SIZE));
+  const paginatedConsents = consents.slice((consentPage - 1) * CONSENT_PAGE_SIZE, consentPage * CONSENT_PAGE_SIZE);
+
+  const historyItems = view.status === "ready" ? view.data.accessHistory.items : [];
+  const totalHistoryPages = Math.max(1, Math.ceil(historyItems.length / HISTORY_PAGE_SIZE));
+  const paginatedHistory = historyItems.slice((historyPage - 1) * HISTORY_PAGE_SIZE, historyPage * HISTORY_PAGE_SIZE);
 
   return (
     <main className="mx-auto max-w-6xl space-y-6 p-6">
@@ -118,19 +132,45 @@ export default function Page() {
           <section className="surface-card overflow-hidden">
             <div className="border-b border-border p-5">
               <h2 className="text-lg font-semibold">My consents</h2>
-              <p className="mt-1 text-sm text-muted-foreground">Current and historical consent decisions recorded for you.</p>
+              <p className="mt-1 text-sm text-muted-foreground">Current and historical consent decisions recorded for you ({consents.length} total).</p>
             </div>
-            {view.data.consents.length === 0 ? (
+            {consents.length === 0 ? (
               <p className="p-5 text-sm text-muted-foreground">No consent records have been recorded.</p>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-muted/50 text-muted-foreground"><tr><th className="p-3">Purpose</th><th className="p-3">Status</th><th className="p-3">Granted</th><th className="p-3">Expires</th></tr></thead>
-                  <tbody>{view.data.consents.map((consent) => (
-                    <tr key={consent.id} className="border-t border-border"><td className="p-3"><span className="font-medium">{humanise(consent.purpose_code)}</span>{consent.purpose_description ? <span className="block text-xs text-muted-foreground">{consent.purpose_description}</span> : null}</td><td className="p-3 capitalize">{humanise(consent.status)}</td><td className="p-3">{formatDateTime(consent.granted_at)}</td><td className="p-3">{consent.expires_at ? formatDateTime(consent.expires_at) : "No expiry"}</td></tr>
-                  ))}</tbody>
-                </table>
-              </div>
+              <>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-muted/50 text-muted-foreground"><tr><th className="p-3">Purpose</th><th className="p-3">Status</th><th className="p-3">Granted</th><th className="p-3">Expires</th></tr></thead>
+                    <tbody>{paginatedConsents.map((consent) => (
+                      <tr key={consent.id} className="border-t border-border"><td className="p-3"><span className="font-medium">{humanise(consent.purpose_code)}</span>{consent.purpose_description ? <span className="block text-xs text-muted-foreground">{consent.purpose_description}</span> : null}</td><td className="p-3 capitalize">{humanise(consent.status)}</td><td className="p-3">{formatDateTime(consent.granted_at)}</td><td className="p-3">{consent.expires_at ? formatDateTime(consent.expires_at) : "No expiry"}</td></tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+
+                {consents.length > CONSENT_PAGE_SIZE && (
+                  <div className="flex items-center justify-between border-t border-border px-4 py-2.5 bg-muted/20 text-xs">
+                    <span className="text-muted-foreground">Page {consentPage} of {totalConsentPages}</span>
+                    <div className="flex gap-1.5">
+                      <button
+                        type="button"
+                        disabled={consentPage <= 1}
+                        onClick={() => setConsentPage((p) => Math.max(1, p - 1))}
+                        className="rounded border border-border bg-card px-2.5 py-1 disabled:opacity-50"
+                      >
+                        Prev
+                      </button>
+                      <button
+                        type="button"
+                        disabled={consentPage >= totalConsentPages}
+                        onClick={() => setConsentPage((p) => Math.min(totalConsentPages, p + 1))}
+                        className="rounded border border-border bg-card px-2.5 py-1 disabled:opacity-50"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </section>
 
@@ -142,11 +182,35 @@ export default function Page() {
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
                 <thead className="bg-muted/50 text-muted-foreground"><tr><th className="p-3">When</th><th className="p-3">Accessed by</th><th className="p-3">Data</th><th className="p-3">Purpose</th></tr></thead>
-                <tbody>{view.data.accessHistory.items.map((entry, index) => (
+                <tbody>{paginatedHistory.map((entry, index) => (
                   <tr key={`${entry.accessed_at}-${index}`} className="border-t border-border"><td className="p-3">{formatDateTime(entry.accessed_at)}</td><td className="p-3">{entry.staff_name ?? "System"}<span className="block text-xs capitalize text-muted-foreground">{humanise(entry.role)}</span></td><td className="p-3 capitalize">{humanise(entry.resource_type)}{entry.emergency_access ? <span className="ml-2 rounded bg-danger-muted px-2 py-0.5 text-xs text-danger">Emergency</span> : null}</td><td className="p-3 capitalize">{humanise(entry.purpose_code)}</td></tr>
                 ))}</tbody>
               </table>
             </div>
+
+            {historyItems.length > HISTORY_PAGE_SIZE && (
+              <div className="flex items-center justify-between border-t border-border px-4 py-2.5 bg-muted/20 text-xs">
+                <span className="text-muted-foreground">Page {historyPage} of {totalHistoryPages}</span>
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    disabled={historyPage <= 1}
+                    onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
+                    className="rounded border border-border bg-card px-2.5 py-1 disabled:opacity-50"
+                  >
+                    Prev
+                  </button>
+                  <button
+                    type="button"
+                    disabled={historyPage >= totalHistoryPages}
+                    onClick={() => setHistoryPage((p) => Math.min(totalHistoryPages, p + 1))}
+                    className="rounded border border-border bg-card px-2.5 py-1 disabled:opacity-50"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
           </section>
         </>
       ) : null}
