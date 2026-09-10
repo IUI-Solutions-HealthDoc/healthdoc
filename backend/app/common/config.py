@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     keycloak_admin_password: str = "change-me"
 
     minio_endpoint: str = "localhost:9000"
+    # Host[:port], no URL path. Public download signing is always HTTPS and
+    # separate from internal storage traffic; never rewrite a signed hostname.
+    minio_public_endpoint: str | None = None
+    minio_region: str = "us-east-1"
     minio_root_user: str = "healthdoc"
     minio_root_password: str = "change-me"
     minio_bucket_files: str = "hd-files"

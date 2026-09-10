@@ -11,15 +11,16 @@ this module must go through asyncio.to_thread() at the call site (see
 service.py), never awaited directly, or it blocks the event loop for
 every other request.
 
-secure=False: this repo's docker-compose MinIO (and every local/dev
-deployment described in .env.example) is plain HTTP behind the internal
-network; TLS termination for the public path happens at the nginx edge
-per B1-W1-03, not at MinIO itself. Hardcoded rather than a new Settings
-field -- app/common/config.py isn't this module's file to extend; flag to
-whoever owns it if production ever needs MinIO itself to speak TLS.
+The storage client uses HTTP on the internal Docker network. Public download
+signing uses a separate HTTPS endpoint when configured; its proxy must preserve
+Host, path and query. The application nginx configuration does not provision
+that storage hostname. Do not hand a browser an internal minio:9000 URL.
 """
 from __future__ import annotations
 
+from urllib.parse import urlsplit
+
+from fastapi import HTTPException
 from minio import Minio
 from minio.error import S3Error
 
@@ -39,6 +40,33 @@ def get_minio_client() -> Minio:
             secure=False,
         )
     return _client
+
+
+def get_download_client() -> Minio:
+    """Sign for the browser-facing host, without making a public network call.
+
+    Region is explicit so the SDK does not probe the external hostname for
+    bucket location while signing. It must match the deployed MinIO region.
+    Local development retains the existing direct-storage fallback only.
+    """
+    settings = get_settings()
+    endpoint = settings.minio_public_endpoint
+    unavailable = "File downloads need a public HTTPS storage endpoint and region configuration."
+    if not endpoint:
+        if settings.environment.lower() in {"production", "prod"}:
+            raise HTTPException(503, unavailable)
+        return get_minio_client()
+    try:
+        parsed = urlsplit(f"https://{endpoint}")
+        if (endpoint != endpoint.strip() or not parsed.hostname or parsed.path
+                or parsed.query or parsed.fragment or parsed.username or parsed.password
+                or not settings.minio_region.strip()):
+            raise HTTPException(503, unavailable)
+        return Minio(endpoint, access_key=settings.minio_root_user,
+                     secret_key=settings.minio_root_password,
+                     secure=True, region=settings.minio_region)
+    except ValueError:
+        raise HTTPException(503, unavailable) from None
 
 
 def ensure_bucket(bucket_name: str) -> None:

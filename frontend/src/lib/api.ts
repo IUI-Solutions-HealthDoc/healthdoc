@@ -74,6 +74,9 @@ export interface ApiOptions extends RequestInit {
 export async function api<T>(path: string, init: ApiOptions = {}): Promise<T> {
   const { idempotencyKey, ifMatch, ...rest } = init;
   const method = (rest.method ?? "GET").toUpperCase();
+  // The browser supplies the multipart boundary. A JSON Content-Type here
+  // makes valid authenticated file uploads unreadable by FastAPI.
+  const multipart = typeof FormData !== "undefined" && rest.body instanceof FormData;
 
   if (method === "POST" && idempotencyKey === undefined) {
     // Fail loudly in dev so it is caught before a duplicate payment reaches
@@ -85,7 +88,7 @@ export async function api<T>(path: string, init: ApiOptions = {}): Promise<T> {
   const res = await fetch(`${API_BASE_URL}${path}`, {
     ...rest,
     headers: {
-      "Content-Type": "application/json",
+      ...(!multipart ? { "Content-Type": "application/json" } : {}),
       ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
       ...(ifMatch !== undefined ? { "If-Match": String(ifMatch) } : {}),
