@@ -9,11 +9,13 @@ session; this session did not issue the merge command.
 
 The referral work is on **`feat/external-referral-results`**, originally branched
 from staging `43195e1` before #547 merged. On 10 September the user requested
-commit/publication and a live local browser retest. It is being published as a
-**draft PR into staging**, with the existing runtime blocker disclosed, not as
-a merge-ready release. Integrate current staging `48dd47d` (#547) before review.
-Earlier full-suite counts below predate that integration and exclude #547's
-31 tariff-safety tests. This is **partial F04**, not closure of all referrals.
+commit/publication and a live local browser retest. Implementation `45fa36d`
+and staging integration `ae824a9` were pushed in
+[PR #549 → staging](https://github.com/IUI-Solutions-HealthDoc/healthdoc/pull/549).
+The PR was created as draft with the runtime blocker disclosed; it was later
+marked ready outside this session. All four active CI checks passed on
+`ae824a9` (Electron packaging skipped), but browser acceptance is still blocked.
+No merge command was issued. This is **partial F04**, not closure of all referrals.
 
 ## Implemented
 
@@ -86,7 +88,41 @@ Builder skill guided the input, ownership, replay and failure-path checks.
 
 ## Verification and limits
 
+### Publication retest — integrated with staging
+
+- `make test-pg`: **1,573 backend tests and 14 script tests passed**; migration
+  checker reports 75 linear migrations through `0068`, downgrades present.
+  This gate uses the disposable test database, not a production upgrade.
+- Frontend suite: **82 passed**, typecheck passed before the staging integration;
+  GitHub frontend CI subsequently passed on the integrated commit.
+- All-role real-Keycloak dashboard sweep: **50/51 screens passed**. Admin
+  `/admin/data-protection` timed out waiting for `#main-content`; every other
+  captured screen completed with no failed API responses. The admin-only retry
+  **passed 12/12**, including data protection (8 successful API responses).
+  This is separate evidence, not a substitute for the failed first run; the
+  intermittent navigation/server cause is not established.
+- Visible Chrome: actual doctor login, results list and the new external-referral
+  inbox opened. Results initially returned a local nginx 502, then loaded on
+  reload. The pending inbox contained zero records; this does not prove a
+  populated inbox, writes, attachments or pagination.
+- Referral fault-scenario browser repeat: **failed overall**, despite seven
+  successful assertions. The error occurs while filling the result summary:
+  `ExternalResultPanel`'s `onChange` → MUI `InputBase`/`TextareaAutosize` → React
+  `Maximum update depth exceeded`. No verified root cause or fix yet.
+- Local evidence directories: `docs/evidence/pr549-live-dashboards-20260910/`
+  `docs/evidence/pr549-admin-retry-20260910/`, and
+  `docs/evidence/external-results-pr549-retest-20260910/`. Generated browser
+  artifacts remain local and ignored, not committed or posted to GitHub.
+
+The acceptance-orchestrator workflow kept publication separate from acceptance:
+the failures were posted on #549 and not waived because CI was green. No full
+production frontend build, real storage download or clinical write journey was
+rerun in this publication pass. No sandbox exchange or production change occurred.
+
 ### Latest follow-up — inbox, attachments and public signing
+
+The following records the earlier implementation checks; the publication retest
+above is the latest browser evidence.
 
 | Check | Result |
 |---|---|
@@ -127,15 +163,16 @@ a render loop, and no speculative library or application patch was made.
 
 The harness now captures each page error's stack and last completed check in
 `browserErrors` so the next reproduction can identify the owning component.
-An attempted diagnostic browser rerun was rejected by the tool approval service
-because its usage limit was reached. It was not bypassed. Browser reproduction
-and validation need restored execution capacity or a developer-run capture.
-No claim of a clean latest browser run is made.
+An earlier diagnostic run was blocked by the approval service's usage limit.
+Execution was restored during publication; the repeat reproduced the error and
+captured the stack described above. That access problem is no longer the blocker.
+No claim of a clean latest browser run is made. Changing input speed or suppressing
+page errors without establishing the cause would not constitute a fix.
 
 The first-slice production build/typecheck passed, but neither proves runtime render
-stability. The user has now requested publication; retain the PR as a draft
-pending diagnosis and a clean repeated browser run. Use a **new** evidence directory to preserve the
-failed run when reproducing.
+stability. Regardless of the PR's externally changed ready/draft flag, retain the
+merge blocker pending diagnosis and a clean repeated browser run. Use a **new**
+evidence directory to preserve the failed run when reproducing.
 
 The two initial backend regressions failed before the fixes: a moved-facility
 retry returned 201, and the order response omitted fulfilment mode. The patient
