@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import MenuItem from "@mui/material/MenuItem";
@@ -52,6 +53,18 @@ export function AuditLogListPanel({
   onToChange,
   onSelect,
 }: Props) {
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 10;
+
+  // Reset to page 1 on filter or search change
+  useEffect(() => {
+    setPage(1);
+  }, [query, action, resourceType, from, to]);
+
+  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const paginatedRows = rows.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
   return (
     <Box
       sx={{
@@ -77,7 +90,7 @@ export function AuditLogListPanel({
           Audit logs
         </Typography>
         <Typography sx={{ m: 0, mt: 0.4, fontSize: "0.8125rem", color: meridian.textSecondary }}>
-          Search and filter activity recorded for this facility.
+          Search and filter activity recorded for this facility ({rows.length} total entries).
         </Typography>
       </Box>
 
@@ -161,7 +174,7 @@ export function AuditLogListPanel({
             No audit entries match.
           </Typography>
         ) : (
-          rows.map((row) => {
+          paginatedRows.map((row) => {
             const key = `${row.id}::${row.created_at}`;
             const selected = key === selectedKey;
             return (
@@ -199,6 +212,63 @@ export function AuditLogListPanel({
           })
         )}
       </Box>
+
+      {/* Pagination Footer */}
+      {rows.length > PAGE_SIZE && (
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            px: 2,
+            py: 1.25,
+            borderTop: `1px solid ${meridian.border}`,
+            bgcolor: "#fafbfc",
+          }}
+        >
+          <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary, fontWeight: 500 }}>
+            Page {currentPage} of {totalPages}
+          </Typography>
+          <Stack direction="row" spacing={1}>
+            <button
+              type="button"
+              disabled={currentPage <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              style={{
+                padding: "4px 10px",
+                fontSize: "0.75rem",
+                fontWeight: 600,
+                borderRadius: "6px",
+                border: `1px solid ${meridian.border}`,
+                backgroundColor: "#fff",
+                color: meridian.textPrimary,
+                cursor: currentPage <= 1 ? "not-allowed" : "pointer",
+                opacity: currentPage <= 1 ? 0.5 : 1,
+              }}
+            >
+              Prev
+            </button>
+            <button
+              type="button"
+              disabled={currentPage >= totalPages}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              style={{
+                padding: "4px 10px",
+                fontSize: "0.75rem",
+                fontWeight: 600,
+                borderRadius: "6px",
+                border: `1px solid ${meridian.border}`,
+                backgroundColor: "#fff",
+                color: meridian.textPrimary,
+                cursor: currentPage >= totalPages ? "not-allowed" : "pointer",
+                opacity: currentPage >= totalPages ? 0.5 : 1,
+              }}
+            >
+              Next
+            </button>
+          </Stack>
+        </Box>
+      )}
     </Box>
   );
 }

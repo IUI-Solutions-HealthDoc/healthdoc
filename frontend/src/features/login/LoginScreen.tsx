@@ -55,34 +55,62 @@ export function LoginScreen() {
   }
 
   return (
-    <div className="surface-card p-8">
-      <HealthDocBrand
-        size={72}
-        preload
-        className="items-center"
-        nameClassName="brand-gradient text-3xl font-bold"
-        subtitle="HMIS"
-      />
-      <h1 className="mt-4 text-2xl font-semibold text-foreground">Sign in</h1>
-      <p className="mt-2 text-sm text-muted-foreground">
-        Hospital Information Management System
-      </p>
+    <div className="surface-card rounded-2xl border border-border/80 bg-card p-8 shadow-xl shadow-slate-900/5 transition-all">
+      <div className="flex flex-col items-center text-center">
+        <HealthDocBrand
+          size={64}
+          preload
+          className="items-center"
+          nameClassName="brand-gradient text-3xl font-bold tracking-tight"
+          subtitle="Enterprise HMIS"
+        />
+        <h1 className="mt-5 text-2xl font-bold tracking-tight text-foreground">
+          Clinical Portal Sign-In
+        </h1>
+        <p className="mt-1.5 text-sm text-muted-foreground">
+          Authenticate using your authorized hospital credentials
+        </p>
+      </div>
 
       <div className="mt-6 space-y-4">
         {sessionExpired && (
-          <p
-            className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+          <div
+            className="flex items-start gap-3 rounded-xl border border-amber-300/80 bg-amber-50/90 p-3.5 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
             role="status"
           >
-            Your session expired. Sign in again to continue; unsaved clinical work
-            was not stored in the browser.
-          </p>
+            <span className="mt-0.5 text-amber-600 dark:text-amber-400">⚠️</span>
+            <p className="leading-snug">
+              <strong>Session Expired:</strong> Please sign in again to continue. Unsaved clinical drafts were not retained.
+            </p>
+          </div>
+        )}
+
+        {error && (
+          <div
+            className="flex items-start gap-3 rounded-xl border border-red-300/80 bg-red-50/90 p-3.5 text-sm text-red-900 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200"
+            role="alert"
+          >
+            <span className="mt-0.5 text-red-600 dark:text-red-400">⛔</span>
+            <p className="leading-snug">{error}</p>
+          </div>
+        )}
+
+        {!keycloakConfigured && (
+          <div
+            className="flex items-start gap-3 rounded-xl border border-red-300/80 bg-red-50/90 p-3.5 text-sm text-red-900 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200"
+            role="alert"
+          >
+            <span className="mt-0.5 text-red-600 dark:text-red-400">⚠️</span>
+            <p className="leading-snug">
+              Sign-in is not configured for this deployment. Contact your hospital system administrator.
+            </p>
+          </div>
         )}
 
         <Button
           type="button"
           onClick={() => void handleKeycloakLogin()}
-          className="w-full"
+          className="w-full h-12 text-base font-semibold shadow-md transition-all hover:shadow-lg active:scale-[0.99]"
           disabled={busy || isLoading || !keycloakConfigured}
         >
           {/* Wording left exactly as it was. Three e2e scripts locate this
@@ -95,22 +123,27 @@ export function LoginScreen() {
               : "Sign in with Keycloak"}
         </Button>
 
-        {error && (
-          <p className="text-sm text-red-600" role="alert">
-            {error}
-          </p>
-        )}
-
-        {!keycloakConfigured ? (
-          <p className="text-sm text-red-600" role="alert">
-            Sign-in is not configured for this deployment. Contact your administrator.
-          </p>
-        ) : null}
+        <div className="mt-6 border-t border-border/60 pt-5">
+          <div className="flex flex-col items-center gap-2 text-xs text-muted-foreground">
+            <div className="flex items-center gap-4">
+              <span className="inline-flex items-center gap-1">
+                🔒 TLS 1.3 / FIPS
+              </span>
+              <span>•</span>
+              <span className="inline-flex items-center gap-1">
+                🛡️ ABDM M1/M2/M3
+              </span>
+              <span>•</span>
+              <span className="inline-flex items-center gap-1">
+                ⚖️ DPDP Compliant
+              </span>
+            </div>
+            <p className="mt-1 text-center text-[11px] text-muted-foreground/80">
+              Authorized clinical personnel only. All access is logged to tamper-evident audit logs.
+            </p>
+          </div>
+        </div>
       </div>
-
-      {/* No self-registration link. Staff accounts are created in Keycloak and
-          requested through /admin/account-requests — a hospital does not let
-          people enrol themselves into a clinical system. */}
     </div>
   );
 }

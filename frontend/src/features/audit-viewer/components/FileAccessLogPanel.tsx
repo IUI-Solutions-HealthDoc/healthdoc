@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Box from "@mui/material/Box";
 import MenuItem from "@mui/material/MenuItem";
 import Stack from "@mui/material/Stack";
@@ -30,6 +31,14 @@ export function FileAccessLogPanel({
   onQueryChange,
   onActionChange,
 }: Props) {
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+
+  useEffect(() => {
+    setPage(0);
+  }, [query, action]);
+
+  const paginatedRows = rows.slice(page * rowsPerPage, (page + 1) * rowsPerPage);
   const columns: DataTableColumn<FileAccessLog>[] = [
     {
       key: "accessed_at",
@@ -106,10 +115,19 @@ export function FileAccessLogPanel({
 
       <DataTable
         columns={columns}
-        rows={rows}
+        rows={paginatedRows}
         getRowId={(r) => r.id}
         loading={loading}
         emptyMessage="No file access events."
+        page={page}
+        rowsPerPage={rowsPerPage}
+        totalCount={rows.length}
+        onPageChange={(p) => setPage(p)}
+        onRowsPerPageChange={(r) => {
+          setRowsPerPage(r);
+          setPage(0);
+        }}
+        rowsPerPageOptions={[10, 25, 50]}
       />
     </Box>
   );

@@ -14,6 +14,8 @@ export default function Page() {
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 8;
 
   const load = useCallback(async (search = "") => {
     setLoading(true);
@@ -22,6 +24,7 @@ export default function Page() {
       const response = await listPlatformFacilities(search);
       setFacilities(response.items);
       setTotal(response.total);
+      setPage(1);
     } catch (reason) {
       setError(getUserFacingError(reason, "Could not load platform facilities."));
     } finally {
@@ -32,6 +35,10 @@ export default function Page() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const totalPages = Math.max(1, Math.ceil(facilities.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const paginatedFacilities = facilities.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-6">
@@ -84,32 +91,58 @@ export default function Page() {
         </div>
         {loading ? (
           <p className="p-5 text-sm text-muted-foreground">Loading facilities…</p>
-        ) : facilities.length === 0 ? (
+        ) : paginatedFacilities.length === 0 ? (
           <p className="p-5 text-sm text-muted-foreground">No facilities match this search.</p>
         ) : (
-          <ul className="divide-y divide-border">
-            {facilities.map((facility) => (
-              <li key={facility.id} className="grid gap-3 px-5 py-4 sm:grid-cols-[1fr_auto]">
-                <div>
-                  <p className="font-medium">{facility.name}</p>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {facility.code} · {facility.state_code}
-                    {facility.district ? ` · ${facility.district}` : ""}
-                    {facility.hfr_facility_id ? ` · HFR ${facility.hfr_facility_id}` : ""}
-                  </p>
+          <>
+            <ul className="divide-y divide-border">
+              {paginatedFacilities.map((facility) => (
+                <li key={facility.id} className="grid gap-3 px-5 py-4 sm:grid-cols-[1fr_auto]">
+                  <div>
+                    <p className="font-medium">{facility.name}</p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {facility.code} · {facility.state_code}
+                      {facility.district ? ` · ${facility.district}` : ""}
+                      {facility.hfr_facility_id ? ` · HFR ${facility.hfr_facility_id}` : ""}
+                    </p>
+                  </div>
+                  <span
+                    className={`self-start rounded-full px-3 py-1 text-xs font-medium ${
+                      facility.is_active
+                        ? "bg-success-muted text-success"
+                        : "bg-muted text-muted-foreground"
+                    }`}
+                  >
+                    {facility.is_active ? "Active" : "Inactive"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+
+            {facilities.length > PAGE_SIZE && (
+              <div className="flex items-center justify-between border-t border-border px-5 py-3 bg-muted/20 text-xs">
+                <span className="text-muted-foreground">Page {currentPage} of {totalPages}</span>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    disabled={currentPage <= 1}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    className="rounded border border-border bg-card px-3 py-1 font-medium disabled:opacity-50"
+                  >
+                    Previous
+                  </button>
+                  <button
+                    type="button"
+                    disabled={currentPage >= totalPages}
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    className="rounded border border-border bg-card px-3 py-1 font-medium disabled:opacity-50"
+                  >
+                    Next
+                  </button>
                 </div>
-                <span
-                  className={`self-start rounded-full px-3 py-1 text-xs font-medium ${
-                    facility.is_active
-                      ? "bg-success-muted text-success"
-                      : "bg-muted text-muted-foreground"
-                  }`}
-                >
-                  {facility.is_active ? "Active" : "Inactive"}
-                </span>
-              </li>
-            ))}
-          </ul>
+              </div>
+            )}
+          </>
         )}
       </section>
     </div>
