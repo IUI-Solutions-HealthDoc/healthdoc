@@ -37,6 +37,32 @@ router = APIRouter(prefix="/users", tags=["users"],
                    dependencies=[Depends(require_roles("admin"))])
 
 
+def _validate_requester_fields(payload: UserCreate | UserUpdate, existing: User | None = None) -> None:
+    from app.integrations.abdm.hiu.requester import RequesterUnavailable, validate_requester
+
+    changes = payload.model_dump(exclude_unset=True)
+
+    def value(name):
+        return changes.get(name, getattr(existing, name, None))
+
+    if value("registration_identifier_type") is None and value("registration_identifier_system") is None:
+        return  # Non-requesting staff need not have a professional registration.
+    try:
+        validate_requester({
+            "name": value("full_name"),
+            "identifier": {
+                "type": value("registration_identifier_type"),
+                "value": value("registration_number"),
+                "system": value("registration_identifier_system"),
+            },
+        })
+    except RequesterUnavailable as exc:
+        raise HTTPException(422, {
+            "code": "invalid_abdm_requester_profile",
+            "message": "Supply a real registration number, identifier type and issuing registry URI together, or clear both ABDM metadata fields.",
+        }) from exc
+
+
 async def _get_scoped_user(
     db: AsyncSession, user_id: uuid.UUID, caller_facility_id: uuid.UUID
 ) -> User:
@@ -145,6 +171,7 @@ async def create_user(
         )
 
     await _validate_department(db, payload.department_id, current_db_user.facility_id)
+    _validate_requester_fields(payload)
 
     existing = await db.execute(select(User).where(User.username == payload.username))
     if existing.scalar_one_or_none():
@@ -175,6 +202,7 @@ async def update_user(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     user = await _get_scoped_user(db, user_id, current_db_user.facility_id)
+    _validate_requester_fields(payload, user)
     if "department_id" in payload.model_fields_set:
         await _validate_department(db, payload.department_id, current_db_user.facility_id)
     # facility_id is not updateable through this route even if the schema ever

@@ -26,6 +26,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.common.db import Base
 from app.common.models import Timestamps, UUIDPk
 
+TOKEN_CALLBACK_RECOVERY_MARKER = "Operator queued one lost-token-callback recovery"
+
 
 class AbdmJob(Base, UUIDPk, Timestamps):
     __tablename__ = "abdm_jobs"
@@ -125,7 +127,12 @@ async def claim(
     ).scalar_one_or_none()
     if row is None:
         return None
-    if row.attempts >= 5:
+    # A token request whose worker crashed may already have reached NHA.
+    # Do not automatically generate again: NHA limits generation per address.
+    attempt_limit = 5
+    if row.kind == "link_token":
+        attempt_limit = 2 if row.last_error == TOKEN_CALLBACK_RECOVERY_MARKER else 1
+    if row.attempts >= attempt_limit:
         row.status = "dead"
         row.last_error = "Worker retry limit reached"
         row.lease_token = row.lease_until = None
@@ -140,7 +147,12 @@ async def claim(
 
 
 async def finish(
-    db: AsyncSession, job: AbdmJob, *, error: str | None = None, deferred: bool = False
+    db: AsyncSession,
+    job: AbdmJob,
+    *,
+    error: str | None = None,
+    deferred: bool = False,
+    terminal: bool = False,
 ) -> bool:
     # A stale worker must not overwrite a lease that a replacement owns.
     values = dict(status="done", lease_token=None, lease_until=None, last_error=None)
@@ -153,6 +165,10 @@ async def finish(
         )
         if deferred:
             values["attempts"] = max(0, job.attempts - 1)
+        # A pre-dispatch deferral sends nothing. Actual token-request failures
+        # need inspection, not an automatic five-attempt generation loop.
+        if terminal or (job.kind == "link_token" and not deferred):
+            values["status"] = "dead"
     result = await db.execute(
         update(AbdmJob)
         .where(

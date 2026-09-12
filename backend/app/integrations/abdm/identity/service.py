@@ -39,13 +39,15 @@ is an environment variable, not a release.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 
 from app.common.config import get_settings
-from app.integrations.abdm.client import AbdmResponse, get_abdm_client
+from app.integrations.abdm.client import AbdmRejected, AbdmResponse, get_abdm_client
 
 from . import otp_session
 from .crypto import encrypt_for_abdm
+from .formatting import hyphenate_abha
 from .otp_session import OtpPurpose, OtpSession
 
 log = logging.getLogger("healthdoc.abdm")
@@ -110,9 +112,45 @@ async def _post(path: str, payload: dict) -> AbdmResponse:
     """
     settings = get_settings()
     client = get_abdm_client()
-    return await client.request(
-        "POST", f"{settings.abdm_abha_base_url.rstrip('/')}{path}", json=payload
-    )
+    try:
+        return await client.request(
+            "POST", f"{settings.abdm_abha_base_url.rstrip('/')}{path}", json=payload
+        )
+    except AbdmRejected as exc:
+        # Error bodies can echo the identifier or OTP. Retain only contracted
+        # field names and error-code syntax, never values or free-form messages.
+        codes, fields = _rejection_metadata(exc.detail)
+        log.warning(
+            "ABDM identity rejected (status=%s request=%s codes=%s fields=%s)",
+            exc.status_code, exc.request_id, codes, fields,
+        )
+        raise
+
+
+def _rejection_metadata(detail: object) -> tuple[list[str], list[str]]:
+    codes: set[str] = set()
+    fields: set[str] = set()
+    allowed_fields = {"loginId", "loginHint", "scope", "otpSystem", "otpValue", "txnId"}
+
+    def visit(value: object, depth: int = 0) -> None:
+        if depth > 5:
+            return
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if key in allowed_fields:
+                    fields.add(key)
+                if key == "code" and isinstance(child, str) and re.fullmatch(r"ABDM-\d{4}", child):
+                    codes.add(child)
+                if key in {"field", "property"} and isinstance(child, str) and child in allowed_fields:
+                    fields.add(child)
+                if isinstance(child, dict | list):
+                    visit(child, depth + 1)
+        elif isinstance(value, list):
+            for child in value[:50]:
+                visit(child, depth + 1)
+
+    visit(detail)
+    return sorted(codes), sorted(fields)
 
 
 def _address(profile: dict) -> str | None:
@@ -258,7 +296,9 @@ async def request_login_otp(
                 "scope": ["abha-login", "mobile-verify"],
                 "loginHint": "abha-number",
                 "otpSystem": "abdm",
-                "loginId": encrypt_for_abdm(abha_number),
+                # The route normalises for storage; ABDM validates the
+                # decrypted loginId in its hyphenated 2-4-4-4 representation.
+                "loginId": encrypt_for_abdm(hyphenate_abha(abha_number)),
             },
         )
     ).body

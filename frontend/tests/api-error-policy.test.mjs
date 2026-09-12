@@ -25,3 +25,13 @@ test("safe domain conflicts remain actionable", () => {
     "The service is temporarily unavailable. Try again shortly.",
   );
 });
+
+test("an ABDM rejection is not presented as a temporary outage or raw gateway text", () => {
+  const message = userFacingApiError(502, {
+    code: "abdm_rejected",
+    message: "private-identifier private-otp upstream internal response",
+  });
+  assert.equal(message, "ABDM declined this request. Check the details before retrying; contact support if it continues.");
+  assert.doesNotMatch(message, /private|temporarily unavailable|internal/);
+  assert.equal(userFacingApiError(503), "The service is temporarily unavailable. Try again shortly.");
+});

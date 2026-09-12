@@ -23,7 +23,7 @@ from cryptography.exceptions import InvalidTag
 from sqlalchemy import select
 
 from app.common.security import decrypt_pii
-from app.integrations.abdm import hi_crypto
+from app.integrations.abdm import curve25519, hi_crypto
 from app.integrations.abdm.hip import service as hip_service
 from app.integrations.abdm.hiu import records, service
 from app.integrations.abdm.hiu.models import (
@@ -32,7 +32,7 @@ from app.integrations.abdm.hiu.models import (
     AbdmReceivedBundle,
 )
 from app.patients.models import Patient
-from app.users.models import Facility
+from app.users.models import Facility, User
 
 NOW = datetime(2026, 8, 29, 12, 0, tzinfo=UTC)
 FACILITY = uuid.uuid4()
@@ -54,6 +54,20 @@ async def hiu_db(db, monkeypatch):
             timezone="Asia/Kolkata",
             is_active=True,
             hfr_facility_id="TEST-HFR",
+        )
+    )
+    await db.flush()
+    db.add(
+        User(
+            id=ACTOR,
+            facility_id=FACILITY,
+            keycloak_sub=str(ACTOR),
+            username="hiu-test-clinician",
+            full_name="Synthetic Test Clinician",
+            registration_number="TEST-ONLY",
+            registration_identifier_type="REGNO1",
+            registration_identifier_system="https://registry.test",
+            is_active=True,
         )
     )
     await db.flush()
@@ -156,7 +170,7 @@ async def test_the_private_key_is_never_stored_in_plaintext(hiu_db):
 
     # The ciphertext must not contain the key, in raw or hex form.
     opened = decrypt_pii(stored, associated_data=f"abdm-hiu-hi-request:{row.id}".encode())
-    assert bytes.fromhex(opened) not in stored
+    assert curve25519.deserialize(opened).private_bytes_raw() not in stored
     assert opened.encode() not in stored
     # And the wire block the gateway receives must not carry it at all.
     assert opened not in json.dumps(wire)

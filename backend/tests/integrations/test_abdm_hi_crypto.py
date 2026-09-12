@@ -5,10 +5,10 @@ both parties reach the same key, a wrong key does not silently produce
 plausible plaintext, tampering is detected, and a private key never appears in
 anything we send.
 
-What they deliberately do NOT claim: that ABDM agrees. Every test here is
-self-consistency between our two halves. Only a sandbox round trip proves
-interoperability, and pretending otherwise is how an unverified integration
-gets described as tested.
+These tests cover self-consistency. test_abdm_fidelius_interop.py independently
+pins published known-answer vectors, and scripts.verify_abdm_crypto_reference
+cross-checks the real Fidelius CLI. Neither substitutes for a live sandbox
+exchange or milestone certification.
 """
 from __future__ import annotations
 
@@ -138,20 +138,15 @@ def test_malformed_key_material_raises_our_error_not_a_stray_exception(kwargs):
         hi_crypto.derive_shared_key(**call)
 
 
-def test_an_uncompressed_point_prefix_is_accepted():
-    """Implementations differ on whether the 0x04 prefix is sent. Accepting
-    both is interoperability; accepting any length would be guessing."""
+def test_raw_x25519_with_a_fake_point_prefix_is_rejected():
+    """A 33-byte prefix shortcut is not a Fidelius EC point."""
     hip, hiu = _pair()
-    prefixed = base64.b64encode(b"\x04" + base64.b64decode(hiu.public_key_b64)).decode()
-
-    plain_key, _ = _keys_for(hip, hiu)
-    prefixed_key, _ = hi_crypto.derive_shared_key(
-        private_key=hip.private_key,
-        peer_public_key_b64=prefixed,
-        our_nonce_b64=hip.nonce_b64,
-        peer_nonce_b64=hiu.nonce_b64,
-    )
-    assert plain_key == prefixed_key
+    prefixed = base64.b64encode(b"\x04" + bytes(32)).decode()
+    with pytest.raises(hi_crypto.HiCryptoError):
+        hi_crypto.derive_shared_key(
+            private_key=hip.private_key, peer_public_key_b64=prefixed,
+            our_nonce_b64=hip.nonce_b64, peer_nonce_b64=hiu.nonce_b64,
+        )
 
 
 def test_every_generated_keypair_is_fresh():

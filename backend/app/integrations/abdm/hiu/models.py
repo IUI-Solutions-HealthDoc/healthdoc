@@ -47,6 +47,9 @@ class AbdmConsentRequest(Base, UUIDPk, Timestamps, Blame):
     #: How long WE asked to keep it. The manager may return less; the artefact
     #: is what binds, not this.
     requested_expiry = Column(DateTime(timezone=True), nullable=False)
+    # Immutable wire identity from the requesting staff profile. Legacy rows
+    # stay NULL and cannot be newly dispatched under an invented identity.
+    requester_snapshot = Column(JSONB, nullable=True)
 
     consent_request_id = Column(String(120), nullable=True)
     gateway_request_id = Column(String(100), nullable=True)

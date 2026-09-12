@@ -15,24 +15,20 @@ import { StatusChip } from "@/components/ui/StatusChip";
 import { toast } from "@/components/ui/toast";
 import { meridian } from "@/styles/theme";
 import { transitionConsentStatus, withdrawConsent } from "../api/consent";
-import { ACCESS_CHANNEL_LABELS, CONSENT_STATUS_LABELS } from "../constants";
+import { CONSENT_STATUS_LABELS } from "../constants";
 import { formatDate, formatDateTime } from "../lib/formatters";
-import type { ConsentRecord, DataAccessLog } from "../types";
-import { DataAccessLogPanel } from "./DataAccessLogPanel";
+import type { ConsentRecord } from "../types";
+import { ConsentAccessHistory } from "./ConsentAccessHistory";
 
 type Props = {
   record: ConsentRecord | null;
   loading?: boolean;
-  accessRows: DataAccessLog[];
-  accessLoading: boolean;
   onRecordUpdated?: (next: ConsentRecord) => void;
 };
 
 export function ConsentRecordDetail({
   record,
   loading,
-  accessRows,
-  accessLoading,
   onRecordUpdated,
 }: Props) {
   const [withdrawOpen, setWithdrawOpen] = useState(false);
@@ -91,7 +87,7 @@ export function ConsentRecordDetail({
           color: meridian.textSecondary,
         }}
       >
-        Select a consent record to view linked data access events.
+        Select a consent record to review the decision and expiry.
       </Box>
     );
   }
@@ -210,11 +206,7 @@ export function ConsentRecordDetail({
         </DialogActions>
       </Dialog>
 
-      <DataAccessLogPanel
-        rows={accessRows}
-        loading={accessLoading}
-        channels={ACCESS_CHANNEL_LABELS}
-      />
+      <ConsentAccessHistory consentId={record.id} />
     </Stack>
   );
 }

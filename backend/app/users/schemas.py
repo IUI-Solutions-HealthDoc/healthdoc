@@ -37,6 +37,8 @@ class UserCreate(BaseModel):
     designation: str | None = None
     employee_id: str | None = None
     registration_number: str | None = None
+    registration_identifier_type: str | None = Field(default=None, min_length=1, max_length=50)
+    registration_identifier_system: str | None = Field(default=None, min_length=1, max_length=255)
     qualification: str | None = None
     department_id: uuid.UUID | None = None
     #: Ignored — the account is created at the authenticated admin's facility.
@@ -57,6 +59,8 @@ class UserUpdate(BaseModel):
     designation: str | None = None
     employee_id: str | None = None
     registration_number: str | None = None
+    registration_identifier_type: str | None = Field(default=None, min_length=1, max_length=50)
+    registration_identifier_system: str | None = Field(default=None, min_length=1, max_length=255)
     qualification: str | None = None
     department_id: uuid.UUID | None = None
 
@@ -73,6 +77,8 @@ class UserOut(BaseModel):
     designation: str | None
     employee_id: str | None
     registration_number: str | None
+    registration_identifier_type: str | None = None
+    registration_identifier_system: str | None = None
     qualification: str | None
     facility_id: uuid.UUID
     department_id: uuid.UUID | None

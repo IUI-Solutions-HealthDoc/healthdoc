@@ -16,10 +16,8 @@ the closest relative of this one). So:
 
     NOT CONFIGURED MEANS REFUSE, NOT ALLOW.
 
-With `ABDM_CALLBACK_SHARED_SECRET` unset every callback route answers 503 and
-says why. The integration is inert rather than open. That is a worse demo and a
-correct system, and it is the only setting of this dial that cannot become an
-incident.
+With `ABDM_CALLBACK_SHARED_SECRET` unset every legacy private callback route
+answers 503. Official v3 callbacks use the separate routing checks below.
 
 WHAT THIS IS NOT
 ----------------
@@ -60,6 +58,30 @@ _MAX_CLOCK_SKEW = timedelta(minutes=10)
 # failed handler must be allowed to run again.  The database transaction/state
 # machines below the callback are the durable duplicate guard.
 _REPLAY_TTL_SECONDS = 60
+
+# The supplied NHA M2/M3 v2.8 tables omit X-CM-ID on these callbacks.
+# Do not infer callback headers from the corresponding outbound API: the
+# outbound calls still require X-CM-ID. Unknown paths remain strict, and a CM
+# header supplied on any path must match. These are routing checks, NOT proof
+# of gateway origin. See docs/abdm-callback-header-matrix-2026-09-11.md.
+_HIP_CALLBACKS_WITHOUT_CM_ID = frozenset(
+    {
+        "/api/v3/links/context/on-notify",
+        "/api/v3/hip/patient/care-context/discover",
+        "/api/v3/hip/link/care-context/init",
+        "/api/v3/hip/link/care-context/confirm",
+        "/api/v3/consent/request/hip/notify",
+        "/api/v3/hip/health-information/request",
+    }
+)
+_HIU_CALLBACKS_WITHOUT_CM_ID = frozenset(
+    {
+        "/api/v3/hiu/consent/request/notify",
+        "/api/v3/hiu/consent/request/on-status",
+        "/api/v3/hiu/consent/on-fetch",
+        "/api/v3/hiu/health-information/on-request",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -112,11 +134,8 @@ _KNOWN_HEADERS = {
     "cf-worker",
     "cf-ew-via",
     "cf-request-id",
-    # ABDM puts these on every callback — its own v3 Postman collection shows
-    # REQUEST-ID, TIMESTAMP and X-CM-ID and nothing else on the HIP callback.
-    # They were being reported as unrecognised, which is the opposite of useful:
-    # this log exists to surface the ONE header we do not know, and we get a
-    # single clean look at the first genuine callback to spot it in.
+    # Known ABDM metadata; the required subset varies by callback family.
+    # In particular, M2 v2.8 does not list X-CM-ID on token/link acknowledgements.
     "request-id",
     "timestamp",
     "x-cm-id",
@@ -204,14 +223,15 @@ async def _verify_gateway_headers(
     *,
     recipient_header: str | None,
     expected_recipient: str | None,
+    require_cm_id: bool = True,
 ) -> GatewayCallback:
     """Validate ABDM's documented callback headers and reject replays.
 
     ABDM's published v3 callback contract does not send HealthDoc's private
-    shared secret. It sends REQUEST-ID, TIMESTAMP, X-CM-ID and the addressed
-    X-HIP-ID/X-HIU-ID. These checks enforce that contract without pretending a
-    spoofable custom header is gateway authentication. Network allow-listing
-    remains an edge control; transaction/consent checks remain the data control.
+    shared secret. Required routing metadata varies by callback family. These
+    checks are not cryptographic authentication (including any Authorization
+    header the caller sends). Network restrictions remain an edge control;
+    transaction/consent checks remain the data control.
     """
     request_id = request.headers.get("REQUEST-ID")
     raw_timestamp = request.headers.get("TIMESTAMP")
@@ -220,15 +240,25 @@ async def _verify_gateway_headers(
     if (
         not request_id
         or not raw_timestamp
-        or not cm_id
+        or (require_cm_id and not cm_id)
         or (recipient_header is not None and not recipient)
     ):
-        recipient_message = f", {recipient_header}" if recipient_header else ""
+        required_headers = ["REQUEST-ID", "TIMESTAMP"]
+        if require_cm_id:
+            required_headers.append("X-CM-ID")
+        if recipient_header:
+            required_headers.append(recipient_header)
+        # Fixed allowlisted names only. Never print header values or the body:
+        # token callbacks contain credentials and verified patient identifiers.
+        log.warning(
+            "ABDM callback missing required headers: %s",
+            ", ".join(name for name in required_headers if not request.headers.get(name)),
+        )
         raise HTTPException(
             400,
             {
                 "code": "missing_abdm_headers",
-                "message": f"REQUEST-ID, TIMESTAMP, X-CM-ID{recipient_message} are required",
+                "message": f"{', '.join(required_headers)} are required",
             },
         )
     try:
@@ -249,7 +279,7 @@ async def _verify_gateway_headers(
         )
     if recipient_header and not hmac.compare_digest(recipient or "", expected_recipient or ""):
         raise HTTPException(404, {"code": "unknown_service", "message": "Unknown ABDM service"})
-    if not hmac.compare_digest(cm_id, settings.abdm_x_cm_id):
+    if cm_id is not None and not hmac.compare_digest(cm_id, settings.abdm_x_cm_id):
         raise HTTPException(401, {"code": "invalid_cm_id", "message": "Unauthorised"})
 
     timestamp = _parse_timestamp(raw_timestamp)
@@ -278,7 +308,7 @@ async def _verify_gateway_headers(
     return GatewayCallback(
         request_id=request_id,
         timestamp=timestamp,
-        recipient_id=recipient or cm_id,
+        recipient_id=recipient or cm_id or "",
         replayed=not bool(first_seen),
         replay_key=replay_key,
     )
@@ -314,6 +344,7 @@ async def verify_hip_gateway_callback(request: Request) -> GatewayCallback:
         request,
         recipient_header="X-HIP-ID",
         expected_recipient=get_settings().abdm_hip_id,
+        require_cm_id=request.url.path not in _HIP_CALLBACKS_WITHOUT_CM_ID,
     )
 
 
@@ -322,6 +353,23 @@ async def verify_hiu_gateway_callback(request: Request) -> GatewayCallback:
         request,
         recipient_header="X-HIU-ID",
         expected_recipient=get_settings().abdm_hiu_id,
+        require_cm_id=request.url.path not in _HIU_CALLBACKS_WITHOUT_CM_ID,
+    )
+
+
+async def verify_hip_link_gateway_callback(request: Request) -> GatewayCallback:
+    """M2 v2.8 token/link acknowledgements do not require X-CM-ID.
+
+    Only the two HIP-initiated linking responses use this dependency. They
+    still require an exact HIP recipient, fresh timestamp, UUID/replay checks
+    and the handler's facility-scoped outbound-request correlation. If a CM
+    header is supplied it must match; this is not a global callback exception.
+    """
+    return await _verify_gateway_headers(
+        request,
+        recipient_header="X-HIP-ID",
+        expected_recipient=get_settings().abdm_hip_id,
+        require_cm_id=False,
     )
 
 
@@ -356,6 +404,15 @@ async def hip_gateway_callback(request: Request) -> AsyncIterator[GatewayCallbac
 
 async def hiu_gateway_callback(request: Request) -> AsyncIterator[GatewayCallback]:
     callback = await verify_hiu_gateway_callback(request)
+    try:
+        yield callback
+    except Exception:
+        await _release_replay(callback)
+        raise
+
+
+async def hip_link_gateway_callback(request: Request) -> AsyncIterator[GatewayCallback]:
+    callback = await verify_hip_link_gateway_callback(request)
     try:
         yield callback
     except Exception:

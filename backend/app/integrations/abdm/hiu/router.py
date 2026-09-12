@@ -31,7 +31,7 @@ from app.auth.deps import CurrentDbUser, require_roles
 from app.common.db import get_db
 from app.integrations.abdm import jobs
 from app.integrations.abdm.callback_auth import verify_callback
-from app.integrations.abdm.hiu import records, service
+from app.integrations.abdm.hiu import records, requester, service
 from app.integrations.abdm.hiu.models import (
     AbdmConsentRequest,
     AbdmHiuConsentArtefact,
@@ -348,6 +348,7 @@ class WorkspaceOut(BaseModel):
     patient_name: str
     abha_address: str | None
     identity_verified: bool
+    requester_ready: bool
     requests: list[ConsentStatusOut]
     next_offset: int | None
 
@@ -492,11 +493,19 @@ async def patient_workspace(
                 transfers=transfer_output,
             )
         )
+    from app.users.models import User
+
+    requester_ready = True
+    try:
+        requester.from_staff(await db.get(User, current_db_user.id), current_db_user.facility_id)
+    except requester.RequesterUnavailable:
+        requester_ready = False
     return WorkspaceOut(
         patient_id=patient.id,
         patient_name=patient.full_name,
         abha_address=patient.abha_address,
         identity_verified=patient.abha_linked_at is not None and bool(patient.abha_address),
+        requester_ready=requester_ready,
         requests=output,
         next_offset=offset + limit if len(rows) > limit else None,
     )

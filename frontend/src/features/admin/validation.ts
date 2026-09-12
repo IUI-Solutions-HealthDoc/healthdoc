@@ -100,7 +100,21 @@ export function validateAccountRequest(values: {
 }
 
 export function validateUserProfile(user: User): FieldErrors {
+  const registrationErrors: FieldErrors = {};
+  const kind = user.registration_identifier_type?.trim() ?? "";
+  const system = user.registration_identifier_system?.trim() ?? "";
+  if (kind || system) {
+    if (!kind || kind.length > 50) registrationErrors.registration_identifier_type = "Enter the verified identifier type (up to 50 characters).";
+    if (!user.registration_number?.trim() || user.registration_number.trim().length > 50) registrationErrors.registration_number = "Enter the clinician’s real registration number (up to 50 characters).";
+    try {
+      const uri = new URL(system);
+      if (!/^https?:$/.test(uri.protocol) || !uri.hostname || uri.username || uri.password || uri.search || uri.hash || /\s/.test(system) || system.length > 255) throw new Error("invalid");
+    } catch {
+      registrationErrors.registration_identifier_system = "Enter the issuing registry’s HTTP(S) URI, without credentials, query or fragment.";
+    }
+  }
   return compact({
+    ...registrationErrors,
     full_name: user.full_name.trim() ? "" : "Full name is required.",
     email: optionalEmail(user.email ?? "") ?? "",
     mobile: optionalMobile(user.mobile ?? "") ?? "",

@@ -294,6 +294,14 @@ async def test_receipt_notification_is_restart_safe_and_does_not_need_retained_p
     calls = worker.gateway.notify_hi_receipt.call_args_list
     assert calls[0].kwargs == calls[1].kwargs
     assert calls[1].kwargs["hip_id"] == "TEST-EXTERNAL-HIP"
+    assert calls[1].kwargs["session_status"] == "RECEIVED"
+    assert calls[1].kwargs["status_responses"] == [
+        {
+            "careContextReference": "visit-1",
+            "hiStatus": "OK",
+            "description": "Received and authenticated",
+        }
+    ]
 
 
 async def test_workspace_is_requester_scoped_and_hides_revoked_content(received_case):
@@ -305,6 +313,7 @@ async def test_workspace_is_requester_scoped_and_hides_revoked_content(received_
         consent.patient_id, actor, case.db, limit=20, offset=0
     )
     assert len(page.requests) == 1 and page.requests[0].transfers[0].records[0].available
+    assert page.requester_ready
     stranger = await hiu_router.patient_workspace(
         consent.patient_id,
         SimpleNamespace(id=uuid.uuid4(), facility_id=FACILITY),
@@ -313,6 +322,7 @@ async def test_workspace_is_requester_scoped_and_hides_revoked_content(received_
         offset=0,
     )
     assert stranger.requests == []
+    assert not stranger.requester_ready
     case.artefact.status = "revoked"
     page = await hiu_router.patient_workspace(
         consent.patient_id, actor, case.db, limit=20, offset=0
@@ -327,6 +337,76 @@ async def test_workspace_is_requester_scoped_and_hides_revoked_content(received_
             offset=0,
         )
     assert denied.value.status_code == 404
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "registration_number",
+        "registration_identifier_type",
+        "registration_identifier_system",
+    ],
+)
+async def test_missing_requester_profile_never_creates_a_consent_ask(received_case, field):
+    from app.users.models import User
+
+    case = received_case
+    original = await case.db.get(AbdmConsentRequest, case.artefact.consent_request_id)
+    staff = await case.db.get(User, ACTOR)
+    setattr(staff, field, None)
+    ident = uuid.uuid4()
+    with pytest.raises(service.HiuError) as error:
+        await service.create_consent_request(
+            case.db,
+            facility_id=FACILITY,
+            patient_id=original.patient_id,
+            abha_address=original.abha_address,
+            purpose_code="CAREMGT",
+            hi_types=["WellnessRecord"],
+            date_range_from=case.now - timedelta(days=1),
+            date_range_to=case.now,
+            requested_expiry=case.now + timedelta(days=1),
+            created_by=ACTOR,
+            request_id=ident,
+        )
+    assert error.value.code == "abdm_requester_required"
+    assert await case.db.get(AbdmConsentRequest, ident) is None
+
+
+@pytest.mark.parametrize("problem", ["legacy", "malformed", "inactive", "changed_registration"])
+async def test_worker_refuses_unattributed_or_changed_requester_before_network(
+    received_case, monkeypatch, problem
+):
+    from app.integrations.abdm.hiu import requester
+    from app.users.models import User
+
+    case = received_case
+    row = await case.db.get(AbdmConsentRequest, case.artefact.consent_request_id)
+    staff = await case.db.get(User, ACTOR)
+    row.requester_snapshot = requester.from_staff(staff, FACILITY)
+    row.status = "requested"
+    row.requested_expiry = case.now + timedelta(days=1)
+    if problem == "legacy":
+        row.requester_snapshot = None
+    elif problem == "malformed":
+        row.requester_snapshot = {"name": "Unattributed"}
+    elif problem == "inactive":
+        staff.is_active = False
+    else:
+        staff.registration_number = "DIFFERENT-TEST-IDENTITY"
+    call = AsyncMock()
+    monkeypatch.setattr(worker.gateway, "request_consent", call)
+    await case.db.commit()
+    with pytest.raises(requester.RequesterUnavailable):
+        await worker.dispatch(
+            jobs.AbdmJob(
+                id=uuid.uuid4(),
+                kind="hiu_consent",
+                target_id=row.id,
+                facility_id=FACILITY,
+            )
+        )
+    call.assert_not_awaited()
 
 
 async def test_request_mutations_persist_correlation_before_network_and_deduplicate(
@@ -357,11 +437,18 @@ async def test_request_mutations_persist_correlation_before_network_and_deduplic
     assert first.id == second.id
     row = await case.db.get(AbdmConsentRequest, first.id)
     assert row.gateway_request_id == str(jobs.job_id("hiu_consent", first.id))
+    from app.users.models import User
+
+    snapshot = copy.deepcopy(row.requester_snapshot)
+    assert snapshot["name"] == "Synthetic Test Clinician"
+    staff = await case.db.get(User, ACTOR)
+    staff.full_name = "Renamed after asking"
     worker.gateway.request_consent.assert_not_awaited()
     await case.db.commit()
     assert await job_runner.run_once(jobs.job_id("hiu_consent", first.id))
     worker.gateway.request_consent.assert_awaited_once()
     assert worker.gateway.request_consent.call_args.kwargs["request_id"] == row.gateway_request_id
+    assert worker.gateway.request_consent.call_args.kwargs["requester"] == snapshot
     altered = payload.model_copy(update={"hi_types": ["Prescription"]})
     with pytest.raises(HTTPException) as conflict:
         await hiu_router.create_consent_request(altered, actor, "consent-retry", case.db)

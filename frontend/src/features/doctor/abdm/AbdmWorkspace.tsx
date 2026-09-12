@@ -78,6 +78,7 @@ function PatientWorkspace({ patientId }: { patientId: string }) {
   async function requestConsent() {
     const start = new Date(from), end = new Date(to), until = new Date(expiry);
     if (!workspace?.identity_verified || !workspace.abha_address) { setError("Verify this patient’s ABHA at reception before requesting records."); return; }
+    if (!workspace.requester_ready) { setError("Ask your facility administrator to verify your professional registration details before requesting ABDM records."); return; }
     if (!types.length || [start, end, until].some((date) => !Number.isFinite(date.getTime())) || start > end || until.getTime() <= Date.now()) {
       setError("Choose record types, a valid start/end period and a future consent expiry."); return;
     }
@@ -113,8 +114,9 @@ function PatientWorkspace({ patientId }: { patientId: string }) {
         <h2 className="text-xl font-semibold">{workspace.patient_name}</h2>
         <p>{workspace.identity_verified ? `Verified ABHA address: ${workspace.abha_address}` : "ABHA identity must be verified at reception before requesting external records."}</p>
         <p className="text-sm text-muted-foreground">Only your own consent requests and their received records are shown. Purpose: care management.</p>
+        {!workspace.requester_ready && <p role="alert" className="text-danger">Your ABDM requester profile is incomplete. Ask the facility administrator to verify your name, registration number, identifier type and issuing registry URI in your staff profile. No request will be sent until this is complete.</p>}
         <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void requestConsent(); }}>
-          <fieldset disabled={busy || !workspace.identity_verified} className="space-y-4">
+          <fieldset disabled={busy || !workspace.identity_verified || !workspace.requester_ready} className="space-y-4">
             <legend className="font-medium">Request consent</legend>
             <div className="grid gap-3 md:grid-cols-3">{[["Records from", from, setFrom], ["Records to", to, setTo], ["Consent expires", expiry, setExpiry]].map(([label, value, setter]) => <label key={String(label)} className="space-y-1"><span className="text-sm">{String(label)}</span><input type="datetime-local" required className={inputClass} value={String(value)} onChange={(event) => (setter as (value: string) => void)(event.target.value)} /></label>)}</div>
             <fieldset><legend className="mb-2 text-sm">Required record types</legend><div className="flex flex-wrap gap-4">{HI_TYPES.map((type) => <label className="flex items-center gap-2 text-sm" key={type}><input type="checkbox" checked={types.includes(type)} onChange={(event) => setTypes((current) => event.target.checked ? [...current, type] : current.filter((entry) => entry !== type))} />{type}</label>)}</div></fieldset>

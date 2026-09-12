@@ -8,7 +8,6 @@ import { PatientSearch } from "@/features/receptionist/PatientSearch";
 import { meridian } from "@/styles/theme";
 import { useConsentDetail } from "../hooks/useConsentDetail";
 import { useConsentRecords } from "../hooks/useConsentRecords";
-import { useDataAccessLogs } from "../hooks/useDataAccessLogs";
 import { ConsentListPanel } from "./ConsentListPanel";
 import { ConsentRecordDetail } from "./ConsentRecordDetail";
 import { ConsentGrantForm } from "./ConsentGrantForm";
@@ -27,7 +26,6 @@ export function ConsentDashboard() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const list = useConsentRecords({ status: "all", patient_id: patient?.id });
   const detail = useConsentDetail(patient?.id ?? null, selectedId);
-  const access = useDataAccessLogs(selectedId);
 
   const handleRecordUpdated = useCallback(() => {
     void list.refresh();
@@ -113,9 +111,9 @@ export function ConsentDashboard() {
               {list.error}
             </Typography>
           ) : null}
-          {detail.error || access.error ? (
+          {detail.error ? (
             <Typography role="alert" sx={{ color: meridian.danger, fontSize: "0.875rem" }}>
-              {detail.error ?? access.error}
+              {detail.error}
             </Typography>
           ) : null}
           <Box
@@ -127,21 +125,19 @@ export function ConsentDashboard() {
             }}
           >
             <ConsentListPanel
-          rows={list.rows}
-          loading={list.loading}
-          query={list.filters.query ?? ""}
-          status={list.filters.status ?? "all"}
-          selectedId={selectedId}
-          onQueryChange={list.setQuery}
-          onStatusChange={list.setStatus}
-          onSelect={setSelectedId}
-        />
-        <ConsentRecordDetail
-          record={detail.record}
-          loading={detail.loading}
-          accessRows={access.rows}
-          accessLoading={access.loading}
-          onRecordUpdated={handleRecordUpdated}
+              rows={list.rows}
+              loading={list.loading}
+              query={list.filters.query ?? ""}
+              status={list.filters.status ?? "all"}
+              selectedId={selectedId}
+              onQueryChange={list.setQuery}
+              onStatusChange={list.setStatus}
+              onSelect={setSelectedId}
+            />
+            <ConsentRecordDetail
+              record={detail.record}
+              loading={detail.loading}
+              onRecordUpdated={handleRecordUpdated}
             />
           </Box>
         </>

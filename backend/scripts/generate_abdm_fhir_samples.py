@@ -21,6 +21,9 @@ def _common() -> dict:
             "id": "validation-patient",
             "name": "Validation Patient",
             "identifier": "VALIDATION-UHID",
+            # Exercise the second identifier too: samples without ABHA hid a
+            # missing mandatory Patient.identifier.type in the live exporter.
+            "abha_number": "91000000000001",
             "gender": "unknown",
             "birth_date": date(1990, 1, 1),
         },

@@ -3,22 +3,28 @@
 import { useEffect, useState } from "react";
 import { getUserFacingError } from "@/lib/api";
 import { loadRecord } from "./api";
+import { EmbeddedPdfPreview } from "./EmbeddedPdfPreview";
+import { embeddedPdfs, type EmbeddedPdf } from "./pdfAttachments";
 
-/** External XHTML, URLs and attachments are untrusted. Render text only;
- * never inject a narrative as HTML or fetch a remote attachment automatically. */
+/** Narratives remain escaped text; PDF bytes are rendered separately to canvas. */
 function Value({ value, depth = 0 }: { value: unknown; depth?: number }) {
   if (depth > 12) return <span>Nested content omitted from this view.</span>;
   if (value == null) return <span>—</span>;
   if (typeof value !== "object") return <span className="whitespace-pre-wrap break-words">{String(value)}</span>;
   if (Array.isArray(value)) return <ul className="space-y-2 border-l pl-3">{value.map((entry, index) => <li key={index}><Value value={entry} depth={depth + 1} /></li>)}</ul>;
-  return <dl className="space-y-2">{Object.entries(value).map(([name, child]) => <div key={name}>
+  return <dl className="space-y-2">{Object.entries(value).filter(([name]) => !(name === "data" && "contentType" in value)).map(([name, child]) => <div key={name}>
     <dt className="text-xs font-semibold text-muted-foreground">{name}</dt><dd className="pl-2"><Value value={child} depth={depth + 1} /></dd>
   </div>)}</dl>;
 }
 
 export function ExternalRecordViewer({ id, close }: { id: string; close: () => void }) {
+  return <ExternalRecordBody key={id} id={id} close={close} />;
+}
+
+function ExternalRecordBody({ id, close }: { id: string; close: () => void }) {
   const [bundle, setBundle] = useState<Record<string, unknown> | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [selectedPdf, setSelectedPdf] = useState<number | null>(null);
   useEffect(() => {
     let current: AbortController | null = null;
     let disposed = false;
@@ -43,11 +49,19 @@ export function ExternalRecordViewer({ id, close }: { id: string; close: () => v
     return () => { disposed = true; current?.abort(); window.clearInterval(timer); document.removeEventListener("visibilitychange", onVisibility); window.removeEventListener("blur", onVisibility); };
   }, [id]);
   const entries = Array.isArray(bundle?.entry) ? bundle.entry : [];
+  let attachments: EmbeddedPdf[] = [];
+  let attachmentError = false;
+  try { attachments = bundle ? embeddedPdfs(bundle) : []; } catch { attachmentError = true; }
   return <section className="surface-card space-y-4 p-5" aria-label="External clinical record">
     <div className="flex justify-between gap-4"><h2 className="text-xl font-semibold">External clinical record</h2><button type="button" className="underline" onClick={close}>Close record</button></div>
-    <p className="text-sm text-muted-foreground">Read-only record received from another HIP. It has not been imported into this patient’s local chart. Access is rechecked every 15 seconds. External links and attachments are not opened.</p>
+    <p className="text-sm text-muted-foreground">Read-only record received from another HIP. It has not been imported into this patient’s local chart. Access is rechecked every 15 seconds. Embedded PDFs can be previewed; external links are never opened.</p>
     {error && <p role="alert" className="text-danger">{error}</p>}
     {!bundle && !error && <p role="status">Checking consent and loading record…</p>}
+    {attachmentError && <p role="alert">The PDF attachments could not be safely displayed.</p>}
+    {attachments.map((pdf, index) => <div key={index} className="space-y-3 rounded border p-3">
+      <button type="button" className="underline" onClick={() => setSelectedPdf(selectedPdf === index ? null : index)}>{selectedPdf === index ? "Close PDF preview" : `Preview ${pdf.title}`}</button>
+      {selectedPdf === index && <EmbeddedPdfPreview key={`${id}:${index}`} data={pdf.data} title={pdf.title} />}
+    </div>)}
     {entries.map((entry: unknown, index) => {
       const resource = typeof entry === "object" && entry !== null && "resource" in entry ? entry.resource : entry;
       const title = typeof resource === "object" && resource !== null && "resourceType" in resource ? String(resource.resourceType) : "Resource";

@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admissions.models import Admission, Discharge
 from app.allergies.models import Allergy
+from app.common.config import get_settings
 from app.common.db import SessionLocal
 from app.integrations.abdm.fhir.builder import build_clinical_bundle
 from app.integrations.abdm.hip import gateway as hip_gateway
@@ -133,8 +134,30 @@ async def _clinical_facts(
     visit, primary = source.visit, source.encounter
     encounters = [primary] if primary is not None else []
     practitioner = await db.get(User, source.author_id)
-    if practitioner is None or not practitioner.registration_number:
+    if practitioner is None:
         raise TransferError("Document author has no registration number")
+    practitioner_facts = {"id": practitioner.id, "name": practitioner.full_name}
+    if (practitioner.registration_number or "").strip():
+        practitioner_facts["registration_number"] = practitioner.registration_number
+    else:
+        settings = get_settings()
+        # Never turn a missing licence into a plausible licence. This opt-in
+        # is exact-document scoped, development only, and emits AN in a local
+        # sandbox namespace. The normal production requirement is unchanged.
+        sandbox_author_allowed = (
+            settings.environment == "dev"
+            and settings.abdm_gateway_base_url == "https://dev.abdm.gov.in"
+            and settings.abdm_x_cm_id == "sbx"
+            and context.id in settings.abdm_sandbox_local_author_context_ids
+            and source.kind == "wellness"
+            and context.display.startswith("ABDM SANDBOX TEST — SYNTHETIC WellnessRecord;")
+            and practitioner.username.startswith("dev.")
+            and practitioner.is_active
+            and practitioner.facility_id == facility.id
+        )
+        if not sandbox_author_allowed:
+            raise TransferError("Document author has no registration number")
+        practitioner_facts["sandbox_account_id"] = str(practitioner.id)
     if not facility.hfr_facility_id:
         raise TransferError("Facility has no HFR identifier")
 
@@ -347,11 +370,7 @@ async def _clinical_facts(
             "birth_date": patient.dob,
             "mobile": patient.mobile,
         },
-        "practitioner": {
-            "id": practitioner.id,
-            "name": practitioner.full_name,
-            "registration_number": practitioner.registration_number,
-        },
+        "practitioner": practitioner_facts,
         "organization": {
             "id": facility.id,
             "name": facility.name,
@@ -367,6 +386,7 @@ async def _clinical_facts(
         },
         "authored_at": authored_at,
         "care_context_reference": context.reference,
+        "document_label": context.display,
         "chief_complaints": [
             {"id": row.id, "text": row.chief_complaint} for row in encounters if row.chief_complaint
         ],
