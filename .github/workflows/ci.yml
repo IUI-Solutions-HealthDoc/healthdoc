@@ -126,6 +126,10 @@ jobs:
         with: { fetch-depth: 0 }
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "21" }
+      - name: Build checksum-pinned ABDM crypto helper
+        run: python crypto/build.py
 
       # pg_dump/pg_restore for the backup/restore tests (#244). Pinned to 16 to
       # match the postgres service: pg_dump refuses to run against a server
@@ -290,6 +294,14 @@ jobs:
           E2E_RUN_ID: external-results-${{ github.run_id }}-${{ github.run_attempt }}
           E2E_EVIDENCE_DIR: ${{ runner.temp }}/healthdoc-e2e/external-results
         run: npm run test:external-results-ui
+
+      # Real login and PDF rendering; synthetic intercepted clinical transport.
+      # This proves preview isolation and access-refresh refusal, not NHA exchange.
+      - name: ABDM PDF preview and consent-refresh safety
+        working-directory: frontend
+        env:
+          E2E_EVIDENCE_DIR: ${{ runner.temp }}/healthdoc-e2e/abdm-pdf-ui
+        run: npm run test:abdm-pdf-ui
 
       # Each run creates its own synthetic tariff code; no hospital fee
       # schedule is revised. Includes real 204 retirement and role refusals.

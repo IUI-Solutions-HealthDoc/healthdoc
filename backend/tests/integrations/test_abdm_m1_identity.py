@@ -27,7 +27,7 @@ import pytest
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
-from app.integrations.abdm.client import AbdmResponse
+from app.integrations.abdm.client import AbdmRejected, AbdmResponse
 from app.integrations.abdm.identity import crypto, otp_session, service
 from app.integrations.abdm.identity.otp_session import (
     OtpPurpose,
@@ -121,6 +121,46 @@ def _decrypt(rsa_key, b64: str) -> str:
     return rsa_key.decrypt(base64.b64decode(b64), padding.OAEP(
         mgf=padding.MGF1(hashes.SHA1()), algorithm=hashes.SHA1(), label=None,
     )).decode()
+
+
+async def test_gateway_rejection_logs_only_safe_metadata(monkeypatch, caplog):
+    class RejectingGateway:
+        async def request(self, *args, **kwargs):
+            raise AbdmRejected(400, {
+                "code": "ABDM-1042",
+                "loginId": "private-identifier",
+                "message": "private-identifier secret-token",
+                "errors": [{"field": "otpValue", "message": "private-otp"},
+                           {"code": "private-identifier", "field": "secret-token"}],
+            }, "11111111-1111-4111-8111-111111111111")
+
+    monkeypatch.setattr(service, "get_abdm_client", lambda: RejectingGateway())
+    with caplog.at_level(logging.WARNING), pytest.raises(AbdmRejected):
+        await service.request_login_otp(
+            abha_number="91111122223333", facility_id=FACILITY_A, started_by=STAFF,
+        )
+    message = " ".join(record.getMessage() for record in caplog.records)
+    assert "ABDM-1042" in message
+    assert "loginId" in message and "otpValue" in message
+    assert "11111111-1111-4111-8111-111111111111" in message
+    for private in ("private-identifier", "secret-token", "private-otp", "91111122223333"):
+        assert private not in message
+
+
+@pytest.mark.parametrize("number", ["91111122223333", "91-1111-2222-3333", " 91-1111-2222-3333 "])
+async def test_login_encrypts_the_hyphenated_abha_number(monkeypatch, rsa_key, number):
+    gw = _gateway(monkeypatch, [{"txnId": "synthetic-login-transaction"}])
+    await service.request_login_otp(
+        abha_number=number, facility_id=FACILITY_A, started_by=STAFF,
+    )
+    assert gw.calls[0][0] == "https://abha.test/abha/api/v3/profile/login/request/otp"
+    assert set(gw.last_body) == {"scope", "loginHint", "otpSystem", "loginId"}
+    assert gw.last_body["scope"] == ["abha-login", "mobile-verify"]
+    assert gw.last_body["loginHint"] == "abha-number"
+    assert gw.last_body["otpSystem"] == "abdm"
+    assert _decrypt(rsa_key, gw.last_body["loginId"]) == "91-1111-2222-3333"
+    assert "91111122223333" not in json.dumps(gw.last_body)
+    assert "91-1111-2222-3333" not in json.dumps(gw.last_body)
 
 
 # ------------------------------------------------- the Aadhaar never travels raw

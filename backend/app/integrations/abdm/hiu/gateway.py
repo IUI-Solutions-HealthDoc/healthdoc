@@ -38,8 +38,9 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.common.config import get_settings
-from app.integrations.abdm.client import AbdmResponse, get_abdm_client
+from app.integrations.abdm.client import AbdmProtocolError, AbdmResponse, get_abdm_client
 from app.integrations.abdm.hip.gateway import HI_TYPES, validate_hi_types
+from app.integrations.abdm.hiu.requester import validate_requester
 
 log = logging.getLogger("healthdoc.abdm")
 
@@ -121,6 +122,7 @@ async def _post(
     *,
     extra_headers: Mapping[str, str] | None = None,
     request_id: str | None = None,
+    expected_status: int | None = None,
 ) -> tuple[str, AbdmResponse]:
     rid = request_id or str(uuid.uuid4())
     client = get_abdm_client()
@@ -133,6 +135,8 @@ async def _post(
     )
     # Path and status only — these bodies carry ABHA addresses and consent ids.
     log.info("ABDM HIU call %s -> %s (request_id=%s)", path, response.status_code, rid)
+    if expected_status is not None and response.status_code != expected_status:
+        raise AbdmProtocolError(response.status_code)
     return rid, response
 
 
@@ -148,6 +152,7 @@ async def request_consent(
     date_from: datetime,
     date_to: datetime,
     expiry: datetime,
+    requester: Mapping[str, Any],
     purpose: Mapping[str, str] | None = None,
     hip_id: str | None = None,
     request_id: str | None = None,
@@ -166,12 +171,14 @@ async def request_consent(
     validate_hi_types(hi_types)
     if date_to < date_from:
         raise ValueError("date_to is before date_from")
+    verified_requester = validate_requester(requester)
     return await _post(
         settings.abdm_path_hiu_consent_request_init,
         {
             "consent": {
                 "hip": {"id": hip_id} if hip_id else None,
                 "hiu": {"id": hiu_id()},
+                "requester": verified_requester,
                 "hiTypes": list(hi_types),
                 "patient": {"id": abha_address},
                 "purpose": dict(purpose or PURPOSE_CARE_MANAGEMENT),
@@ -189,6 +196,7 @@ async def request_consent(
         },
         extra_headers={"X-HIU-ID": hiu_id()},
         request_id=request_id,
+        expected_status=202,
     )
 
 
@@ -304,6 +312,7 @@ async def request_health_information(
         },
         extra_headers={"X-HIU-ID": hiu_id()},
         request_id=request_id,
+        expected_status=202,
     )
 
 
@@ -321,7 +330,15 @@ async def notify_hi_receipt(
     Same endpoint the HIP notifies on; `notifier.type` and `sessionStatus` are
     what distinguish the two sides. Without it the gateway shows the patient a
     transfer stuck at "sent" forever.
+
+    The supplied v3 Postman HIU example and M3 v2.8 prose specify RECEIVED /
+    FAILED and OK / ERRORED. Some Word examples copy the HIP's TRANSFERRED;
+    that is a sender status, not evidence of authenticated receipt.
     """
+    if session_status not in {"RECEIVED", "FAILED"}:
+        raise ValueError("HIU receipt session status must be RECEIVED or FAILED")
+    if any(item.get("hiStatus") not in {"OK", "ERRORED"} for item in status_responses):
+        raise ValueError("HIU receipt entry status must be OK or ERRORED")
     settings = get_settings()
     return await _post(
         settings.abdm_path_hip_hi_notify,
@@ -340,4 +357,5 @@ async def notify_hi_receipt(
         },
         extra_headers={"X-HIU-ID": hiu_id()},
         request_id=request_id,
+        expected_status=202,
     )

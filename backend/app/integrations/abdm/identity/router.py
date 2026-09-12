@@ -33,6 +33,7 @@ from app.integrations.abdm.client import (
 from app.integrations.abdm.identity import otp_session
 from app.integrations.abdm.identity import service as identity_service
 from app.integrations.abdm.identity.crypto import AbdmPublicKeyMissing
+from app.integrations.abdm.identity.formatting import hyphenate_abha
 from app.integrations.abdm.identity.otp_session import (
     OtpPurpose,
     OtpSessionMismatch,
@@ -66,19 +67,6 @@ _VERIFY_PATH: str | None = "/v3/profile/login/search"
 
 #: ABDM's "this ABHA does not exist" answer. Distinct from a gateway outage.
 _ABHA_NOT_FOUND_CODE = "ABDM-1114"
-
-
-def _hyphenate_abha(stored: str) -> str:
-    """`91000000000001` -> `91-0000-0000-0001`, the only form ABDM accepts.
-
-    We normalise to digits for storage (`_normalise_abha`), so every outbound
-    call has to undo that. Returned unchanged if it is not 14 digits — ABDM
-    will reject it and say so, which beats us silently mangling a value.
-    """
-    digits = stored.replace("-", "").strip()
-    if len(digits) != 14 or not digits.isdigit():
-        return stored
-    return f"{digits[:2]}-{digits[2:6]}-{digits[6:10]}-{digits[10:]}"
 
 
 async def _verify_with_gateway(abha_number: str) -> dict | None:
@@ -141,7 +129,7 @@ async def _verify_with_gateway(abha_number: str) -> dict | None:
             # while the client's base is the gateway. Same pattern as
             # identity/service.py.
             f"{get_settings().abdm_abha_base_url.rstrip('/')}{_VERIFY_PATH}",
-            json={"ABHANumber": _hyphenate_abha(abha_number)},
+            json={"ABHANumber": hyphenate_abha(abha_number)},
         )
     except AbdmNotConfigured:
         log.info("ABDM not configured — ABHA recorded without gateway verification")

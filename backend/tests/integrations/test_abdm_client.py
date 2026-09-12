@@ -14,6 +14,7 @@ What these prove, in the order the failures would actually bite:
   - every authenticated call carries Authorization, REQUEST-ID, TIMESTAMP, X-CM-ID
   - the REQUEST-ID we sent comes back to the caller for the audit row
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -25,6 +26,7 @@ import pytest
 from app.integrations.abdm.client import (
     AbdmAuthError,
     AbdmClient,
+    AbdmError,
     AbdmNotConfigured,
     AbdmRejected,
     AbdmUnavailable,
@@ -176,6 +178,7 @@ async def test_bad_credentials_raise_auth_error_not_unavailable():
     record unverified. If bad credentials arrived as Unavailable, every patient
     would be silently marked unverified and nobody would notice for weeks.
     """
+
     def handler(request):
         return httpx.Response(401, json={"error": "invalid_client"})
 
@@ -253,6 +256,114 @@ async def test_4xx_is_rejected_and_carries_the_gateway_explanation():
     assert exc.value.status_code == 400
     assert exc.value.detail["code"] == "ABDM-1042"
     assert exc.value.request_id
+
+
+async def test_failure_diagnostics_do_not_include_credentials_or_patient_content():
+    from app.integrations.abdm.client import safe_failure_summary
+
+    body = {"error": {"code": "ABDM-1042: ", "message": "SECRET-TOKEN patient@sbx"}}
+    exc = AbdmRejected(400, body, "SECRET-REQUEST-ID")
+    assert exc.detail == body
+    assert safe_failure_summary(exc) == "AbdmRejected:request:400:ABDM-1042"
+    for rendered in (str(exc), repr(exc), safe_failure_summary(exc)):
+        assert "SECRET" not in rendered and "patient@sbx" not in rendered
+    exc.detail = [{"code": "SECRET-TOKEN"}, {"code": "ABDM-1042 patient@sbx"}]
+    assert safe_failure_summary(exc) == "AbdmRejected:request:400"
+
+
+@pytest.mark.parametrize(("stage", "status"), [("session", 500), ("request", 403)])
+async def test_failure_diagnostics_distinguish_session_from_operation(stage, status):
+    from app.integrations.abdm.client import safe_failure_summary
+
+    def handler(request):
+        if stage == "session" or request.url.path != SESSION_PATH:
+            return httpx.Response(status, json={"message": "SECRET-TOKEN patient@sbx"})
+        return _session_ok(request)
+
+    error_type = AbdmUnavailable if status == 500 else AbdmAuthError
+    with pytest.raises(error_type) as caught:
+        await _client(handler).request("POST", "/v3/link")
+    assert safe_failure_summary(caught.value) == f"{error_type.__name__}:{stage}:{status}"
+
+
+@pytest.mark.parametrize("status", [401, 403, 500])
+@pytest.mark.parametrize("stage", ["session", "request"])
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        ({"error": {"code": "ABDM-1066", "message": "SECRET patient@sbx"}}, "ABDM-1066"),
+        ({"fault": {"code": 900908, "description": "SECRET patient@sbx"}}, "900908"),
+        ({"code": "900910", "message": "SECRET patient@sbx"}, "900910"),
+        ({"code": "12345678901234", "message": "SECRET patient@sbx"}, ""),
+        ({"fault": {"code": "900908 SECRET patient@sbx"}}, ""),
+    ],
+)
+async def test_auth_and_outage_errors_keep_only_safe_codes(status, stage, body, expected):
+    from app.integrations.abdm.client import safe_failure_summary
+
+    def handler(request):
+        if stage == "session" or request.url.path != SESSION_PATH:
+            return httpx.Response(status, json=body)
+        return _session_ok(request)
+
+    error_type = AbdmUnavailable if status == 500 else AbdmAuthError
+    with pytest.raises(error_type) as caught:
+        await _client(handler).request("POST", "/v3/link")
+    summary = safe_failure_summary(caught.value)
+    suffix = f":{expected}" if expected else ""
+    assert summary == f"{error_type.__name__}:{stage}:{status}{suffix}"
+    assert not hasattr(caught.value, "detail"), "Auth error must not retain its raw body"
+    for rendered in (summary, str(caught.value), repr(caught.value)):
+        assert "SECRET" not in rendered and "patient@sbx" not in rendered
+
+
+@pytest.mark.parametrize("stage", ["session", "request"])
+async def test_transport_failure_retains_stage_without_transport_details(stage):
+    from app.integrations.abdm.client import safe_failure_summary
+
+    def handler(request):
+        if stage == "session" or request.url.path != SESSION_PATH:
+            raise httpx.ConnectError("SECRET patient@sbx", request=request)
+        return _session_ok(request)
+
+    with pytest.raises(AbdmUnavailable) as caught:
+        await _client(handler).request("POST", "/v3/link")
+    assert safe_failure_summary(caught.value) == f"AbdmUnavailable:{stage}"
+
+
+@pytest.mark.parametrize("status", [301, 302, 303, 304, 307, 308])
+@pytest.mark.parametrize("stage", ["session", "request"])
+async def test_redirect_is_not_success_and_never_forwards_secrets(status, stage, caplog):
+    from app.integrations.abdm.client import safe_failure_summary
+
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        if stage == "request" and request.url.path == SESSION_PATH:
+            return _session_ok(request)
+        # Even a redirect carrying a plausible token is not a session response.
+        return httpx.Response(
+            status,
+            headers={"Location": "https://other.test/SECRET?patient=patient@sbx"},
+            json={"accessToken": "SECRET", "expiresIn": 1800},
+        )
+
+    client = _client(handler)
+    try:
+        with pytest.raises(AbdmError) as caught:
+            await client.request("POST", "/v3/link", json={"patient": "patient@sbx"})
+        assert type(caught.value).__name__ == "AbdmProtocolError"
+        assert safe_failure_summary(caught.value) == f"AbdmProtocolError:{stage}:{status}"
+        assert len(seen) == (1 if stage == "session" else 2)
+        assert all(request.url.host == "gateway.test" for request in seen)
+        assert not hasattr(caught.value, "detail")
+        for rendered in (str(caught.value), repr(caught.value), caplog.text):
+            assert "SECRET" not in rendered and "patient@sbx" not in rendered
+        if stage == "session":
+            assert client._tokens.get_if_fresh() is None
+    finally:
+        await client.aclose()
 
 
 # -------------------------------------------------------------------- headers

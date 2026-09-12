@@ -24,7 +24,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from app.common.config import Settings
-from app.integrations.abdm.client import AbdmResponse
+from app.integrations.abdm.client import AbdmError, AbdmResponse
 from app.integrations.abdm.hip import gateway as hip_gw
 from app.integrations.abdm.hiu import gateway as hiu_gw
 
@@ -32,6 +32,10 @@ pytestmark = pytest.mark.asyncio
 
 FROM = datetime(2026, 1, 1, tzinfo=UTC)
 TO = datetime(2026, 6, 1, tzinfo=UTC)
+REQUESTER = {
+    "name": "Synthetic Test Clinician",
+    "identifier": {"type": "REGNO1", "value": "TEST-ONLY", "system": "https://registry.test"},
+}
 
 
 class _StubClient:
@@ -153,6 +157,75 @@ async def test_link_care_contexts_sends_the_link_token_header(stub):
     assert patient["referenceNumber"] == "ram@sbx"
     assert patient["careContexts"] == [{"referenceNumber": "V-1", "display": "Blood Test"}]
     assert patient["count"] == 1
+
+
+async def test_mixed_hi_types_share_one_authenticated_link_request(stub):
+    groups = {
+        kind: [{"referenceNumber": f"test-{kind}", "display": "Synthetic record"}]
+        for kind in hip_gw.HI_TYPES
+    }
+    await hip_gw.link_care_contexts(
+        abha_address="test@sbx",
+        link_token="SYNTHETIC",
+        display="Synthetic Test",
+        groups=groups,
+        request_id="same-request-id",
+    )
+    assert len(stub.calls) == 1
+    assert stub.last["headers"]["X-LINK-TOKEN"] == "SYNTHETIC"
+    assert stub.last["request_id"] == "same-request-id"
+    rows = stub.last["json"]["patient"]
+    assert [row["hiType"] for row in rows] == sorted(hip_gw.HI_TYPES)
+    for row in rows:
+        assert row["careContexts"] == groups[row["hiType"]] and row["count"] == 1
+
+
+@pytest.mark.parametrize("problem", ["duplicate", "empty", "unknown"])
+async def test_grouped_linking_rejects_ambiguous_document_sets(stub, problem):
+    groups = {
+        "Prescription": [{"referenceNumber": "C1", "display": "Synthetic record"}],
+        "WellnessRecord": [{"referenceNumber": "C2", "display": "Synthetic record"}],
+    }
+    if problem == "duplicate":
+        groups["WellnessRecord"][0]["referenceNumber"] = "C1"
+    elif problem == "empty":
+        groups["WellnessRecord"] = []
+    else:
+        groups["UnknownType"] = groups.pop("WellnessRecord")
+    with pytest.raises(ValueError):
+        await hip_gw.link_care_contexts(
+            abha_address="test@sbx",
+            link_token="SYNTHETIC",
+            display="Synthetic Test",
+            groups=groups,
+        )
+    assert stub.calls == []
+
+
+@pytest.mark.parametrize("operation", ["token", "context"])
+@pytest.mark.parametrize("status", [200, 204, 302])
+async def test_linking_requires_documented_async_acceptance(stub, operation, status):
+    """M2 v2.8 specifies 202, not an arbitrary non-error web response."""
+    stub._status = status
+    stub._body = {"message": "SECRET patient@sbx"}
+    with pytest.raises(AbdmError) as caught:
+        if operation == "token":
+            await hip_gw.generate_link_token(
+                abha_address="patient@sbx", name="Test", gender="M", year_of_birth="1990"
+            )
+        else:
+            await hip_gw.link_care_contexts(
+                abha_address="patient@sbx",
+                link_token="SECRET",
+                display="Synthetic record",
+                care_contexts=[{"referenceNumber": "C1", "display": "Synthetic record"}],
+                hi_type="WellnessRecord",
+            )
+    assert type(caught.value).__name__ == "AbdmProtocolError"
+    assert caught.value.status_code == status
+    assert caught.value.stage == "request"
+    assert len(stub.calls) == 1, "unexpected acceptance must not cause an immediate replay"
+    assert "SECRET" not in str(caught.value) and "patient@sbx" not in str(caught.value)
 
 
 async def test_notify_care_context_shape(stub):
@@ -291,11 +364,13 @@ async def test_consent_request_shape(stub):
         date_from=FROM,
         date_to=TO,
         expiry=TO + timedelta(days=30),
+        requester=REQUESTER,
     )
     call = stub.last
     assert call["path"] == "/api/hiecm/consent/v3/request/init"
     assert call["headers"] == {"X-HIU-ID": "SBXID_TEST_HIU"}
     consent = call["json"]["consent"]
+    assert consent["requester"] == REQUESTER
     assert consent["hiu"] == {"id": "SBXID_TEST_HIU"}
     # ABDM's own example sends an explicit null for "any HIP".
     assert consent["hip"] is None
@@ -356,6 +431,59 @@ async def test_hiu_receipt_notification_identifies_us_as_the_hiu(stub):
     assert n["notifier"] == {"type": "HIU", "id": "SBXID_TEST_HIU"}
     # hipId names the SENDER, which is not us.
     assert n["statusNotification"]["hipId"] == "OTHER_HIP"
+    assert n["statusNotification"]["sessionStatus"] == "RECEIVED"
+
+
+@pytest.mark.parametrize(
+    ("session_status", "entry_status"),
+    [("TRANSFERRED", "OK"), ("ACKNOWLEDGED", "OK"), ("RECEIVED", "DELIVERED")],
+)
+async def test_hiu_receipt_refuses_hip_or_request_statuses(stub, session_status, entry_status):
+    with pytest.raises(ValueError):
+        await hiu_gw.notify_hi_receipt(
+            consent_id="C-1",
+            transaction_id="T-1",
+            session_status=session_status,
+            hip_id="OTHER_HIP",
+            status_responses=[{"careContextReference": "V-1", "hiStatus": entry_status}],
+        )
+    assert stub.calls == []
+
+
+@pytest.mark.parametrize("status", [200, 204])
+@pytest.mark.parametrize("operation", ["consent", "request", "receipt"])
+async def test_hiu_async_operations_require_documented_202(stub, status, operation):
+    stub._status = status
+    with pytest.raises(AbdmError) as caught:
+        if operation == "consent":
+            await hiu_gw.request_consent(
+                abha_address="test@sbx",
+                hi_types=["WellnessRecord"],
+                date_from=FROM,
+                date_to=TO,
+                expiry=TO,
+                requester=REQUESTER,
+            )
+        elif operation == "request":
+            await hiu_gw.request_health_information(
+                consent_id="C-1",
+                date_from=FROM,
+                date_to=TO,
+                dh_public_key="SYNTHETIC",
+                key_expiry=TO,
+                nonce="SYNTHETIC",
+            )
+        else:
+            await hiu_gw.notify_hi_receipt(
+                consent_id="C-1",
+                transaction_id="T-1",
+                session_status="RECEIVED",
+                hip_id="OTHER-HIP",
+                status_responses=[],
+            )
+    assert type(caught.value).__name__ == "AbdmProtocolError"
+    assert caught.value.status_code == status
+    assert len(stub.calls) == 1
 
 
 # =============================================================================
@@ -391,6 +519,7 @@ async def test_a_backwards_date_range_is_refused(stub):
             date_from=TO,
             date_to=FROM,
             expiry=TO,
+            requester=REQUESTER,
         )
     assert stub.calls == []
 
@@ -404,6 +533,7 @@ async def test_timestamps_use_a_literal_z_not_an_offset(stub):
         date_from=FROM,
         date_to=TO,
         expiry=TO,
+        requester=REQUESTER,
     )
     rng = stub.last["json"]["consent"]["permission"]["dateRange"]
     assert rng["from"].endswith("Z") and "+00:00" not in rng["from"]
@@ -419,6 +549,7 @@ async def test_a_naive_datetime_is_treated_as_utc_not_local(stub):
         date_from=datetime(2026, 1, 1),
         date_to=datetime(2026, 6, 1),
         expiry=datetime(2026, 6, 1),
+        requester=REQUESTER,
     )
     assert stub.last["json"]["consent"]["permission"]["dateRange"]["from"] == (
         "2026-01-01T00:00:00.000Z"

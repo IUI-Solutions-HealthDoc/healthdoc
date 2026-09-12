@@ -1,7 +1,9 @@
 """Central settings — every module reads config from here, never os.environ directly."""
 
 from functools import lru_cache
+from uuid import UUID
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -59,6 +61,10 @@ class Settings(BaseSettings):
     # ABDM v3 OpenAPI paths already include /api/hiecm/gateway/v3. Keep the
     # origin here so joining a path cannot silently produce /gateway/v3/*.
     abdm_gateway_base_url: str = "https://dev.abdm.gov.in"
+    # Local crypto executable/artifacts, not an HTTP service. Docker sets both;
+    # host test setup may point at an installed JDK and locally built helper.
+    healthdoc_java: str = "java"
+    healthdoc_ecdh_runtime: str | None = None
     abdm_client_id: str = "change-me"
     #: Our identities ON the gateway, registered with
     #: PUT /api/hiecm/gateway/v3/bridge-service. These are NOT the client id:
@@ -68,12 +74,20 @@ class Settings(BaseSettings):
     #: facility and 404s.
     abdm_hip_id: str = "change-me"
     abdm_hiu_id: str = "change-me"
-    abdm_client_secret: str = "change-me"
+    abdm_client_secret: str = Field(default="change-me", repr=False)
     abdm_hfr_facility_id: str = "change-me"
     # Consent-manager id sent as X-CM-ID on every gateway call. 'sbx' is the
     # sandbox; production is 'abdm'. Wrong value returns a 400 the gateway
     # does not explain, so it is configuration rather than a constant.
     abdm_x_cm_id: str = "sbx"
+
+    #: Explicit development-only synthetic WellnessRecord context UUIDs. An
+    #: allowlisted document may identify its dev.* author by the existing local
+    #: account UUID (FHIR AN), never by an invented medical licence (MD).
+    #: The transfer worker additionally checks environment, exact sandbox
+    #: gateway/CM, author facility/activity and the synthetic document label.
+    #: Empty by default; never copy the local opt-in into deployment config.
+    abdm_sandbox_local_author_context_ids: tuple[UUID, ...] = ()
 
     #: ABDM's PUBLIC certificate, used to encrypt Aadhaar numbers, mobile
     #: numbers and OTPs before transmission (see abdm/identity/crypto.py).
@@ -225,7 +239,7 @@ class Settings(BaseSettings):
     #: that writes consent artefacts and patient data is the single most
     #: dangerous thing in an HIP/HIU integration, and "we could not verify it
     #: yet, so we let it through" is how it gets shipped.
-    abdm_callback_shared_secret: str | None = None
+    abdm_callback_shared_secret: str | None = Field(default=None, repr=False)
 
     #: Our own base URL, given to the gateway so HIPs know where to push data.
     #: Placeholder means HIU data-transfer requests are refused rather than
@@ -236,7 +250,7 @@ class Settings(BaseSettings):
     #: integrations/abdm/hip/link_otp.py. Unset means the linking callback
     #: fails closed; accepting an unverified confirmation is never a fallback.
     abdm_link_otp_delivery_url: str | None = None
-    abdm_link_otp_delivery_token: str | None = None
+    abdm_link_otp_delivery_token: str | None = Field(default=None, repr=False)
 
     aadhaar_hmac_key: str = "change-me-in-env"
     aadhaar_encryption_key: str = "change-me-in-env"

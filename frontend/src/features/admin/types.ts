@@ -46,6 +46,8 @@ export type User = {
   designation: string | null;
   employee_id: string | null;
   registration_number: string | null;
+  registration_identifier_type: string | null;
+  registration_identifier_system: string | null;
   qualification: string | null;
   facility_id: string;
   department_id: string | null;
@@ -79,6 +81,8 @@ export type UserUpdateInput = {
   designation?: string | null;
   employee_id?: string | null;
   registration_number?: string | null;
+  registration_identifier_type?: string | null;
+  registration_identifier_system?: string | null;
   qualification?: string | null;
   department_id?: string | null;
 };

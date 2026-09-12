@@ -121,13 +121,23 @@ def _patient(data: Mapping[str, Any], authored_at: datetime) -> dict[str, Any]:
                     {"system": IDENTIFIER_TYPE, "code": "MR", "display": "Medical record number"}
                 ]
             },
-            "system": "https://healthid.abdm.gov.in",
+            # A hospital UHID/THID is not an identifier issued by ABDM.
+            "system": "https://healthdoc.world/identifiers/patient",
             "value": str(data["identifier"]),
         }
     ]
     if data.get("abha_number"):
         identifiers.append(
             {
+                "type": {
+                    "coding": [
+                        {
+                            "system": IDENTIFIER_TYPE,
+                            "code": "MR",
+                            "display": "Medical record number",
+                        }
+                    ]
+                },
                 "system": "https://healthid.abdm.gov.in",
                 "value": str(data["abha_number"]),
             }
@@ -150,26 +160,47 @@ def _patient(data: Mapping[str, Any], authored_at: datetime) -> dict[str, Any]:
 
 
 def _practitioner(data: Mapping[str, Any], authored_at: datetime) -> dict[str, Any]:
-    if not data.get("id") or not data.get("name") or not data.get("registration_number"):
-        raise ValueError("FHIR practitioner requires id, name and registration_number")
+    if not data.get("id") or not str(data.get("name") or "").strip():
+        raise ValueError("FHIR practitioner requires id and name")
+    registration = str(data.get("registration_number") or "").strip()
+    narrative = f"Practitioner: {data['name']}"
+    if registration:
+        code, display = "MD", "Medical License number"
+        system, value = "https://doctor.abdm.gov.in", registration
+    elif data.get("sandbox_account_id"):
+        # The caller must opt in after its environment/document checks. This
+        # identifies an existing local account, not an HPR or medical licence.
+        account_id = str(uuid.UUID(str(data["sandbox_account_id"])))
+        if account_id != str(data["id"]):
+            raise ValueError("Sandbox practitioner identifier must match the source author")
+        code, display = "AN", "Account number"
+        system = "https://healthdoc.world/identifiers/sandbox-staff-account"
+        value = account_id
+        narrative = (
+            f"Sandbox test practitioner account: {data['name']} (not a medical registration)"
+        )
+    else:
+        raise ValueError(
+            "FHIR practitioner requires registration_number or explicit sandbox account"
+        )
     return {
         "resourceType": "Practitioner",
         "id": _rid("practitioner", data["id"]),
         "meta": _meta("Practitioner", authored_at),
-        "text": _narrative(f"Practitioner: {data['name']}"),
+        "text": _narrative(narrative),
         "identifier": [
             {
                 "type": {
                     "coding": [
                         {
                             "system": IDENTIFIER_TYPE,
-                            "code": "MD",
-                            "display": "Medical License number",
+                            "code": code,
+                            "display": display,
                         }
                     ]
                 },
-                "system": "https://doctor.abdm.gov.in",
-                "value": str(data["registration_number"]),
+                "system": system,
+                "value": value,
             }
         ],
         "name": [{"text": str(data["name"])}],
@@ -532,6 +563,7 @@ def build_clinical_bundle(
     encounter: Mapping[str, Any],
     authored_at: datetime,
     care_context_reference: str,
+    document_label: str | None = None,
     chief_complaints: Sequence[Mapping[str, Any]] = (),
     diagnoses: Sequence[Mapping[str, Any]] = (),
     allergies: Sequence[Mapping[str, Any]] = (),
@@ -544,6 +576,9 @@ def build_clinical_bundle(
     if record_type not in _DOCUMENTS:
         raise ValueError(f"Unknown ABDM record type: {record_type!r}")
     profile, document_code, document_title = _DOCUMENTS[record_type]
+    # Preserve the registered document label (including explicit test warnings)
+    # without changing the profile's fixed/coded Composition.type vocabulary.
+    composition_title = (document_label or "").strip() or document_title
     patient_resource = _patient(patient, authored_at)
     practitioner_resource = _practitioner(practitioner, authored_at)
     organization_resource = _organization(organization, authored_at)
@@ -630,7 +665,7 @@ def build_clinical_bundle(
         "resourceType": "Composition",
         "id": str(uuid.uuid4()),
         "meta": _meta(profile, authored_at),
-        "text": _narrative(document_title),
+        "text": _narrative(composition_title),
         "identifier": {
             "system": "https://healthdoc.world/fhir/document",
             "value": str(uuid.uuid4()),
@@ -641,7 +676,7 @@ def build_clinical_bundle(
         "encounter": _reference(encounter_resource),
         "date": _iso(authored_at),
         "author": [_reference(practitioner_resource, str(practitioner["name"]))],
-        "title": document_title,
+        "title": composition_title,
         "custodian": _reference(organization_resource, str(organization["name"])),
         "section": sections,
     }

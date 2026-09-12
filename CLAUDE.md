@@ -243,6 +243,21 @@ the console shows `[HMR] connected`.
 
 ## Current state
 
+- **12 September crypto/PDF follow-up:** raw X25519 was incompatible with
+  Fidelius. The new checksum-pinned BC 1.86 helper supports full Curve25519
+  points and X.509 peer keys; known-answer and actual independent CLI exchanges
+  pass. Docker/CI build Java runtime; host tests need `make abdm-crypto` with
+  JDK 17+ (21 in CI/Docker). Stored keys are format-versioned; never reinterpret
+  legacy keys or frozen ciphertext. Embedded PDF intake and canvas-only viewer
+  pass synthetic real-browser acceptance including refused-consent refresh.
+  Full backend 1816 + 14 script tests, frontend 108/typecheck/build pass.
+  Cleanup-only container is running; one-shot cleared zero items. No general
+  delivery worker or new NHA clinical request. Current link remains pending,
+  participant local consent expired, requester metadata absent. Public health
+  404 is expected callback-only ingress; token callback GET 405 and registry
+  GET 200 were verified. Tool approval usage limit blocked subsequent probe/log
+  inspection. See `docs/abdm-crypto-pdf-cleanup-execution-2026-09-12.md`.
+
 - **ABDM closure branch (9 September)**: `fix/abdm-milestone-closure`
   adds exact finalized-document contexts, transactional publication, per-type HIP
   linking, durable delivery jobs/frozen encrypted transfer pages, protected HIU
@@ -399,8 +414,11 @@ must equal the HIP service id or inbound callbacks 404 at `_facility_for_hfr_id`
 DEV001 is set to `SBXID_053401_HIP`.
 
 **Official callbacks do not use HealthDoc's private shared secret.** The
-published v3 callback requests carry `REQUEST-ID`, `TIMESTAMP`, `X-CM-ID` and
-the addressed `X-HIP-ID`/`X-HIU-ID`; the published collection does not define a
+published v3 callback requests carry `REQUEST-ID`, `TIMESTAMP` and the addressed
+`X-HIP-ID`/`X-HIU-ID`. `X-CM-ID` is route-specific: M2/M3 v2.8 omit it on many
+callbacks, while HIU consent on-init requires it. Never infer inbound headers
+from outbound calls; see `docs/abdm-callback-header-matrix-2026-09-11.md`.
+The published collection does not define a
 request-signature header or canonical signing input. The root-level handlers
 therefore enforce those headers, UUID/timestamp freshness, replay coalescing,
 recipient matching and the durable consent/transaction state machine without
@@ -408,6 +426,47 @@ pretending that headers are cryptographic proof of origin. Source restrictions
 remain an ingress/Cloudflare control until NHA publishes a verifiable callback
 signature scheme. `ABDM_CALLBACK_SHARED_SECRET` protects only legacy private
 `/api/v1/abdm/...` callback routes and is not required by ABDM.
+
+**12 September live linking:** Same secret passes session/bridge checks. Fresh
+token request `d613360a-99e5-5fc4-873c-b804d01dba8a` completed on 11 September
+at 12:40 UTC but has no callback/token as of 12 September 04:19 UTC. The old
+dispatch did not retain its exact success HTTP status: job `done` is not proof
+of HTTP 202. Do not regenerate (three recorded token job attempts on 11 Sep),
+reset the expired original operation, start the general worker or claim M2/M3
+passed. Midnight does not prove a rolling quota reset. Local consent **expired
+11 September at 23:59 IST** and needs participant renewal before record access.
+Owner completed portal login: application approved with M1/M2/M3 requested;
+exit/production approval pending. Inspected account/exit pages have no request
+trace UI; integrator dashboard is aggregate statistics only. Support draft
+not sent. No completion declarations or configuration were changed. Initial
+automatic portal snapshot included its plain-text secret; subsequent reads
+redacted it, no secret copied to files and no rotation performed.
+Token failures/crashes stop after one attempt; explicit lost-callback recovery
+permits its existing one extra attempt. Auth/protocol failures are terminal;
+non-token transport retries remain. Redirects/non-2xx can no longer count as
+success. Token/link, HIU consent/data initiation and receipt require HTTP 202;
+HIU receipt success is `RECEIVED`, not HIP's `TRANSFERRED`.
+
+**M3 requester identity is now mandatory and explicit.** Migration 0069 adds
+staff registration identifier type/registry URI and consent requester snapshots;
+it is applied to local development and test databases, with no fake backfill.
+Admin → Users exposes these fields beside registration number. `dev.doctor`
+has none configured and cannot request consent until a genuine or NHA-approved
+sandbox requester is supplied. Completeness checks are not registry verification.
+Legacy missing snapshots fail closed rather than inventing attribution.
+
+**HIP linking groups an explicit selection, not one token per HI type.** Each
+document remains a separate context. Mixed-type selection uses one token job
+and one grouped POST; exact legacy replays preserve old IDs/counters. A changed
+selection cannot reuse the same idempotency key. Do not reset existing pending
+work or extend the five-minute local credential-use window to demonstrate it.
+Final regression: 1794 backend + 14 script tests pass, head 0069; six existing
+Pydantic warnings remain. One earlier DB SSL-setup error did not recur on the
+full rerun; no SSL settings or test retries were changed. Frontend: 106
+tests/typecheck pass; API contract: 214 calls. Whole-backend lint is not claimed
+clean (existing users-module findings persist). See
+`docs/abdm-m2-m3-next-day-runbook-2026-09-12.md` for the latest full backend
+verification and live execution boundary.
 
 **M1 ABHA verification is on.** `_VERIFY_PATH` is
 `/v3/profile/login/search`, relative to `abdm_abha_base_url` — the ABHA host,

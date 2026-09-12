@@ -1,4 +1,9 @@
-"""One independent link row per HI-type group; token and link IDs never alias."""
+"""One link operation per explicit selection; token and link IDs never alias.
+
+NHA accepts multiple HI-type groups in patient[]. Generating once per group
+wastes its bounded token quota. Each selected context still names one document.
+Legacy per-type operations retain their IDs/state on exact idempotent replays.
+"""
 
 import uuid
 from collections import defaultdict
@@ -60,42 +65,53 @@ async def initiate(
     )
     if len(contexts) != len(context_ids):
         raise DocumentUnavailable("One or more selected documents are unavailable")
-    groups = defaultdict(list)
     for context in contexts:
         await resolve_context_document(db, context)
-        groups[context.hi_type].append(context.reference)
-    links = []
-    for hi_type, references in sorted(groups.items()):
-        # Each type has independent correlation. Its stored references reject
-        # changed retries without aliasing the token and link request IDs.
-        ident = uuid.uuid5(
-            uuid.NAMESPACE_URL,
-            f"healthdoc:hip-link:{patient.facility_id}:{patient.id}:{idempotency_key}:{hi_type}",
-        )
-        link = await db.get(AbdmCareContextLink, ident)
-        if link is not None:
-            if link.abha_address != patient.abha_address or sorted(
-                link.care_context_references
-            ) != sorted(references):
-                raise DocumentUnavailable(
-                    "Idempotency key was already used for different documents"
+    references = sorted(context.reference for context in contexts)
+    prefix = f"healthdoc:hip-link:{patient.facility_id}:{patient.id}:{idempotency_key}"
+    ident = uuid.uuid5(uuid.NAMESPACE_URL, f"{prefix}:document-batch")
+    # Search ALL old type IDs, not only newly selected types. Otherwise a
+    # changed selection could silently reuse an old key for a different ask.
+    legacy_ids = [
+        uuid.uuid5(uuid.NAMESPACE_URL, f"{prefix}:{hi_type}") for hi_type in gateway.HI_TYPES
+    ]
+    existing = list(
+        (
+            await db.execute(
+                select(AbdmCareContextLink)
+                .where(
+                    AbdmCareContextLink.id.in_([ident, *legacy_ids]),
+                    AbdmCareContextLink.facility_id == patient.facility_id,
+                    AbdmCareContextLink.patient_id == patient.id,
                 )
-        else:
-            link = AbdmCareContextLink(
-                id=ident,
-                facility_id=patient.facility_id,
-                patient_id=patient.id,
-                abha_address=patient.abha_address,
-                care_context_references=sorted(references),
-                status="pending",
-                token_request_id=str(job_id("link_token", ident)),
-                gateway_request_id=str(job_id("link_context", ident)),
+                .order_by(AbdmCareContextLink.id)
             )
-            db.add(link)
-            await db.flush()
-            await enqueue(db, kind="link_token", target_id=link.id, facility_id=link.facility_id)
-        links.append(link)
-    return links
+        ).scalars()
+    )
+    if existing:
+        held = sorted(ref for link in existing for ref in link.care_context_references)
+        if (
+            held != references
+            or any(link.abha_address != patient.abha_address for link in existing)
+            or (len(existing) > 1 and any(link.id == ident for link in existing))
+        ):
+            raise DocumentUnavailable("Idempotency key was already used for different documents")
+        return existing  # Never reset old attempts or enqueue a replacement generation.
+
+    link = AbdmCareContextLink(
+        id=ident,
+        facility_id=patient.facility_id,
+        patient_id=patient.id,
+        abha_address=patient.abha_address,
+        care_context_references=references,
+        status="pending",
+        token_request_id=str(job_id("link_token", ident)),
+        gateway_request_id=str(job_id("link_context", ident)),
+    )
+    db.add(link)
+    await db.flush()
+    await enqueue(db, kind="link_token", target_id=link.id, facility_id=link.facility_id)
+    return [link]
 
 
 async def accept_token(
@@ -145,18 +161,27 @@ async def send_link(db: AsyncSession, link: AbdmCareContextLink) -> None:
         .scalars()
         .all()
     )
-    if (
-        len(contexts) != len(link.care_context_references)
-        or len({c.hi_type for c in contexts}) != 1
-    ):
-        raise DocumentUnavailable("Link operation must identify one complete HI-type group")
+    if not contexts or len(contexts) != len(link.care_context_references):
+        raise DocumentUnavailable("Link operation must identify the complete document selection")
+    groups = defaultdict(list)
     for context in contexts:
         await resolve_context_document(db, context)
+        groups[context.hi_type].append(
+            {"referenceNumber": context.reference, "display": context.display}
+        )
+    groups = {
+        kind: sorted(items, key=lambda item: item["referenceNumber"])
+        for kind, items in groups.items()
+    }
+    selection = (
+        {"hi_type": contexts[0].hi_type, "care_contexts": groups[contexts[0].hi_type]}
+        if len(groups) == 1
+        else {"groups": groups}
+    )
     await gateway.link_care_contexts(
         abha_address=link.abha_address,
         link_token=decrypt_pii(link.link_token_encrypted, associated_data=token_aad(link)),
         display=patient.full_name,
-        hi_type=contexts[0].hi_type,
-        care_contexts=[{"referenceNumber": c.reference, "display": c.display} for c in contexts],
+        **selection,
         request_id=link.gateway_request_id,
     )

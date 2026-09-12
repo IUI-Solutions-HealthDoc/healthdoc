@@ -184,6 +184,8 @@ export function UsersWorkspace() {
                 key === "designation" ||
                 key === "employee_id" ||
                 key === "registration_number" ||
+                key === "registration_identifier_type" ||
+                key === "registration_identifier_system" ||
                 key === "qualification" ||
                 key === "department_id"
               ) {
