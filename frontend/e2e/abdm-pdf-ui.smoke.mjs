@@ -45,7 +45,7 @@ const workspace = { patient_id: patient, patient_name: "Synthetic PDF Patient", 
     transfers: [{ id: randomUUID(), status: "received", delivery_status: "done", received_pages: 1, expected_pages: 1,
       records: [{ id: record, hi_type: "Prescription", source_hip_id: "SYNTHETIC-HIP", document_at: now, status: "stored", available: true }] }] }] };
 const browser = await puppeteer.launch({ headless: true, acceptInsecureCerts: true,
-  defaultViewport: { width: 1440, height: 1100 }, executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined });
+  defaultViewport: { width: 1440, height: 1100 }, args: ["--no-sandbox"], executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined });
 let session, page, revoked = false, recordReads = 0;
 const errors = [], external = [], writes = [], dialogs = [];
 function respond(request, data, status = 200) {
