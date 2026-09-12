@@ -243,83 +243,147 @@ export default function Page() {
 
       {queues && queues.length > 0 && (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {queues.map((q) => (
-            <button
-              key={q.id}
-              type="button"
-              onClick={() => setSelected(q.id)}
-              className={`surface-card p-4 text-left transition-all hover:shadow-md ${
-                selected === q.id ? "ring-2 ring-primary" : ""
-              }`}
-            >
-              <p className="text-base font-semibold">{q.doctor_name ?? "Doctor"}</p>
-              <p className="text-sm text-muted-foreground">
-                {q.room_number ? `Room ${q.room_number}` : "Room not assigned"}
-              </p>
-              <div className="mt-3 flex items-baseline gap-4">
-                <span className="text-3xl font-bold tabular-nums">{q.waiting_count}</span>
-                <span className="text-sm text-muted-foreground">waiting</span>
-              </div>
-              <p className="mt-1 text-sm">
-                Now serving:{" "}
-                <span className="font-mono">{q.now_serving ?? "—"}</span>
-              </p>
-            </button>
-          ))}
+          {queues.map((q) => {
+            const isSelected = selected === q.id;
+            return (
+              <button
+                key={q.id}
+                type="button"
+                onClick={() => setSelected(q.id)}
+                className={`group relative rounded-xl border p-5 text-left transition-all duration-200 ${
+                  isSelected
+                    ? "border-primary bg-primary/5 shadow-md ring-2 ring-primary/20"
+                    : "border-border/80 bg-card hover:border-border hover:shadow-sm"
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <p className="text-base font-bold text-foreground group-hover:text-primary transition-colors">
+                      {q.doctor_name ?? "General Clinic"}
+                    </p>
+                    <p className="mt-0.5 text-xs font-medium text-muted-foreground">
+                      {q.room_number ? `Room ${q.room_number}` : "Room not assigned"}
+                    </p>
+                  </div>
+                  {isSelected && (
+                    <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
+                      ACTIVE
+                    </span>
+                  )}
+                </div>
+
+                <div className="mt-4 flex items-center justify-between border-t border-border/50 pt-3">
+                  <div>
+                    <span className="text-3xl font-extrabold tabular-nums tracking-tight text-foreground">
+                      {q.waiting_count}
+                    </span>
+                    <span className="ml-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                      waiting
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <span className="block text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+                      Now Serving
+                    </span>
+                    <span className="inline-block rounded bg-primary/10 px-2 py-0.5 font-mono text-sm font-bold text-primary">
+                      {q.now_serving ?? "—"}
+                    </span>
+                  </div>
+                </div>
+              </button>
+            );
+          })}
         </div>
       )}
 
       {tokens && (
-        <div className="surface-card overflow-hidden">
-          <div className="border-b border-border px-6 py-4">
-            <h2 className="text-lg font-semibold">
-              {tokens.waiting_count} waiting · now serving{" "}
-              <span className="font-mono">{tokens.now_serving ?? "—"}</span>
+        <div className="surface-card overflow-hidden shadow-sm">
+          <div className="flex flex-wrap items-center justify-between border-b border-border bg-muted/20 px-6 py-4">
+            <h2 className="text-base font-bold text-foreground">
+              Queue Roster: <span className="text-primary">{tokens.waiting_count} patients waiting</span>
             </h2>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-medium text-muted-foreground">Current counter:</span>
+              <span className="rounded bg-primary px-2.5 py-1 font-mono text-xs font-bold text-primary-foreground shadow-xs">
+                {tokens.now_serving ?? "—"}
+              </span>
+            </div>
           </div>
-          <table className="min-w-full border-collapse">
-            <thead className="bg-muted">
-              <tr>
-                <th className="px-4 py-3 text-left">Token</th>
-                <th className="px-4 py-3 text-left">Patient</th>
-                <th className="px-4 py-3 text-left">Status</th>
-                <th className="px-4 py-3 text-left">Priority</th>
-                <th className="px-4 py-3 text-left">Issued</th>
-                <th className="px-4 py-3 text-left">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {tokens.items.map((t) => (
-                <tr key={t.id} className="border-b border-border last:border-none">
-                  <td className="px-4 py-3 font-mono">{t.token_display}</td>
-                  <td className="px-4 py-3 text-sm">
-                    <span className="block font-medium">{t.patient_name ?? "Patient unavailable"}</span>
-                    <span className="font-mono text-xs text-muted-foreground">
-                      {t.patient_identifier ?? "No identifier"}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-sm">{t.status.replaceAll("_", " ")}</td>
-                  <td className="px-4 py-3 text-sm">{t.priority.replaceAll("_", " ")}</td>
-                  <td className="px-4 py-3 text-sm">{formatDateTime(t.created_at)}</td>
-                  <td className="px-4 py-3 text-sm">
-                    {t.status === "waiting" && t.priority === "normal" ? (
-                      <button
-                        type="button"
-                        className="font-medium underline"
-                        onClick={() => {
-                          setPriorityTokenId(t.id);
-                          setPriority("senior_citizen");
-                          setPriorityReason("");
-                        }}
-                      >
-                        Change priority
-                      </button>
-                    ) : "—"}
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="min-w-full border-collapse">
+              <thead className="table-sticky-header">
+                <tr>
+                  <th className="px-5 py-3.5 text-left">Token</th>
+                  <th className="px-5 py-3.5 text-left">Patient & Identifier</th>
+                  <th className="px-5 py-3.5 text-left">Status</th>
+                  <th className="px-5 py-3.5 text-left">Priority</th>
+                  <th className="px-5 py-3.5 text-left">Issued Time</th>
+                  <th className="px-5 py-3.5 text-right">Action</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {tokens.items.map((t) => {
+                  const isSenior = t.priority === "senior_citizen";
+                  const isEmergency = t.priority === "emergency";
+                  return (
+                    <tr key={t.id} className="table-row-hover transition-colors">
+                      <td className="px-5 py-3.5 font-mono text-sm font-bold text-primary">
+                        <span className="rounded bg-primary/10 px-2 py-1">
+                          {t.token_display}
+                        </span>
+                      </td>
+                      <td className="px-5 py-3.5 text-sm">
+                        <span className="block font-semibold text-foreground">
+                          {t.patient_name ?? "Patient unavailable"}
+                        </span>
+                        <span className="font-mono text-xs text-muted-foreground">
+                          {t.patient_identifier ?? "No identifier"}
+                        </span>
+                      </td>
+                      <td className="px-5 py-3.5 text-xs">
+                        <span className="inline-flex items-center rounded-full px-2.5 py-0.5 font-semibold capitalize bg-muted text-muted-foreground">
+                          {t.status.replaceAll("_", " ")}
+                        </span>
+                      </td>
+                      <td className="px-5 py-3.5 text-xs">
+                        <span
+                          className={`inline-flex items-center rounded-full px-2.5 py-0.5 font-semibold capitalize ${
+                            isEmergency
+                              ? "bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-300"
+                              : isSenior
+                                ? "bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300"
+                                : "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300"
+                          }`}
+                        >
+                          {t.priority.replaceAll("_", " ")}
+                        </span>
+                      </td>
+                      <td className="px-5 py-3.5 text-xs text-muted-foreground">
+                        {formatDateTime(t.created_at)}
+                      </td>
+                      <td className="px-5 py-3.5 text-right text-xs">
+                        {t.status === "waiting" && t.priority === "normal" ? (
+                          <button
+                            type="button"
+                            className="rounded border border-border bg-card px-2.5 py-1 font-medium text-foreground shadow-xs hover:bg-muted transition"
+                            onClick={() => {
+                              setPriorityTokenId(t.id);
+                              setPriority("senior_citizen");
+                              setPriorityReason("");
+                            }}
+                          >
+                            Escalate Priority
+                          </button>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

@@ -156,72 +156,56 @@ export default function Sidebar({ open, setOpen }: SidebarProps) {
         aria-label="Workspace navigation"
         aria-hidden={!open}
         inert={!open}
-        className={`
-    fixed
-    top-16
-    left-0
-    z-40
-    h-[calc(100vh-64px)]
-    w-[260px]
-    bg-white
-    border-r
-    border-border
-    shadow-lg
-    overflow-y-auto
-    transition-transform
-    duration-300
-    ease-in-out
-    p-4
-
-    ${open ? "translate-x-0" : "-translate-x-full"}
-  `}
+        className={`fixed top-16 left-0 z-40 h-[calc(100vh-64px)] w-[260px] bg-card border-r border-border/80 shadow-md overflow-y-auto transition-transform duration-300 ease-in-out p-4 ${
+          open ? "translate-x-0" : "-translate-x-full"
+        }`}
       >
-        <div className="flex items-center justify-between border-b border-gray-200 pb-4">
+        <div className="flex items-center justify-between border-b border-border/70 pb-3.5">
           <div>
             <HealthDocBrand
-              size={42}
+              size={36}
               subtitle="HMIS"
-              nameClassName="text-lg text-[#001F54]"
+              nameClassName="text-base font-bold text-foreground"
             />
-            <p className="text-xs text-gray-500 mt-1">
-              Signed in as {roleLabel}
+            <p className="text-[11px] font-medium text-foreground/80 mt-0.5">
+              Role: <span className="text-foreground font-semibold">{roleLabel}</span>
             </p>
           </div>
 
           <button
             onClick={() => setOpen(false)}
-            className="flex h-9 w-9 items-center justify-center rounded-lg hover:bg-gray-100 transition"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-foreground/70 hover:bg-muted hover:text-foreground transition"
             type="button"
             aria-label="Close sidebar"
           >
-            <X size={20} />
+            <X size={18} />
           </button>
         </div>
 
-        <div className="relative mt-5 mb-6">
+        <div className="relative mt-4 mb-5">
           <Search
-            size={18}
-            className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400"
+            size={16}
+            className="absolute left-3.5 top-1/2 -translate-y-1/2 text-foreground/60"
           />
           <input
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search menu..."
-            className="w-full h-11 rounded-xl border border-gray-200 bg-gray-50 pl-11 pr-4 text-sm outline-none focus:border-[#001F54] focus:bg-white transition"
+            placeholder="Search modules…"
+            className="w-full h-10 rounded-lg border border-border/80 bg-muted/40 pl-10 pr-3 text-xs font-medium outline-none focus:border-primary focus:bg-card focus:ring-2 focus:ring-primary/20 transition"
           />
         </div>
 
         <nav aria-label="HealthDoc modules" className="space-y-4">
           {groups.length === 0 ? (
-            <p className="px-2 text-sm text-gray-500">No screens for this role.</p>
+            <p className="px-2 text-xs text-foreground/70">No screens available for this role.</p>
           ) : (
             groups.map(([group, items]) => (
-              <div key={group}>
-                <p className="mb-2 text-[11px] uppercase tracking-[2px] text-gray-600 font-semibold">
+              <div key={group} className="space-y-1">
+                <p className="px-2.5 mb-1.5 text-[10px] uppercase tracking-[1.5px] text-foreground/75 font-bold">
                   {group}
                 </p>
-                <div className="space-y-1">
+                <div className="space-y-0.5">
                   {items.map((item) => {
                     const Icon = item.icon;
                     const active =
@@ -236,34 +220,32 @@ export default function Sidebar({ open, setOpen }: SidebarProps) {
                         href={item.href}
                         onClick={closeOnMobile}
                         aria-current={active ? "page" : undefined}
-                        className={`group flex items-center justify-between rounded-xl px-4 py-3 transition ${
-                          active ? "bg-[#EEF4FF]" : "hover:bg-[#EEF4FF]"
+                        className={`group flex items-center justify-between rounded-lg px-3 py-2 text-xs font-semibold transition-all ${
+                          active
+                            ? "bg-primary/10 text-primary border-l-3 border-primary shadow-xs"
+                            : "text-foreground/80 hover:bg-muted hover:text-foreground border-l-3 border-transparent"
                         }`}
                       >
-                        <div className="flex items-center gap-3">
-                          <div className="w-6 flex justify-center">
-                            <Icon
-                              size={20}
-                              className={
-                                active
-                                  ? "text-[#001F54]"
-                                  : "text-gray-500 group-hover:text-[#001F54]"
-                              }
-                            />
-                          </div>
-                          <span
-                            className={`font-medium ${
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <Icon
+                            size={17}
+                            className={`shrink-0 transition-colors ${
                               active
-                                ? "text-[#001F54]"
-                                : "text-gray-700 group-hover:text-[#001F54]"
+                                ? "text-primary"
+                                : "text-muted-foreground group-hover:text-primary"
                             }`}
-                          >
+                          />
+                          <span className="truncate">
                             {item.label}
                           </span>
                         </div>
                         <ChevronRight
-                          size={16}
-                          className="text-gray-300 group-hover:text-[#001F54]"
+                          size={14}
+                          className={`shrink-0 transition-transform ${
+                            active
+                              ? "text-primary translate-x-0.5"
+                              : "text-muted-foreground/40 group-hover:text-muted-foreground group-hover:translate-x-0.5"
+                          }`}
                         />
                       </Link>
                     );
