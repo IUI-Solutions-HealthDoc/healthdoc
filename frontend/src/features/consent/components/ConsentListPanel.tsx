@@ -52,7 +52,7 @@ export function ConsentListPanel({
           Consent records
         </Typography>
         <Typography sx={{ m: 0, mt: 0.4, fontSize: "0.8125rem", color: meridian.textSecondary }}>
-          Open a record to see data_access_log
+          Open a record to review its decision and expiry.
         </Typography>
       </Box>
 

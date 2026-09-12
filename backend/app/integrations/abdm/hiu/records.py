@@ -7,6 +7,7 @@ patient identity or unsupported document is refused rather than guessed.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import uuid
@@ -27,6 +28,7 @@ from app.patients.models import Patient
 
 MAX_DOCUMENT_BYTES = 2 * 1024 * 1024
 MAX_RESOURCES = 1000
+MAX_PDF_BYTES = 1024 * 1024
 PROFILE_ROOT = "https://nrces.in/ndhm/fhir/r4/StructureDefinition/"
 PROFILES = {
     "OPConsultRecord": "OPConsultation",
@@ -40,6 +42,46 @@ ABHA_SYSTEMS = {"https://healthid.abdm.gov.in", "https://healthid.ndhm.gov.in"}
 
 class RecordRefused(ValueError):
     """Redacted refusal safe to persist and expose to an authorized caller."""
+
+
+def _validate_pdf(value: dict) -> None:
+    encoded = value.get("data")
+    if value.get("contentType") != "application/pdf" or not isinstance(encoded, str):
+        raise RecordRefused("Only embedded PDF attachments are supported")
+    if len(encoded) > 4 * ((MAX_PDF_BYTES + 2) // 3):
+        raise RecordRefused("The PDF attachment exceeds the size limit")
+    try:
+        data = base64.b64decode(encoded, validate=True)
+    except ValueError as exc:
+        raise RecordRefused("The PDF attachment is not valid base64") from exc
+    if not data.startswith(b"%PDF-") or not 0 < len(data) <= MAX_PDF_BYTES:
+        raise RecordRefused("The attachment does not contain a bounded PDF")
+    if "size" in value and value["size"] != len(data):
+        raise RecordRefused("The PDF attachment size does not match")
+    if "hash" in value:
+        # FHIR Attachment.hash is SHA-1, not a replacement for authenticated
+        # transport or the SHA-256 digest of the entire received document.
+        digest = base64.b64encode(hashlib.sha1(data, usedforsecurity=False).digest()).decode()
+        if value["hash"] != digest:
+            raise RecordRefused("The PDF attachment hash does not match")
+
+
+def _reachable_resources(composition: dict, refs: dict) -> set[int]:
+    """Local reference traversal only. No URLs are fetched, ever."""
+    stack, seen = [composition], set()
+    while stack:
+        node = stack.pop()
+        if isinstance(node, dict):
+            if id(node) in seen:
+                continue
+            seen.add(id(node))
+            for key, value in node.items():
+                if key in {"reference", "url"} and isinstance(value, str) and value in refs:
+                    stack.append(refs[value])
+                stack.append(value)
+        elif isinstance(node, list):
+            stack.extend(node)
+    return seen
 
 
 def aware(value: datetime) -> datetime:
@@ -215,16 +257,31 @@ def validate_document(bundle: dict, grant: Grant, reference: str | None) -> tupl
         raise RecordRefused("The Composition patient reference cannot be verified")
     # Walk nested patient/subject references too. Do not resolve network URLs,
     # contained patients or a second subject by guessing which patient is meant.
+    reachable = _reachable_resources(composition, refs)
+    for resource in resources:
+        if resource.get("resourceType") in {"Binary", "DocumentReference"} and id(resource) not in reachable:
+            raise RecordRefused("An attachment is not referenced by the consented document")
+        if resource.get("resourceType") == "Binary":
+            _validate_pdf(resource)
+            security = resource.get("securityContext")
+            if security is not None and not is_patient_reference(security):
+                target = refs.get(security.get("reference")) if isinstance(security, dict) else None
+                if not isinstance(target, dict) or not is_patient_reference(target.get("subject")):
+                    raise RecordRefused("The attachment security context cannot be verified")
     stack = list(resources)
     while stack:
         node = stack.pop()
         if isinstance(node, list):
             stack.extend(node)
         elif isinstance(node, dict):
-            if node.get("resourceType") in {"Bundle", "Binary"} or node.get("contained"):
+            if node.get("resourceType") == "Bundle" or node.get("contained"):
                 raise RecordRefused(
                     "Nested bundles, opaque resources and contained records are unsupported"
                 )
+            if "contentType" in node and "data" in node:
+                if id(node) not in reachable:
+                    raise RecordRefused("An attachment is not referenced by the consented document")
+                _validate_pdf(node)
             for name, value in node.items():
                 if name in {"subject", "patient"}:
                     if not is_patient_reference(value):

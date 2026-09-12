@@ -23,6 +23,7 @@ from app.integrations.abdm import callback_replies
 from app.integrations.abdm.callback_auth import (
     GatewayCallback,
     hip_gateway_callback,
+    hip_link_gateway_callback,
     hiu_gateway_callback,
     profile_gateway_callback,
 )
@@ -73,6 +74,7 @@ router = APIRouter(tags=["abdm-v3-callbacks"], include_in_schema=False)
 _PLACEHOLDER = "change-me"
 DbSession = Annotated[AsyncSession, Depends(get_db)]
 HipCallback = Annotated[GatewayCallback, Depends(hip_gateway_callback)]
+HipLinkCallback = Annotated[GatewayCallback, Depends(hip_link_gateway_callback)]
 HiuCallback = Annotated[GatewayCallback, Depends(hiu_gateway_callback)]
 ProfileCallback = Annotated[GatewayCallback, Depends(profile_gateway_callback)]
 
@@ -382,7 +384,7 @@ async def link_confirm(
 @router.post("/api/v3/hip/token/on-generate-token", status_code=202)
 async def generated_link_token(
     payload: LinkTokenCallback,
-    callback: HipCallback,
+    callback: HipLinkCallback,
     db: DbSession,
 ) -> Response:
     if callback.replayed:
@@ -417,7 +419,7 @@ async def generated_link_token(
 @router.post("/api/v3/link/on_carecontext", status_code=202)
 async def on_care_context(
     payload: GenericCallback,
-    callback: HipCallback,
+    callback: HipLinkCallback,
     db: DbSession,
 ) -> Response:
     if callback.replayed:

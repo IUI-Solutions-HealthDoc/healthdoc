@@ -187,6 +187,7 @@ do not merge out of order.**
 | 0066 | abdm_received_record_store | ALTER abdm_received_bundles, abdm_jobs | Consent-bound encrypted external documents and durable HIU receipt notification; no historical import. |
 | 0067 | abdm_callback_replies | abdm_callback_replies, ALTER abdm_jobs | Transactional acknowledgement intent and stable consent-artefact fetch correlation; identifier-only reply metadata. |
 | 0068 | tariff_inclusive_dates | ALTER charge_master | Permit one-day inclusive tariff periods; no price/data rewrite; guarded downgrade. |
+| 0069 | abdm_consent_requester | ALTER users; ALTER abdm_consent_requests | Explicit registration type/system and immutable HIU requester snapshot. No identity backfill; guarded downgrade preserves evidence. |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -305,6 +306,8 @@ mobile          varchar(20)                      -- E.164 (+15 digits max, incl.
 designation     varchar(100)                     -- display only; authz = Keycloak roles
 employee_id     varchar(30) NULL                 -- hospital HR id; UNIQUE (facility_id, employee_id)
 registration_number varchar(50) NULL             -- medical council reg no (doctors)
+registration_identifier_type varchar(50) NULL     -- 0069; administrator-verified ABDM requester type
+registration_identifier_system varchar(255) NULL -- 0069; explicit issuing registry URI, never guessed
 qualification   varchar(100) NULL
 facility_id     UUID NOT NULL → facilities
 is_active       boolean NOT NULL DEFAULT true
@@ -1809,6 +1812,7 @@ purpose_code varchar(50) NOT NULL                 -- CAREMGT|BTG|PUBHLTH|HPAYMT|
 hi_types jsonb NOT NULL
 date_range_from timestamptz NOT NULL · date_range_to timestamptz NOT NULL
 requested_expiry timestamptz NOT NULL             -- what we asked for; the artefact is what binds
+requester_snapshot jsonb NULL                    -- 0069; name + identifier type/value/system at request creation; NULL legacy rows cannot dispatch
 consent_request_id varchar(120) · gateway_request_id varchar(100)
 status varchar(50) NOT NULL DEFAULT 'requested'   -- requested|granted|denied|expired|revoked|failed
 failure_reason text · facility_id UUID NOT NULL → facilities

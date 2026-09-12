@@ -7,8 +7,10 @@ import pytest
 from sqlalchemy import update
 
 from app.admissions.models import Discharge
+from app.common.config import Settings
 from app.integrations.abdm.external_router import _contexts
 from app.integrations.abdm.fhir.builder import build_clinical_bundle
+from app.integrations.abdm.hip import worker
 from app.integrations.abdm.hip.documents import DocumentUnavailable, resolve_document
 from app.integrations.abdm.hip.models import AbdmCareContext
 from app.integrations.abdm.hip.worker import TransferError, _clinical_facts
@@ -17,7 +19,7 @@ from app.opd.models import Encounter
 from app.orders.models import Order, Prescription, PrescriptionItem
 from app.pathology.models import LabOrderItem, LabResult
 from app.radiology.models import RadiologyOrderItem, RadiologyReport
-from app.users.models import Facility
+from app.users.models import Facility, User
 
 
 @pytest.fixture
@@ -317,6 +319,113 @@ async def test_wellness_uses_only_selected_encounter_measurements_before_finaliz
     facts = await _clinical_facts(db, selected, facility=facility)
     assert [row["value"] for row in facts["observations"]] == [70]
     assert build_clinical_bundle(selected.hi_type, **facts)["type"] == "document"
+
+
+async def test_wellness_preserves_its_registered_label_without_exporting_consultation_notes(
+    db, documents
+):
+    facility, encounters, _, _, context = documents
+    selected = context("wellness", encounters[0].id, "WellnessRecord")
+    selected.display = "ABDM SANDBOX TEST — SYNTHETIC WellnessRecord; not clinical advice"
+    db.add(
+        Vitals(
+            id=uuid.uuid4(),
+            patient_id=selected.patient_id,
+            encounter_id=encounters[0].id,
+            measured_at=selected.document_at - timedelta(minutes=1),
+            pulse_bpm=72,
+            created_by=encounters[0].created_by,
+        )
+    )
+    await db.flush()
+    facts = await _clinical_facts(db, selected, facility=facility)
+    assert facts["document_label"] == selected.display
+    assert facts["chief_complaints"] == []
+    assert facts["care_plan"] is None
+    composition = build_clinical_bundle(selected.hi_type, **facts)["entry"][0]["resource"]
+    assert composition["title"] == selected.display
+    assert composition["type"] == {"text": "Wellness Record"}
+
+
+@pytest.fixture
+async def sandbox_document(db, documents, monkeypatch):
+    facility, encounters, _, _, context = documents
+    selected = context("wellness", encounters[0].id, "WellnessRecord")
+    selected.display = "ABDM SANDBOX TEST — SYNTHETIC WellnessRecord; not clinical advice"
+    author = await db.get(User, encounters[0].provider_user_id)
+    author.registration_number = None
+    author.username = "dev.sandbox-author"
+    await db.flush()
+    # Do not use the application's cached/live settings: pytest may display
+    # their repr on a failing setattr, leaking credentials from the dev .env.
+    settings = Settings.model_construct()
+    monkeypatch.setattr(worker, "get_settings", lambda: settings, raising=False)
+    monkeypatch.setattr(settings, "environment", "dev")
+    monkeypatch.setattr(settings, "abdm_gateway_base_url", "https://dev.abdm.gov.in")
+    monkeypatch.setattr(settings, "abdm_x_cm_id", "sbx")
+    monkeypatch.setattr(settings, "abdm_sandbox_local_author_context_ids", (selected.id,))
+    return facility, selected, author, settings
+
+
+async def test_sandbox_identity_requires_explicit_exact_document_scope(db, sandbox_document):
+    facility, selected, author, _ = sandbox_document
+    facts = await _clinical_facts(db, selected, facility=facility)
+    assert facts["practitioner"] == {
+        "id": author.id,
+        "name": author.full_name,
+        "sandbox_account_id": str(author.id),
+    }
+    assert author.registration_number is None
+    selected.id = uuid.uuid4()
+    with pytest.raises(TransferError, match="registration number"):
+        await _clinical_facts(db, selected, facility=facility)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("environment", "production"),
+        ("environment", "staging"),
+        ("abdm_gateway_base_url", "https://abdm.gov.in"),
+        ("abdm_gateway_base_url", "https://dev.abdm.gov.in.evil.example"),
+        ("abdm_gateway_base_url", "http://dev.abdm.gov.in"),
+        ("abdm_x_cm_id", "abdm"),
+        ("abdm_sandbox_local_author_context_ids", ()),
+    ],
+)
+async def test_sandbox_policy_never_relaxes_other_environments(
+    db, sandbox_document, monkeypatch, field, value
+):
+    facility, selected, _, settings = sandbox_document
+    monkeypatch.setattr(settings, field, value)
+    with pytest.raises(TransferError, match="registration number"):
+        await _clinical_facts(db, selected, facility=facility)
+
+
+@pytest.mark.parametrize("change", ["label", "account", "inactive", "facility", "document_type"])
+async def test_allowlist_does_not_override_document_and_author_safety(db, sandbox_document, change):
+    facility, selected, author, _ = sandbox_document
+    if change == "label":
+        selected.display = "WellnessRecord"
+    elif change == "account":
+        author.username = "real-author"
+    elif change == "inactive":
+        author.is_active = False
+    elif change == "facility":
+        author.facility_id = uuid.uuid4()
+    else:
+        selected.reference = selected.reference.replace("wellness/", "encounter/")
+        selected.hi_type = "OPConsultation"
+    with pytest.raises(TransferError):
+        await _clinical_facts(db, selected, facility=facility)
+
+
+async def test_registered_practitioner_keeps_existing_identity(db, sandbox_document):
+    facility, selected, author, _ = sandbox_document
+    author.registration_number = "TEST-REG"
+    facts = await _clinical_facts(db, selected, facility=facility)
+    assert facts["practitioner"]["registration_number"] == "TEST-REG"
+    assert "sandbox_account_id" not in facts["practitioner"]
 
 
 async def test_discharge_uses_its_own_summary_without_requiring_an_opd_encounter(

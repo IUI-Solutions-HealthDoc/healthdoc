@@ -11,11 +11,10 @@ its own ephemeral pair and nonce, derives a shared key, encrypts the FHIR
 bundle, and pushes the ciphertext straight to the HIU's data endpoint. The
 gateway brokers the request and never holds a key that opens the payload.
 
-  curve      X25519 (Curve25519). NOT P-256: ABDM's key material block names
-             Curve25519 explicitly, and a P-256 point will not even parse as
-             an X25519 key, so a mismatch fails loudly here rather than
-             producing a shared secret neither side can use.
-  kdf        HKDF-SHA256 over the raw ECDH output. The raw X25519 result must
+  curve      Bouncy Castle's named Curve25519 with full EC points, as used by
+             Fidelius. This is NOT RFC7748's raw 32-byte X25519 wire format.
+             EC operations are delegated to the pinned local Java helper.
+  kdf        HKDF-SHA256 over the raw ECDH output. The raw ECDH result must
              never be used as an AES key directly — it is a curve point, not
              uniformly random, and AES-GCM assumes a uniform key.
   salt/iv    Derived from the XOR of BOTH nonces, so neither party alone fixes
@@ -48,26 +47,20 @@ in plaintext is enforced there and tested.
 
 UNVERIFIED AGAINST THE SANDBOX
 ------------------------------
-The algorithm choices above come from ABDM's published specification, not from
-a round trip we have made. `derive_shared_key()` is deterministic and its tests
-pin it both ways (two parties reach the same key; a tampered nonce does not),
-which proves the implementation is self-consistent — it does NOT prove ABDM
-agrees. The first sandbox transfer is what proves that, and it is the first
-thing to run when credentials exist.
+Independent reference vectors complement self-consistency tests. Neither is a
+claim of a completed live sandbox transfer or milestone certification.
 """
 from __future__ import annotations
 
 import base64
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric.x25519 import (
-    X25519PrivateKey,
-    X25519PublicKey,
-)
+from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+from app.integrations.abdm import curve25519
 
 #: ABDM's key-material block names these verbatim. Sent as-is so a reviewer can
 #: diff our payload against the spec without translating our vocabulary first.
@@ -94,7 +87,7 @@ class KeyMaterial:
     state where a second request could reach it.
     """
 
-    private_key: X25519PrivateKey
+    private_key: curve25519.PrivateKey = field(repr=False)
     public_key_b64: str
     nonce_b64: str
 
@@ -110,11 +103,10 @@ class KeyMaterial:
 
 def generate_key_material() -> KeyMaterial:
     """A fresh ephemeral keypair and nonce. Never reuse one across transfers."""
-    private_key = X25519PrivateKey.generate()
-    public_bytes = private_key.public_key().public_bytes(
-        encoding=serialization.Encoding.Raw,
-        format=serialization.PublicFormat.Raw,
-    )
+    try:
+        private_key, public_bytes = curve25519.generate()
+    except curve25519.CurveError as exc:
+        raise HiCryptoError(str(exc)) from exc
     return KeyMaterial(
         private_key=private_key,
         public_key_b64=base64.b64encode(public_bytes).decode(),
@@ -140,7 +132,7 @@ def _xor_nonces(ours_b64: str, theirs_b64: str) -> bytes:
 
 def derive_shared_key(
     *,
-    private_key: X25519PrivateKey,
+    private_key: curve25519.PrivateKey,
     peer_public_key_b64: str,
     our_nonce_b64: str,
     peer_nonce_b64: str,
@@ -151,18 +143,15 @@ def derive_shared_key(
     key and reach the same answer — that symmetry is what the tests pin.
     """
     peer_raw = _decode(peer_public_key_b64, field="peer public key")
-    # ABDM implementations differ on whether the key is sent raw (32 bytes) or
-    # with an uncompressed-point 0x04 prefix (33). Accept both rather than
-    # failing a real gateway over a leading byte, but accept nothing else — a
-    # length we do not recognise is a bug, not something to pad or truncate.
-    if len(peer_raw) == 33 and peer_raw[0] == 0x04:
-        peer_raw = peer_raw[1:]
-    if len(peer_raw) != 32:
-        raise HiCryptoError(f"peer public key must be 32 bytes on {CURVE}, got {len(peer_raw)}")
+    # Fidelius accepts a full point or X.509 SPKI. BC parses and validates
+    # both, including the curve parameters. Never strip DER headers by length.
+    if not (len(peer_raw) == 65 and peer_raw[0] == 4) and not (
+        65 < len(peer_raw) <= 512 and peer_raw[0] == 0x30
+    ):
+        raise HiCryptoError("peer public key must be a Curve25519 point or X.509 key")
 
     try:
-        peer_public = X25519PublicKey.from_public_bytes(peer_raw)
-        shared = private_key.exchange(peer_public)
+        shared = private_key.exchange(peer_raw)
     except HiCryptoError:
         raise
     except Exception as exc:  # noqa: BLE001

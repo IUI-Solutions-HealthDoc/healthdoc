@@ -35,8 +35,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.security import current_aes_key_version, decrypt_pii, encrypt_pii
-from app.integrations.abdm import hi_crypto
-from app.integrations.abdm.hiu import records
+from app.integrations.abdm import curve25519, hi_crypto
+from app.integrations.abdm.hiu import records, requester
 from app.integrations.abdm.hiu.models import (
     AbdmConsentRequest,
     AbdmHiuConsentArtefact,
@@ -120,6 +120,17 @@ async def create_consent_request(
     ):
         raise HiuError("patient_binding_required", "Select a patient with a verified ABHA address")
 
+    from app.users.models import User
+
+    try:
+        snapshot = requester.from_staff(await db.get(User, created_by), facility_id)
+    except requester.RequesterUnavailable as exc:
+        raise HiuError(
+            "abdm_requester_required",
+            "Ask the facility administrator to verify your name, registration number, "
+            "identifier type and registry URI before requesting ABDM records.",
+        ) from exc
+
     row = AbdmConsentRequest(
         id=request_id or uuid.uuid4(),
         facility_id=facility_id,
@@ -130,6 +141,7 @@ async def create_consent_request(
         date_range_from=date_range_from,
         date_range_to=date_range_to,
         requested_expiry=requested_expiry,
+        requester_snapshot=snapshot,
         status="requested",
         created_by=created_by,
     )
@@ -305,7 +317,7 @@ async def begin_hi_request(
         key_expires_at=now + KEY_LIFETIME,
         created_by=created_by,
         private_key_encrypted=encrypt_pii(
-            material.private_key.private_bytes_raw().hex(),
+            curve25519.serialize(material.private_key),
             key_version=version,
             associated_data=_aad(request_id),
         ),
@@ -322,8 +334,11 @@ async def begin_hi_request(
 def _load_private_key(row: AbdmHiuHealthInformationRequest):
     if row.private_key_encrypted is None:
         raise HiuError("key_unavailable", "This request no longer holds key material")
-    hex_key = decrypt_pii(row.private_key_encrypted, associated_data=_aad(row.id))
-    return hi_crypto.X25519PrivateKey.from_private_bytes(bytes.fromhex(hex_key))
+    encoded = decrypt_pii(row.private_key_encrypted, associated_data=_aad(row.id))
+    try:
+        return curve25519.deserialize(encoded)
+    except curve25519.CurveError as exc:
+        raise HiuError("key_incompatible", str(exc)) from exc
 
 
 async def _record_rejection(

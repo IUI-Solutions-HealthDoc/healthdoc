@@ -1,0 +1,17 @@
+# Independent retention worker. This file has NO outbound delivery consumer.
+# docker compose --env-file .env -f infra/docker-compose.yml -f infra/docker-compose.abdm-cleanup.yml up -d --no-deps abdm-cleanup
+services:
+  abdm-cleanup:
+    build:
+      context: ../backend
+      target: dev
+    env_file: ../.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    volumes:
+      - ../backend:/code
+    command: ["python", "-m", "app.integrations.abdm.job_runner", "--mode", "cleanup"]
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy

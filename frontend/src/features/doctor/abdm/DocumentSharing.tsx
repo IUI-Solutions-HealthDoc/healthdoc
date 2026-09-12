@@ -32,7 +32,7 @@ export function DocumentSharing({ patientId, verified }: { patientId: string; ve
     setBusy(true); setError(null); setNotice(null);
     try {
       await api<LinkStatus[]>(`/abdm/hip/patients/${patientId}/links`, { method: "POST", body: JSON.stringify({ context_ids: selected }), idempotencyKey: retry.current.key });
-      setNotice("Link operations queued separately for each record type. Refresh to check the gateway acknowledgement; pending is not confirmed.");
+      setNotice("Linking queued for the selected documents, grouped by record type in one request. Refresh to check the gateway acknowledgement; pending is not confirmed.");
       setSelected([]); retry.current = null; setRefresh((value) => value + 1);
     } catch (reason) { setError(getUserFacingError(reason, "Documents could not be queued for linking.")); }
     finally { setBusy(false); }

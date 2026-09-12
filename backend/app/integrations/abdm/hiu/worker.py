@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from app.common.config import get_settings
 from app.common.db import SessionLocal
-from app.integrations.abdm.hiu import gateway, records
+from app.integrations.abdm.hiu import gateway, records, requester
 from app.integrations.abdm.hiu.models import (
     AbdmConsentRequest,
     AbdmHiuConsentArtefact,
@@ -14,7 +14,7 @@ from app.integrations.abdm.hiu.models import (
     AbdmReceivedBundle,
 )
 from app.integrations.abdm.jobs import AbdmJob
-from app.users.models import Facility
+from app.users.models import Facility, User
 
 
 async def _require_configured_facility(db, job: AbdmJob) -> None:
@@ -73,6 +73,10 @@ async def dispatch(job: AbdmJob) -> None:
                 or records.aware(row.requested_expiry) <= datetime.now(UTC)
             ):
                 raise ValueError("Verified patient binding or request expired")
+            snapshot = requester.validate_requester(row.requester_snapshot)
+            current = requester.from_staff(await db.get(User, row.created_by), job.facility_id)
+            if current["identifier"] != snapshot["identifier"]:
+                raise requester.RequesterUnavailable("Requester identity changed; reconcile the ask")
             _, response = await gateway.request_consent(
                 abha_address=row.abha_address,
                 hi_types=row.hi_types,
@@ -80,6 +84,7 @@ async def dispatch(job: AbdmJob) -> None:
                 date_to=row.date_range_to,
                 expiry=row.requested_expiry,
                 purpose=gateway.PURPOSE_CARE_MANAGEMENT,
+                requester=snapshot,
                 request_id=row.gateway_request_id,
             )
             body = response.body if isinstance(response.body, dict) else {}
@@ -151,7 +156,7 @@ async def notify_received(job: AbdmJob) -> None:
         await gateway.notify_hi_receipt(
             consent_id=artefact.consent_artefact_id,
             transaction_id=request.transaction_id,
-            session_status="TRANSFERRED",
+            session_status="RECEIVED",
             hip_id=hip["id"],
             request_id=str(job.id),
             status_responses=[

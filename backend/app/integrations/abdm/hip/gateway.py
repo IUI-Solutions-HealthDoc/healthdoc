@@ -37,7 +37,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.common.config import get_settings
-from app.integrations.abdm.client import AbdmResponse, get_abdm_client
+from app.integrations.abdm.client import AbdmProtocolError, AbdmResponse, get_abdm_client
 
 log = logging.getLogger("healthdoc.abdm")
 
@@ -150,6 +150,7 @@ async def _post(
     *,
     extra_headers: Mapping[str, str] | None = None,
     request_id: str | None = None,
+    expected_status: int | None = None,
 ) -> tuple[str, AbdmResponse]:
     """Send and return (request_id, response).
 
@@ -166,6 +167,8 @@ async def _post(
     # Path and status only. These payloads carry ABHA addresses and care-context
     # references, which are patient identifiers.
     log.info("ABDM HIP call %s -> %s (request_id=%s)", path, response.status_code, rid)
+    if expected_status is not None and response.status_code != expected_status:
+        raise AbdmProtocolError(response.status_code)
     return rid, response
 
 
@@ -189,6 +192,9 @@ async def generate_link_token(
     bare `/api/hiecm/v3/token/...` base rather than under `/hip/v3/` — one of
     the few that does, and the reason `abdm_path_hip_token_generate` is a
     separate setting instead of a suffix.
+
+    M2 v2.8 (16 February 2026) specifies 202 Accepted for this operation.
+    That proves dispatch acceptance only; the callback still supplies the token.
     """
     settings = get_settings()
     return await _post(
@@ -201,6 +207,7 @@ async def generate_link_token(
         },
         extra_headers={"X-HIP-ID": hip_id()},
         request_id=request_id,
+        expected_status=202,
     )
 
 
@@ -209,8 +216,9 @@ async def link_care_contexts(
     abha_address: str,
     link_token: str,
     display: str,
-    care_contexts: Sequence[Mapping[str, str]],
-    hi_type: str,
+    care_contexts: Sequence[Mapping[str, str]] | None = None,
+    hi_type: str | None = None,
+    groups: Mapping[str, Sequence[Mapping[str, str]]] | None = None,
     request_id: str | None = None,
 ) -> tuple[str, AbdmResponse]:
     """HIP -> gateway. Attach care contexts we hold to an ABHA address.
@@ -218,24 +226,46 @@ async def link_care_contexts(
     Requires X-LINK-TOKEN from `generate_link_token`. Without it the gateway
     answers 401 rather than a validation error, which reads like a credentials
     problem and sends you to the wrong place.
+
+    NHA's HIPLinkV3Service groups care contexts by HI type inside patient[],
+    then sends the whole selection with one link token. Never generate a token
+    per type, invent a type, or silently widen the selected document set.
     """
     settings = get_settings()
-    validate_hi_types([hi_type])
+    if groups is None:
+        if hi_type is None or not care_contexts:
+            raise ValueError("A nonempty care-context group is required")
+        groups = {hi_type: care_contexts}
+    elif hi_type is not None or care_contexts is not None:
+        raise ValueError("Supply grouped contexts or a single group, not both")
+    validate_hi_types(list(groups))
+    patient_groups = []
+    references = set()
+    for kind, items in sorted(groups.items()):
+        if not items:
+            raise ValueError("Care-context groups must not be empty")
+        for item in items:
+            reference = item.get("referenceNumber")
+            if not reference or reference in references:
+                raise ValueError("Each selected document must have one distinct reference")
+            references.add(reference)
+        patient_groups.append(
+            care_context_payload(
+                abha_address=abha_address,
+                display=display,
+                care_contexts=items,
+                hi_type=kind,
+            )
+        )
     return await _post(
         settings.abdm_path_hip_link_add_contexts,
         {
             "abhaAddress": abha_address,
-            "patient": [
-                care_context_payload(
-                    abha_address=abha_address,
-                    display=display,
-                    care_contexts=care_contexts,
-                    hi_type=hi_type,
-                )
-            ],
+            "patient": patient_groups,
         },
         extra_headers={"X-HIP-ID": hip_id(), "X-LINK-TOKEN": link_token},
         request_id=request_id,
+        expected_status=202,
     )
 
 

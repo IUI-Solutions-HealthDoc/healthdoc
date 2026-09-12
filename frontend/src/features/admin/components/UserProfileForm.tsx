@@ -36,6 +36,8 @@ const FIELDS: { key: keyof User; label: string }[] = [
   { key: "designation", label: "Designation" },
   { key: "employee_id", label: "Employee ID" },
   { key: "registration_number", label: "Registration number" },
+  { key: "registration_identifier_type", label: "ABDM registration identifier type" },
+  { key: "registration_identifier_system", label: "Issuing registry URI" },
   { key: "qualification", label: "Qualification" },
 ];
 
@@ -80,6 +82,9 @@ export function UserProfileForm({
         </Typography>
         <Typography sx={{ m: 0, mb: 2, fontSize: "0.8125rem", color: meridian.textSecondary }}>
           Update the staff member&apos;s editable profile details and department assignment.
+          {" "}For ABDM consent requests, verify the clinician&apos;s real registration number,
+          identifier type and issuing registry URI. Leave both ABDM fields blank for other staff;
+          do not enter sample or invented credentials.
         </Typography>
 
         <Stack direction="row" useFlexGap spacing={1.5} sx={{ flexWrap: "wrap" }}>

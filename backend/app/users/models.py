@@ -66,6 +66,8 @@ class User(Base, UUIDPk, Timestamps):
     designation: Mapped[str | None] = mapped_column(String(100))
     employee_id: Mapped[str | None] = mapped_column(String(30))
     registration_number: Mapped[str | None] = mapped_column(String(50))
+    registration_identifier_type: Mapped[str | None] = mapped_column(String(50))
+    registration_identifier_system: Mapped[str | None] = mapped_column(String(255))
     qualification: Mapped[str | None] = mapped_column(String(100))
     facility_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False

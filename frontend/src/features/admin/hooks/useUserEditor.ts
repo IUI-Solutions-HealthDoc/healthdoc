@@ -53,6 +53,8 @@ export function useUserEditor(user: User | null, onSaved?: (next: User) => void)
         designation: draft.designation,
         employee_id: draft.employee_id,
         registration_number: draft.registration_number,
+        registration_identifier_type: draft.registration_identifier_type?.trim() || null,
+        registration_identifier_system: draft.registration_identifier_system?.trim() || null,
         qualification: draft.qualification,
         department_id: draft.department_id,
       });

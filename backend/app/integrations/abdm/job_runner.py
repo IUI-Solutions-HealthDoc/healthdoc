@@ -4,6 +4,7 @@ The HTTP background task is only a latency optimization. This polling process
 is what recovers accepted work after an API process dies or reloads.
 """
 
+import argparse
 import asyncio
 import logging
 import uuid
@@ -15,6 +16,7 @@ from sqlalchemy import or_, select
 from app.common.config import get_settings
 from app.common.db import SessionLocal
 from app.integrations.abdm import jobs
+from app.integrations.abdm.client import AbdmAuthError, AbdmProtocolError, safe_failure_summary
 from app.integrations.abdm.hip import gateway, linking, worker
 from app.integrations.abdm.hip.documents import DocumentUnavailable, resolve_context_document
 from app.integrations.abdm.hip.models import (
@@ -95,6 +97,10 @@ async def _dispatch(job: jobs.AbdmJob) -> None:
             else:
                 from app.patients.models import Patient
 
+                # A delayed original callback may beat an operator recovery.
+                # Never regenerate a credential that is already stored.
+                if link.link_token_encrypted is not None:
+                    return
                 patient = await db.get(Patient, link.patient_id)
                 if patient is None or patient.abha_address != link.abha_address:
                     raise DocumentUnavailable("Patient identity changed during linking")
@@ -133,6 +139,7 @@ async def run_once(ident: uuid.UUID | None = None) -> bool:
     heartbeat = asyncio.create_task(_heartbeat(job.id, job.lease_token))
     error = None
     deferred = False
+    terminal = False
     try:
         done, _ = await asyncio.wait({task, heartbeat}, return_when=asyncio.FIRST_COMPLETED)
         if heartbeat in done:
@@ -142,7 +149,13 @@ async def run_once(ident: uuid.UUID | None = None) -> bool:
         error, deferred = str(exc), True
     except Exception as exc:
         # Never persist arbitrary gateway response text or patient content.
-        error = type(exc).__name__
+        error = safe_failure_summary(exc)
+        # Refreshing the gateway session once is already handled by the
+        # client. Repeating a refused authorization will not fix its scope or
+        # link token, and must not consume the token-generation quota.
+        # An unexpected response is not evidence that repeating the operation
+        # is safe either. Preserve the diagnostic for deliberate reconciliation.
+        terminal = isinstance(exc, AbdmAuthError | AbdmProtocolError)
         log.warning("ABDM job failed (%s)", error)
     finally:
         for pending in (task, heartbeat):
@@ -150,7 +163,7 @@ async def run_once(ident: uuid.UUID | None = None) -> bool:
             with suppress(asyncio.CancelledError, Exception):
                 await pending
     async with SessionLocal() as db:
-        await jobs.finish(db, job, error=error, deferred=deferred)
+        await jobs.finish(db, job, error=error, deferred=deferred, terminal=terminal)
     return True
 
 
@@ -213,14 +226,30 @@ async def cleanup_expired_keys() -> int:
         return len(rows) + len(links) + erased
 
 
-async def main() -> None:
+async def run_mode(*, mode: str, once: bool = False) -> None:
+    """Cleanup mode never enters the dispatcher, even when outbound jobs exist."""
+    if mode == "cleanup":
+        if once:
+            count = await cleanup_expired_keys()
+            log.info("ABDM cleanup completed; cleared items=%s", count)
+        else:
+            await _poll_cleanup()
+    elif mode == "all":
+        if once:
+            raise ValueError("--once is supported only with --mode cleanup")
+        await asyncio.gather(_poll_jobs(), _poll_cleanup())
+    else:
+        raise ValueError("Unknown ABDM worker mode")
+
+
+async def main(*, mode: str = "all", once: bool = False) -> None:
     # Load model metadata/listeners as the API does, without running its HTTP server.
     from app import main as app_main  # noqa: F401
     from app.common.security import _get_encryption_key, _get_hmac_key
 
     _get_encryption_key()
     _get_hmac_key()
-    await asyncio.gather(_poll_jobs(), _poll_cleanup())
+    await run_mode(mode=mode, once=once)
 
 
 async def _poll_cleanup() -> None:
@@ -228,7 +257,8 @@ async def _poll_cleanup() -> None:
     # external-record erasure indefinitely.
     while True:
         try:
-            await cleanup_expired_keys()
+            count = await cleanup_expired_keys()
+            log.info("ABDM cleanup completed; cleared items=%s", count)
         except Exception as exc:
             log.error("ABDM cleanup failed (%s)", type(exc).__name__)
         await asyncio.sleep(60)
@@ -245,5 +275,11 @@ async def _poll_jobs() -> None:
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--mode", choices=["all", "cleanup"], default="all")
+    parser.add_argument("--once", action="store_true", help="Run cleanup once; fail nonzero on errors")
+    options = parser.parse_args()
+    if options.once and options.mode != "cleanup":
+        parser.error("--once requires --mode cleanup")
     logging.basicConfig(level=logging.INFO)
-    asyncio.run(main())
+    asyncio.run(main(mode=options.mode, once=options.once))

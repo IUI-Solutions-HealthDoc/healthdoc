@@ -96,7 +96,12 @@ audit-deps:       ## CVE scan of backend + frontend dependencies (WASA gate)
 	@cd backend && ../.venv/bin/pip-audit -r requirements.txt --progress-spinner off
 	@echo "== frontend (npm audit) =="
 	@cd frontend && npm audit --omit=dev
+	@.venv/bin/python backend/crypto/build.py --audit
 	@echo "OK: no known vulnerabilities"
+
+.PHONY: abdm-crypto
+abdm-crypto:      ## Host tests: requires JDK 17+ (CI/Docker use 21)
+	@.venv/bin/python backend/crypto/build.py
 
 lint:             ## Lint backend + frontend
 	$(COMPOSE) exec backend ruff check .

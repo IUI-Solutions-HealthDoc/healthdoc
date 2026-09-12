@@ -33,8 +33,9 @@ gateway's receipt produces a 401 that looks like a credentials problem. We
 treat a token as expired `_EXPIRY_MARGIN_SECONDS` early.
 
 **One 401 retry, not more.** ABDM can revoke a token before its stated expiry.
-A single forced refresh covers that. A second 401 means the credentials are
-wrong, and retrying a credentials problem is how you get an account locked.
+A single forced refresh covers that. A second 401 requires inspection of the
+operation's authorization (including its link/patient token or scope); it does
+not by itself prove the client secret is wrong. Do not keep refreshing blindly.
 
 **Errors are a taxonomy, not one exception.** Callers need to distinguish "the
 gateway is down, degrade gracefully and mark the record unverified" from "ABDM
@@ -56,6 +57,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 import uuid
 from collections.abc import Mapping
@@ -84,6 +86,19 @@ _PLACEHOLDER = "change-me"
 class AbdmError(Exception):
     """Base for every ABDM failure. Catch this to treat them alike."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        stage: str | None = None,
+        error_codes: tuple[str, ...] = (),
+    ):
+        self.status_code = status_code
+        self.stage = stage
+        self.error_codes = error_codes
+        super().__init__(message)
+
 
 class AbdmNotConfigured(AbdmError):
     """Credentials are still the .env.example placeholders.
@@ -96,8 +111,9 @@ class AbdmNotConfigured(AbdmError):
 class AbdmAuthError(AbdmError):
     """Gateway rejected our credentials, or rejected a freshly minted token.
 
-    Not retryable. Means the client id/secret are wrong, expired, or the
-    facility's registration has lapsed — a human problem, not a transient one.
+    Not automatically retryable. Session rejection may concern client
+    credentials; operation rejection may instead concern a patient/link token,
+    API subscription or scope. Do not diagnose the client secret from HTTP alone.
     """
 
 
@@ -111,19 +127,78 @@ class AbdmUnavailable(AbdmError):
     """
 
 
+class AbdmProtocolError(AbdmError):
+    """Unexpected HTTP response; inspect the endpoint, do not replay blindly.
+
+    A redirect is neither acceptance nor permission to send credentials and
+    patient data to its Location. Keep only bounded operational evidence.
+    """
+
+    def __init__(self, status_code: int, *, stage: str = "request") -> None:
+        super().__init__(
+            f"ABDM returned an unexpected HTTP status: {status_code}",
+            status_code=status_code,
+            stage=stage,
+        )
+
+
 class AbdmRejected(AbdmError):
     """Gateway understood the request and refused it (4xx other than 401/403).
 
-    Carries the status and the gateway's error body, which is the only place
-    ABDM explains itself. Callers may surface `detail` to the operator —
-    it describes the request, not the patient.
+    ``detail`` may echo patient identifiers or credentials. Keep it available
+    for deliberate parsing, but never put it in an exception string or toast.
     """
 
-    def __init__(self, status_code: int, detail: Any, request_id: str) -> None:
-        self.status_code = status_code
+    def __init__(
+        self, status_code: int, detail: Any, request_id: str, *, stage: str = "request"
+    ) -> None:
         self.detail = detail
         self.request_id = request_id
-        super().__init__(f"ABDM rejected request {request_id}: {status_code} {detail}")
+        super().__init__(
+            f"ABDM rejected request: HTTP {status_code}", status_code=status_code, stage=stage
+        )
+
+
+def _safe_error_codes(body: Any) -> tuple[str, ...]:
+    """Only documented code namespaces; no messages, arbitrary numbers or PHI.
+
+    NHA's application errors use ABDM-NNNN. API-manager authentication faults
+    may use WSO2's 900900–900910 codes inside `fault`, including forbidden scope
+    and inactive subscription. Preserve those without retaining the auth body.
+    """
+    nodes = body if isinstance(body, list) else [body]
+    codes = set()
+    for node in nodes[:20]:
+        if not isinstance(node, dict):
+            continue
+        for item in (node, node.get("error"), node.get("fault")):
+            if not isinstance(item, dict):
+                continue
+            code = item.get("code")
+            if isinstance(code, str) and re.fullmatch(r"ABDM-[0-9]{4}:?\s*", code):
+                codes.add(code[:9])
+            elif (type(code) is int and 900900 <= code <= 900910) or (
+                isinstance(code, str) and code in {str(n) for n in range(900900, 900911)}
+            ):
+                codes.add(str(code))
+    return tuple(sorted(codes)[:3])
+
+
+def safe_failure_summary(exc: Exception) -> str:
+    """Bounded operational evidence, never arbitrary gateway messages/values."""
+    parts = [type(exc).__name__]
+    if isinstance(exc, AbdmError):
+        if exc.stage in {"session", "request"}:
+            parts.append(exc.stage)
+        if type(exc.status_code) is int and 100 <= exc.status_code <= 599:
+            parts.append(str(exc.status_code))
+        body = (
+            exc.detail
+            if isinstance(exc, AbdmRejected)
+            else [{"code": code} for code in exc.error_codes[:3]]
+        )
+        parts.extend(_safe_error_codes(body))
+    return ":".join(parts)[:100]
 
 
 @dataclass
@@ -192,6 +267,7 @@ class AbdmClient:
             base_url=self.base_url,
             timeout=timeout or _DEFAULT_TIMEOUT,
             transport=transport,
+            follow_redirects=False,
         )
 
     # ------------------------------------------------------------------ config
@@ -240,18 +316,30 @@ class AbdmClient:
             log.warning(
                 "ABDM session request %s failed at transport: %s", request_id, type(exc).__name__
             )
-            raise AbdmUnavailable("ABDM gateway unreachable for session") from exc
+            raise AbdmUnavailable("ABDM gateway unreachable for session", stage="session") from exc
 
         if resp.status_code in (401, 403):
             log.error(
                 "ABDM rejected client credentials (session %s, %s)", request_id, resp.status_code
             )
-            raise AbdmAuthError(f"ABDM rejected client credentials ({resp.status_code})")
+            raise AbdmAuthError(
+                "ABDM rejected client credentials",
+                status_code=resp.status_code,
+                stage="session",
+                error_codes=_safe_error_codes(_safe_body(resp)),
+            )
         if resp.status_code >= 500:
             log.warning("ABDM session %s returned %s", request_id, resp.status_code)
-            raise AbdmUnavailable(f"ABDM session endpoint returned {resp.status_code}")
+            raise AbdmUnavailable(
+                "ABDM session endpoint unavailable",
+                status_code=resp.status_code,
+                stage="session",
+                error_codes=_safe_error_codes(_safe_body(resp)),
+            )
         if resp.status_code >= 400:
-            raise AbdmRejected(resp.status_code, _safe_body(resp), request_id)
+            raise AbdmRejected(resp.status_code, _safe_body(resp), request_id, stage="session")
+        if not 200 <= resp.status_code < 300:
+            raise AbdmProtocolError(resp.status_code, stage="session")
 
         body = _safe_body(resp)
         if not isinstance(body, Mapping):
@@ -317,22 +405,37 @@ class AbdmClient:
 
         if resp.status_code == 401:
             # Revoked early, or expired between our margin and the gateway.
-            # Exactly one forced refresh; a second 401 is a credentials fault.
+            # Exactly one forced refresh; a second 401 needs authorization review.
             log.info("ABDM 401 on %s — refreshing session and retrying once", rid)
             token = await self._token(force_refresh=True)
             resp = await self._send(method, path, json, token, rid, extra_headers)
             if resp.status_code == 401:
                 self._tokens.clear()
                 raise AbdmAuthError(
-                    "ABDM returned 401 with a freshly issued token — check credentials"
+                    "ABDM rejected operation authorization after one session refresh",
+                    status_code=401,
+                    stage="request",
+                    error_codes=_safe_error_codes(_safe_body(resp)),
                 )
 
         if resp.status_code == 403:
-            raise AbdmAuthError(f"ABDM returned 403 for {method} {path}")
+            raise AbdmAuthError(
+                "ABDM request was forbidden",
+                status_code=403,
+                stage="request",
+                error_codes=_safe_error_codes(_safe_body(resp)),
+            )
         if resp.status_code >= 500:
-            raise AbdmUnavailable(f"ABDM returned {resp.status_code} for {method} {path}")
+            raise AbdmUnavailable(
+                "ABDM request unavailable",
+                status_code=resp.status_code,
+                stage="request",
+                error_codes=_safe_error_codes(_safe_body(resp)),
+            )
         if resp.status_code >= 400:
             raise AbdmRejected(resp.status_code, _safe_body(resp), rid)
+        if not 200 <= resp.status_code < 300:
+            raise AbdmProtocolError(resp.status_code)
 
         return AbdmResponse(resp.status_code, _safe_body(resp), rid)
 
@@ -368,7 +471,9 @@ class AbdmClient:
                 request_id,
                 type(exc).__name__,
             )
-            raise AbdmUnavailable(f"ABDM gateway unreachable for {method} {path}") from exc
+            raise AbdmUnavailable(
+                f"ABDM gateway unreachable for {method} {path}", stage="request"
+            ) from exc
 
         # Status and duration only. Never the body — it carries PHI.
         log.info(

@@ -18,7 +18,7 @@ export interface ConsentRequest {
 }
 export interface Workspace {
   patient_id: string; patient_name: string; abha_address: string | null;
-  identity_verified: boolean; requests: ConsentRequest[]; next_offset: number | null;
+  identity_verified: boolean; requester_ready: boolean; requests: ConsentRequest[]; next_offset: number | null;
 }
 export interface ConsentInput {
   patient_id: string; abha_address: string; purpose_code: "CAREMGT";
