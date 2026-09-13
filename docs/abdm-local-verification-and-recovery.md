@@ -1,7 +1,6 @@
 # ABDM local verification and recovery
 
-Updated: 9 September 2026. PR #537 merged into staging; current follow-up:
-`fix/abdm-historical-registration`.
+Updated: 13 September 2026. Current follow-up: `fix/abdm-live-operations`.
 This is an engineering runbook, **not evidence of NHA milestone approval**.
 The status table in [the gap report](bahmni-abdm-m1-m2-m3-gap-analysis-2026-09-08.md)
 distinguishes implementation from unproven deployment and clinical behaviour.
@@ -92,7 +91,29 @@ Migration 0067 commits HIP consent/data-request and HIU consent acknowledgement
 intent with the accepted business state. The reply job schedules transfer/fetch
 only after acknowledgement succeeds. Each fetch uses its durable job ID on the
 wire; an incoming artefact must match that dispatched job, not merely a known
-consent ID. Discovery/link/Scan-and-Share replies still have inline work. Recovery
+consent ID. Migration 0070 extends durable intent to successful mediated-link
+confirmation: the exact OTP proof can retry a database rollback under its
+original Redis TTL, and committed acknowledgement retries use a keyed proof
+fingerprint without retaining the code. These jobs never enqueue clinical
+transfer. Migration 0071 extends that durable boundary to discovery, link-init,
+negative confirmation and Scan-and-Share acknowledgements. Their frozen reply
+snapshots are encrypted with per-reply associated data, expire within ten
+minutes, and are erased by cleanup after successful delivery or expiry. A
+callback replay cannot extend that deadline or restore erased content.
+
+Link-init commits before attempting SMS. Redis permits one delivery attempt
+per link under its original deadline. Concurrent/repeated work cannot generate
+another OTP, reset attempts or change the recipient. An ambiguous SMS outcome
+requires an explicit new patient action, not automatic redelivery. Wrong-proof
+retries with the same callback ID also cannot consume the attempt budget twice
+after a database rollback. The configured worker is required to dispatch these
+replies; receipt of HTTP 202 alone does not mean a reply was delivered.
+
+The owner deferred SMS-provider setup, so this alternative remains disabled
+operationally and is tested with synthetic data, not a live participant. Keep
+the general outbound worker stopped until its entire queue is reviewed. For an
+approved single operation, use the targeted job dispatcher rather than draining
+unrelated jobs. Recovery
 when the gateway accepted a fetch but never sends a usable callback still needs
 an explicit callback-timeout/redelivery workflow.
 

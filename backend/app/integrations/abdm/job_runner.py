@@ -222,8 +222,21 @@ async def cleanup_expired_keys() -> int:
             if link.status == "pending":
                 link.status = "expired"
                 link.failure_reason = "Link credential use window expired; start linking again"
+        replies = list((await db.execute(
+            select(jobs.AbdmCallbackReply).where(
+                jobs.AbdmCallbackReply.response_encrypted.is_not(None),
+                or_(
+                    jobs.AbdmCallbackReply.response_expires_at <= now,
+                    jobs.AbdmCallbackReply.id.in_(select(jobs.AbdmJob.target_id).where(
+                        jobs.AbdmJob.kind == "callback_ack", jobs.AbdmJob.status == "done",
+                    )),
+                ),
+            ).with_for_update(skip_locked=True)
+        )).scalars())
+        for reply in replies:
+            reply.response_encrypted = None
         await db.commit()
-        return len(rows) + len(links) + erased
+        return len(rows) + len(links) + len(replies) + erased
 
 
 async def run_mode(*, mode: str, once: bool = False) -> None:

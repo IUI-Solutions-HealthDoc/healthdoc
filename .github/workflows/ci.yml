@@ -215,6 +215,10 @@ jobs:
       - name: Tests
         run: pytest -q
 
+      # backend/pyproject.toml does not collect repository-level script tests.
+      - name: Deployment and evidence script regressions
+        run: pytest ../scripts/tests -q
+
   frontend:
     runs-on: ubuntu-latest
     defaults: { run: { working-directory: frontend } }
