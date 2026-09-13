@@ -54,4 +54,7 @@ async def test_width_migration_preserves_numbers_and_refuses_destructive_downgra
     with pytest.raises(DBAPIError, match="Long billing identifiers exist"):
         async with connection.begin_nested():
             await connection.run_sync(run, migration.downgrade)
-    assert (await db.execute(sa.text("SELECT refund_number FROM refunds ORDER BY refund_number"))).scalars().all() == [long_number, "original-number"]
+    # Database collation differs between macOS development and Linux CI. This
+    # proves exact preservation (including row count), not locale-specific sort.
+    numbers = (await db.execute(sa.text("SELECT refund_number FROM refunds"))).scalars().all()
+    assert sorted(numbers) == sorted([long_number, "original-number"])
