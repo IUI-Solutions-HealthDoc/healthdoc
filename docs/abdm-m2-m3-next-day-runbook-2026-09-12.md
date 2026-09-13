@@ -1,5 +1,36 @@
 # M2/M3: next-day execution gates — 12 September 2026
 
+## PR #557 CI and live follow-up — 13 September, 14:51 IST
+
+- The initial GitHub run proved the **production frontend build**, release
+  policy and **nurse-auth-e2e** job (staff/patient authentication, dashboard,
+  print and scoped UI safety steps). This resolves the earlier build-evidence
+  gap caused by local Google Fonts connectivity. These are not NHA exchanges.
+- Its backend run failed one test, with 1,903 passing: the billing migration
+  preservation test assumed PostgreSQL's local text collation. The assertion
+  now compares the exact retained multiset using Python ordering, without
+  changing application code, identifiers or database collation. Eight targeted
+  PostgreSQL migration/fixture tests pass. Fix commit: `c04af71`.
+- Fresh local API health and silent-SSO returned **200** using nginx's exact
+  configured development certificate as the explicit trust anchor (no `-k`).
+  A bare curl invocation did not trust the self-signed certificate; that was
+  not an API outage. All 16 public callback routes refused empty unauthenticated
+  probes as expected. Those probes do not prove genuine callback delivery.
+- At **09:18:00 UTC / 14:48:00 IST**, metadata remained unchanged: selected
+  token job two attempts, no HIP token/confirmation, no received records/keys,
+  active local consent and incomplete M3 requester metadata. No further token
+  request, SMS, consent submission or clinical transfer was performed.
+- The sandbox command helper no longer writes session responses to predictable
+  `/tmp` files or puts bearer headers in curl's process arguments. Session JSON
+  uses proper escaping, malformed tokens are refused, requests are time-bounded,
+  and transport/non-2xx failures return nonzero without printing upstream bodies
+  or automatically retrying. Sixteen synthetic CLI tests exercise the actual
+  shell helper with fake curl; no live credentials or gateway call are used.
+
+Live milestone completion still requires the external prerequisites listed below.
+PR review and the CI run for the final pushed commit must pass before merging;
+the earlier green frontend/browser checks are not a blanket green for a later SHA.
+
 ## PR handoff — 13 September 2026, 14:08 IST
 
 This section supersedes the older inline-reply work item below. It is **local
