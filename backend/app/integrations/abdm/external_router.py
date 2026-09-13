@@ -7,14 +7,14 @@ camelCase bodies and empty 202 responses follow the NHA reference wrapper.
 
 from __future__ import annotations
 
-import logging
+import re
 import uuid
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.config import get_settings
@@ -27,7 +27,6 @@ from app.integrations.abdm.callback_auth import (
     hiu_gateway_callback,
     profile_gateway_callback,
 )
-from app.integrations.abdm.client import AbdmError
 from app.integrations.abdm.contracts_v3 import (
     ConsentOnFetchCallback,
     ConsentOnInitCallback,
@@ -45,7 +44,6 @@ from app.integrations.abdm.contracts_v3 import (
     ProfileShareCallback,
     raw_dict,
 )
-from app.integrations.abdm.hip import gateway as hip_gateway
 from app.integrations.abdm.hip import link_otp
 from app.integrations.abdm.hip import service as hip_service
 from app.integrations.abdm.hip.documents import DocumentUnavailable, resolve_context_document
@@ -63,13 +61,12 @@ from app.integrations.abdm.hiu.models import (
     AbdmHiuHealthInformationRequest,
     AbdmReceivedBundle,
 )
-from app.integrations.abdm.jobs import AbdmJob
+from app.integrations.abdm.jobs import AbdmCallbackReply, AbdmJob
 from app.integrations.abdm.jobs import job_id as durable_job_id
 from app.patients import service as patient_service
 from app.patients.models import Patient
 from app.users.models import Facility, User
 
-log = logging.getLogger("healthdoc.abdm.callbacks")
 router = APIRouter(tags=["abdm-v3-callbacks"], include_in_schema=False)
 _PLACEHOLDER = "change-me"
 DbSession = Annotated[AsyncSession, Depends(get_db)]
@@ -116,6 +113,7 @@ async def _patient_by_address(
                 Patient.facility_id == facility_id,
                 Patient.abha_address == abha_address,
                 Patient.deleted_at.is_(None),
+                Patient.merged_into_patient_id.is_(None),
             )
         )
     ).scalar_one_or_none()
@@ -155,7 +153,11 @@ async def _contexts(
     if references is not None:
         stmt = stmt.where(AbdmCareContext.reference.in_(references))
     contexts = []
-    for context in (await db.execute(stmt)).scalars().all():
+    for context in (
+        (await db.execute(stmt.order_by(AbdmCareContext.hi_type, AbdmCareContext.reference)))
+        .scalars()
+        .all()
+    ):
         try:
             await resolve_context_document(db, context)
         except DocumentUnavailable:
@@ -185,18 +187,26 @@ def _groups(patient: Patient, contexts: list[AbdmCareContext]) -> list[dict]:
     ]
 
 
-async def _outbound(label: str, call) -> None:
-    try:
-        await call
-    except (AbdmError, RuntimeError, ValueError) as exc:
-        log.error("ABDM %s response failed (%s)", label, type(exc).__name__)
+async def _link_patient_contexts(
+    db: AsyncSession, link: AbdmCareContextLink
+) -> tuple[Patient, list[AbdmCareContext]]:
+    patient = await _patient_by_address(
+        db, facility_id=link.facility_id, abha_address=link.abha_address
+    )
+    if patient is None or patient.id != link.patient_id:
+        raise HTTPException(404, {"code": "patient_not_found", "message": "Patient not found"})
+    refs = set(link.care_context_references or [])
+    rows = await _contexts(db, facility_id=link.facility_id, patient_id=patient.id, references=refs)
+    if (
+        not refs
+        or len(refs) != len(link.care_context_references)
+        or {row.reference for row in rows} != refs
+    ):
         raise HTTPException(
-            502,
-            {
-                "code": "abdm_response_failed",
-                "message": f"Could not send the {label} response to ABDM",
-            },
-        ) from exc
+            409,
+            {"code": "link_documents_unavailable", "message": "Selected documents changed"},
+        )
+    return patient, rows
 
 
 # ------------------------------------------------------------------ HIP M2
@@ -222,14 +232,22 @@ async def discover(
             await _contexts(db, facility_id=facility_id, patient_id=patient.id),
         )
         matched_by = ["ABHA_ADDRESS"]
-    await _outbound(
-        "discovery",
-        hip_gateway.respond_to_discovery_groups(
-            transaction_id=payload.transaction_id,
-            gateway_request_id=callback.request_id,
-            patient_groups=patient_groups,
-            matched_by=matched_by,
-        ),
+    await callback_replies.schedule(
+        db,
+        facility_id=facility_id,
+        kind="hip_discover",
+        gateway_request_id=callback.request_id,
+        payload=payload,
+        target_id=patient.id if patient else None,
+        subject_ids=[c["referenceNumber"] for g in patient_groups for c in g["careContexts"]],
+        response_data={
+            "abha_address": payload.patient.id,
+            "wire": {
+                "transaction_id": payload.transaction_id,
+                "patient_groups": patient_groups,
+                "matched_by": matched_by,
+            },
+        },
     )
     return _accepted()
 
@@ -248,6 +266,16 @@ async def link_init(
     )
     if patient is None:
         raise HTTPException(404, {"code": "patient_not_found", "message": "Patient not found"})
+    # Serializes the transaction, even if concurrent callbacks claim different
+    # patients. Locking the patient alone cannot guard that rebinding race.
+    transaction_key = uuid.uuid5(facility_id, payload.transaction_id)
+    if db.bind.dialect.name == "postgresql":
+        await db.execute(
+            text("SELECT pg_advisory_xact_lock(:key)"),
+            {
+                "key": int.from_bytes(transaction_key.bytes[:8], "big", signed=True),
+            },
+        )
     requested = {
         context.reference_number for group in payload.patient for context in group.care_contexts
     }
@@ -263,14 +291,37 @@ async def link_init(
 
     link = (
         await db.execute(
-            select(AbdmCareContextLink).where(
+            select(AbdmCareContextLink)
+            .where(
                 AbdmCareContextLink.facility_id == facility_id,
                 AbdmCareContextLink.transaction_id == payload.transaction_id,
             )
+            .with_for_update()
         )
     ).scalar_one_or_none()
+    if link is not None:
+        # A transaction identifies one patient and one exact document selection.
+        # Never send a new patient's OTP for a previously bound transaction.
+        if (
+            link.patient_id != patient.id
+            or link.abha_address != payload.abha_address
+            or set(link.care_context_references or []) != requested
+        ):
+            raise HTTPException(
+                409, {"code": "link_replay_conflict", "message": "Link selection changed"}
+            )
+        if link.status != "pending":
+            raise HTTPException(
+                409, {"code": "link_not_pending", "message": "Link request is no longer pending"}
+            )
+        expiry = link.expires_at
+        if expiry is None or (
+            expiry if expiry.tzinfo else expiry.replace(tzinfo=UTC)
+        ) <= datetime.now(UTC):
+            raise HTTPException(410, {"code": "link_expired", "message": "Link request expired"})
     if link is None:
         link = AbdmCareContextLink(
+            id=transaction_key,
             facility_id=facility_id,
             patient_id=patient.id,
             abha_address=payload.abha_address,
@@ -291,30 +342,27 @@ async def link_init(
                 "message": "The patient has no mobile number for mediated linking",
             },
         )
-    try:
-        communication_hint = await link_otp.issue(
-            link_ref_number=link.link_ref_number,
-            mobile=patient.mobile,
-        )
-    except link_otp.LinkOtpUnavailable as exc:
-        raise HTTPException(
-            503,
-            {
-                "code": "link_otp_unavailable",
-                "message": "The patient linking OTP could not be delivered",
-            },
-        ) from exc
+    communication_hint = link_otp.masked_mobile(patient.mobile)
     expiry = (link.expires_at or datetime.now(UTC) + timedelta(minutes=10)).astimezone(UTC)
-    await _outbound(
-        "link-init",
-        hip_gateway.respond_to_link_init(
-            transaction_id=payload.transaction_id,
-            gateway_request_id=callback.request_id,
-            link_ref_number=link.link_ref_number,
-            authentication_type="MEDIATE",
-            communication_hint=communication_hint,
-            communication_expiry=expiry.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
-        ),
+    await callback_replies.schedule(
+        db,
+        facility_id=facility_id,
+        kind="hip_link_init",
+        gateway_request_id=callback.request_id,
+        payload=payload,
+        target_id=link.id,
+        subject_ids=link.care_context_references,
+        response_expires_at=expiry,
+        response_data={
+            "mobile": patient.mobile,
+            "wire": {
+                "transaction_id": payload.transaction_id,
+                "link_ref_number": link.link_ref_number,
+                "authentication_type": "MEDIATE",
+                "communication_hint": communication_hint,
+                "communication_expiry": expiry.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
+            },
+        },
     )
     return _accepted()
 
@@ -333,51 +381,85 @@ async def link_confirm(
         )
     link = (
         await db.execute(
-            select(AbdmCareContextLink).where(
+            select(AbdmCareContextLink)
+            .where(
                 AbdmCareContextLink.link_ref_number == payload.confirmation.link_ref_number,
-                AbdmCareContextLink.status == "pending",
+                AbdmCareContextLink.facility_id == await _facility_id(db),
+                AbdmCareContextLink.status.in_(["pending", "confirmed", "expired"]),
             )
+            .with_for_update()
         )
     ).scalar_one_or_none()
     if link is None:
         raise HTTPException(404, {"code": "link_not_found", "message": "Link request not found"})
+    # Persist a keyed fingerprint, not an OTP or an offline-guessable OTP hash.
+    receipt = payload.model_copy(deep=True)
+    receipt.confirmation.token = link_otp.confirmation_digest(
+        link_ref_number=link.link_ref_number,
+        otp=payload.confirmation.token or "",
+        request_id=callback.request_id,
+    )
+    reply_kwargs = dict(
+        facility_id=link.facility_id,
+        kind="hip_link_confirm",
+        gateway_request_id=callback.request_id,
+        payload=receipt,
+        subject_ids=link.care_context_references,
+        target_id=link.id,
+    )
+    rejected = await db.get(
+        AbdmCallbackReply,
+        callback_replies.reply_id(link.facility_id, "hip_link_reject", callback.request_id),
+    )
+    if rejected is not None:
+        # Replay the same refusal without spending another OTP attempt.
+        await callback_replies.schedule(
+            db, **{**reply_kwargs, "kind": "hip_link_reject"}, response_data={}
+        )
+        return _accepted()
+    if link.status == "confirmed":
+        existing = await db.get(
+            AbdmCallbackReply,
+            callback_replies.reply_id(link.facility_id, "hip_link_confirm", callback.request_id),
+        )
+        if existing is None or existing.target_id != link.id:
+            raise HTTPException(
+                409, {"code": "link_replay_conflict", "message": "Confirmation changed"}
+            )
+        # Only an exact previously committed proof may replay after OTP expiry.
+        await callback_replies.schedule(db, **reply_kwargs)
+        return _accepted()
     expiry = link.expires_at
-    if expiry and (expiry if expiry.tzinfo else expiry.replace(tzinfo=UTC)) <= datetime.now(UTC):
-        link.status = "expired"
+    if (
+        link.status != "pending"
+        or expiry is None
+        or (expiry if expiry.tzinfo else expiry.replace(tzinfo=UTC)) <= datetime.now(UTC)
+    ):
         raise HTTPException(410, {"code": "link_expired", "message": "Link request expired"})
+    # Check source lifecycle BEFORE consuming proof; do not confirm a subset.
+    await _link_patient_contexts(db, link)
     try:
         await link_otp.verify(
             link_ref_number=link.link_ref_number,
             otp=payload.confirmation.token or "",
+            confirmation_id=callback.request_id,
         )
     except (link_otp.LinkOtpInvalid, link_otp.LinkOtpExpired) as exc:
         if isinstance(exc, link_otp.LinkOtpExpired):
             link.status = "expired"
             link.failure_reason = "link_otp_expired"
-        await _outbound(
-            "link-confirm refusal",
-            hip_gateway.respond_to_link_confirm_error(
-                gateway_request_id=callback.request_id,
-                code="ABDM-1035",
-                message="Incorrect OTP",
-            ),
+        await callback_replies.schedule(
+            db,
+            **{**reply_kwargs, "kind": "hip_link_reject"},
+            response_data={},
         )
         return _accepted()
-    patient = await db.get(Patient, link.patient_id)
-    if patient is None:
-        raise HTTPException(404, {"code": "patient_not_found", "message": "Patient not found"})
-    refs = set(link.care_context_references or [])
-    rows = await _contexts(db, facility_id=link.facility_id, patient_id=patient.id, references=refs)
     link.status = "confirmed"
     link.confirmed_at = datetime.now(UTC)
     await db.flush()
-    await _outbound(
-        "link-confirm",
-        hip_gateway.respond_to_link_confirm_groups(
-            gateway_request_id=callback.request_id,
-            patient_groups=_groups(patient, rows),
-        ),
-    )
+    # Commit proof and delivery intent together. A network failure must not
+    # roll back the link after Redis has already reserved the successful OTP.
+    await callback_replies.schedule(db, **reply_kwargs)
     return _accepted()
 
 
@@ -594,16 +676,33 @@ async def profile_share(
         db.add(patient)
         await db.flush()
 
-    token_number = (patient.uhid or str(patient.id)).split("-")[-2].lstrip("0") or "0"
-    await _outbound(
-        "profile-share acknowledgement",
-        hip_gateway.acknowledge_profile_share(
-            gateway_request_id=callback.request_id,
-            abha_address=shared.abha_address,
-            context=payload.meta_data.context,
-            token_number=token_number,
-            expiry_seconds=1800,
-        ),
+    identity = re.fullmatch(r"IN-[^-]+-[^-]+-\d{4}-(\d{6})-[0-9A-Z]", patient.uhid or "")
+    if identity is None:
+        raise HTTPException(
+            409,
+            {
+                "code": "profile_uhid_unavailable",
+                "message": "Patient UHID requires reconciliation before Scan-and-Share",
+            },
+        )
+    token_number = identity.group(1).lstrip("0") or "0"
+    await callback_replies.schedule(
+        db,
+        facility_id=facility_id,
+        kind="hip_profile",
+        gateway_request_id=callback.request_id,
+        payload=payload,
+        subject_ids=[],
+        target_id=patient.id,
+        response_data={
+            "abha_address": shared.abha_address,
+            "wire": {
+                "abha_address": shared.abha_address,
+                "context": payload.meta_data.context,
+                "token_number": token_number,
+                "expiry_seconds": 1800,
+            },
+        },
     )
     return _accepted()
 

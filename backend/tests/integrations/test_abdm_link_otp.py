@@ -24,21 +24,35 @@ class _Redis:
         self.values.pop(key, None)
         self.ttls.pop(key, None)
 
-    async def eval(self, script, number_of_keys, key, presented, max_attempts):
+    async def eval(self, script, number_of_keys, key, presented, max_attempts, confirmation_id):
         raw = self.values.get(key)
         if raw is None:
             return -1
         state = json.loads(raw)
+        if confirmation_id and confirmation_id in state.get("failures", {}):
+            return 0 if state["failures"][confirmation_id] == presented else -1
         if state["attempts"] >= int(max_attempts):
             await self.delete(key)
             return -1
         if state["digest"] == presented:
-            await self.delete(key)
+            if confirmation_id:
+                if state.get("confirmation_id") not in {None, confirmation_id}:
+                    return -1
+                state["confirmation_id"] = confirmation_id
+                self.values[key] = json.dumps(state)
+            else:
+                if state.get("confirmation_id"):
+                    return -1
+                await self.delete(key)
             return 1
+        if state.get("confirmation_id"):
+            return -1
         state["attempts"] += 1
         if state["attempts"] >= int(max_attempts):
             await self.delete(key)
             return -1
+        if confirmation_id:
+            state.setdefault("failures", {})[confirmation_id] = presented
         self.values[key] = json.dumps(state)
         return 0
 
@@ -79,6 +93,24 @@ async def test_correct_code_is_single_use(monkeypatch, redis):
     await link_otp.verify(link_ref_number="LINK-1", otp="123456")
     with pytest.raises(link_otp.LinkOtpExpired):
         await link_otp.verify(link_ref_number="LINK-1", otp="123456")
+
+
+async def test_reserved_proof_only_retries_the_same_callback_under_original_ttl(monkeypatch, redis):
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr(link_otp, "_deliver", AsyncMock())
+    await link_otp.issue(link_ref_number="LINK-1", mobile="9876543210")
+    before = dict(redis.ttls)
+    for _ in range(2):
+        await link_otp.verify(link_ref_number="LINK-1", otp="123456", confirmation_id="CALLBACK-1")
+    for code, ident in [("123456", "CALLBACK-2"), ("000000", "CALLBACK-1"), ("123456", "")]:
+        with pytest.raises(link_otp.LinkOtpExpired):
+            await link_otp.verify(link_ref_number="LINK-1", otp=code, confirmation_id=ident)
+    assert redis.ttls == before
+    assert "123456" not in redis.values["abdm:link-otp:LINK-1"]
+    await redis.delete("abdm:link-otp:LINK-1")
+    with pytest.raises(link_otp.LinkOtpExpired):
+        await link_otp.verify(link_ref_number="LINK-1", otp="123456", confirmation_id="CALLBACK-1")
 
 
 async def test_wrong_codes_are_bounded_and_lock_the_session(monkeypatch, redis):

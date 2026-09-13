@@ -204,8 +204,9 @@ case "${1:-}" in
     done
     echo
     if [[ "$fail" == "0" ]]; then
-      echo "✓ ABDM can reach every callback on $base"
-      echo "  Register it:  $0 set-url $base"
+      echo "✓ Empty callback probes reached refusing endpoints on $base"
+      echo "  This does not prove NHA-origin connectivity, authentication or live callback acceptance."
+      echo "  Check the existing bridge registration before deciding whether it needs an update."
     else
       echo "✗ Not ready to register. ABDM would call this URL and get nothing usable."
       exit 1

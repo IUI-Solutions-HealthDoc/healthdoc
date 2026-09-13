@@ -1,8 +1,10 @@
-"""Explicit operator recovery for one accepted request with a lost callback.
+"""Explicit operator recovery for one completed dispatch with a missing callback.
 
 This does not run a worker or invent a new REQUEST-ID. It only requeues the
 original job after inspection. No automatic timer calls it: generating tokens
 repeatedly can block a facility/address for 24 hours (M2 v2.8).
+Job completion alone does not prove the historical HTTP response was accepted;
+inspect independent transport evidence and obtain transmission permission first.
 """
 
 import uuid
@@ -65,7 +67,7 @@ async def queue_token_callback_retry(
         or job.lease_token is not None
         or job.lease_until is not None
     ):
-        raise DocumentUnavailable("Recovery requires exactly one accepted, completed token request")
+        raise DocumentUnavailable("Recovery requires exactly one completed token dispatch")
     if job.updated_at > now - timedelta(minutes=10):
         raise DocumentUnavailable("Wait at least ten minutes for the original callback")
     if await db.get(AbdmJob, job_id("link_context", link.id)) is not None:

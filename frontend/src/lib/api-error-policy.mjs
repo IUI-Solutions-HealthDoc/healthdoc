@@ -24,9 +24,11 @@ export function userFacingApiError(code, payload) {
     username_taken: "That username is already in use.",
     patient_not_found: "The requested patient was not found.",
     account_request_not_found: "The account request was not found.",
+    actor_not_provisioned: "Sign-in succeeded, but this account is not linked to a HealthDoc staff profile. Ask your facility administrator to check account provisioning.",
+    user_deactivated: "Your HealthDoc staff account is deactivated. Contact your facility administrator.",
     abdm_rejected: "ABDM declined this request. Check the details before retrying; contact support if it continues.",
     abdm_requester_required: "Ask your facility administrator to verify your name, registration number, identifier type and issuing registry URI before requesting ABDM records.",
-    invalid_abdm_requester_profile: "Enter the real registration number, identifier type and issuing registry URI together, or clear both ABDM metadata fields.",
+    invalid_abdm_requester_profile: "Enter the real registration number, identifier type and issuing registry URI together, or clear all three registration fields.",
   };
   if (domainCode && Object.hasOwn(domainMessages, domainCode)) {
     return domainMessages[domainCode];
