@@ -62,6 +62,29 @@ consent request. Please help trace the following sequence on 11 September 2026.
    exit and integrator dashboards provide no request-level callback trace.
    The local request was still pending without a token at 04:19:20 UTC. We
    have not submitted exit declarations or changed the bridge configuration.
+9. On **12 September at 18:25:41 UTC**, following renewed local consent and
+   explicit participant permission for one demographic-only retry, we reran
+   only the fresh operation's original job/REQUEST-ID
+   `d613360a-99e5-5fc4-873c-b804d01dba8a`. This time the gateway log captured
+   **HTTP 202** from `POST /api/hiecm/v3/token/generate-token`. That is evidence
+   of dispatch acceptance, not token delivery or successful linking. The job
+   now has two attempts; the old expired operation and other queued jobs were
+   untouched. At **18:29:05 UTC**, this operation still had no token callback,
+   stored token, or confirmation. A subsequent read-only bridge-services call
+   returned 200, the registered URL still matched, and both services were
+   active. An empty public token-callback probe returned 400 (expected refusal).
+   No further token retry is authorized or planned. The earlier missing HTTP
+   status is still unknown and has not been retrospectively inferred.
+10. At **12 September 23:31:44 UTC**, approximately five hours after that
+    observed 202, the selected HIP operation still had no token or confirmation.
+    We retested all 16 public callback routes with empty unauthenticated probes:
+    they were reachable and refused the probes as expected. Fresh session and
+    bridge-services access succeeded, with the same URL and active services.
+    We also completed a fresh participant-entered M1 existing-ABHA OTP
+    verification; persisted identity still matches the pending HIP operation.
+    No M1 credential was substituted as a HIP link token, and no further HIP
+    token-generation request was sent. Reachability from our probe client is
+    not proof of NHA-origin delivery; please trace your actual delivery outcome.
 
 ### Please confirm
 
@@ -81,6 +104,15 @@ consent request. Please help trace the following sequence on 11 September 2026.
    rate-limited, or was callback delivery attempted? Please provide the delivery
    time, destination, response status and safe error code. Confirm when another
    attempt is safe; we will not repeatedly regenerate tokens.
+6. We also need an appropriate **M3 sandbox requester identity**. The supplied
+   M3 v2.8 material requires name and identifier type/value/system, but examples
+   differ between `REGN01`, `REGNO1` and `REGNO`. We currently have no authorized
+   clinician registration configured. Please provide an approved sandbox test
+   requester or confirm your policy for explicitly synthetic requester values,
+   including the accepted identifier type and issuer URI for our assigned M3
+   cases. Does sandbox testing require a registered HPR identity, or can an
+   approved test identity be used? We will not represent example values as a
+   real clinician or declare registry membership without verification.
 
 We will keep any subsequent run to the same approved document and obtain
 separate participant PHR consent before clinical transfer.
@@ -96,8 +128,10 @@ separate participant PHR consent before clinical transfer.
 - Resolve the rejection from the above evidence, then plan one fresh attempt
   with safe status/code logging and a stable callback origin. Do not run the
   general queue consumer or repeatedly request linking tokens.
-- Local participant consent expired at 23:59 IST on 11 September. Obtain a
-  new explicit local access decision before accessing the record. M3 also
+- The retry above occurred before the previous local consent expired. The
+  participant subsequently renewed Clinical Review consent at **13 September
+  00:02:12 IST**, valid through **14 September 23:59:59 IST**; active patient
+  matching was verified at **00:07:46 IST**. This does not grant PHR consent. M3 also
   needs a genuine or NHA-approved clinician requester identifier configured
   in the user's profile and the participant's separate PHR approval.
 - Header routing checks do not authenticate callback origin. Complete the

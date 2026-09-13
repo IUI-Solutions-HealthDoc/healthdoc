@@ -55,26 +55,41 @@ require_credentials() {
 _now() { date -u +"%Y-%m-%dT%H:%M:%S.000Z"; }
 
 token() {
-  local rid body http
+  local rid response http
   rid=$(uuidgen)
-  # Built here and piped in via --data @-, so the secret never appears on the
-  # process list where `ps` would show it to any other user on the box.
-  body=$(printf '{"clientId":"%s","clientSecret":"%s","grantType":"client_credentials"}' \
-          "$ABDM_CLIENT_ID" "$ABDM_CLIENT_SECRET")
-  http=$(printf '%s' "$body" | curl -s -o /tmp/abdm_session.$$ -w '%{http_code}' \
+  # Encode credentials as JSON and keep the request/response in pipes/memory.
+  # Predictable /tmp files exposed bearer tokens and allowed symlink clobbering.
+  # Neither credentials nor tokens belong in process arguments or error output.
+  if ! response=$(python3 -c 'import json,os; print(json.dumps({
+      "clientId": os.environ["ABDM_CLIENT_ID"],
+      "clientSecret": os.environ["ABDM_CLIENT_SECRET"],
+      "grantType": "client_credentials"}))' | curl -sS --max-time 30 -w '\n%{http_code}' \
     -X POST "$GATEWAY$SESSION_PATH" \
     -H "REQUEST-ID: $rid" -H "TIMESTAMP: $(_now)" -H "X-CM-ID: $CM_ID" \
     -H "Content-Type: application/json" -H "Accept: application/json" \
-    --data @-)
-  if [[ "$http" != "200" && "$http" != "202" ]]; then
-    echo "✗ session request returned HTTP $http" >&2
-    # Body may echo the client id; show it only on failure, and say so.
-    sed 's/"clientSecret":"[^"]*"/"clientSecret":"[redacted]"/g' /tmp/abdm_session.$$ >&2
-    rm -f /tmp/abdm_session.$$; exit 1
+    --data @-); then
+    echo "✗ session transport failed; no automatic retry" >&2
+    return 1
   fi
-  # accessToken is the v3 field; some responses use access_token.
-  python3 -c "import json,sys;d=json.load(open('/tmp/abdm_session.$$'));print(d.get('accessToken') or d.get('access_token') or '')"
-  rm -f /tmp/abdm_session.$$
+  http="${response##*$'\n'}"
+  if [[ ! "$http" =~ ^[0-9]{3}$ ]]; then
+    echo "✗ invalid session HTTP response" >&2
+    return 1
+  elif [[ "$http" != "200" && "$http" != "202" ]]; then
+    echo "✗ session request returned HTTP $http" >&2
+    return 1  # An upstream error body can echo any submitted secret.
+  fi
+  printf '%s' "${response%$'\n'*}" | python3 -c '
+import json,sys
+try:
+    data=json.load(sys.stdin)
+    token=data.get("accessToken") or data.get("access_token")
+    if not isinstance(token, str) or not token or any(c.isspace() or ord(c)<32 or ord(c)==127 for c in token):
+        raise ValueError()
+except (ValueError, AttributeError):
+    print("Session response has no valid access token", file=sys.stderr)
+    sys.exit(1)
+print(token)'
 }
 
 # JSON payloads are built here, never by interpolating into a quoted literal.
@@ -104,15 +119,28 @@ print(json.dumps({
 }
 
 _auth_call() {  # method path json
-  local tok rid
+  local tok rid response http
   tok=$(token)
   [[ -n "$tok" ]] || { echo "✗ no token in session response" >&2; exit 1; }
   rid=$(uuidgen)
-  curl -s -X "$1" "$2" \
-    -H "Authorization: Bearer $tok" \
+  # curl reads the sensitive header from stdin, not the visible argument list.
+  if ! response=$(printf 'Authorization: Bearer %s\n' "$tok" | curl -sS --max-time 30 -X "$1" "$2" \
+    -H @- \
     -H "REQUEST-ID: $rid" -H "TIMESTAMP: $(_now)" -H "X-CM-ID: $CM_ID" \
     -H "Content-Type: application/json" -H "Accept: */*" \
-    ${3:+--data "$3"} -w '\n[HTTP %{http_code}]\n'
+    ${3:+--data "$3"} -w '\n%{http_code}'); then
+    echo "✗ ABDM transport failed; no automatic retry" >&2
+    return 1
+  fi
+  http="${response##*$'\n'}"
+  if [[ ! "$http" =~ ^[0-9]{3}$ ]]; then
+    echo "✗ invalid ABDM HTTP response" >&2
+    return 1
+  elif [[ ! "$http" =~ ^2[0-9]{2}$ ]]; then
+    echo "✗ ABDM request returned HTTP $http" >&2
+    return 1
+  fi
+  printf '%s\n[HTTP %s]\n' "${response%$'\n'*}" "$http"
 }
 
 case "${1:-}" in
@@ -204,8 +232,9 @@ case "${1:-}" in
     done
     echo
     if [[ "$fail" == "0" ]]; then
-      echo "✓ ABDM can reach every callback on $base"
-      echo "  Register it:  $0 set-url $base"
+      echo "✓ Empty callback probes reached refusing endpoints on $base"
+      echo "  This does not prove NHA-origin connectivity, authentication or live callback acceptance."
+      echo "  Check the existing bridge registration before deciding whether it needs an update."
     else
       echo "✗ Not ready to register. ABDM would call this URL and get nothing usable."
       exit 1

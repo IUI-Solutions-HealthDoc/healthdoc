@@ -35,7 +35,7 @@ export default function AuthLayout({
           </h2>
 
           <p className="text-sm xl:text-base leading-relaxed text-blue-100/80">
-            Streamlining outpatient consultations, inpatient bed telemetry, verified diagnostic reporting, and digital health records under unified ABDM standards.
+            Manage outpatient consultations, inpatient care, diagnostic reporting, and consent-based digital record workflows.
           </p>
 
           <div className="grid grid-cols-2 gap-4 pt-4">
@@ -45,8 +45,8 @@ export default function AuthLayout({
                   <ShieldCheck className="h-5 w-5" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-semibold text-white">ABDM M1, M2 & M3</h3>
-                  <p className="text-xs text-blue-200/70">Ayushman Bharat Digital Mission</p>
+                  <h3 className="text-sm font-semibold text-white">ABDM integration</h3>
+                  <p className="text-xs text-blue-200/70">M1/M2/M3 sandbox verification in progress</p>
                 </div>
               </div>
             </div>
@@ -57,8 +57,8 @@ export default function AuthLayout({
                   <Lock className="h-5 w-5" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-semibold text-white">DPDP Act 2023</h3>
-                  <p className="text-xs text-blue-200/70">Immutable audit & consent compliance</p>
+                  <h3 className="text-sm font-semibold text-white">Consent & audit</h3>
+                  <p className="text-xs text-blue-200/70">Access controls and activity records</p>
                 </div>
               </div>
             </div>
@@ -69,8 +69,8 @@ export default function AuthLayout({
                   <Activity className="h-5 w-5" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-semibold text-white">Real-Time eMAR</h3>
-                  <p className="text-xs text-blue-200/70">Telemetry, wards & closed-loop dispensing</p>
+                  <h3 className="text-sm font-semibold text-white">Ward workflows</h3>
+                  <p className="text-xs text-blue-200/70">Vitals, medication and discharge records</p>
                 </div>
               </div>
             </div>
@@ -81,8 +81,8 @@ export default function AuthLayout({
                   <Award className="h-5 w-5" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-semibold text-white">DICOM PACS</h3>
-                  <p className="text-xs text-blue-200/70">Full Orthanc imaging & diagnostics</p>
+                  <h3 className="text-sm font-semibold text-white">Radiology</h3>
+                  <p className="text-xs text-blue-200/70">Imaging integration requires facility setup</p>
                 </div>
               </div>
             </div>
@@ -90,8 +90,8 @@ export default function AuthLayout({
         </div>
 
         <div className="relative z-10 flex items-center justify-between border-t border-white/10 pt-6 text-xs text-blue-200/60">
-          <span>HealthDoc Clinical Suite v2.4</span>
-          <span>End-to-End FIPS 140-3 Encryption</span>
+          <span>HealthDoc Clinical Suite</span>
+          <span>Role-based clinical workspaces</span>
         </div>
       </div>
 
@@ -102,4 +102,3 @@ export default function AuthLayout({
     </div>
   );
 }
-

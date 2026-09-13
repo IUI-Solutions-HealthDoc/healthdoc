@@ -14,6 +14,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
     or_,
@@ -69,9 +70,14 @@ class AbdmCallbackReply(Base, UUIDPk, Timestamps):
     payload_sha256 = Column(String(64), nullable=False)
     subject_ids = Column(JSONB, nullable=False)
     target_id = Column(UUID(as_uuid=True), nullable=True)
+    # Bounded M2 response snapshots, encrypted with per-reply associated data.
+    # Never OTPs, private keys or bearer credentials; erased after delivery/expiry.
+    response_encrypted = Column(LargeBinary, nullable=True)
+    response_expires_at = Column(DateTime(timezone=True), nullable=True)
     __table_args__ = (
         CheckConstraint(
-            "kind IN ('hip_consent','hip_request','hiu_consent')", name="abdm_callback_reply_kind"
+            "kind IN ('hip_consent','hip_request','hiu_consent','hip_link_confirm','hip_discover','hip_link_init','hip_link_reject','hip_profile')",
+            name="abdm_callback_reply_kind",
         ),
         Index("ix_abdm_callback_replies_facility_id", "facility_id"),
     )

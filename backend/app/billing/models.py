@@ -119,7 +119,7 @@ class Invoice(UUIDPk, Blame, Timestamps, Base):
     __audit_patient_id_field__ = "patient_id"
     __audit_visit_id_field__ = "visit_id"
 
-    invoice_number: Mapped[str] = mapped_column(String(30), unique=True, nullable=False)
+    invoice_number: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
 
     visit_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -299,7 +299,7 @@ class Payment(UUIDPk, Blame, Timestamps, Base):
 
     __tablename__ = "payments"
 
-    receipt_number: Mapped[str] = mapped_column(String(30), unique=True, nullable=False)
+    receipt_number: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     invoice_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("invoices.id", ondelete="RESTRICT", name="fk_payments_invoice_id"),
@@ -340,7 +340,7 @@ class Refund(UUIDPk, Blame, Timestamps, Base):
 
     __tablename__ = "refunds"
 
-    refund_number: Mapped[str] = mapped_column(String(30), unique=True, nullable=False)
+    refund_number: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     payment_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("payments.id", ondelete="RESTRICT", name="fk_refunds_payment_id"),

@@ -127,19 +127,19 @@ export function LoginScreen() {
           <div className="flex flex-col items-center gap-2 text-xs text-muted-foreground">
             <div className="flex items-center gap-4">
               <span className="inline-flex items-center gap-1">
-                🔒 TLS 1.3 / FIPS
+                🔒 Keycloak sign-in
               </span>
               <span>•</span>
               <span className="inline-flex items-center gap-1">
-                🛡️ ABDM M1/M2/M3
+                🛡️ Role-based access
               </span>
               <span>•</span>
               <span className="inline-flex items-center gap-1">
-                ⚖️ DPDP Compliant
+                ⚖️ Consent controls
               </span>
             </div>
             <p className="mt-1 text-center text-[11px] text-muted-foreground/80">
-              Authorized clinical personnel only. All access is logged to tamper-evident audit logs.
+              Authorized personnel only. Use the workspace assigned to your role.
             </p>
           </div>
         </div>

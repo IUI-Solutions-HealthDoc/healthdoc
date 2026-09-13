@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.integrations.abdm import callback_replies, external_router, job_runner, jobs
 from app.integrations.abdm.callback_auth import GatewayCallback
 from app.integrations.abdm.contracts_v3 import HiuConsentNotifyCallback
+from app.integrations.abdm.hip import gateway
 from app.integrations.abdm.hip.models import AbdmHipHealthInformationRequest
 from app.integrations.abdm.hiu import worker as hiu_worker
 from app.integrations.abdm.hiu.models import AbdmConsentRequest
@@ -25,7 +26,7 @@ transfer_case = transfer_fixture
 
 async def test_hip_ack_failure_cannot_lose_the_request_or_start_transfer(db, transfer_case):
     payload, callback, _, pushes = transfer_case
-    ack = external_router.hip_gateway.acknowledge_hi_request
+    ack = gateway.acknowledge_hi_request
     ack.side_effect = RuntimeError("Synthetic acknowledgement outage")
     await external_router.hip_health_information_request(payload, BackgroundTasks(), callback, db)
     ack.assert_not_awaited()
@@ -143,6 +144,8 @@ async def test_hiu_notification_survives_ack_and_fetch_outages_without_patient_c
         "payload_sha256",
         "subject_ids",
         "target_id",
+        "response_encrypted",
+        "response_expires_at",
         "created_at",
         "updated_at",
     }
