@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.integrations.abdm import callback_replies, external_router, job_runner
 from app.integrations.abdm.callback_auth import GatewayCallback
 from app.integrations.abdm.contracts_v3 import HipHealthInformationCallback
-from app.integrations.abdm.hip import worker
+from app.integrations.abdm.hip import gateway, worker
 from app.integrations.abdm.hip.models import (
     AbdmCareContext,
     AbdmCareContextLink,
@@ -109,7 +109,7 @@ async def transfer_case(db, seed, opd_visit, monkeypatch):
     )
     await db.commit()
     monkeypatch.setattr(external_router, "_facility_id", AsyncMock(return_value=dept.facility_id))
-    monkeypatch.setattr(external_router.hip_gateway, "acknowledge_hi_request", AsyncMock())
+    monkeypatch.setattr(gateway, "acknowledge_hi_request", AsyncMock())
     monkeypatch.setattr(worker, "SessionLocal", async_sessionmaker(db.bind, expire_on_commit=False))
     monkeypatch.setattr(
         job_runner, "SessionLocal", async_sessionmaker(db.bind, expire_on_commit=False)

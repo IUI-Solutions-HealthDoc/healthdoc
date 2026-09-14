@@ -140,7 +140,10 @@ async def seed_facility(db: AsyncSession, *, timezone_name: str = "Asia/Kolkata"
     migration) -- billing itself never reads state_code, this is purely
     to satisfy the real schema's constraint."""
     facility_id = uuid.uuid4()
-    code = code or f"TST{str(facility_id)[:5].upper()}"
+    # Five hex characters collided in a populated test database. Keep 68 random
+    # bits within the schema's 20-character limit (the UUID suffix has no
+    # fixed version bits). Do not truncate explicit facility codes further.
+    code = code or f"TST{facility_id.hex[-17:].upper()}"
     await db.execute(
         sa.text(
             "INSERT INTO facilities (id, code, name, state_code, timezone) "

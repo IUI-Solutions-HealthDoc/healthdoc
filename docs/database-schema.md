@@ -188,6 +188,9 @@ do not merge out of order.**
 | 0067 | abdm_callback_replies | abdm_callback_replies, ALTER abdm_jobs | Transactional acknowledgement intent and stable consent-artefact fetch correlation; identifier-only reply metadata. |
 | 0068 | tariff_inclusive_dates | ALTER charge_master | Permit one-day inclusive tariff periods; no price/data rewrite; guarded downgrade. |
 | 0069 | abdm_consent_requester | ALTER users; ALTER abdm_consent_requests | Explicit registration type/system and immutable HIU requester snapshot. No identity backfill; guarded downgrade preserves evidence. |
+| 0070 | abdm_mediated_confirmation | ALTER abdm_callback_replies | Durable patient-initiated M2 confirmation acknowledgement; keyed OTP replay fingerprint, no plaintext code; guarded evidence-preserving downgrade. |
+| 0071 | abdm_m2_reply_recovery | ALTER abdm_callback_replies | Encrypted, expiring discovery/init/refusal/profile response snapshots and durable jobs; never retain OTP plaintext. |
+| 0072 | billing_identifier_width | ALTER invoices, payments, refunds | Billing number columns widened to varchar(50) for permitted 20-character facility codes; no number rewrite; downgrade refuses truncation. |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -1046,7 +1049,7 @@ move `issued → partially_paid → paid`; the trigger checks column changes, no
 updates. Corrections happen by `cancelled` + new invoice, never edits. B7: unit-test
 that a payment can flip status on an issued invoice before merging 0014.
 ```
-invoice_number varchar(30) UNIQUE NOT NULL       -- INV-<FACILITY>-<YYYYMMDD>-<SEQ5>, gapless
+invoice_number varchar(50) UNIQUE NOT NULL       -- INV-<FACILITY>-<YYYYMMDD>-<SEQ5>, gapless (0072)
 visit_id UUID NOT NULL → visits
 patient_id UUID NOT NULL → patients
 facility_id UUID NOT NULL → facilities
@@ -1076,7 +1079,7 @@ charge_master_id UUID NULL → charge_master      -- 0033. The tariff row this l
 
 **payments** `[Blame]` — partial payments allowed (many per invoice)
 ```
-receipt_number varchar(30) UNIQUE NOT NULL       -- RCP-<FACILITY>-<YYYYMMDD>-<SEQ5>, gapless
+receipt_number varchar(50) UNIQUE NOT NULL       -- RCP-<FACILITY>-<YYYYMMDD>-<SEQ5>, gapless (0072)
 invoice_id UUID NOT NULL → invoices
 amount numeric(12,2) NOT NULL CHECK (> 0)
 currency char(3) NOT NULL DEFAULT 'INR'
@@ -1088,7 +1091,7 @@ sensitivity varchar(30) NOT NULL DEFAULT 'critical'
 
 **refunds** `[Blame]` — reversal rows only; a refund never edits the payment
 ```
-refund_number varchar(30) UNIQUE NOT NULL        -- RFD-<FACILITY>-<YYYYMMDD>-<SEQ5>
+refund_number varchar(50) UNIQUE NOT NULL        -- RFD-<FACILITY>-<YYYYMMDD>-<SEQ5> (0072)
 payment_id UUID NOT NULL → payments
 amount numeric(12,2) NOT NULL CHECK (> 0)
 reason text NOT NULL
@@ -1716,16 +1719,28 @@ ABHA credentials or bearer tokens belong in this queue.
 **abdm_callback_replies** (0067) — committed reply intent, not a clinical inbox
 ```
 facility_id UUID NOT NULL → facilities
-kind varchar(50) NOT NULL                        -- hip_consent|hip_request|hiu_consent
+kind varchar(50) NOT NULL                        -- hip_consent|hip_request|hiu_consent|hip_link_confirm (0070)|hip_discover|hip_link_init|hip_link_reject|hip_profile (0071)
 gateway_request_id varchar(100) NOT NULL
-payload_sha256 varchar(64) NOT NULL              -- full parsed callback digest, not its content
-subject_ids jsonb NOT NULL                       -- consent/transaction correlation IDs only
-target_id UUID                                  -- kind-specific HIP transfer target
+payload_sha256 varchar(64) NOT NULL              -- callback digest; M2 OTP replaced by keyed fingerprint BEFORE hashing
+subject_ids jsonb NOT NULL                       -- consent/transaction IDs or exact M2 care-context references
+target_id UUID                                  -- kind-specific HIP transfer or M2 link target
+response_encrypted bytea NULL                   -- 0071: AES-GCM bounded M2 response snapshot; excludes OTP/credentials
+response_expires_at timestamptz NULL             -- 0071: original link deadline or 10-minute reply window
 ```
 UUID keys deterministically bind facility, callback kind and inbound request ID.
 Replays with changed content are rejected. Reply jobs acknowledge only committed
 state and then schedule transfer/fetch jobs. Stable outbound request IDs survive
 retries. A fetch callback must match a dispatched `hiu_fetch` job and its artefact.
+M2 confirmation jobs acknowledge the exact committed link only; they never start
+clinical transfer. Its successful OTP is reserved in Redis for the original
+confirmation request ID under the original TTL, permitting a database rollback
+retry but not another callback, an extended expiry or a reset attempt count.
+After commit, only the matching keyed fingerprint can replay the acknowledgement.
+Discovery, init, refusal and profile reply snapshots use per-reply/facility/kind
+associated data. Cleanup erases ciphertext after delivery or expiry, retaining
+correlation digests. Init commits before SMS delivery; a Redis delivery guard
+prevents regeneration/resend after a crash or ambiguous relay response. Provider
+ambiguity requires a new patient action, not automatic quota-consuming recovery.
 Migration downgrade refuses when reply evidence or new-kind jobs exist; recovery
 requires review rather than silently discarding pending acknowledgements.
 
