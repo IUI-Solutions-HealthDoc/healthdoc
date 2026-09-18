@@ -6,32 +6,45 @@ import CircularProgress from "@mui/material/CircularProgress";
 import Typography from "@mui/material/Typography";
 
 import { ConsultationWorkspace } from "@/features/doctor";
-import { getQueueToken } from "@/features/doctor/api";
+import { getPatient, getQueueToken } from "@/features/doctor/api";
 import { doctorPageSx } from "@/features/doctor/panelSx";
 import type { EncounterContext } from "@/features/doctor/types";
+import { api } from "@/lib/api";
+import { useAuth } from "@/providers/auth-provider";
+
+interface VisitRecord {
+  id: string;
+  visit_number: string;
+  patient_id: string;
+  facility_id: string;
+  visit_type: string;
+  status: string;
+  visit_date: string;
+}
 
 /**
- * The queue token is read from the URL in an effect rather than with
+ * The queue token or visit_id is read from the URL in an effect rather than with
  * `useSearchParams`.
  *
  * `useSearchParams` suspends during prerender, and the Suspense boundary it
- * requires was leaving this route's subtree unhydrated: the markup arrived from
- * the server but no effect ever ran and no click did anything — the screen
- * looked finished and was completely dead. Reading `window.location` after
- * mount keeps the whole page a normal client tree.
+ * requires was leaving this route's subtree unhydrated. Reading `window.location`
+ * after mount keeps the whole page a normal client tree.
  */
 export default function Page() {
+  const { user } = useAuth();
   const [context, setContext] = useState<EncounterContext | null>(null);
   const [message, setMessage] = useState<{ tone: "instruction" | "error"; text: string } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    const tokenId = new URLSearchParams(window.location.search).get("token");
+    const params = new URLSearchParams(window.location.search);
+    const tokenId = params.get("token");
+    const visitId = params.get("visit_id");
 
-    if (!tokenId) {
+    if (!tokenId && !visitId) {
       setMessage({
         tone: "instruction",
-        text: "Open a patient from the live OPD queue to start a consultation.",
+        text: "Open a patient from the live OPD queue or Emergency arrivals to start a consultation.",
       });
       setContext(null);
       return;
@@ -39,26 +52,58 @@ export default function Page() {
 
     void (async () => {
       try {
-        const token = await getQueueToken(tokenId);
-        if (cancelled) return;
-        if (!token) {
-          setMessage({ tone: "error", text: "Queue token not found." });
-          setContext(null);
-          return;
+        if (tokenId) {
+          const token = await getQueueToken(tokenId);
+          if (cancelled) return;
+          if (!token) {
+            setMessage({ tone: "error", text: "Queue token not found." });
+            setContext(null);
+            return;
+          }
+          setMessage(null);
+          setContext({
+            visit_id: token.visit_id,
+            patient_id: token.patient_id,
+            patient_name: token.full_name,
+            uhid: token.uhid,
+            age_years: token.age_years,
+            sex: token.sex,
+            provider_user_id: token.provider_user_id || user?.id || "",
+            provider_name: token.provider_name || user?.name || "Assigned doctor",
+            department: token.department ?? "OPD",
+            token_display: token.token_display,
+          });
+        } else if (visitId) {
+          const visit = await api<VisitRecord>(`/visits/${visitId}`);
+          if (cancelled) return;
+          if (!visit) {
+            setMessage({ tone: "error", text: "Visit not found." });
+            setContext(null);
+            return;
+          }
+          const patient = await getPatient(visit.patient_id);
+          if (cancelled) return;
+          if (!patient) {
+            setMessage({ tone: "error", text: "Patient record not found for this visit." });
+            setContext(null);
+            return;
+          }
+          const isEmergency = visit.visit_type === "emergency";
+          const isIpd = visit.visit_type === "ipd";
+          setMessage(null);
+          setContext({
+            visit_id: visit.id,
+            patient_id: patient.id,
+            patient_name: patient.full_name,
+            uhid: patient.uhid || patient.thid || "No identifier",
+            age_years: patient.age_years ?? 0,
+            sex: patient.sex || "unknown",
+            provider_user_id: user?.id || "",
+            provider_name: user?.name || "Attending Doctor",
+            department: isEmergency ? "Emergency" : isIpd ? "Inpatient" : "OPD",
+            token_display: isEmergency ? `EMERGENCY · ${visit.visit_number}` : visit.visit_number,
+          });
         }
-        setMessage(null);
-        setContext({
-          visit_id: token.visit_id,
-          patient_id: token.patient_id,
-          patient_name: token.full_name,
-          uhid: token.uhid,
-          age_years: token.age_years,
-          sex: token.sex,
-          provider_user_id: token.provider_user_id ?? "",
-          provider_name: token.provider_name ?? "Assigned doctor",
-          department: token.department ?? "OPD",
-          token_display: token.token_display,
-        });
       } catch (e) {
         if (cancelled) return;
         setMessage({
@@ -72,7 +117,7 @@ export default function Page() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [user]);
 
   return (
     <Box sx={doctorPageSx}>

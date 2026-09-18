@@ -66,3 +66,21 @@ class PromotionOut(BaseModel):
     status: str
     reason: str | None
     unmerge_reason: str | None
+
+
+class EmergencyWorklistItem(BaseModel):
+    """Active emergency arrival item for clinicians without requiring an OPD token."""
+    model_config = ConfigDict(from_attributes=True)
+
+    visit_id: uuid.UUID
+    visit_number: str
+    patient_id: uuid.UUID
+    thid: str | None = None
+    uhid: str | None = None
+    full_name: str
+    age_years: int | None = None
+    sex: str
+    arrival_time: datetime
+    status: str
+    visit_type: str = "emergency"
+

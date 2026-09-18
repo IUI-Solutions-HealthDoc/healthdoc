@@ -129,7 +129,7 @@ export function ConsentRecordDetail({
               (record.purpose_code
                 ? (PURPOSE_LABELS[record.purpose_code] ??
                    record.purpose_code.replaceAll("_", " ").replace(/\b\w/g, (l) => l.toUpperCase()))
-                : "General Clinical")
+                : "Unknown / Unavailable")
             }
           />
           <Meta

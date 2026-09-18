@@ -115,7 +115,7 @@ export function ConsentListPanel({
                   <StatusChip status={row.status} label={CONSENT_STATUS_LABELS[row.status]} />
                 </Stack>
                 <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary }}>
-                  {row.purpose_label ?? (row.purpose_code ? (PURPOSE_LABELS[row.purpose_code] ?? row.purpose_code.replaceAll("_", " ").replace(/\b\w/g, (l) => l.toUpperCase())) : "General Clinical")} · {CONSENT_CHANNEL_LABELS[row.channel as keyof typeof CONSENT_CHANNEL_LABELS] ?? row.channel} · {row.id}
+                  {row.purpose_label ?? (row.purpose_code ? (PURPOSE_LABELS[row.purpose_code] ?? row.purpose_code.replaceAll("_", " ").replace(/\b\w/g, (l) => l.toUpperCase())) : "Unknown / Unavailable")} · {CONSENT_CHANNEL_LABELS[row.channel as keyof typeof CONSENT_CHANNEL_LABELS] ?? row.channel} · {row.id}
                 </Typography>
                 <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary }}>
                   {row.patient?.uhid} · granted {formatDate(row.granted_at)}

@@ -49,7 +49,7 @@ router = APIRouter(prefix="/visits", tags=["visits"])
     "",
     response_model=VisitOut,
     status_code=http_status.HTTP_201_CREATED,
-    dependencies=[Depends(require_roles("receptionist", "admin"))],
+    dependencies=[Depends(require_roles("receptionist", "admin", "nurse", "emergency"))],
 )
 async def create_visit(
     payload: VisitCreate,

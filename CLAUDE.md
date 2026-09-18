@@ -4,6 +4,205 @@ Hospital management system for Indian facilities. FastAPI + PostgreSQL backend,
 Next.js 16 + Electron frontend, Keycloak OIDC, all behind nginx in Docker
 Compose. Targeting ABDM certification and a CERT-In WASA audit.
 
+## Current project status — reviewed 18 September 2026
+
+**Read this section before the historical notes below. HealthDoc is not fully
+finished, production-approved or ABDM-certified.** This is an independent source
+and targeted-test review, not a new all-role browser or NHA acceptance run.
+No application fix, deployment, participant operation or PR mutation was made
+in this documentation pass.
+
+### Revision, delivery and evidence boundary
+
+- Reviewed application HEAD: `4ec81b8798989d0ae05644c0882dd0fddbbb624e`, branch
+  `feat/login-split-screen-hims-branding`. The login/branding work was committed
+  during this review; it is separate from the Bahmni handoff fixes.
+- [PR #559](https://github.com/IUI-Solutions-HealthDoc/healthdoc/pull/559)
+  delivered callback diagnostics to staging; #560 promoted staging to main.
+- [PR #561](https://github.com/IUI-Solutions-HealthDoc/healthdoc/pull/561)
+  delivered `9b2a771` (reception/consent) and `d9d8dd3` (superadmin landing wait).
+  GitHub confirms merge into staging on 18 September at 15:40 UTC, approval,
+  four successful checks (release-policy/backend/frontend/nurse-auth-e2e), and
+  **electron-shell skipped**, not passed.
+- [PR #562](https://github.com/IUI-Solutions-HealthDoc/healthdoc/pull/562)
+  promoted staging to main at 16:00 UTC, merge `e84bd753684542de987e600aa99f43c6733bb99e`.
+  This is repository promotion, not proof of a production deployment.
+- [PR #563](https://github.com/IUI-Solutions-HealthDoc/healthdoc/pull/563)
+  contains the new in-place credentials login and HIMS branding. At the review
+  snapshot it is open against staging and approved; release-policy passed,
+  backend/frontend/nurse-auth-e2e were running, Electron skipped. Re-read its
+  latest SHA/checks before any decision. Approval does not resolve the findings below.
+- `Issues/` remains untracked locally. Do not assume its handoff, PDFs or agent
+  ledger are in a merged PR. Preserve unrelated work and do not stage everything.
+
+### What the other agent actually completed
+
+The four-PDF comparison defines **40 work packages**, not 40 equal-size bugs or
+a whole-product percentage. Only **HD-01/HD-02 were implemented and HD-03 was
+retested** in the new handoff work. HD-04–HD-40 have no new completion evidence
+in that agent's ledger. Existing foundations in those packages still count;
+“not newly completed” does not mean “nothing implemented.”
+
+| Package | Confirmed improvement | Independent review verdict / next action |
+|---|---|---|
+| HD-01: post-visit actions | Billing link now checks `canRoleAccessPath`; queue link is OPD-only; desk handoff copy added | **Partial, changes required.** New `/emergency` and `/ipd` links remain unconditional for those visit types, but receptionist's route map allows neither. Replace with permitted handoff/context, without broadening privileges. Teleconsult copy promises a scheduled notification with no implemented scheduling/notification path. |
+| HD-02: consent labels/context | Backend list/get/create enrich purpose code/description; channel labels are human-readable; list adds request sequencing | **Partial, changes required.** The actual hook still returns A's rows on the first B render and a retained A `refresh()` can overwrite B after B loads. Missing purpose falls back to invented “General Clinical”; show unavailable/unknown instead. Review detail and mutation callbacks too; add regression tests for the whole patient context. |
+| HD-03: nurse Accept/Complete | Agent reports successful live acceptance/completion after staff provisioning; existing service tests pass | **Happy path only; not closed.** `complete_order` changes cancelled orders to completed and lets a lab order complete without a diagnostic result. No row lock or compare-and-set protects simultaneous completion. Prove state/type/ownership/facility/race refusal, not just removal from the pending table. |
+
+Review locations: `frontend/src/features/receptionist/StartVisit.tsx`,
+`frontend/src/lib/auth/routes.ts`, `frontend/src/features/consent/hooks/useConsentRecords.ts`,
+`useConsentDetail.ts`, consent list/detail components, and
+`backend/app/nursing/{router,service}.py`.
+The original Accept-500 cause is not independently established by a successful
+retest; do not present staff provisioning as the proven cause of every prior 500.
+HD-03's reported lab “Mark completed” action is precisely why fulfilment semantics
+need review: an HTTP 200 is not evidence that a diagnostic investigation occurred.
+
+The agent ledger reports browser screenshots in `.tempmediaStorage`/execution
+history but does not provide a complete committed evidence bundle for the
+negative cases. Its “complete” statements are implementer claims, not this
+reviewer's acceptance. See [implementation specification](Issues/Updates.md)
+and [agent change log](Issues/Agent-Change-Log.md); this newer review qualifies
+their earlier status statements without erasing the original record.
+
+### New authentication branch: release blockers, not cosmetic changes
+
+Commit `4ec81b8` changes the security/session architecture as well as branding:
+
+1. `loginWithCredentials()` sends a password grant directly from the application;
+   `healthdoc-frontend.directAccessGrantsEnabled` changes to true. The production
+   realm renderer currently inherits that flag while requiring TOTP. The new
+   form has no OTP/required-action flow. Prefer the existing themed Keycloak
+   browser/PKCE path; do not claim production MFA support from dev password login.
+2. Refresh tokens are persisted as `sessionStorage.hd_rt`, contradicting the
+   prior memory-only credential boundary. Tab storage is still script-readable.
+   Expiry-failure paths clear the access token but not this stored refresh token;
+   explicit logout does remove it. Resolve persistence/expiry/revocation policy
+   and test it rather than describing all tokens as memory-only.
+3. `LoginScreen` accepts any return path starting with `/`. `//example.invalid/`
+   passes and resolves off-origin. Use the existing safe internal-return-path
+   approach, enforce same-origin and test protocol-relative/backslash cases.
+4. Direct login/restoration manually assigns Keycloak token fields. It bypasses
+   the installed SDK's `setToken` bookkeeping (including time skew and expiry
+   timer), and SDK refresh does not persist a rotated `hd_rt`. Test token expiry,
+   rotation, reload, logout, session revocation and production required actions.
+5. Existing login tests and real-SSO smoke gates do not establish correctness of
+   the newly added credentials form. Add action-level tests; do not weaken the
+   old SSO tests to get green checks.
+
+Do not promote this auth change on the strength of green unrelated tests.
+Keep the HIMS visual naming changes separate from approval of the login mechanism.
+
+### Project functionality: built versus unfinished
+
+The 15 foundations listed in `Issues/Updates.md` exist: Keycloak/role boundaries,
+registration/search/UHID, roster/queue, OPD notes/orders/prescribing, admission/
+bed/transfer/discharge, nursing observations/tasks, lab results/verify/amend/MIS,
+radiology workflow, external results intake, pharmacy/stock, PO/GRN/indents,
+separate billing/tariffs/refunds, THID/maker–checker, consent/audit/DPDP/portal
+binding, and the ABDM integration framework. Preserve these; do not rebuild them.
+
+| Remaining scope | Handoff IDs | Current limit / next delivery |
+|---|---|---|
+| Core access | HD-04–05 | Doctor consultation still requires an OPD `token`; ED/IPD care needs authorized visit context. THID creation is not emergency arrival/treatment. Roster creation exists; improve no-roster guidance and recovery of visits whose token failed. |
+| Reception | HD-06–12 | Age precision, address/guardian editing, protected photo, cards/barcode, counter/locale, appointments/follow-up/waitlist and stale-visit reconciliation remain partial/new. Reuse existing fields; scheduling and closure policy need owners. |
+| IPD/nursing/emergency | HD-13–18 | Clinical disposition queues, visit picker, ward onboarding/care chart, checklists and ED triage remain. eMAR page is still read-only despite write APIs; dose identity, concurrency and clinical scheduling need design/approval. |
+| Diagnostics | HD-19–23 | Structured approved analytes/ranges, durable cross-process critical alerts, LIS depth and proven PACS/upload journeys remain. Urgent/STAT orders already exist. Critical thresholds still contain a placeholder haemoglobin rule; live alert queues remain process-local. |
+| Stock and finance | HD-24–25 | FEFO, PO/GRN and tariffs exist; close partial/return/concurrency acceptance, expiry-exception policy, care-setting accrual and claims. PM-JAY eligibility remains a stub, not scheme integration. |
+| Further product depth | HD-26–30, HD-32–34 | KPI producers, reception/ED MIS, appointments-linked service-only arrivals, released portal documents, forms/order sets/terminology and approved OT/programs/immunization/blood-bank scope. OT/blood-bank guarded pings are not implemented modules. |
+| Integration operations | HD-31 | Keep ABDM jobs/diagnostics; finish operator/dead-letter workflows and legacy FHIR outbox plaintext `payload=bundle` producers/cleanup. Receiver logging is not milestone completion. |
+| Acceptance and operations | HD-35, HD-38–40 | Actual role actions, accessibility/print, referral/tariff/switch read-back, production-derived restore/PITR, alert receiver, clinical load/security review and named approvals. Existing test counts do not waive them. |
+| ABDM | HD-36–37 | M1/M2/M3 status and exact blockers below. |
+
+This is weeks-to-months of optional and core work across several disciplines,
+not evidence of a one-day finished product. Freeze launch scope and estimate
+individual accepted slices; do not assign a percentage by counting packages.
+
+### ABDM M1, M2 and M3 — separate implementation from acceptance
+
+**No milestone is certified by the evidence currently in the repository.**
+The owner reports no support-ticket reply as of 18 September. The support draft
+still says “not submitted”; that is an old drafting status, not verification
+of the current ticket. No portal/support inbox or fresh participant state was
+queried in this review. The dated local consent renewed through 14 September
+23:59:59 IST has elapsed; verify any newer grant before access or transmission.
+
+| Milestone | Implemented / recorded evidence | Not yet completed |
+|---|---|---|
+| **M1 — ABHA identity** | Backend identity/OTP/enrolment continuation and reception UI exist. Existing-number mobile OTP verification and patient binding have historical live success, most recently documented 13 September. | Full applicable enrolment/verification/profile/card/Scan-and-Share and negative cases. The case ledger has two PARTIAL M1 rows, not two completed cases. Obtain participant input privately and record every applicable case; the missing M2 token callback does not by itself block M1 testing. |
+| **M2 — HIP linking/sharing** | Official v3 callbacks/outbound calls, finalized-document contexts, grouped linking, durable jobs, FHIR export and encrypted transfer exist. An earlier token callback succeeded but its link failed/expired. A later request's controlled same-ID retry returned 202; no confirmed link is evidenced. | Resolve the missing genuine callback/link confirmation, then real PHR discovery/link visibility, approved consent, record sharing/notifications and required negative cases. HTTP 202 and synthetic receiver probes are not completed linkage. The alternative MEDIATE user-initiated route needs an approved SMS/HTTPS OTP relay, which the owner has not provisioned. |
+| **M3 — HIU consent/exchange** | Consent request/artefact/data APIs, requester snapshots/admin fields, durable transfer handling, encrypted received storage and protected document/PDF viewer exist. Local crypto interoperability and sample bundle validation are recorded. | Genuine or NHA-approved clinician requester details, actual PHR approval/denial, authorized counterparty data, encrypted receive/decrypt/validate/display/receipt, revocation/expiry and evidence. No complete live HIU consent/data exchange is recorded. A synthetic local viewer test is not M3. |
+
+**Supported content is five HI types**, with both lab and imaging represented
+under DiagnosticReport: Prescription, DiagnosticReport, OPConsultation,
+DischargeSummary and WellnessRecord (`hip/gateway.py::HI_TYPES`). Historical
+samples validated against NRCeS 6.5.0 with HL7 validator 6.9.12; that does not
+validate every future clinical document or settle current assigned case scope.
+The supplied FAQ/workbook conflict on required types remains: confirm with NHA.
+ImmunizationRecord, HealthDocumentRecord and InvoiceRecord must have legitimate
+source workflows and mappings if in scope; do not generate dummy content.
+
+**Callback diagnostics are built and merged, not a cure proven against NHA.**
+Migration 0073 adds durable encrypted/redacted receipts; nginx persists bounded
+forwarded-IP claims and receipt IDs in a named log volume. Wrapper-shaped
+synthetic probes returned expected 400/404 locally and publicly on 14 September;
+isolated receiver tests cover 202 for a matching synthetic operation. Public
+receipt read-back/cross-layer correlation and a second recreation-survival
+check remain pending in the execution record. `CF-Connecting-IP`/XFF are claims,
+not origin authentication; a local probe cannot establish NHA delivery.
+
+Preserve root-level `/api/v3/hip`, `/api/v3/hiu`, `/api/v3/consent` and direct-push
+contracts. They do not require the legacy HealthDoc private shared secret.
+Keep route-specific headers, freshness/correlation/recipient checks and consent
+state gates. Do not add `/api` to the registered bridge base to test a path guess.
+Callback-only public ingress can intentionally return 404 for `/`/health; inspect
+the actual expected routes, not just the home page. Bridge/services were active
+in the last recorded check, not freshly revalidated by this documentation update.
+
+**Resume order:**
+
+1. Close the auth/reception/consent/nursing review findings before declaring the
+   next release safe; continue unrelated local work while support is pending.
+2. Finish synthetic receipt/log persistence evidence without starting outbound
+   workers. Revalidate deployed revision, migration, tunnel and bridge safely.
+3. Confirm assigned NHA cases/HI types, consenting participant, current local
+   access consent, and genuine/NHA-approved requester metadata. Configure a
+   relay only if the selected linking route requires it.
+4. Complete applicable M1 browser cases with participant-entered OTPs; never
+   reuse an expired credential or infer consent from an earlier chat.
+5. Resolve the exact M2 operation using retained receipt/support evidence.
+   A same-REQUEST-ID 202 may be deduplication; no extra generation, ID changes,
+   quota assumptions or queued-job draining without renewed explicit approval.
+6. After confirmed linkage, run scoped real M2/M3 consent/data/receipt paths,
+   including denial/revocation/expiry. Keep one finalized document per context.
+   Participant grants PHR consent; an agent must not do so on their behalf.
+7. Update the case ledger with revision, case/row, safe correlations and actual
+   receiver/PHR read-back, then submit the required evidence for NHA assessment.
+
+The general outbound worker was stopped in the last execution record; cleanup
+ran separately. Recheck actual runtime/queued work before any start. Never
+replace the NHA blocker with invented tokens, clinician identifiers or fixed OTPs.
+
+### Verification performed in this review
+
+| Check | Result / limit |
+|---|---|
+| `make test-pg p='tests/consent tests/nursing/test_tasks_and_incidents.py'` | **62 passed**, isolated PostgreSQL test database migrated/checked through the existing target; some nursing tests use the suite's SQLite fixture. Initial sandbox Docker access was denied; authorized rerun passed. Not the full backend suite. |
+| `cd frontend && npm test` | **112 passed, 0 failed/skipped** on reviewed worktree. No new HD-01/HD-02-specific regression files were added by the implementation commit. |
+| `cd frontend && npm run typecheck` | Passed. Not a fresh production build or browser acceptance. |
+| Actual consent hook in existing component harness | Reproduced A rows on B's initial render and retained A refresh overwriting B. Synthetic promises/data only; no patient record read. |
+| Nurse service with isolated synthetic Order/AsyncMock session | Reproduced cancelled lab → completed and placed lab → completed without a diagnostic result. Service-level proof, not a new live API write or concurrency test. |
+| Login return-path check | `//example.invalid/` passes the current guard and resolves off-origin. No external navigation performed. |
+| GitHub read-only metadata | #559–#562 merged; #561 four active checks passed, Electron skipped; #563 open at review snapshot. |
+| Full suite / all-role browser / current audit / load / NHA round trip | **Not run in this review.** Last recorded full local gate: 1,929 backend + 36 script tests on 14 September, head 0073, with documented warnings. Do not relabel those results as current. |
+
+Detailed sources:
+[40-package handoff](Issues/Updates.md), [implementer ledger](Issues/Agent-Change-Log.md),
+[ABDM case ledger](docs/abdm-milestone-case-ledger-2026-09-10.md),
+[dated live runbook](docs/abdm-m2-m3-next-day-runbook-2026-09-12.md),
+[callback evidence](docs/abdm-callback-diagnostics-2026-09-14.md),
+[crypto/PDF evidence](docs/abdm-crypto-pdf-cleanup-execution-2026-09-12.md).
+
 ---
 
 ## Running it
@@ -19,13 +218,13 @@ users`. If it stops short, the accounts do not exist and every login fails —
 which presents as a wrong password, so people blame themselves before the
 script. It now verifies this and exits 1 naming the missing accounts.
 
-App at https://localhost (self-signed cert). All fourteen dev accounts use
+App at https://localhost (self-signed cert). All fifteen dev accounts use
 `devpass`; usernames and landing routes are in `docs/manual-test-guide.md`.
 
 ### Tests
 
 ```bash
-make test-pg                       # THE GATE — host venv, real Postgres, ~1155
+make test-pg                       # full host gate; real-PG cases + scripts/checks
 make test p=tests/foo.py k=name    # in-container, quick, skips DB tests
 make contract                      # every frontend API call exists in OpenAPI
 make audit-deps                    # pip-audit + npm audit, must be zero
@@ -45,8 +244,8 @@ raise, issue and settle an invoice. A pharmacist may do the same *only* for an
 invoice made entirely of dispensed medicines — there is one invoice per visit
 (§3 0014), so "medicines only" is checked against what is on the invoice, not
 against the role. Receptionist and supervisor have no billing access at all;
-registering a patient still creates the draft registration invoice server-side,
-because the whole billing chain 404s without it. Refunds are admin-approved: the
+creating a visit still creates its draft registration invoice server-side
+(`opd.service.create_visit`), not patient registration alone. Refunds are admin-approved: the
 desk that raises one must not approve it.
 
 
@@ -241,7 +440,11 @@ the console shows `[HMR] connected`.
 
 ---
 
-## Current state
+## Historical implementation notes — 1–12 September 2026
+
+These dated notes preserve earlier rationale and test results. They are not a
+current deployment inventory. The 18 September status above takes precedence,
+especially for auth safety, migration head, consent expiry, PRs and milestones.
 
 - **12 September crypto/PDF follow-up:** raw X25519 was incompatible with
   Fidelius. The new checksum-pinned BC 1.86 helper supports full Curve25519
@@ -320,10 +523,12 @@ the console shows `[HMR] connected`.
   requester and the unmerger from the approver. With one supervisor the only
   reachable outcome was the refusal, so the approve and unmerge halves of that
   flow had never been executed by anyone.
-- WASA cybersecurity track: **all findings closed**, including M3 — the CSP now
+- The earlier WASA implementation review reported its findings addressed,
+  including its finding M3 (not ABDM Milestone 3) — the CSP
   carries a per-request nonce from `frontend/src/proxy.ts` instead of
   `'unsafe-inline'`, and every route renders `force-dynamic` because a nonce
-  cannot be baked into prerendered HTML.
+  cannot be baked into prerendered HTML. This is not a current security
+  attestation: the new login branch and operational controls need fresh review.
 - WASA ABDM track: **M1/M2/M3 are not yet milestone-ready.** The 7 September
   review found public callback HTTP 530/1033, missing OTP-relay configuration,
   incomplete application-initiated linking and no complete HIU clinician
@@ -366,14 +571,14 @@ the console shows `[HMR] connected`.
 
   `integrations/abdm/consent/` and `nhcx/` remain empty; consent artefact
   handling lives in `hip/` and `hiu/`, and NHCX is out of scope for this audit.
-- Frontend is production-ready: the `NEXT_PUBLIC_AUTH_MODE=dev` role picker is
-  deleted, and `.env.production.example` carries the `NEXT_PUBLIC_*` build args
-  the image needs.
+- Earlier frontend hardening removed the `NEXT_PUBLIC_AUTH_MODE=dev` role picker;
+  `.env.production.example` carries the `NEXT_PUBLIC_*` build args the image needs.
+  Neither fact establishes current production readiness.
 - See `docs/wasa-readiness.md` for the full assessment,
   `docs/manual-test-guide.md` for per-role testing, and the Endpoint Atlas for
   every route with its access tier.
 
-### Known gaps, stated plainly
+### Historical ABDM protocol findings and remaining cautions
 
 **ABDM: the gateway now answers, and the path guesses were all wrong.**
 Corrected on 2026-09-01 from the official v3 Postman collections ABDM support
@@ -480,7 +685,8 @@ ABHA is 404 `ABDM-1114`, a real answer that must not be logged as an outage.
 Credentials must never be committed and CI must never hold them; the client
 tests are fully mocked and stay that way.
 
-**Audit coverage is 17 of 98 models**, up from 8. `assert_audit_coverage()` is
+**An earlier audit counted 17 of 98 models**, up from 8; this count was not
+recomputed on 18 September. `assert_audit_coverage()` is
 now called from `app.main`'s lifespan and covers
 `app.integrations.abdm.hip` / `.hiu`; removing an opt-in in either package
 fails the boot, so the guard is non-vacuous — but it still only guards those
@@ -492,8 +698,10 @@ flipping the opt-in would double-write. Of the 12 models in `app.patients`,
 `audit_logs.facility_id` is NOT NULL — so the other nine need a migration each
 before they can opt in. Tracked as #290.
 
-**`release-readiness` holds one unmerged commit** (`scripts/close_verified_issues.sh`).
-Every other branch of ours is merged; the teammates' branches are not ours to judge.
+An earlier branch inventory found a `release-readiness` commit containing
+`scripts/close_verified_issues.sh`. That is historical, not a current statement
+that every other branch is merged. Use the dated PR snapshot above and recheck
+remote state before any promotion; teammates' branches are not ours to discard.
 
 ---
 

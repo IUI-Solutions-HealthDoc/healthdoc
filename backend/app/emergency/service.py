@@ -283,3 +283,43 @@ async def unmerge_promotion(
     await db.flush()
     await db.refresh(merge_log)
     return merge_log
+
+
+async def get_emergency_worklist(
+    db: AsyncSession, facility_id: uuid.UUID
+) -> list[dict]:
+    """List active emergency arrivals for the facility.
+
+    Joins active emergency visits with patient records so clinicians
+    can open consultations without requiring an OPD queue token.
+    """
+    from app.opd.models import Visit
+
+    stmt = (
+        select(Visit, Patient)
+        .join(Patient, Patient.id == Visit.patient_id)
+        .where(
+            Visit.facility_id == facility_id,
+            Visit.visit_type == "emergency",
+            Visit.status.in_(["created", "active", "in_progress", "admitted"]),
+        )
+        .order_by(Visit.created_at.desc())
+    )
+    result = await db.execute(stmt)
+    items = []
+    for visit, patient in result.all():
+        items.append({
+            "visit_id": visit.id,
+            "visit_number": visit.visit_number,
+            "patient_id": patient.id,
+            "thid": patient.thid,
+            "uhid": patient.uhid,
+            "full_name": patient.full_name,
+            "age_years": patient.age_years,
+            "sex": patient.sex,
+            "arrival_time": visit.created_at,
+            "status": visit.status,
+            "visit_type": visit.visit_type,
+        })
+    return items
+
