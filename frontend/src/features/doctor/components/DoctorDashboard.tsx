@@ -1,10 +1,13 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
 import Typography from "@mui/material/Typography";
+import Link from "next/link";
 
+import { listEmergencyWorklist, type EmergencyWorklistItem } from "@/features/emergency/api";
 import { meridian } from "@/styles/theme";
 import { doctorPageHeaderSx } from "../panelSx";
 import { useDoctorQueue } from "../hooks/useDoctorQueue";
@@ -18,6 +21,19 @@ import { PatientSummarySidebar } from "./PatientSummarySidebar";
  */
 export function DoctorDashboard() {
   const { patients, loading, error, selected, select } = useDoctorQueue();
+  const [emergencyArrivals, setEmergencyArrivals] = useState<EmergencyWorklistItem[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    listEmergencyWorklist()
+      .then((rows) => {
+        if (!cancelled) setEmergencyArrivals(rows);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Prefer in_service, else waiting/called/recalled, else first row.
   useEffect(() => {
@@ -45,7 +61,7 @@ export function DoctorDashboard() {
             color: meridian.textSecondary,
           }}
         >
-          OPD · Doctor
+          OPD & Emergency · Doctor
         </Typography>
         <Typography
           component="h1"
@@ -58,7 +74,7 @@ export function DoctorDashboard() {
             lineHeight: 1.2,
           }}
         >
-          Queue dashboard
+          Clinical dashboard
         </Typography>
         <Typography
           sx={{
@@ -70,10 +86,62 @@ export function DoctorDashboard() {
             lineHeight: 1.45,
           }}
         >
-          Today&apos;s worklist sorted by queue priority — select a patient, review summary, start
+          Today&apos;s clinical worklist — select a queue patient or emergency arrival to start
           consultation.
         </Typography>
       </Box>
+
+      {emergencyArrivals.length > 0 && (
+        <Box
+          sx={{
+            p: 2,
+            borderRadius: "12px",
+            bgcolor: "rgba(211, 47, 47, 0.08)",
+            border: "1px solid",
+            borderColor: "error.light",
+          }}
+        >
+          <Typography sx={{ fontWeight: 700, fontSize: "0.9375rem", color: "error.main", mb: 1 }}>
+            Emergency Arrivals Awaiting Care ({emergencyArrivals.length})
+          </Typography>
+          <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1.5 }}>
+            {emergencyArrivals.map((arr) => (
+              <Box
+                key={arr.visit_id}
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 1.5,
+                  p: 1.25,
+                  bgcolor: "background.paper",
+                  borderRadius: "8px",
+                  border: "1px solid",
+                  borderColor: "divider",
+                }}
+              >
+                <Box>
+                  <Typography sx={{ fontWeight: 600, fontSize: "0.8125rem" }}>
+                    {arr.full_name} · {arr.thid ?? arr.uhid}
+                  </Typography>
+                  <Typography sx={{ fontSize: "0.6875rem", color: "text.secondary" }}>
+                    {arr.age_years ?? "?"}y/{arr.sex[0]?.toUpperCase()} · Visit {arr.visit_number}
+                  </Typography>
+                </Box>
+                <Button
+                  component={Link}
+                  href={`/doctor/consultation?visit_id=${arr.visit_id}`}
+                  variant="contained"
+                  color="error"
+                  size="small"
+                  sx={{ textTransform: "none", fontSize: "0.75rem", px: 1.5, py: 0.5 }}
+                >
+                  Consult
+                </Button>
+              </Box>
+            ))}
+          </Box>
+        </Box>
+      )}
 
       {error ? (
         <Alert severity="error" sx={{ borderRadius: "12px" }}>

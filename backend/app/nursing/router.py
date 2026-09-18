@@ -349,6 +349,11 @@ async def accept_task(
         order = await service.accept_order(db, order_id, accepted_by=current_db_user.id)
     except service.OrderNotFound:
         raise HTTPException(http_status.HTTP_404_NOT_FOUND, "order_not_found")
+    except service.OrderCancelledError:
+        raise HTTPException(
+            http_status.HTTP_409_CONFLICT,
+            detail={"code": "order_cancelled", "message": "Cancelled orders cannot be accepted"},
+        )
     return OrderTaskOut.model_validate(order)
 
 
@@ -375,6 +380,19 @@ async def complete_task(
             db, order_id, completed_by=current_db_user.id, note=payload.note)
     except service.OrderNotFound:
         raise HTTPException(http_status.HTTP_404_NOT_FOUND, "order_not_found")
+    except service.OrderCancelledError:
+        raise HTTPException(
+            http_status.HTTP_409_CONFLICT,
+            detail={"code": "order_cancelled", "message": "Cancelled orders cannot be completed"},
+        )
+    except service.DiagnosticOrderRequiresFulfillment as exc:
+        raise HTTPException(
+            http_status.HTTP_409_CONFLICT,
+            detail={
+                "code": "diagnostic_order_requires_fulfillment",
+                "message": f"Diagnostic orders of type '{exc.order_type}' cannot be completed by nursing staff; fulfillment must occur in the diagnostic department.",
+            },
+        )
     except service.OrderAlreadyCompleted as exc:
         raise HTTPException(
             http_status.HTTP_409_CONFLICT,

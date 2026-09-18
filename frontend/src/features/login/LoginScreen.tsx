@@ -8,11 +8,20 @@ import { Button } from "@/components/ui/Button";
 import { HealthDocBrand } from "@/components/common/HealthDocBrand";
 import {
   isKeycloakConfigured,
-  loginWithKeycloak,
   loginWithCredentials,
 } from "@/lib/auth/keycloak";
 import { getDefaultRouteForRole } from "@/lib/auth/routes";
 import { useAuth } from "@/providers/auth-provider";
+
+function isSafeInternalPath(url: string | null): boolean {
+  if (!url) return false;
+  return (
+    url.startsWith("/") &&
+    !url.startsWith("//") &&
+    !url.startsWith("/\\") &&
+    !url.includes("://")
+  );
+}
 
 export function LoginScreen() {
   const searchParams = useSearchParams();
@@ -32,17 +41,6 @@ export function LoginScreen() {
     }
   }, [isAuthenticated, isLoading, user?.role]);
 
-  async function handleKeycloakLogin() {
-    setBusy(true);
-    setError(null);
-    try {
-      await loginWithKeycloak(`${window.location.origin}/`);
-    } catch (err) {
-      console.error(err);
-      setError("Sign-in failed. Please try again, or contact your administrator.");
-      setBusy(false);
-    }
-  }
 
   async function handleCredentialsLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -58,8 +56,8 @@ export function LoginScreen() {
       }
       const redirect = searchParams.get("redirect");
       const target =
-        redirect && redirect.startsWith("/")
-          ? redirect
+        isSafeInternalPath(redirect)
+          ? redirect!
           : result.landingPath || (result.user.role ? getDefaultRouteForRole(result.user.role) : "/");
       window.location.replace(target);
     } catch (err) {

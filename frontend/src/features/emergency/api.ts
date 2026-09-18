@@ -76,3 +76,43 @@ export function unmergeThidPromotion(
     idempotencyKey: newIdempotencyKey(),
   });
 }
+
+export interface EmergencyWorklistItem {
+  visit_id: string;
+  visit_number: string;
+  patient_id: string;
+  thid?: string | null;
+  uhid?: string | null;
+  full_name: string;
+  age_years?: number | null;
+  sex: string;
+  arrival_time: string;
+  status: string;
+  visit_type: string;
+}
+
+export function listEmergencyWorklist(): Promise<EmergencyWorklistItem[]> {
+  return api<EmergencyWorklistItem[]>("/emergency/worklist");
+}
+
+export interface EmergencyVisitResult {
+  id: string;
+  visit_number: string;
+  patient_id: string;
+  visit_type: string;
+  status: string;
+}
+
+export function createEmergencyVisit(patientId: string): Promise<EmergencyVisitResult> {
+  return api<EmergencyVisitResult>("/visits", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    idempotencyKey: newIdempotencyKey(),
+    body: JSON.stringify({
+      patient_id: patientId,
+      visit_type: "emergency",
+      visit_date: new Date().toISOString(),
+    }),
+  });
+}
+

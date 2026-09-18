@@ -20,10 +20,10 @@ from app.auth.deps import CurrentDbUser, require_roles
 from app.common.db import get_db
 from app.emergency.schemas import (
     EmergencyPatientCreate, EmergencyPatientOut,
-    PromotionOut, PromotionRequest, UnmergeRequest,
+    EmergencyWorklistItem, PromotionOut, PromotionRequest, UnmergeRequest,
 )
 from app.emergency.service import (
-    approve_promotion, generate_thid,
+    approve_promotion, generate_thid, get_emergency_worklist,
     request_promotion, unmerge_promotion,
 )
 from app.patients.models import Patient
@@ -234,3 +234,19 @@ async def unmerge_thid_promotion(
         if code.startswith("not_approved"):
             raise HTTPException(409, {"code": "not_approved"})
         raise HTTPException(400, str(e))
+
+
+@router.get(
+    "/worklist",
+    response_model=list[EmergencyWorklistItem],
+    dependencies=[Depends(require_roles("doctor", "nurse", "emergency", "receptionist", "admin"))],
+    summary="Active emergency arrivals awaiting or under clinical care",
+)
+async def list_emergency_worklist(
+    current_db_user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+) -> list[EmergencyWorklistItem]:
+    """Facility-scoped list of active emergency visits and their patient details."""
+    rows = await get_emergency_worklist(db, current_db_user.facility_id)
+    return [EmergencyWorklistItem(**r) for r in rows]
+
