@@ -157,37 +157,37 @@ export function PatientSearch({ onSelect, selectLabel = "Select" }: Props) {
 
   return (
     <section className="space-y-6">
-      <form onSubmit={run} className="surface-card space-y-4 p-6">
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 p-3.5 rounded-lg border border-primary/20 bg-primary/5">
-          <div className="flex items-center gap-2 text-primary">
-            <Scan size={20} />
-            <span className="text-sm font-semibold">Scan Barcode / Exact Identifier</span>
-          </div>
-          <div className="flex-1 flex gap-2">
-            <input
-              type="text"
-              className="flex-1 rounded-md border border-border bg-card px-3 py-1.5 font-mono text-sm uppercase placeholder:normal-case placeholder:font-sans"
-              placeholder="Scan barcode or paste UHID / THID (e.g. IN-RJ-JPR001-2026-000001-4)..."
-              value={criteria.uhid ?? ""}
-              onChange={(e) => set("uhid", e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  void handleQuickScan(criteria.uhid ?? "");
-                }
-              }}
-            />
-            <button
-              type="button"
-              onClick={() => void handleQuickScan(criteria.uhid ?? "")}
-              disabled={!criteria.uhid?.trim() || busy}
-              className="rounded-md bg-primary px-3.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
-            >
-              Scan & Find
-            </button>
-          </div>
+      <div className="surface-card p-4 rounded-lg border border-primary/20 bg-primary/5 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+        <div className="flex items-center gap-2 text-primary">
+          <Scan size={20} />
+          <span className="text-sm font-semibold">Scan Barcode / Exact Identifier</span>
         </div>
+        <div className="flex-1 flex gap-2">
+          <input
+            type="text"
+            className="flex-1 rounded-md border border-border bg-card px-3 py-1.5 font-mono text-sm uppercase placeholder:normal-case placeholder:font-sans"
+            placeholder="Scan barcode or paste UHID / THID (e.g. IN-RJ-JPR001-2026-000001-4)..."
+            value={criteria.uhid ?? ""}
+            onChange={(e) => set("uhid", e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                void handleQuickScan(criteria.uhid ?? "");
+              }
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => void handleQuickScan(criteria.uhid ?? "")}
+            disabled={!criteria.uhid?.trim() || busy}
+            className="rounded-md bg-primary px-3.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+          >
+            Scan & Find
+          </button>
+        </div>
+      </div>
 
+      <form onSubmit={run} className="surface-card space-y-4 p-6">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
           <label className="space-y-1 text-sm">
             <span className="text-muted-foreground">Name</span>
