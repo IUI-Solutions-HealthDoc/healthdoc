@@ -32,7 +32,7 @@ import os
 import sys
 import uuid
 from collections.abc import AsyncGenerator
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import pytest
 import pytest_asyncio
@@ -125,7 +125,7 @@ def _placeholder_for(data_type: str, column_name: str, max_length: int | None = 
     if data_type in ("integer", "bigint", "smallint", "numeric", "double precision", "real"):
         return 0
     if data_type in ("timestamp with time zone", "timestamp without time zone"):
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
     if data_type == "date":
         return date.today()
 
@@ -188,7 +188,9 @@ async def facility_id(engine: AsyncEngine) -> AsyncGenerator[uuid.UUID, None]:
                 VALUES (:id, :code, 'Files Test Facility', 'RJ')
                 """
             ),
-            {"id": fid, "code": f"FCIL{uuid.uuid4().hex[:6]}"},
+            # Six hex digits collided in the accumulating test database. Use
+            # the available 20-character column rather than a 24-bit namespace.
+            {"id": fid, "code": f"FCIL{fid.hex[:16]}"},
         )
     yield fid
     # No DELETE — see docstring.
@@ -206,7 +208,7 @@ async def second_facility_id(engine: AsyncEngine) -> AsyncGenerator[uuid.UUID, N
                 VALUES (:id, :code, 'Files Test Facility 2', 'RJ')
                 """
             ),
-            {"id": fid, "code": f"FCIL{uuid.uuid4().hex[:6]}"},
+            {"id": fid, "code": f"FCIL{fid.hex[:16]}"},
         )
     yield fid
     # No DELETE — see facility_id's docstring.

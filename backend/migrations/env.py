@@ -13,6 +13,7 @@ if config.config_file_name is not None:
 from app.allergies import models as allergies_models  # noqa: E402, F401
 from app.billing import models as billing_models  # noqa: E402, F401
 from app.common.db import Base  # noqa: E402
+from app.integrations.abdm import callback_evidence as abdm_receipt_models  # noqa: E402, F401
 from app.integrations.abdm import jobs as abdm_jobs_models  # noqa: E402, F401
 from app.integrations.abdm.hip import models as abdm_hip_models  # noqa: E402, F401
 from app.integrations.abdm.hiu import models as abdm_hiu_models  # noqa: E402, F401

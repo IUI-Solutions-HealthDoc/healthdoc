@@ -12,6 +12,8 @@ class Settings(BaseSettings):
 
     environment: str = "dev"
     api_prefix: str = "/api/v1"
+    # Enable after migration 0073; Compose enables this on upgraded deployments.
+    abdm_callback_evidence_enabled: bool = False
 
     database_url: str = "postgresql+asyncpg://healthdoc:change-me@localhost:5432/healthdoc"
     mongo_uri: str = "mongodb://localhost:27017/healthdoc"
