@@ -15,8 +15,6 @@ import {
 } from "lucide-react";
 
 import { listDepartments, type Department } from "@/features/admin/api/departments";
-import { listUsers } from "@/features/admin/api/users";
-import type { User as AdminUser } from "@/features/admin/types";
 import {
   checkInAppointment,
   createAppointment,
@@ -32,7 +30,7 @@ import type {
   AppointmentService,
   AppointmentStatus,
 } from "@/features/appointments/types";
-import { searchPatients } from "@/features/receptionist/api";
+import { listQueueOpeningOptions, searchPatients } from "@/features/receptionist/api";
 import type { PatientSearchResult } from "@/features/receptionist/types";
 import { getUserFacingError } from "@/lib/api";
 
@@ -55,7 +53,7 @@ export default function AppointmentsPage() {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [services, setServices] = useState<AppointmentService[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
-  const [doctors, setDoctors] = useState<AdminUser[]>([]);
+  const [doctors, setDoctors] = useState<Array<{ id: string; full_name: string }>>([]);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -95,14 +93,22 @@ export default function AppointmentsPage() {
   useEffect(() => {
     async function init() {
       try {
-        const [deptRes, userRes, srvRes] = await Promise.all([
+        const [deptRes, srvRes, rosterRes] = await Promise.all([
           listDepartments(),
-          listUsers({ page_size: 100 }),
           listAppointmentServices(),
+          listQueueOpeningOptions().catch(() => ({ service_date: "", items: [] })),
         ]);
         setDepartments(deptRes.items ?? []);
-        setDoctors(userRes.items ?? []);
         setServices(srvRes ?? []);
+        const uniqueDoctors = Array.from(
+          new Map(
+            (rosterRes.items ?? []).map((item) => [
+              item.staff_user_id,
+              { id: item.staff_user_id, full_name: item.staff_name },
+            ])
+          ).values()
+        );
+        setDoctors(uniqueDoctors);
       } catch (err) {
         console.error("Failed to load reference data", err);
       }
