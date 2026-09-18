@@ -31,7 +31,7 @@ way they are.
 
 ## 1. What the project is
 
-HealthDoc HMIS — a hospital system for Indian facilities. FastAPI + PostgreSQL
+HealthDoc HIMS — a hospital system for Indian facilities. FastAPI + PostgreSQL
 backend, Next.js 16 + Keycloak frontend, all behind nginx in Docker Compose.
 Targeting ABDM certification and a CERT-In WASA audit.
 

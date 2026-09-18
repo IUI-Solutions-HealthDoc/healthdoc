@@ -2,7 +2,7 @@
 
 ## About this document
 
-HealthDoc is a Hospital Information Management System (HMIS) for India's public health
+HealthDoc is a Hospital Information Management System (HIMS) for India's public health
 network — ABDM V3-ready, DPDP-compliant, and built as an offline-resilient hybrid
 edge-cloud system. This document defines the complete PostgreSQL schema that all seven
 backend developers build against: every table, every column, every migration number,

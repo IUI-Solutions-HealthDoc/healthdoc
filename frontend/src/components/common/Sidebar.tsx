@@ -164,7 +164,7 @@ export default function Sidebar({ open, setOpen }: SidebarProps) {
           <div>
             <HealthDocBrand
               size={36}
-              subtitle="HMIS"
+              subtitle="HIMS"
               nameClassName="text-base font-bold text-foreground"
             />
             <p className="text-[11px] font-medium text-foreground/80 mt-0.5">

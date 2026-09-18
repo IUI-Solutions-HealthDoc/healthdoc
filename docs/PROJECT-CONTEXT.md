@@ -1,4 +1,4 @@
-# Project context — HealthDoc HMIS
+# Project context — HealthDoc HIMS
 
 Orientation for anyone (human or AI agent) picking this repository up cold.
 
