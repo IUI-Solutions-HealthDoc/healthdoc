@@ -256,3 +256,41 @@ class PendingApprovalOut(BaseModel):
     department_id: uuid.UUID
     created_at: datetime
     items: list[PendingApprovalItemOut]
+
+
+class StaleVisitCandidateOut(BaseModel):
+    visit_id: uuid.UUID
+    visit_number: str
+    patient_id: uuid.UUID
+    patient_name: str
+    patient_uhid: str
+    department_id: uuid.UUID | None = None
+    department_name: str | None = None
+    visit_date: datetime
+    current_status: str
+    live_token_id: uuid.UUID | None = None
+    live_token_display: str | None = None
+    live_token_status: str | None = None
+    encounter_count: int = 0
+    has_active_encounter: bool = False
+    recommended_visit_action: str
+    recommended_token_action: str | None = None
+
+
+class StaleVisitsReportOut(BaseModel):
+    total_stale_count: int
+    cutoff_date: date
+    candidates: list[StaleVisitCandidateOut]
+
+
+class StaleVisitsReconcileRequest(BaseModel):
+    visit_ids: list[uuid.UUID] | None = None
+    reason: str = "Authorized end-of-day stale visit reconciliation (LWBS / no-show)"
+
+
+class StaleVisitsReconcileResult(BaseModel):
+    reconciled_count: int
+    skipped_count: int
+    reconciled_visits: list[uuid.UUID]
+    skipped_details: list[dict]
+

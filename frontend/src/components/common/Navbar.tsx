@@ -1,8 +1,10 @@
 "use client";
 
-import { Menu, LogOut, User } from "lucide-react";
+import { Menu, LogOut, User, Languages } from "lucide-react";
 import { REALM_ROLE_LABELS } from "@/features/admin/constants";
 import { useAuth } from "@/providers/auth-provider";
+import { useLocale } from "@/lib/i18n";
+import { useDeskCounter } from "@/features/receptionist/useDeskCounter";
 import { HealthDocBrand } from "./HealthDocBrand";
 
 interface NavbarProps {
@@ -12,6 +14,9 @@ interface NavbarProps {
 
 export default function Navbar({ open, setOpen }: NavbarProps) {
   const { user, logout } = useAuth();
+  const { locale, setLocale, t } = useLocale();
+  const { counter, setDeskCounter, availableCounters } = useDeskCounter();
+
   const roleLabel = user?.role
     ? (REALM_ROLE_LABELS[user.role] ?? user.role)
     : "Unassigned";
@@ -46,12 +51,58 @@ export default function Navbar({ open, setOpen }: NavbarProps) {
         <div className="hidden items-center gap-2 border-l border-border/70 pl-4 md:flex">
           <div className="flex h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
           <span className="text-xs font-semibold text-foreground/75 uppercase tracking-wider">
-            Clinical System Online
+            {t("common.online")}
           </span>
         </div>
       </div>
 
       <div className="flex items-center gap-3 sm:gap-4">
+        {user?.role === "receptionist" && (
+          <div className="hidden sm:flex items-center gap-2 rounded-full border border-border/80 bg-muted/40 px-3 py-1 text-xs">
+            <span className="font-medium text-muted-foreground">{t("counter.label")}:</span>
+            <select
+              value={counter}
+              onChange={(e) => setDeskCounter(e.target.value)}
+              className="bg-transparent font-semibold text-foreground focus:outline-none cursor-pointer"
+              aria-label="Select desk counter"
+            >
+              {availableCounters.map((c) => (
+                <option key={c} value={c} className="bg-card text-foreground">
+                  {c}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        <div className="flex items-center gap-1 rounded-full border border-border/80 bg-muted/40 p-1 text-xs">
+          <Languages size={14} className="ml-1 text-muted-foreground hidden xs:block" />
+          <button
+            type="button"
+            onClick={() => setLocale("en")}
+            className={`rounded-full px-2 py-0.5 font-medium transition-colors ${
+              locale === "en"
+                ? "bg-primary text-white shadow-xs"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+            aria-label="Switch language to English"
+          >
+            English
+          </button>
+          <button
+            type="button"
+            onClick={() => setLocale("hi")}
+            className={`rounded-full px-2 py-0.5 font-medium transition-colors ${
+              locale === "hi"
+                ? "bg-primary text-white shadow-xs"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+            aria-label="Switch language to Hindi"
+          >
+            हिंदी
+          </button>
+        </div>
+
         <div className="flex items-center gap-3 rounded-full border border-border/80 bg-muted/40 py-1 pl-1.5 pr-3 transition-colors hover:bg-muted/70">
           <div
             className="flex h-8 w-8 items-center justify-center rounded-full bg-[#001F54] text-white shadow-sm"
@@ -73,7 +124,7 @@ export default function Navbar({ open, setOpen }: NavbarProps) {
           onClick={() => void logout()}
           className="flex h-9 w-9 items-center justify-center rounded-full border border-border/80 text-muted-foreground transition-all hover:border-red-200 hover:bg-red-50 hover:text-red-600 focus:outline-none focus:ring-2 focus:ring-red-200 dark:hover:bg-red-950/30"
           aria-label="Sign out"
-          title="Sign out of HealthDoc"
+          title={t("nav.logout")}
         >
           <LogOut size={16} />
         </button>

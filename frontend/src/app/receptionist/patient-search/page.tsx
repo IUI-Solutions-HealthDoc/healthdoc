@@ -1,13 +1,16 @@
 "use client";
 
 import { useState } from "react";
+import { Printer } from "lucide-react";
 
 import { PatientSearch } from "@/features/receptionist/PatientSearch";
 import { StartVisit } from "@/features/receptionist/StartVisit";
+import { PatientCardModal } from "@/features/receptionist/PatientCardModal";
 import type { PatientSearchResult } from "@/features/receptionist/types";
 
 export default function Page() {
   const [selected, setSelected] = useState<PatientSearchResult | null>(null);
+  const [showCard, setShowCard] = useState(false);
 
   return (
     <div className="space-y-6">
@@ -28,21 +31,47 @@ export default function Page() {
             <div>
               <p className="font-medium">Selected patient</p>
               <p className="text-sm text-muted-foreground">
-                {selected.full_name} · {selected.uhid ?? "UHID pending"}
+                {selected.full_name} · {selected.uhid ?? selected.thid ?? "UHID pending"}
               </p>
             </div>
-            <button type="button" className="text-sm underline" onClick={() => setSelected(null)}>
-              Change patient
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setShowCard(true)}
+                className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-semibold hover:bg-muted"
+              >
+                <Printer size={14} />
+                Print Card
+              </button>
+              <button type="button" className="text-sm underline" onClick={() => setSelected(null)}>
+                Change patient
+              </button>
+            </div>
           </div>
           <StartVisit
             patient={{
               id: selected.id,
               full_name: selected.full_name,
               uhid: selected.uhid,
-              thid: null,
+              thid: selected.thid ?? null,
             }}
           />
+
+          {showCard && (
+            <PatientCardModal
+              open={showCard}
+              onClose={() => setShowCard(false)}
+              patient={{
+                id: selected.id,
+                full_name: selected.full_name,
+                uhid: selected.uhid,
+                thid: selected.thid,
+                sex: selected.sex,
+                age_years: selected.age_years,
+                dob: selected.dob,
+              }}
+            />
+          )}
         </div>
       ) : null}
     </div>

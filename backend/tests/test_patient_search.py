@@ -61,6 +61,11 @@ def test_search_uhid_preserves_canonical_separators_and_checks_the_digit():
         PatientSearchRequest(uhid=f"{body}-{wrong_digit}")
 
 
+def test_search_uhid_accepts_valid_thid():
+    thid = "TH-JPR001-260919-0001"
+    assert PatientSearchRequest(uhid=thid.lower()).uhid == thid
+
+
 # --- Not yet covered: search_patients() itself ---
 # Needs a real Postgres session (trigram similarity, joins, sequences aren't
 # mockable meaningfully). No async-DB test fixture exists anywhere in the

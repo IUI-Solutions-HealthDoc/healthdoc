@@ -15,7 +15,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import func, select, text, update
+from sqlalchemy import func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.actions import AuditAction
@@ -269,11 +269,30 @@ async def search_patients(
                 matches[patient.id] = (patient, 1.0, "abha")
 
     if uhid:
-        stmt = select(Patient).where(Patient.uhid == uhid, *base_filter)
+        stmt = select(Patient).where(or_(Patient.uhid == uhid, Patient.thid == uhid), *base_filter)
         for patient in (await db.execute(stmt)).scalars().all():
             existing = matches.get(patient.id)
+            matched_key = "uhid" if patient.uhid == uhid else "thid"
             if not existing or existing[1] < 1.0:
-                matches[patient.id] = (patient, 1.0, "uhid")
+                matches[patient.id] = (patient, 1.0, matched_key, None)
+
+        if not matches:
+            merged_stmt = select(Patient).where(
+                or_(Patient.uhid == uhid, Patient.thid == uhid),
+                Patient.facility_id == facility_id,
+                Patient.deleted_at.is_(None),
+                Patient.status == "merged",
+            )
+            for merged_patient in (await db.execute(merged_stmt)).scalars().all():
+                if merged_patient.merged_into_patient_id:
+                    canonical = await db.get(Patient, merged_patient.merged_into_patient_id)
+                    if canonical and canonical.deleted_at is None and canonical.status != "merged":
+                        matches[canonical.id] = (
+                            canonical,
+                            1.0,
+                            "merged_identifier",
+                            merged_patient.uhid or merged_patient.thid,
+                        )
 
     if mobile:
         stmt = select(Patient).where(Patient.mobile == mobile, *base_filter)

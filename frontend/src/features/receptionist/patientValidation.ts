@@ -1,4 +1,5 @@
 const UHID_PATTERN = /^IN-[A-Z]{2}-[A-Z0-9_]{1,20}-\d{4}-\d{6,}-\d$/;
+const THID_PATTERN = /^TH-[A-Z0-9_]{1,20}-\d{6}-\d{4,}$/;
 const FORBIDDEN_NAME_CHARACTERS = /[\d<>{}\[\]|\\^~`@#$%*_=+;]/u;
 
 export function digitsOnly(value: string): string {
@@ -33,7 +34,8 @@ export function normaliseUhidInput(value: string): string {
 }
 
 export function isValidUhidInput(value: string): boolean {
-  return UHID_PATTERN.test(normaliseUhidInput(value));
+  const norm = normaliseUhidInput(value);
+  return UHID_PATTERN.test(norm) || THID_PATTERN.test(norm);
 }
 
 export interface DerivedAgeInfo {

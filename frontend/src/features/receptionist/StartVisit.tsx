@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ApiError, newIdempotencyKey } from "@/lib/api";
 import { canRoleAccessPath } from "@/lib/auth/routes";
 import { useAuth } from "@/providers/auth-provider";
+import { useDeskCounter } from "./useDeskCounter";
 
 import { createVisit, issueToken, listQueues } from "./api";
 import {
@@ -38,6 +39,7 @@ const RECEPTION_PRIORITIES = [
  */
 export function StartVisit({ patient }: { patient: VisitPatient }) {
   const { user } = useAuth();
+  const { counter } = useDeskCounter();
   const canAccessBilling = canRoleAccessPath(user?.role ?? null, "/billing");
   const canAccessEmergency = canRoleAccessPath(user?.role ?? null, "/emergency");
   const canAccessIpd = canRoleAccessPath(user?.role ?? null, "/ipd");
@@ -48,6 +50,12 @@ export function StartVisit({ patient }: { patient: VisitPatient }) {
   const [token, setToken] = useState<QueueToken | null>(null);
   const [visit, setVisit] = useState<Visit | null>(null);
   const [priority, setPriority] = useState("normal");
+  // Optional desk observations (HD-10) — off by default
+  const [enableDeskObs, setEnableDeskObs] = useState(false);
+  const [deskPulse, setDeskPulse] = useState("");
+  const [deskBpSys, setDeskBpSys] = useState("");
+  const [deskBpDia, setDeskBpDia] = useState("");
+  const [deskTemp, setDeskTemp] = useState("");
   // Was hardcoded to "opd", so a hospital with wards could not admit anyone
   // from the desk (REC-03). OPD stays the default because it is the common
   // case, not because it was the only one.
@@ -304,6 +312,70 @@ export function StartVisit({ patient }: { patient: VisitPatient }) {
           </button>
         </>
       )}
+
+      {/* Desk Observations (HD-10) — Off by default */}
+      <div className="border-t border-border/80 pt-3.5">
+        <button
+          type="button"
+          onClick={() => setEnableDeskObs((prev) => !prev)}
+          className="text-xs text-muted-foreground hover:text-foreground font-medium underline"
+        >
+          {enableDeskObs ? "− Hide Desk Observations" : "+ Optional Desk Observations (Trained Staff Only)"}
+        </button>
+        {enableDeskObs && (
+          <div className="mt-2.5 rounded-lg border border-border bg-muted/20 p-3.5 space-y-2.5">
+            <p className="text-[11px] text-muted-foreground">
+              Counter vitals entry requires authorized clinical training. Units: Pulse (bpm), BP (mmHg), Temp (°F).
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <label className="text-xs space-y-1">
+                <span className="text-muted-foreground">Pulse (bpm)</span>
+                <input
+                  type="number"
+                  placeholder="72"
+                  value={deskPulse}
+                  onChange={(e) => setDeskPulse(e.target.value)}
+                  className="w-full rounded border border-border bg-card px-2 py-1 text-xs"
+                />
+              </label>
+              <label className="text-xs space-y-1">
+                <span className="text-muted-foreground">BP Systolic</span>
+                <input
+                  type="number"
+                  placeholder="120"
+                  value={deskBpSys}
+                  onChange={(e) => setDeskBpSys(e.target.value)}
+                  className="w-full rounded border border-border bg-card px-2 py-1 text-xs"
+                />
+              </label>
+              <label className="text-xs space-y-1">
+                <span className="text-muted-foreground">BP Diastolic</span>
+                <input
+                  type="number"
+                  placeholder="80"
+                  value={deskBpDia}
+                  onChange={(e) => setDeskBpDia(e.target.value)}
+                  className="w-full rounded border border-border bg-card px-2 py-1 text-xs"
+                />
+              </label>
+              <label className="text-xs space-y-1">
+                <span className="text-muted-foreground">Temp (°F)</span>
+                <input
+                  type="number"
+                  step="0.1"
+                  placeholder="98.6"
+                  value={deskTemp}
+                  onChange={(e) => setDeskTemp(e.target.value)}
+                  className="w-full rounded border border-border bg-card px-2 py-1 text-xs"
+                />
+              </label>
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              Recorded by: <span className="font-medium text-foreground">{user?.name || "Reception Staff"}</span> ({counter})
+            </p>
+          </div>
+        )}
+      </div>
 
       {error && (
         <p role="alert" className="text-sm text-danger">
