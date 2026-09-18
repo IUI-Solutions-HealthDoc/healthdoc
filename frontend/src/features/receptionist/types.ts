@@ -77,14 +77,17 @@ export interface PatientSearchRequest {
 export interface PatientSearchResult {
   id: string;
   uhid: string | null;
+  thid?: string | null;
   full_name: string;
   sex: string;
   age_years: number | null;
+  dob?: string | null;
   /** The server masks it. Never ask for or display the full number in a list. */
   mobile_masked: string | null;
   match_score: number;
-  /** "aadhaar" | "abha" | "uhid" | "mobile" | "name_dob" */
+  /** "aadhaar" | "abha" | "uhid" | "thid" | "merged_identifier" | "mobile" | "name_dob" */
   matched_on: string;
+  merged_from_uhid?: string | null;
 }
 
 export interface PatientSearchResponse {
@@ -122,12 +125,14 @@ export const MATCH_LABELS: Record<string, string> = {
   aadhaar: "Aadhaar match",
   abha: "ABHA match",
   uhid: "UHID match",
+  thid: "THID match",
+  merged_identifier: "Merged UHID match",
   mobile: "Mobile match",
   name_dob: "Name + date of birth",
 };
 
 export function isIdentityMatch(matchedOn: string): boolean {
-  return ["aadhaar", "abha", "uhid"].includes(matchedOn);
+  return ["aadhaar", "abha", "uhid", "thid", "merged_identifier"].includes(matchedOn);
 }
 
 /* ------------------------------------------------------------------ visits */
@@ -260,3 +265,38 @@ export interface QueueTokenList {
   now_serving: string | null;
   items: QueueTokenListItem[];
 }
+
+/* ------------------------------------------------ HD-12: stale visits */
+
+export interface StaleVisitCandidate {
+  visit_id: string;
+  visit_number: string;
+  patient_id: string;
+  patient_name: string;
+  patient_uhid: string;
+  department_id?: string | null;
+  department_name?: string | null;
+  visit_date: string;
+  current_status: string;
+  live_token_id?: string | null;
+  live_token_display?: string | null;
+  live_token_status?: string | null;
+  encounter_count: number;
+  has_active_encounter: boolean;
+  recommended_visit_action: string;
+  recommended_token_action?: string | null;
+}
+
+export interface StaleVisitsReport {
+  total_stale_count: number;
+  cutoff_date: string;
+  candidates: StaleVisitCandidate[];
+}
+
+export interface StaleVisitsReconcileResult {
+  reconciled_count: number;
+  skipped_count: number;
+  reconciled_visits: string[];
+  skipped_details: Array<{ visit_id?: string; reason?: string }>;
+}
+

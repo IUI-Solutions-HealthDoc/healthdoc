@@ -6,17 +6,21 @@ import { toast } from "@/components/ui/toast";
 import { ApiError, formatDateTime, newIdempotencyKey } from "@/lib/api";
 import {
   createQueue,
+  getStaleVisits,
   issueToken,
   listQueueOpeningOptions,
   listQueueTokens,
   listQueues,
   listVisitsWithoutTokens,
+  reconcileStaleVisits,
   updateTokenPriority,
 } from "@/features/receptionist/api";
 import type {
   QueueOpeningOptions,
   QueueSummary,
   QueueTokenList,
+  StaleVisitsReconcileResult,
+  StaleVisitsReport,
   TokenPriorityUpdate,
   VisitWithoutToken,
 } from "@/features/receptionist/types";
@@ -51,16 +55,24 @@ export default function Page() {
   const [assignPriority, setAssignPriority] = useState("normal");
   const [assigningBusy, setAssigningBusy] = useState(false);
 
+  // HD-12: Stale visits state
+  const [staleReport, setStaleReport] = useState<StaleVisitsReport | null>(null);
+  const [showStaleVisits, setShowStaleVisits] = useState(false);
+  const [reconciling, setReconciling] = useState(false);
+  const [reconcileResult, setReconcileResult] = useState<StaleVisitsReconcileResult | null>(null);
+
   const load = useCallback(async () => {
     try {
-      const [rows, options, unassigned] = await Promise.all([
+      const [rows, options, unassigned, stale] = await Promise.all([
         listQueues(),
         listQueueOpeningOptions(),
         listVisitsWithoutTokens().catch(() => [] as VisitWithoutToken[]),
+        getStaleVisits().catch(() => null),
       ]);
       setQueues(rows);
       setOpeningOptions(options);
       setUnassignedVisits(unassigned);
+      setStaleReport(stale);
       setOptionId((current) =>
         options.items.some((option) => option.roster_id === current)
           ? current
@@ -186,6 +198,31 @@ export default function Page() {
     }
   };
 
+  const handleReconcileAllStale = async () => {
+    if (
+      !window.confirm(
+        "Reconcile all stale visits from prior days? Registered visits will be marked as LWBS and consultation visits as Closed. Live queue tokens will be closed as No-Show. Clinical history and invoices are preserved.",
+      )
+    ) {
+      return;
+    }
+    setReconciling(true);
+    setError(null);
+    try {
+      const res = await reconcileStaleVisits();
+      setReconcileResult(res);
+      toast.success(
+        "Stale visits reconciled",
+        `Successfully reconciled ${res.reconciled_count} visits (${res.skipped_count} skipped/exempt).`,
+      );
+      await load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to reconcile stale visits");
+    } finally {
+      setReconciling(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -199,6 +236,22 @@ export default function Page() {
             is push-based; polling here would add load for a screen someone
             looks at when a patient asks, not continuously. */}
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setShowStaleVisits((shown) => !shown)}
+            className={`relative rounded-md border px-3 py-2 text-sm font-medium transition ${
+              showStaleVisits
+                ? "border-rose-500 bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300"
+                : "border-border bg-card text-foreground hover:bg-muted"
+            }`}
+          >
+            Stale Visits Review
+            {staleReport && staleReport.total_stale_count > 0 ? (
+              <span className="ml-2 rounded-full bg-rose-600 px-1.5 py-0.5 text-[11px] font-bold text-white">
+                {staleReport.total_stale_count}
+              </span>
+            ) : null}
+          </button>
           <button
             type="button"
             onClick={() => setShowUnassignedVisits((shown) => !shown)}
@@ -346,6 +399,103 @@ export default function Page() {
                   </button>
                 </div>
               )}
+            </div>
+          )}
+        </section>
+      )}
+
+      {showStaleVisits && (
+        <section className="surface-card space-y-4 p-5" aria-labelledby="stale-visits-title">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 id="stale-visits-title" className="text-lg font-semibold text-foreground">
+                Stale Visits Review &amp; Reconciliation ({staleReport?.total_stale_count ?? 0})
+              </h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Unclosed OPD visits from previous days (before {staleReport?.cutoff_date ?? "today"}). Exempts Emergency &amp; IPD visits. Reconciles unconsulted visits to LWBS and consultation visits to Closed, cancelling live queue tokens while preserving all clinical history and billing.
+              </p>
+            </div>
+            {staleReport && staleReport.total_stale_count > 0 && (
+              <button
+                type="button"
+                disabled={reconciling}
+                onClick={() => void handleReconcileAllStale()}
+                className="rounded-md bg-rose-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-rose-700 disabled:opacity-50"
+              >
+                {reconciling ? "Reconciling..." : `Reconcile All (${staleReport.total_stale_count})`}
+              </button>
+            )}
+          </div>
+
+          {reconcileResult && (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300">
+              <span className="font-semibold">Reconciliation Completed:</span> {reconcileResult.reconciled_count} visits reconciled successfully ({reconcileResult.skipped_count} skipped/exempt).
+            </div>
+          )}
+
+          {staleReport && staleReport.candidates.length === 0 ? (
+            <div className="rounded-lg border border-border bg-muted/20 p-6 text-center text-sm text-muted-foreground">
+              No stale unclosed visits found from prior business days. All previous OPD visits and tokens are cleanly resolved.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full border-collapse">
+                <thead className="bg-muted/40 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  <tr>
+                    <th className="px-4 py-2.5 text-left">Visit #</th>
+                    <th className="px-4 py-2.5 text-left">Patient</th>
+                    <th className="px-4 py-2.5 text-left">Department</th>
+                    <th className="px-4 py-2.5 text-left">Visit Date</th>
+                    <th className="px-4 py-2.5 text-left">Status</th>
+                    <th className="px-4 py-2.5 text-left">Queue Token</th>
+                    <th className="px-4 py-2.5 text-left">Encounters</th>
+                    <th className="px-4 py-2.5 text-right">Recommended</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border text-sm">
+                  {staleReport?.candidates.map((c) => (
+                    <tr key={c.visit_id} className="hover:bg-muted/20 transition-colors">
+                      <td className="px-4 py-3 font-mono font-bold text-primary">{c.visit_number}</td>
+                      <td className="px-4 py-3">
+                        <span className="block font-medium text-foreground">{c.patient_name}</span>
+                        <span className="font-mono text-xs text-muted-foreground">{c.patient_uhid}</span>
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground">{c.department_name ?? "General"}</td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground">{formatDateTime(c.visit_date)}</td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex rounded px-2 py-0.5 text-xs font-medium ${
+                          c.current_status === "registered"
+                            ? "bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300"
+                            : "bg-blue-100 text-blue-800 dark:bg-blue-950/50 dark:text-blue-300"
+                        }`}>
+                          {c.current_status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 font-mono text-xs">
+                        {c.live_token_display ? (
+                          <span className="text-amber-600 dark:text-amber-400">
+                            {c.live_token_display} ({c.live_token_status})
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">None</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-xs">
+                        {c.has_active_encounter ? (
+                          <span className="text-rose-600 font-medium">In-progress note</span>
+                        ) : (
+                          <span className="text-muted-foreground">{c.encounter_count} notes</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-right text-xs font-medium">
+                        <span className="rounded bg-muted px-2 py-1 text-foreground">
+                          {c.recommended_visit_action === "mark_lwbs" ? "Set LWBS" : "Close"}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </section>

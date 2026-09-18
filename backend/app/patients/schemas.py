@@ -85,6 +85,7 @@ def _normalise_abha(value: str | None) -> str | None:
 
 
 _UHID_SHAPE = re.compile(r"^IN-[A-Z]{2}-[A-Z0-9_]{1,20}-\d{4}-\d{6,}-\d$")
+_THID_SHAPE = re.compile(r"^TH-[A-Z0-9_]{1,20}-\d{6}-\d{4,}$")
 
 
 def _normalise_uhid(value: str | None) -> str | None:
@@ -93,8 +94,10 @@ def _normalise_uhid(value: str | None) -> str | None:
     normalised = value.strip().upper()
     if not normalised:
         return None
+    if _THID_SHAPE.fullmatch(normalised):
+        return normalised
     if not _UHID_SHAPE.fullmatch(normalised):
-        raise ValueError("uhid must use the format IN-STATE-FACILITY-YEAR-SEQUENCE-CHECKDIGIT")
+        raise ValueError("uhid must use the format IN-STATE-FACILITY-YEAR-SEQUENCE-CHECKDIGIT or TH-FACILITY-YYMMDD-SEQ")
     # Local import avoids making schemas and service import each other while
     # still applying the same check-digit algorithm used by the generator.
     from app.patients.service import validate_uhid
@@ -102,6 +105,7 @@ def _normalise_uhid(value: str | None) -> str | None:
     if not validate_uhid(normalised):
         raise ValueError("uhid check digit is invalid")
     return normalised
+
 
 
 def _validate_full_name(value: str | None) -> str | None:
@@ -277,12 +281,15 @@ class PatientSearchRequest(BaseModel):
 class PatientSearchResult(BaseModel):
     id: uuid.UUID
     uhid: str | None
+    thid: str | None = None
     full_name: str
     sex: str
     age_years: int | None
+    dob: date | None = None
     mobile_masked: str | None
     match_score: float
-    matched_on: str  # "aadhaar" | "abha" | "uhid" | "mobile" | "name_dob"
+    matched_on: str  # "aadhaar" | "abha" | "uhid" | "thid" | "merged_identifier" | "mobile" | "name_dob"
+    merged_from_uhid: str | None = None
 
 
 class PatientSearchResponse(BaseModel):

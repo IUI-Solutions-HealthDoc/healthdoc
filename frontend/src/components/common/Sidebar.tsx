@@ -7,6 +7,7 @@ import {
   BarChart3,
   Bed,
   Building2,
+  Calendar,
   ChevronRight,
   ClipboardList,
   FileText,
@@ -45,6 +46,7 @@ const NAV_ITEMS: readonly NavItem[] = [
   // no nav entry, so an HOD logged in and had nowhere to go.
   { href: "/hod", label: "Department dashboard", icon: LayoutDashboard, area: "clinical", roles: [ROLES.HOD] },
   { href: "/receptionist/registration", label: "Registration", icon: UserRound, area: "front_desk", roles: [ROLES.RECEPTIONIST] },
+  { href: "/receptionist/appointments", label: "Appointments", icon: Calendar, area: "front_desk", roles: [ROLES.RECEPTIONIST] },
   { href: "/receptionist/patient-search", label: "Patient search", icon: Search, area: "front_desk", roles: [ROLES.RECEPTIONIST] },
   { href: "/receptionist/queue", label: "Queue", icon: Users, area: "front_desk", roles: [ROLES.RECEPTIONIST] },
   { href: "/doctor/dashboard", label: "Doctor queue", icon: Stethoscope, area: "clinical", roles: [ROLES.DOCTOR] },

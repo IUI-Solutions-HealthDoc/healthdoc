@@ -79,6 +79,7 @@ const ROLE_DASHBOARDS = [
     landingPath: "/receptionist/registration",
     dashboards: [
       { path: "/receptionist/registration", expectCalls: false },
+      { path: "/receptionist/appointments", expectCalls: true },
       { path: "/receptionist/patient-search", expectCalls: false },
       { path: "/receptionist/queue", expectCalls: true },
       {
