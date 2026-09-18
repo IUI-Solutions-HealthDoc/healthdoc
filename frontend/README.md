@@ -1,6 +1,6 @@
 # HealthDoc Frontend
 
-Next.js App Router frontend for the HealthDoc Hospital Information Management System (HMIS).
+Next.js App Router frontend for the HealthDoc Hospital Information Management System (HIMS).
 
 ## Stack
 
@@ -221,7 +221,7 @@ styles/
 
 ### Meridian theme
 
-Navy / light HMIS palette (`#001f54` primary). Use:
+Navy / light HIMS palette (`#001f54` primary). Use:
 
 - `meridian` object in `sx` / TS for MUI components
 - CSS variables in `globals.css` for Tailwind utilities (`bg-primary`, `text-muted-foreground`, `surface-card`, …)

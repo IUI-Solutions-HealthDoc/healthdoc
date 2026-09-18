@@ -1,4 +1,4 @@
-# HealthDoc HMIS — working notes
+# HealthDoc HIMS — working notes
 
 Hospital management system for Indian facilities. FastAPI + PostgreSQL backend,
 Next.js 16 + Electron frontend, Keycloak OIDC, all behind nginx in Docker

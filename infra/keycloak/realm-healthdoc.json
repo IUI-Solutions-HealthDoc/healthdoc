@@ -1,7 +1,7 @@
 {
   "realm": "healthdoc",
-  "displayName": "HealthDoc HMIS",
-  "displayNameHtml": "HealthDoc HMIS",
+  "displayName": "HealthDoc HIMS",
+  "displayNameHtml": "HealthDoc HIMS",
   "loginTheme": "healthdoc",
   "enabled": true,
   "sslRequired": "external",
@@ -82,7 +82,7 @@
       "name": "HealthDoc Frontend (Next.js/Electron)",
       "publicClient": true,
       "standardFlowEnabled": true,
-      "directAccessGrantsEnabled": false,
+      "directAccessGrantsEnabled": true,
       "protocol": "openid-connect",
       "redirectUris": [
         "https://localhost/*",

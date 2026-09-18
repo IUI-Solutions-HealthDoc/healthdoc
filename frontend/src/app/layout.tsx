@@ -22,9 +22,9 @@ import "@/styles/globals.css";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "HealthDoc HMIS",
+  title: "HealthDoc HIMS",
   description: "Hospital Information Management System",
-  applicationName: "HealthDoc HMIS",
+  applicationName: "HealthDoc HIMS",
   manifest: "/manifest.webmanifest",
   icons: {
     icon: "/healthdoc-logo.png",

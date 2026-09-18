@@ -1,4 +1,4 @@
-# WASA readiness — HealthDoc HMIS
+# WASA readiness — HealthDoc HIMS
 
 **Assessed:** 26 Aug 2026 · **Remediated:** 26 Aug 2026
 **Standard:** NHA Web Application Security Assessment (CERT-In empanelled auditor)

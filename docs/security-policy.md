@@ -1,6 +1,6 @@
 # HealthDoc security policy (BA-W8-01)
 
-Scope: the HealthDoc HMIS platform (edge + cloud). Framework: DPDP Act 2023, ABDM data
+Scope: the HealthDoc HIMS platform (edge + cloud). Framework: DPDP Act 2023, ABDM data
 policies, CERT-In directions. (Not HIPAA — US law, out of scope.)
 
 This document distinguishes implemented controls from work that is planned or blocked. A
