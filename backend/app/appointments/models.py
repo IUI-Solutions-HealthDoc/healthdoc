@@ -93,4 +93,10 @@ class Appointment(Base, UUIDPk, Timestamps, Blame):
         Index("ix_appointments_doctor_date", "doctor_user_id", "appointment_date"),
         Index("ix_appointments_patient_id", "patient_id"),
         Index("ix_appointments_visit_id", "visit_id"),
+        Index("ix_appointments_department_id", "department_id"),
+        Index("ix_appointments_service_id", "service_id"),
+        Index("ix_appointments_token_id", "token_id"),
+        Index("ix_appointments_follow_up_from_visit_id", "follow_up_from_visit_id"),
+        Index("ix_appointments_created_by", "created_by"),
+        Index("ix_appointments_updated_by", "updated_by"),
     )

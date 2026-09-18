@@ -170,6 +170,36 @@ def upgrade() -> None:
         "appointments",
         ["visit_id"],
     )
+    op.create_index(
+        "ix_appointments_department_id",
+        "appointments",
+        ["department_id"],
+    )
+    op.create_index(
+        "ix_appointments_service_id",
+        "appointments",
+        ["service_id"],
+    )
+    op.create_index(
+        "ix_appointments_token_id",
+        "appointments",
+        ["token_id"],
+    )
+    op.create_index(
+        "ix_appointments_follow_up_from_visit_id",
+        "appointments",
+        ["follow_up_from_visit_id"],
+    )
+    op.create_index(
+        "ix_appointments_created_by",
+        "appointments",
+        ["created_by"],
+    )
+    op.create_index(
+        "ix_appointments_updated_by",
+        "appointments",
+        ["updated_by"],
+    )
 
 
 def downgrade() -> None:

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
   Calendar as CalendarIcon,
@@ -89,7 +89,7 @@ export default function AppointmentsPage() {
   const [serviceSubmitting, setServiceSubmitting] = useState(false);
 
   // Check-in confirmation state
-  const [checkInResult, setCheckInResult] = useState<AppointmentCheckInResult | null>(null);
+  const [_checkInResult, setCheckInResult] = useState<AppointmentCheckInResult | null>(null);
 
   // Load initial reference data
   useEffect(() => {
@@ -111,7 +111,7 @@ export default function AppointmentsPage() {
   }, []);
 
   // Fetch appointments whenever date changes
-  async function loadAppointments() {
+  const loadAppointments = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -126,11 +126,11 @@ export default function AppointmentsPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [selectedDate, statusFilter]);
 
   useEffect(() => {
     loadAppointments();
-  }, [selectedDate, statusFilter]);
+  }, [loadAppointments]);
 
   // Handle patient search for booking
   async function handleSearchPatient(e: React.FormEvent) {

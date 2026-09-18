@@ -528,6 +528,7 @@ REPOINTED_ON_MERGE: frozenset[str] = frozenset(
     {
         "patient_identifiers",
         "visits",
+        "appointments",
         "orders",
         "prescriptions",
         "procedure_records",
@@ -643,6 +644,7 @@ async def approve_merge(
 
     await _repoint_identifiers(db, source=source, target=target)
     await _repoint_visits(db, source=source, target=target)
+    await _repoint_appointments(db, source=source, target=target)
     await _repoint_order_clinical_records(db, source=source, target=target)
     await _repoint_ot_schedules(db, source=source, target=target)
     await _repoint_clinical_incidents(db, source=source, target=target)
@@ -828,6 +830,16 @@ async def _repoint_visits(db: AsyncSession, *, source: Patient, target: Patient)
 
     await db.execute(
         update(Visit).where(Visit.patient_id == source.id).values(patient_id=target.id)
+    )
+    await db.flush()
+
+
+async def _repoint_appointments(db: AsyncSession, *, source: Patient, target: Patient) -> None:
+    """Repoints source's appointments rows onto target."""
+    from app.appointments.models import Appointment
+
+    await db.execute(
+        update(Appointment).where(Appointment.patient_id == source.id).values(patient_id=target.id)
     )
     await db.flush()
 
