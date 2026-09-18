@@ -161,20 +161,50 @@ export type DirectLoginResult = {
   landingPath?: string;
 };
 
+function saveRefreshToken(token: string) {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.setItem("hd_rt", token);
+  } catch {}
+  try {
+    localStorage.setItem("hd_rt", token);
+  } catch {}
+}
+
+function getStoredRefreshToken(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return sessionStorage.getItem("hd_rt") || localStorage.getItem("hd_rt");
+  } catch {
+    return null;
+  }
+}
+
+function clearStoredRefreshToken() {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.removeItem("hd_rt");
+  } catch {}
+  try {
+    localStorage.removeItem("hd_rt");
+  } catch {}
+}
+
 export async function loginWithCredentials(
   username: string,
   pass: string,
-): Promise<DirectLoginResult> {
+): Promise<{ success: boolean; user?: SessionUser; landingPath?: string; error?: string }> {
   const tokenEndpoint = `${url}/realms/${realm}/protocol/openid-connect/token`;
-  const body = new URLSearchParams({
-    grant_type: "password",
-    client_id: clientId,
-    username: username.trim(),
-    password: pass,
-    scope: "openid profile email",
-  });
 
   try {
+    const body = new URLSearchParams({
+      grant_type: "password",
+      client_id: clientId,
+      username: username.trim(),
+      password: pass,
+      scope: "openid profile email",
+    });
+
     const res = await fetch(tokenEndpoint, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -202,8 +232,8 @@ export async function loginWithCredentials(
 
     setAccessToken(data.access_token);
 
-    if (typeof window !== "undefined" && data.refresh_token) {
-      sessionStorage.setItem("hd_rt", data.refresh_token);
+    if (data.refresh_token) {
+      saveRefreshToken(data.refresh_token);
     }
 
     const kc = getKeycloak();
@@ -285,8 +315,8 @@ export async function initKeycloak(): Promise<boolean> {
           return true;
         }
 
-        // If silent SSO did not find an active iframe session, restore from tab session if available
-        const storedRt = typeof window !== "undefined" ? sessionStorage.getItem("hd_rt") : null;
+        // If silent SSO did not find an active iframe session, restore from stored session if available
+        const storedRt = getStoredRefreshToken();
         if (storedRt) {
           try {
             const refreshEndpoint = `${url}/realms/${realm}/protocol/openid-connect/token`;
@@ -317,7 +347,7 @@ export async function initKeycloak(): Promise<boolean> {
               kc.subject = kc.tokenParsed?.sub;
               syncAccessToken(kc);
               if (refreshed.refresh_token) {
-                sessionStorage.setItem("hd_rt", refreshed.refresh_token);
+                saveRefreshToken(refreshed.refresh_token);
               }
               kc.onTokenExpired = () => {
                 void kc
@@ -332,10 +362,10 @@ export async function initKeycloak(): Promise<boolean> {
               };
               return true;
             } else {
-              sessionStorage.removeItem("hd_rt");
+              clearStoredRefreshToken();
             }
           } catch {
-            sessionStorage.removeItem("hd_rt");
+            clearStoredRefreshToken();
           }
         }
 
@@ -391,9 +421,7 @@ export async function stepUpWithKeycloak(redirectUri?: string): Promise<void> {
 export async function logoutFromKeycloak(redirectUri?: string): Promise<void> {
   const kc = getKeycloak();
   setAccessToken(null);
-  if (typeof window !== "undefined") {
-    sessionStorage.removeItem("hd_rt");
-  }
+  clearStoredRefreshToken();
   if (kc.authenticated) {
     await kc.logout({
       redirectUri: redirectUri ?? window.location.origin + "/login",
