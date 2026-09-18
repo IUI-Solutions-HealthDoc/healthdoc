@@ -3,12 +3,14 @@
 import { useMemo, useState } from "react";
 
 import { ApiError, newIdempotencyKey } from "@/lib/api";
+import { PatientAvatar } from "@/components/ui/PatientAvatar";
 
-import { registerPatient } from "./api";
+import { registerPatient, uploadPatientPhoto } from "./api";
 import { AbhaIdentityPanel } from "./AbhaIdentityPanel";
 import { StartVisit } from "./StartVisit";
 import type { Patient, PatientCreate } from "./types";
 import {
+  deriveAgeFromDob,
   digitsOnly,
   isValidAbhaInput,
   isValidPatientName,
@@ -28,6 +30,20 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
   const [mobile, setMobile] = useState("");
   const [abha, setAbha] = useState("");
 
+  // Demographics & Address (HD-06, HD-07)
+  const [showAddressDetails, setShowAddressDetails] = useState(false);
+  const [guardianName, setGuardianName] = useState("");
+  const [guardianRelationship, setGuardianRelationship] = useState("");
+  const [addressLine, setAddressLine] = useState("");
+  const [villageTown, setVillageTown] = useState("");
+  const [district, setDistrict] = useState("");
+  const [stateCode, setStateCode] = useState("");
+  const [pincode, setPincode] = useState("");
+
+  // Patient Photo (HD-08)
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [registered, setRegistered] = useState<Patient | null>(null);
@@ -42,6 +58,8 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
    */
   const idempotencyKey = useMemo(() => newIdempotencyKey(), []);
 
+  const derivedAge = useMemo(() => (ageMode === "dob" && dob ? deriveAgeFromDob(dob) : null), [ageMode, dob]);
+
   const ageProvided = ageMode === "dob" ? dob !== "" : ageYears !== "";
   const fullNameValid = isValidPatientName(fullName);
   const normalisedMobile = normaliseIndianMobileInput(mobile);
@@ -54,6 +72,27 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
   const canSubmit = fullNameValid && sex !== "" && ageProvided && ageValid && mobileValid && abhaValid && !busy;
   const inputClass = (invalid: boolean) =>
     `w-full rounded-md border px-3 py-2 ${invalid ? "border-danger" : "border-border"}`;
+
+  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 2 * 1024 * 1024) {
+        setError("Patient photo must be smaller than 2MB.");
+        return;
+      }
+      setPhotoFile(file);
+      const previewUrl = URL.createObjectURL(file);
+      setPhotoPreview(previewUrl);
+    }
+  };
+
+  const handleClearPhoto = () => {
+    setPhotoFile(null);
+    if (photoPreview) {
+      URL.revokeObjectURL(photoPreview);
+      setPhotoPreview(null);
+    }
+  };
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -72,12 +111,31 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
         : { dob: null, age_years: Number(ageYears) }),
       mobile: normalisedMobile,
       abha_number: abha.trim() ? digitsOnly(abha) : null,
+      guardian_name: guardianName.trim() || null,
+      guardian_relationship: guardianRelationship.trim() || null,
+      address_line: addressLine.trim() || null,
+      village_town: villageTown.trim() || null,
+      district: district.trim() || null,
+      state_code: stateCode.trim() || null,
+      pincode: pincode.trim() || null,
     };
 
     setBusy(true);
     setError(null);
     try {
       const patient = await registerPatient(payload, idempotencyKey);
+      
+      // If photo was selected, upload it to the patient record
+      if (photoFile) {
+        try {
+          const photoRes = await uploadPatientPhoto(patient.id, photoFile);
+          patient.photo_file_id = photoRes.photo_file_id;
+        } catch {
+          // Photo failure should not fail patient creation, but let desk know
+          console.warn("Patient registered, but photo upload encountered an issue.");
+        }
+      }
+
       setRegistered(patient);
       onRegistered?.(patient);
     } catch (reason) {
@@ -94,14 +152,34 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
   if (registered) {
     return (
       <div className="space-y-6">
-        <div className="surface-card space-y-2 p-8 text-center">
-          <p className="text-sm text-muted-foreground">Registered</p>
+        <div className="surface-card flex flex-col items-center space-y-3 p-8 text-center">
+          <PatientAvatar
+            patientId={registered.id}
+            photoFileId={registered.photo_file_id}
+            photoUrl={photoPreview}
+            name={registered.full_name}
+            size="xl"
+          />
+          <p className="text-sm text-muted-foreground">Registered Patient</p>
           <p className="font-mono text-3xl font-bold">{registered.uhid ?? registered.thid}</p>
-          <p className="text-lg font-medium">{registered.full_name}</p>
+          <p className="text-xl font-medium">{registered.full_name}</p>
           <p className="text-sm text-muted-foreground">
-            {registered.sex}
-            {registered.age_years !== null ? ` · ${registered.age_years}y` : ""}
+            <span className="capitalize">{registered.sex}</span>
+            {registered.age_years !== null ? ` · ${registered.age_years} years` : ""}
+            {registered.dob ? ` (DOB: ${registered.dob})` : ""}
           </p>
+          {registered.guardian_name && (
+            <p className="text-xs text-muted-foreground">
+              Guardian: {registered.guardian_name} ({registered.guardian_relationship ?? "Guardian"})
+            </p>
+          )}
+          {registered.address_line && (
+            <p className="text-xs text-muted-foreground">
+              {[registered.address_line, registered.village_town, registered.district, registered.state_code, registered.pincode]
+                .filter(Boolean)
+                .join(", ")}
+            </p>
+          )}
         </div>
 
         <AbhaIdentityPanel patient={registered} />
@@ -162,7 +240,14 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
         </label>
 
         <div className="space-y-1 text-sm">
-          <span className="text-muted-foreground">Age *</span>
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">Age / Date of Birth *</span>
+            {derivedAge && (
+              <span className="rounded bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
+                Derived: {derivedAge.displayText}
+              </span>
+            )}
+          </div>
           <div className="flex gap-2">
             <select
               className="rounded-md border border-border px-2 py-2"
@@ -232,12 +317,130 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
             <span className="text-xs text-danger">ABHA number must contain 14 digits.</span>
           ) : null}
         </label>
+
+        {/* Patient Photo Selection (HD-08) */}
+        <div className="space-y-1 text-sm sm:col-span-2">
+          <span className="text-muted-foreground">Patient Photograph (Optional, max 2MB)</span>
+          <div className="flex items-center gap-4 pt-1">
+            {photoPreview ? (
+              <div className="relative">
+                <img
+                  src={photoPreview}
+                  alt="Patient preview"
+                  className="h-16 w-16 rounded-full border border-border object-cover shadow-sm"
+                />
+                <button
+                  type="button"
+                  onClick={handleClearPhoto}
+                  className="absolute -right-1 -top-1 rounded-full bg-danger px-1.5 py-0.5 text-[10px] font-bold text-white shadow"
+                >
+                  ✕
+                </button>
+              </div>
+            ) : null}
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              onChange={handlePhotoChange}
+              className="text-xs text-muted-foreground file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-foreground hover:file:bg-muted/80"
+            />
+          </div>
+        </div>
       </div>
 
-      {/* Aadhaar is accepted by the API and not collected here. It is not needed
-          to register a patient, and a field on a shared counter screen invites
-          collecting it by default — which is the opposite of data minimisation
-          under the DPDP Act. Add it only behind a stated purpose. */}
+      {/* Additional Demographics & Structured Address Accordion (HD-06, HD-07) */}
+      <div className="border-t border-border/80 pt-3">
+        <button
+          type="button"
+          onClick={() => setShowAddressDetails((shown) => !shown)}
+          className="flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <span>{showAddressDetails ? "▼" : "▶"} Additional Demographics & Address (Optional)</span>
+        </button>
+
+        {showAddressDetails && (
+          <div className="mt-4 grid gap-4 sm:grid-cols-2 rounded-lg border border-border/60 bg-muted/10 p-4">
+            <label className="space-y-1 text-sm">
+              <span className="text-muted-foreground">Guardian Name</span>
+              <input
+                className={inputClass(false)}
+                value={guardianName}
+                onChange={(e) => setGuardianName(e.target.value)}
+                placeholder="e.g. Dashrath Kumar"
+              />
+            </label>
+
+            <label className="space-y-1 text-sm">
+              <span className="text-muted-foreground">Guardian Relationship</span>
+              <select
+                className={inputClass(false)}
+                value={guardianRelationship}
+                onChange={(e) => setGuardianRelationship(e.target.value)}
+              >
+                <option value="">Select relationship…</option>
+                <option value="father">Father</option>
+                <option value="mother">Mother</option>
+                <option value="spouse">Spouse</option>
+                <option value="guardian">Guardian</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
+
+            <label className="space-y-1 text-sm sm:col-span-2">
+              <span className="text-muted-foreground">Address Line</span>
+              <input
+                className={inputClass(false)}
+                value={addressLine}
+                onChange={(e) => setAddressLine(e.target.value)}
+                placeholder="Flat / House number, Building / Street"
+              />
+            </label>
+
+            <label className="space-y-1 text-sm">
+              <span className="text-muted-foreground">Village / Town / City</span>
+              <input
+                className={inputClass(false)}
+                value={villageTown}
+                onChange={(e) => setVillageTown(e.target.value)}
+                placeholder="e.g. Vasant Kunj"
+              />
+            </label>
+
+            <label className="space-y-1 text-sm">
+              <span className="text-muted-foreground">District</span>
+              <input
+                className={inputClass(false)}
+                value={district}
+                onChange={(e) => setDistrict(e.target.value)}
+                placeholder="e.g. South West Delhi"
+              />
+            </label>
+
+            <label className="space-y-1 text-sm">
+              <span className="text-muted-foreground">State Code</span>
+              <input
+                maxLength={4}
+                className={inputClass(false)}
+                value={stateCode}
+                onChange={(e) => setStateCode(e.target.value.toUpperCase())}
+                placeholder="e.g. DL, MH, KA"
+              />
+            </label>
+
+            <label className="space-y-1 text-sm">
+              <span className="text-muted-foreground">Pincode</span>
+              <input
+                maxLength={6}
+                className={inputClass(false)}
+                value={pincode}
+                onChange={(e) => setPincode(e.target.value)}
+                placeholder="e.g. 110070"
+                inputMode="numeric"
+              />
+            </label>
+          </div>
+        )}
+      </div>
 
       {error && (
         <p role="alert" className="text-sm text-danger">

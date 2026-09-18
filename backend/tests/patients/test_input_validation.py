@@ -147,3 +147,51 @@ def test_update_still_allows_omitting_the_fields_entirely():
     patch = PatientUpdate(sex="female")
     assert patch.mobile is None
     assert patch.full_name is None
+
+
+# ------------------------------------------------------------------- age / DOB / demographics
+
+def test_create_with_exact_dob():
+    p = _create(dob=date(1995, 5, 20), age_years=None)
+    assert p.dob == date(1995, 5, 20)
+    assert p.age_years is None
+
+
+def test_create_refuses_both_dob_and_age():
+    with pytest.raises(ValidationError):
+        _create(dob=date(1995, 5, 20), age_years=30)
+
+
+def test_create_refuses_neither_dob_nor_age():
+    with pytest.raises(ValidationError):
+        _create(dob=None, age_years=None)
+
+
+def test_create_refuses_future_dob():
+    future_date = date(2099, 1, 1)
+    with pytest.raises(ValidationError):
+        _create(dob=future_date, age_years=None)
+
+
+def test_create_refuses_negative_or_excessive_age():
+    with pytest.raises(ValidationError):
+        _create(dob=None, age_years=-1)
+    with pytest.raises(ValidationError):
+        _create(dob=None, age_years=150)
+
+
+def test_structured_address_and_guardian_stored():
+    p = _create(
+        guardian_name="Dashrath Kumar",
+        guardian_relationship="father",
+        address_line="Flat 402, Block B",
+        village_town="Vasant Kunj",
+        district="South West Delhi",
+        state_code="DL",
+        pincode="110070",
+    )
+    assert p.guardian_name == "Dashrath Kumar"
+    assert p.guardian_relationship == "father"
+    assert p.address_line == "Flat 402, Block B"
+    assert p.pincode == "110070"
+

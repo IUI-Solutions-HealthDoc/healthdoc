@@ -135,9 +135,17 @@ class PatientCreate(BaseModel):
     sex: Sex
     dob: date | None = None
     age_years: int | None = None
+    is_estimated_age: bool | None = None
     mobile: str | None = None
     abha_number: str | None = None
     aadhaar_number: str | None = None
+    guardian_name: str | None = None
+    guardian_relationship: str | None = None
+    address_line: str | None = None
+    village_town: str | None = None
+    district: str | None = None
+    state_code: str | None = None
+    pincode: str | None = None
 
     _validate_aadhaar = field_validator("aadhaar_number")(_normalise_aadhaar)
     _validate_mobile = field_validator("mobile")(_normalise_mobile)
@@ -148,6 +156,10 @@ class PatientCreate(BaseModel):
     def _dob_or_age_required(self) -> PatientCreate:
         if (self.dob is None) == (self.age_years is None):
             raise ValueError("Exactly one of dob or age_years is required")
+        if self.dob is not None and self.dob > date.today():
+            raise ValueError("dob cannot be in the future")
+        if self.age_years is not None and (self.age_years < 0 or self.age_years > 130):
+            raise ValueError("age_years must be between 0 and 130")
         return self
 
 
@@ -215,27 +227,26 @@ class PatientOut(BaseModel):
 
 
 class PatientDetailOut(PatientOut):
-    """PatientOut plus the fields a single-record read needs.
-
-    Kept separate rather than widening PatientOut, which is the response for
-    POST and PATCH and is consumed by the registration flow — this is additive
-    where it is wanted and unchanged where it is not.
-
-    `row_version` is here because PATCH /patients/{id} increments it for
-    optimistic concurrency (0035) and the If-Match check is staged as a
-    follow-up. When that lands, the client needs a way to have read the value
-    first; without a GET there was none.
-
-    `merged_from_patient_id` is set when the caller asked for an id that has
-    since been merged away. The body describes the surviving record, and this
-    field says which id was asked for — otherwise a screen would silently show
-    a different patient than the one requested.
-    """
+    """PatientOut plus the fields a single-record read needs."""
 
     status: str
     merged_into_patient_id: uuid.UUID | None = None
     merged_from_patient_id: uuid.UUID | None = None
     row_version: int
+    guardian_name: str | None = None
+    guardian_relationship: str | None = None
+    address_line: str | None = None
+    village_town: str | None = None
+    district: str | None = None
+    state_code: str | None = None
+    pincode: str | None = None
+
+
+class PatientPhotoOut(BaseModel):
+    photo_file_id: uuid.UUID
+    download_url: str | None = None
+    status: str = "ok"
+
 
 
 class PatientSearchRequest(BaseModel):

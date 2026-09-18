@@ -2,7 +2,9 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from datetime import date
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.actions import AuditAction
@@ -14,10 +16,11 @@ from app.common.db import get_db
 from app.common.idempotency import (
     check_idempotency, hash_request_body, record_idempotent_response,
 )
+from app.files import service as files_service
 from app.patients.models import Patient
 from app.patients.schemas import (
     MergeActionRequest, MergeLogOut, MergeRequestCreate,
-    PatientCreate, PatientDetailOut, PatientOut,
+    PatientCreate, PatientDetailOut, PatientOut, PatientPhotoOut,
     PatientSearchRequest, PatientSearchResponse, PatientSearchResult,
     PatientUpdate,
 )
@@ -120,14 +123,28 @@ async def register_patient(
     else:
         identity_path = "demographics_only"
 
+    computed_age_years = payload.age_years
+    if payload.dob is not None and computed_age_years is None:
+        today = date.today()
+        computed_age_years = (today.year - payload.dob.year) - (
+            (today.month, today.day) < (payload.dob.month, payload.dob.day)
+        )
+
     patient = Patient(
         uhid=uhid,
         full_name=payload.full_name,
         sex=payload.sex,
         dob=payload.dob,
-        age_years=payload.age_years,
+        age_years=computed_age_years,
         mobile=payload.mobile,
         abha_number=payload.abha_number,
+        guardian_name=payload.guardian_name,
+        guardian_relationship=payload.guardian_relationship,
+        address_line=payload.address_line,
+        village_town=payload.village_town,
+        district=payload.district,
+        state_code=payload.state_code,
+        pincode=payload.pincode,
         facility_id=current_db_user.facility_id,  # B3: from token, not payload
         identity_path=identity_path,
         identity_status="identity_unverified",
@@ -656,3 +673,93 @@ async def get_patient_consents(
         db, patient_id, facility_id=current_db_user.facility_id
     )
     return [ConsentRecordOut.model_validate(r) for r in records]
+
+
+def _extract_ip(request: Request) -> str | None:
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    return request.client.host if request.client else None
+
+
+@router.post(
+    "/{patient_id}/photo",
+    response_model=PatientPhotoOut,
+    dependencies=[Depends(require_roles("receptionist", "nurse", "doctor", "admin"))],
+)
+async def upload_patient_photo(
+    patient_id: uuid.UUID,
+    upload: UploadFile,
+    request: Request,
+    current_db_user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+) -> PatientPhotoOut:
+    patient = await db.get(Patient, patient_id)
+    if patient is None or patient.deleted_at is not None:
+        raise HTTPException(404, {"code": "patient_not_found"})
+    if patient.facility_id != current_db_user.facility_id:
+        raise HTTPException(404, {"code": "patient_not_found"})
+
+    file_record = await files_service.upload_file(
+        db,
+        upload=upload,
+        facility_id=current_db_user.facility_id,
+        uploaded_by=current_db_user.id,
+        owner_module="patients",
+        patient_id=patient.id,
+        sensitivity="normal",
+        ip_address=_extract_ip(request),
+    )
+    patient.photo_file_id = file_record.id
+    await db.flush()
+    await db.refresh(patient)
+    return PatientPhotoOut(photo_file_id=file_record.id, status="uploaded")
+
+
+@router.get(
+    "/{patient_id}/photo",
+    response_model=PatientPhotoOut,
+    dependencies=[Depends(require_roles("receptionist", "nurse", "doctor", "admin"))],
+)
+async def get_patient_photo(
+    patient_id: uuid.UUID,
+    request: Request,
+    current_db_user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+) -> PatientPhotoOut:
+    patient = await db.get(Patient, patient_id)
+    if patient is None or patient.deleted_at is not None:
+        raise HTTPException(404, {"code": "patient_not_found"})
+    if patient.facility_id != current_db_user.facility_id:
+        raise HTTPException(404, {"code": "patient_not_found"})
+    if patient.photo_file_id is None:
+        raise HTTPException(404, {"code": "photo_not_found", "message": "Patient has no photo attached"})
+
+    download_url = await files_service.get_download_url(
+        db,
+        patient.photo_file_id,
+        facility_id=current_db_user.facility_id,
+        user_id=current_db_user.id,
+        ip_address=_extract_ip(request),
+    )
+    return PatientPhotoOut(photo_file_id=patient.photo_file_id, download_url=download_url, status="ok")
+
+
+@router.delete(
+    "/{patient_id}/photo",
+    dependencies=[Depends(require_roles("receptionist", "admin"))],
+)
+async def delete_patient_photo(
+    patient_id: uuid.UUID,
+    current_db_user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    patient = await db.get(Patient, patient_id)
+    if patient is None or patient.deleted_at is not None:
+        raise HTTPException(404, {"code": "patient_not_found"})
+    if patient.facility_id != current_db_user.facility_id:
+        raise HTTPException(404, {"code": "patient_not_found"})
+    patient.photo_file_id = None
+    await db.flush()
+    return {"status": "deleted"}
+

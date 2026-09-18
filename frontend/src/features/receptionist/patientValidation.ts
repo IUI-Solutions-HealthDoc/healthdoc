@@ -35,3 +35,46 @@ export function normaliseUhidInput(value: string): string {
 export function isValidUhidInput(value: string): boolean {
   return UHID_PATTERN.test(normaliseUhidInput(value));
 }
+
+export interface DerivedAgeInfo {
+  years: number;
+  months: number;
+  days: number;
+  displayText: string;
+}
+
+export function deriveAgeFromDob(dobString: string, referenceDate = new Date()): DerivedAgeInfo | null {
+  if (!dobString) return null;
+  const dob = new Date(dobString);
+  if (isNaN(dob.getTime())) return null;
+
+  let years = referenceDate.getFullYear() - dob.getFullYear();
+  let months = referenceDate.getMonth() - dob.getMonth();
+  let days = referenceDate.getDate() - dob.getDate();
+
+  if (days < 0) {
+    months -= 1;
+    const prevMonthDays = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), 0).getDate();
+    days += prevMonthDays;
+  }
+  if (months < 0) {
+    years -= 1;
+    months += 12;
+  }
+
+  if (years < 0) return null;
+
+  let displayText = "";
+  if (years === 0 && months === 0) {
+    displayText = `${days} day${days === 1 ? "" : "s"} (Newborn)`;
+  } else if (years === 0) {
+    displayText = `${months} month${months === 1 ? "" : "s"}, ${days} day${days === 1 ? "" : "s"} (Infant)`;
+  } else if (years < 5) {
+    displayText = `${years} year${years === 1 ? "" : "s"}, ${months} month${months === 1 ? "" : "s"}`;
+  } else {
+    displayText = `${years} years`;
+  }
+
+  return { years, months, days, displayText };
+}
+
