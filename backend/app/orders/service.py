@@ -231,6 +231,7 @@ async def record_external_result(
             order.id,
             completed_by=recorded_by,
             note="External result recorded",
+            allow_diagnostic=True,
         )
 
     await write_audit_log(

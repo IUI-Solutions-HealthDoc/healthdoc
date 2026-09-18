@@ -338,6 +338,7 @@ async def complete_order(
     *,
     completed_by: uuid.UUID,
     note: str | None = None,
+    allow_diagnostic: bool = False,
 ) -> Order:
     """Check off an order: who, when, and optionally why it went the way it did.
 
@@ -352,7 +353,7 @@ async def complete_order(
         raise OrderNotFound(order_id)
     if order.status == OrderStatus.CANCELLED.value:
         raise OrderCancelledError(order_id)
-    if order.order_type in ("lab", "radiology"):
+    if order.order_type in ("lab", "radiology") and not allow_diagnostic:
         raise DiagnosticOrderRequiresFulfillment(order_id, order.order_type)
     if order.completed_at is not None:
         raise OrderAlreadyCompleted(order_id, order.completed_at)
