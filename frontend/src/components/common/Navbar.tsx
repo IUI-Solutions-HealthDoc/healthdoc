@@ -38,7 +38,7 @@ export default function Navbar({ open, setOpen }: NavbarProps) {
         <HealthDocBrand
           size={38}
           preload
-          subtitle="HMIS"
+          subtitle="HIMS"
           nameClassName="text-lg font-bold tracking-tight text-[#001F54] dark:text-blue-200"
           className="text-[#001F54]"
         />

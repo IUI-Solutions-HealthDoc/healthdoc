@@ -1,5 +1,5 @@
 /**
- * Meridian design tokens — navy / light HMIS theme (single source of truth).
+ * Meridian design tokens — navy / light HIMS theme (single source of truth).
  */
 export const meridian = {
   brandPrimary: "#001f54",

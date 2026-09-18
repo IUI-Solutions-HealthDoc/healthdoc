@@ -133,7 +133,7 @@ _DOCS_ENVIRONMENTS = {"dev", "test", "local"}
 _docs_enabled = settings.environment.strip().lower() in _DOCS_ENVIRONMENTS
 
 app = FastAPI(
-    title="HealthDoc HMIS API",
+    title="HealthDoc HIMS API",
     version="0.1.0",
     docs_url=f"{settings.api_prefix}/docs" if _docs_enabled else None,
     redoc_url=f"{settings.api_prefix}/redoc" if _docs_enabled else None,

@@ -63,7 +63,7 @@ export default function MainLayout({
     return (
       <div className="flex min-h-screen items-center justify-center px-4">
         <div className="surface-card max-w-lg p-8 text-center">
-          <HealthDocBrand size={64} className="mb-5 justify-center" subtitle="HMIS" />
+          <HealthDocBrand size={64} className="mb-5 justify-center" subtitle="HIMS" />
           <h1 className="text-xl font-semibold">No HealthDoc role assigned</h1>
           <p className="mt-3 text-sm text-muted-foreground">
             Your sign-in is valid, but no HealthDoc workspace has been assigned.

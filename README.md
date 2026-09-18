@@ -1,4 +1,4 @@
-# HealthDoc HMIS
+# HealthDoc HIMS
 
 Hospital Information Management System for India's public health network.
 ABDM V3-ready · DPDP-compliant · Offline-resilient hybrid edge-cloud.

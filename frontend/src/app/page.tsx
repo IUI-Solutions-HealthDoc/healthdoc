@@ -11,8 +11,12 @@ export default function HomePage() {
   const { user, isAuthenticated, isLoading } = useAuth();
 
   useEffect(() => {
-    if (!isLoading && isAuthenticated) {
-      router.replace(getDefaultRouteForRole(user?.role ?? null));
+    if (!isLoading) {
+      if (isAuthenticated) {
+        router.replace(getDefaultRouteForRole(user?.role ?? null));
+      } else {
+        router.replace("/login?redirect=%2F");
+      }
     }
   }, [isAuthenticated, isLoading, router, user?.role]);
 

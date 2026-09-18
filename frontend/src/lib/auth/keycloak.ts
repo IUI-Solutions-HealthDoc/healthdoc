@@ -2,6 +2,9 @@ import Keycloak from "keycloak-js";
 import type { Role } from "@/config/roles";
 import { ROLES } from "@/config/roles";
 import { setAccessToken } from "@/lib/api";
+import { recordLogin } from "@/lib/audit-session";
+import { setSessionPresence } from "@/lib/auth";
+import { getDefaultRouteForRole } from "@/lib/auth/routes";
 
 /**
  * Keycloak OIDC client (realm healthdoc · public client healthdoc-frontend · PKCE).
@@ -133,6 +136,121 @@ function syncAccessToken(kc: Keycloak) {
   setAccessToken(kc.token ?? null);
 }
 
+function parseJwtPayload(token: string): Record<string, unknown> | null {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    const base64Url = parts[1];
+    const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
+    const json = decodeURIComponent(
+      atob(base64)
+        .split("")
+        .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
+        .join(""),
+    );
+    return JSON.parse(json) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+export type DirectLoginResult = {
+  success: boolean;
+  error?: string;
+  user?: SessionUser;
+  landingPath?: string;
+};
+
+export async function loginWithCredentials(
+  username: string,
+  pass: string,
+): Promise<DirectLoginResult> {
+  const tokenEndpoint = `${url}/realms/${realm}/protocol/openid-connect/token`;
+  const body = new URLSearchParams({
+    grant_type: "password",
+    client_id: clientId,
+    username: username.trim(),
+    password: pass,
+    scope: "openid profile email",
+  });
+
+  try {
+    const res = await fetch(tokenEndpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+    });
+
+    if (!res.ok) {
+      const errData = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        error_description?: string;
+      };
+      const message =
+        errData.error_description ||
+        (errData.error === "invalid_grant"
+          ? "Invalid username or password. Please try again."
+          : "Authentication failed. Please check your credentials.");
+      return { success: false, error: message };
+    }
+
+    const data = (await res.json()) as {
+      access_token: string;
+      refresh_token?: string;
+      id_token?: string;
+    };
+
+    setAccessToken(data.access_token);
+
+    if (typeof window !== "undefined" && data.refresh_token) {
+      sessionStorage.setItem("hd_rt", data.refresh_token);
+    }
+
+    const kc = getKeycloak();
+    kc.token = data.access_token;
+    kc.refreshToken = data.refresh_token;
+    kc.idToken = data.id_token;
+    kc.authenticated = true;
+    kc.tokenParsed = (parseJwtPayload(data.access_token) as typeof kc.tokenParsed) ?? undefined;
+    if (data.id_token) {
+      kc.idTokenParsed = (parseJwtPayload(data.id_token) as typeof kc.idTokenParsed) ?? undefined;
+    }
+    kc.subject = kc.tokenParsed?.sub;
+
+    const session = sessionUserFromKeycloak(kc);
+    if (!session) {
+      return { success: false, error: "Failed to extract user profile from credentials." };
+    }
+
+    setSessionPresence(session.role ?? undefined);
+    void recordLogin();
+
+    kc.onTokenExpired = () => {
+      void kc
+        .updateToken(30)
+        .then((refreshed) => {
+          if (refreshed) syncAccessToken(kc);
+        })
+        .catch(() => {
+          setAccessToken(null);
+          notifySessionExpired();
+        });
+    };
+
+    return {
+      success: true,
+      user: session,
+      landingPath: session.role ? getDefaultRouteForRole(session.role) : "/",
+    };
+  } catch (err) {
+    console.error("[keycloak] Direct credentials login failed", err);
+    return {
+      success: false,
+      error: "Unable to connect to the authentication server. Please try again.",
+    };
+  }
+}
+
 /**
  * Initialize Keycloak once (silent SSO). Returns whether the user is authenticated.
  */
@@ -150,7 +268,7 @@ export async function initKeycloak(): Promise<boolean> {
             ? `${window.location.origin}/silent-check-sso.html`
             : undefined,
       })
-      .then((authenticated) => {
+      .then(async (authenticated) => {
         if (authenticated) {
           syncAccessToken(kc);
           kc.onTokenExpired = () => {
@@ -164,8 +282,64 @@ export async function initKeycloak(): Promise<boolean> {
                 notifySessionExpired();
               });
           };
+          return true;
         }
-        return authenticated;
+
+        // If silent SSO did not find an active iframe session, restore from tab session if available
+        const storedRt = typeof window !== "undefined" ? sessionStorage.getItem("hd_rt") : null;
+        if (storedRt) {
+          try {
+            const refreshEndpoint = `${url}/realms/${realm}/protocol/openid-connect/token`;
+            const refreshBody = new URLSearchParams({
+              grant_type: "refresh_token",
+              client_id: clientId,
+              refresh_token: storedRt,
+            });
+            const res = await fetch(refreshEndpoint, {
+              method: "POST",
+              headers: { "Content-Type": "application/x-www-form-urlencoded" },
+              body: refreshBody.toString(),
+            });
+            if (res.ok) {
+              const refreshed = (await res.json()) as {
+                access_token: string;
+                refresh_token?: string;
+                id_token?: string;
+              };
+              kc.token = refreshed.access_token;
+              kc.refreshToken = refreshed.refresh_token;
+              kc.idToken = refreshed.id_token;
+              kc.authenticated = true;
+              kc.tokenParsed = (parseJwtPayload(refreshed.access_token) as typeof kc.tokenParsed) ?? undefined;
+              if (refreshed.id_token) {
+                kc.idTokenParsed = (parseJwtPayload(refreshed.id_token) as typeof kc.idTokenParsed) ?? undefined;
+              }
+              kc.subject = kc.tokenParsed?.sub;
+              syncAccessToken(kc);
+              if (refreshed.refresh_token) {
+                sessionStorage.setItem("hd_rt", refreshed.refresh_token);
+              }
+              kc.onTokenExpired = () => {
+                void kc
+                  .updateToken(30)
+                  .then((ok) => {
+                    if (ok) syncAccessToken(kc);
+                  })
+                  .catch(() => {
+                    setAccessToken(null);
+                    notifySessionExpired();
+                  });
+              };
+              return true;
+            } else {
+              sessionStorage.removeItem("hd_rt");
+            }
+          } catch {
+            sessionStorage.removeItem("hd_rt");
+          }
+        }
+
+        return false;
       })
       .catch((err) => {
         console.error("[keycloak] init failed", err);
@@ -217,6 +391,9 @@ export async function stepUpWithKeycloak(redirectUri?: string): Promise<void> {
 export async function logoutFromKeycloak(redirectUri?: string): Promise<void> {
   const kc = getKeycloak();
   setAccessToken(null);
+  if (typeof window !== "undefined") {
+    sessionStorage.removeItem("hd_rt");
+  }
   if (kc.authenticated) {
     await kc.logout({
       redirectUri: redirectUri ?? window.location.origin + "/login",

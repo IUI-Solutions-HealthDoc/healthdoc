@@ -2,7 +2,7 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "HealthDoc HMIS",
+    name: "HealthDoc HIMS",
     short_name: "HealthDoc",
     description: "Hospital Information Management System",
     start_url: "/",
