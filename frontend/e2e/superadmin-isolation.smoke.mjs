@@ -117,8 +117,15 @@ try {
     page.click("#kc-login"),
   ]);
 
-  await page.waitForFunction(() => window.location.pathname !== "/login", { timeout: 60_000 });
-  await settle(4000);
+  await page
+    .waitForFunction(
+      () =>
+        !["/", "/login"].includes(window.location.pathname) &&
+        !window.location.pathname.startsWith("/auth/"),
+      { timeout: 60_000 },
+    )
+    .catch(() => undefined);
+  await settle(2000);
 
   const landing = await page.evaluate(() => window.location.pathname);
   if (landing !== "/superadmin") {

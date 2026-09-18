@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import { ApiError, newIdempotencyKey } from "@/lib/api";
+import { canRoleAccessPath } from "@/lib/auth/routes";
+import { useAuth } from "@/providers/auth-provider";
 
 import { createVisit, issueToken, listQueues } from "./api";
 import {
@@ -35,6 +37,8 @@ const RECEPTION_PRIORITIES = [
  * doctor.
  */
 export function StartVisit({ patient }: { patient: VisitPatient }) {
+  const { user } = useAuth();
+  const canAccessBilling = canRoleAccessPath(user?.role ?? null, "/billing");
   const [queues, setQueues] = useState<QueueSummary[] | null>(null);
   const [queueId, setQueueId] = useState<string>("");
   const [busy, setBusy] = useState(false);
@@ -140,10 +144,55 @@ export function StartVisit({ patient }: { patient: VisitPatient }) {
           <p className="text-xs text-muted-foreground">Visit {visit.visit_number}</p>
         )}
         <div className="flex flex-wrap justify-center gap-4 pt-2 text-sm">
-          <Link href="/receptionist/queue" className="font-medium underline">View queue</Link>
-          <Link href="/consent" className="font-medium underline">Record consent</Link>
-          <Link href="/billing" className="font-medium underline">Open billing</Link>
+          {needsToken && (
+            <Link href="/receptionist/queue" className="font-medium underline">
+              View queue
+            </Link>
+          )}
+          {visitType === "emergency" && (
+            <Link href="/emergency" className="font-medium underline">
+              Emergency department
+            </Link>
+          )}
+          {visitType === "ipd" && (
+            <Link href="/ipd" className="font-medium underline">
+              Inpatient admission
+            </Link>
+          )}
+          <Link href="/consent" className="font-medium underline">
+            Record consent
+          </Link>
+          {canAccessBilling && (
+            <Link href="/billing" className="font-medium underline">
+              Open billing
+            </Link>
+          )}
         </div>
+        {!canAccessBilling && (
+          <p className="text-xs text-muted-foreground pt-1">
+            Registration invoice created. Direct the patient to the billing desk to settle the registration fee.
+          </p>
+        )}
+        {visitType === "emergency" && (
+          <p className="text-xs text-muted-foreground">
+            Direct the patient immediately to the Emergency triage / casualty desk.
+          </p>
+        )}
+        {visitType === "ipd" && (
+          <p className="text-xs text-muted-foreground">
+            Direct the patient to ward admission for bed allocation.
+          </p>
+        )}
+        {visitType === "day_care" && (
+          <p className="text-xs text-muted-foreground">
+            Direct the patient to the day care procedure unit.
+          </p>
+        )}
+        {visitType === "teleconsult" && (
+          <p className="text-xs text-muted-foreground">
+            Teleconsultation visit created. Patient will be notified for their scheduled session.
+          </p>
+        )}
       </div>
     );
   }

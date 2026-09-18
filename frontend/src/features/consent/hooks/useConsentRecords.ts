@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { listConsentRecords } from "../api";
 import type { ConsentListFilters, ConsentRecord, ConsentStatus } from "../types";
@@ -10,29 +10,38 @@ export function useConsentRecords(initial: ConsentListFilters = { status: "all" 
   const [rows, setRows] = useState<ConsentRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const activeReqRef = useRef(0);
 
   // The dashboard starts with no patient and supplies one after the shared
   // patient picker resolves. useState(initial) reads `initial` only once, so
   // without this sync the hook kept patient_id=undefined forever and rendered
   // an honest-looking empty ledger without making the records request at all.
   useEffect(() => {
-    setFilters((current) =>
-      current.patient_id === initial.patient_id
-        ? current
-        : { ...current, patient_id: initial.patient_id },
-    );
+    setFilters((current) => {
+      if (current.patient_id === initial.patient_id) return current;
+      setRows([]);
+      return { ...current, patient_id: initial.patient_id };
+    });
   }, [initial.patient_id]);
 
   const refresh = useCallback(async () => {
+    const reqId = ++activeReqRef.current;
     setLoading(true);
     setError(null);
     try {
-      setRows(await listConsentRecords(filters));
+      const data = await listConsentRecords(filters);
+      if (reqId === activeReqRef.current) {
+        setRows(data);
+      }
     } catch (e) {
-      setRows([]);
-      setError(e instanceof Error ? e.message : "Failed to load consents");
+      if (reqId === activeReqRef.current) {
+        setRows([]);
+        setError(e instanceof Error ? e.message : "Failed to load consents");
+      }
     } finally {
-      setLoading(false);
+      if (reqId === activeReqRef.current) {
+        setLoading(false);
+      }
     }
   }, [filters]);
 
