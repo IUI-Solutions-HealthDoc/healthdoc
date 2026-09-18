@@ -235,8 +235,11 @@ async def cleanup_expired_keys() -> int:
         )).scalars())
         for reply in replies:
             reply.response_encrypted = None
+        from app.integrations.abdm.callback_evidence import expire_receipts
+
+        expired_receipts = await expire_receipts(db, now=now)
         await db.commit()
-        return len(rows) + len(links) + len(replies) + erased
+        return len(rows) + len(links) + len(replies) + erased + expired_receipts
 
 
 async def run_mode(*, mode: str, once: bool = False) -> None:

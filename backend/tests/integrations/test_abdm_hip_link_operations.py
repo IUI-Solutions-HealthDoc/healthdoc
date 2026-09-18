@@ -224,8 +224,9 @@ async def test_wrong_patient_token_is_not_persisted_or_dispatched(db, link_case)
     assert (await db.get(jobs.AbdmJob, jobs.job_id("link_context", link.id))) is None
 
 
+@pytest.mark.parametrize("wrapper_entity", [None, "HIP"])
 async def test_linking_http_callbacks_accept_the_m2_documented_header_set(
-    db, link_case, monkeypatch
+    db, link_case, monkeypatch, wrapper_entity
 ):
     """No dependency override for callback validation: exercise the real routes.
 
@@ -266,7 +267,12 @@ async def test_linking_http_callbacks_accept_the_m2_documented_header_set(
         "abhaAddress": patient.abha_address,
         "linkToken": "synthetic-link-token",
         "response": {"requestId": link.token_request_id},
+        "error": None,
     }
+    # NHA wrapper OnGenerateTokenResponse and LinkTokenResponse differ only
+    # by the latter's optional entity field. Both must pass the same wire route.
+    if wrapper_entity is not None:
+        body["entity"] = wrapper_entity
     token_path = "/api/v3/hip/token/on-generate-token"
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         unknown = {**body, "response": {"requestId": str(uuid.uuid4())}}

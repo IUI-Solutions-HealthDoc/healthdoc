@@ -191,6 +191,7 @@ do not merge out of order.**
 | 0070 | abdm_mediated_confirmation | ALTER abdm_callback_replies | Durable patient-initiated M2 confirmation acknowledgement; keyed OTP replay fingerprint, no plaintext code; guarded evidence-preserving downgrade. |
 | 0071 | abdm_m2_reply_recovery | ALTER abdm_callback_replies | Encrypted, expiring discovery/init/refusal/profile response snapshots and durable jobs; never retain OTP plaintext. |
 | 0072 | billing_identifier_width | ALTER invoices, payments, refunds | Billing number columns widened to varchar(50) for permitted 20-character facility codes; no number rewrite; downgrade refuses truncation. |
+| 0073 | abdm_callback_receipts | abdm_callback_receipts | Independent HTTP receipts; correlation/status metadata and bounded encrypted redacted body/header/IP snapshots; seven-day operational retention, not milestone certification. |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -1715,6 +1716,32 @@ token fencing and heartbeat renewal. Expired leases are reclaimable; transport
 failures back off to a dead letter after five claims. A missing confirmed link
 defers notification without consuming transport retries. No clinical payloads,
 ABHA credentials or bearer tokens belong in this queue.
+
+**abdm_callback_receipts** (0073) — deployment-operator HTTP diagnostics, not clinical audit
+```
+id UUID PRIMARY KEY                             -- independent receipt, including repeated callbacks
+received_at timestamptz NOT NULL
+completed_at timestamptz NULL                    -- null means incomplete observation / crash
+expires_at timestamptz NOT NULL                  -- seven-day operational retention; indexed
+request_id UUID NULL                            -- valid inbound REQUEST-ID only; indexed
+response_request_id UUID NULL                   -- valid body response.requestId only; indexed
+path varchar(250) NOT NULL                       -- known callback path, otherwise /api/v3/<unmatched>
+method varchar(50) NOT NULL
+status_code integer NULL                        -- observed HTTP status; never inferred clinical success
+request_bytes integer NOT NULL
+evidence_encrypted bytea NOT NULL                -- AES-GCM, associated data binds receipt UUID
+```
+Independent transactions preserve receipts even when the clinical handler rolls
+back. Request and response capture is limited to 16 KiB each; oversized,
+incomplete and malformed JSON bodies are marked, not stored as raw snippets.
+Known structural field names, safe error codes and UUID correlations survive;
+tokens, demographics, clinical scalar values and unknown field names/headers do
+not. IPs are encrypted, syntactically checked attribution claims, not verified
+gateway identity. No facility API exposes this deployment-wide untrusted inbox;
+inspection requires existing local DB/crypto operator access. The cleanup-only
+worker prunes expired receipts; DB failure emits a metric and safe log message,
+not a changed clinical HTTP outcome. This table is not an NHA transaction ledger
+or certification evidence by itself. See `abdm-callback-diagnostics-2026-09-14.md`.
 
 **abdm_callback_replies** (0067) — committed reply intent, not a clinical inbox
 ```

@@ -129,6 +129,7 @@ services:
       MINIO_ENDPOINT: minio:9000
       CORS_ORIGINS: https://${PUBLIC_HOST}
       DATA_ACCESS_LOG_FALLBACK_PATH: /var/log/healthdoc/data_access_log_fallback.jsonl
+      ABDM_CALLBACK_EVIDENCE_ENABLED: ${ABDM_CALLBACK_EVIDENCE_ENABLED:-true}
     volumes: [audit-fallback-data:/var/log/healthdoc]
     depends_on:
       migrate: {condition: service_completed_successfully}
@@ -189,6 +190,8 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/prod-conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/10-persistent-logs.sh:/docker-entrypoint.d/10-persistent-logs.sh:ro
+      - nginx-logs:/var/log/healthdoc
       - ${TLS_CERT_PATH:?required}:/etc/nginx/certs/tls.crt:ro
       - ${TLS_KEY_PATH:?required}:/etc/nginx/certs/tls.key:ro
     ports: ["80:80", "443:443"]
@@ -207,3 +210,4 @@ volumes:
   audit-fallback-data:
   prometheus-data:
   grafana-data:
+  nginx-logs:

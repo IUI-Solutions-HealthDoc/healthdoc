@@ -25,7 +25,11 @@ def test_alerts_cover_availability_errors_and_latency_without_clinical_guesses()
         "HealthDocBackendDown",
         "HealthDocHighErrorRate",
         "HealthDocHighP95Latency",
+        "HealthDocCallbackEvidenceStorageFailed",
     }
+    receipt_rule = next(rule for group in config["groups"] for rule in group["rules"]
+                        if rule["alert"] == "HealthDocCallbackEvidenceStorageFailed")
+    assert receipt_rule["expr"] == "sum(increase(abdm_callback_evidence_failures_total[5m])) > 0"
 
 
 def test_grafana_dashboard_uses_the_provisioned_prometheus_source() -> None:

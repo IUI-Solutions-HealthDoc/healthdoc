@@ -1,6 +1,14 @@
 groups:
   - name: healthdoc-api
     rules:
+      - alert: HealthDocCallbackEvidenceStorageFailed
+        expr: sum(increase(abdm_callback_evidence_failures_total[5m])) > 0
+        for: 1m
+        labels: {severity: warning}
+        annotations:
+          summary: ABDM callback receipt persistence failed
+          description: Receiver diagnostics are incomplete. Check database availability and encryption configuration; do not infer missing NHA delivery from missing receipts.
+
       - alert: HealthDocBackendDown
         expr: up{job="healthdoc-backend"} == 0
         for: 1m
