@@ -20,6 +20,7 @@ from app.common.envelope import EnvelopeMiddleware
 from app.common.metrics import MetricsMiddleware
 from app.common.mongo import get_mongo
 from app.common.redis import get_redis
+from app.integrations.abdm.callback_evidence import CallbackEvidenceMiddleware
 from app.integrations.abdm.external_router import router as abdm_external_router
 
 log = logging.getLogger("healthdoc")
@@ -161,6 +162,7 @@ app.add_middleware(
         "X-Request-ID",
     ],
 )
+app.add_middleware(CallbackEvidenceMiddleware, enabled=settings.abdm_callback_evidence_enabled)
 
 
 @app.get(f"{settings.api_prefix}/health")
