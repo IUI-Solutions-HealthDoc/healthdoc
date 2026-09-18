@@ -36,6 +36,9 @@ export { toast } from "./toast";
 export { Toaster } from "./Toaster";
 export { EmptyState, ErrorState, LoadingState } from "./AsyncState";
 
+export { PatientAvatar } from "./PatientAvatar";
+export type { PatientAvatarProps } from "./PatientAvatar";
+
 /** Inventory chips (Vanshika) — FEFO / expiry / stock */
 export { default as ExpiryChip } from "./ExpiryChip";
 export type { ExpiryChipProps } from "./ExpiryChip";
@@ -43,3 +46,4 @@ export { default as FEFOIndicator } from "./FEFOindicator";
 export type { FEFOIndicatorProps } from "./FEFOindicator";
 export { default as StockLevelBadge } from "./StockLevelBadge";
 export type { StockLevelBadgeProps } from "./StockLevelBadge";
+

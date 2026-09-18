@@ -16,6 +16,13 @@ export interface PatientCreate {
   mobile?: string | null;
   abha_number?: string | null;
   aadhaar_number?: string | null;
+  guardian_name?: string | null;
+  guardian_relationship?: string | null;
+  address_line?: string | null;
+  village_town?: string | null;
+  district?: string | null;
+  state_code?: string | null;
+  pincode?: string | null;
 }
 
 export interface Patient {
@@ -33,6 +40,26 @@ export interface Patient {
   photo_file_id: string | null;
   facility_id: string;
   created_at: string;
+  guardian_name?: string | null;
+  guardian_relationship?: string | null;
+  address_line?: string | null;
+  village_town?: string | null;
+  district?: string | null;
+  state_code?: string | null;
+  pincode?: string | null;
+}
+
+export interface VisitWithoutToken {
+  visit_id: string;
+  visit_number: string;
+  patient_id: string;
+  patient_name: string;
+  uhid: string | null;
+  thid: string | null;
+  department_id: string | null;
+  department_name: string | null;
+  visit_type: string;
+  visit_date: string;
 }
 
 /** POST /patients/search — at least one criterion required. */

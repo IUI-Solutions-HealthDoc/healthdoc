@@ -17,6 +17,7 @@ import type {
   TokenPriorityUpdate,
   Visit,
   VisitCreate,
+  VisitWithoutToken,
 } from "./types";
 import {
   digitsOnly,
@@ -215,3 +216,49 @@ export function issueToken(
     idempotencyKey,
   });
 }
+
+/** Visits requiring queue tokens that have not yet been assigned. */
+export function listVisitsWithoutTokens(limit = 50): Promise<VisitWithoutToken[]> {
+  return api<VisitWithoutToken[]>(`/queue/visits-without-tokens?limit=${limit}`);
+}
+
+/** Upload a patient identification photograph. */
+export async function uploadPatientPhoto(
+  patientId: string,
+  file: File,
+): Promise<{ photo_file_id: string; status: string }> {
+  const formData = new FormData();
+  formData.append("upload", file);
+  return api<{ photo_file_id: string; status: string }>(`/patients/${patientId}/photo`, {
+    method: "POST",
+    body: formData,
+  });
+}
+
+/** Retrieve presigned download URL for patient photo. */
+export function getPatientPhoto(
+  patientId: string,
+): Promise<{ photo_file_id: string; download_url?: string; status: string }> {
+  return api<{ photo_file_id: string; download_url?: string; status: string }>(
+    `/patients/${patientId}/photo`,
+  );
+}
+
+/** Remove patient photograph. */
+export function deletePatientPhoto(patientId: string): Promise<{ status: string }> {
+  return api<{ status: string }>(`/patients/${patientId}/photo`, {
+    method: "DELETE",
+  });
+}
+
+/** Correct demographics on an existing patient record. */
+export function updatePatientDemographics(
+  patientId: string,
+  payload: Partial<PatientCreate> & { reason?: string },
+): Promise<Patient> {
+  return api<Patient>(`/patients/${patientId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+

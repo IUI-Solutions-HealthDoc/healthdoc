@@ -369,6 +369,51 @@ async def _allocate_token_number(db: AsyncSession, department_id: uuid.UUID, bus
     return (await db.execute(upsert)).scalar_one()
 
 
+async def list_visits_without_tokens(
+    db: AsyncSession,
+    caller_facility_id: uuid.UUID,
+    limit: int = 50,
+) -> list[dict]:
+    """Find registered outpatient/teleconsult visits for today that do not have an active queue token.
+
+    Allows the desk to recover from a queue/roster failure or attach a token later
+    without raising duplicate registration invoices or visits.
+    """
+    stmt = (
+        select(
+            Visit.id.label("visit_id"),
+            Visit.visit_number,
+            Visit.patient_id,
+            Patient.full_name.label("patient_name"),
+            Patient.uhid,
+            Patient.thid,
+            Visit.department_id,
+            Department.name.label("department_name"),
+            Visit.visit_type,
+            Visit.visit_date,
+        )
+        .join(Patient, Patient.id == Visit.patient_id)
+        .outerjoin(Department, Department.id == Visit.department_id)
+        .outerjoin(
+            QueueToken,
+            and_(
+                QueueToken.visit_id == Visit.id,
+                QueueToken.status != QueueTokenStatus.CANCELLED.value,
+            ),
+        )
+        .where(
+            Visit.facility_id == caller_facility_id,
+            Visit.visit_type.in_(VisitType.token_issuing()),
+            Visit.status.in_(["registered", "active"]),
+            QueueToken.id.is_(None),
+        )
+        .order_by(Visit.visit_date.desc())
+        .limit(limit)
+    )
+    rows = (await db.execute(stmt)).mappings().all()
+    return [dict(row) for row in rows]
+
+
 # ---------------- CREATE TOKEN ----------------
 async def create_token(
     db: AsyncSession,
