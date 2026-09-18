@@ -67,14 +67,23 @@ def _build_cascade_plan(scope: list[str] | None) -> dict[str, str] | None:
 async def list_consent_records_for_patient(
     db: AsyncSession, patient_id: uuid.UUID, *, facility_id: uuid.UUID | None = None
 ) -> list[ConsentRecord]:
-    q = sa.select(ConsentRecord).where(ConsentRecord.patient_id == patient_id)
+    q = (
+        sa.select(ConsentRecord, ConsentPurpose.purpose_code, ConsentPurpose.description)
+        .outerjoin(ConsentPurpose, ConsentPurpose.id == ConsentRecord.purpose_id)
+        .where(ConsentRecord.patient_id == patient_id)
+    )
     if facility_id is not None:
         q = q.join(Patient, Patient.id == ConsentRecord.patient_id).where(
             Patient.facility_id == facility_id
         )
     q = q.order_by(ConsentRecord.granted_at.desc())
     result = await db.execute(q)
-    return list(result.scalars().all())
+    rows: list[ConsentRecord] = []
+    for record, p_code, p_desc in result.all():
+        record.purpose_code = p_code
+        record.purpose_label = p_desc or (p_code.replace("_", " ").title() if p_code else None)
+        rows.append(record)
+    return rows
 
 
 async def list_consent_purposes(
@@ -192,14 +201,21 @@ async def evaluate_clinical_access(
 async def get_consent_record(
     db: AsyncSession, consent_id: uuid.UUID, *, facility_id: uuid.UUID | None = None
 ) -> ConsentRecord:
-    q = sa.select(ConsentRecord).where(ConsentRecord.id == consent_id)
+    q = (
+        sa.select(ConsentRecord, ConsentPurpose.purpose_code, ConsentPurpose.description)
+        .outerjoin(ConsentPurpose, ConsentPurpose.id == ConsentRecord.purpose_id)
+        .where(ConsentRecord.id == consent_id)
+    )
     if facility_id is not None:
         q = q.join(Patient, Patient.id == ConsentRecord.patient_id).where(
             Patient.facility_id == facility_id
         )
-    record = (await db.execute(q)).scalar_one_or_none()
-    if record is None:
+    row = (await db.execute(q)).first()
+    if row is None:
         raise HTTPException(404, "Consent record not found")
+    record, p_code, p_desc = row
+    record.purpose_code = p_code
+    record.purpose_label = p_desc or (p_code.replace("_", " ").title() if p_code else None)
     return record
 
 
@@ -296,6 +312,11 @@ async def create_consent_record(
             if consent_manager_id
             else None,
         }
+
+    purpose = await db.get(ConsentPurpose, purpose_id)
+    if purpose is not None:
+        record.purpose_code = purpose.purpose_code
+        record.purpose_label = purpose.description or purpose.purpose_code.replace("_", " ").title()
 
     return record
 

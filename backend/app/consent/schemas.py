@@ -33,6 +33,8 @@ class ConsentRecordOut(BaseModel):
     patient_id: uuid.UUID
     visit_id: uuid.UUID | None
     purpose_id: uuid.UUID
+    purpose_code: str | None = None
+    purpose_label: str | None = None
     granted_by_type: str
     granted_by_user_id: uuid.UUID | None
     guardian_name: str | None

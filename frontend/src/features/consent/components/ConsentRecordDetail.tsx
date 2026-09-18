@@ -15,7 +15,7 @@ import { StatusChip } from "@/components/ui/StatusChip";
 import { toast } from "@/components/ui/toast";
 import { meridian } from "@/styles/theme";
 import { transitionConsentStatus, withdrawConsent } from "../api/consent";
-import { CONSENT_STATUS_LABELS } from "../constants";
+import { CONSENT_CHANNEL_LABELS, CONSENT_STATUS_LABELS, PURPOSE_LABELS } from "../constants";
 import { formatDate, formatDateTime } from "../lib/formatters";
 import type { ConsentRecord } from "../types";
 import { ConsentAccessHistory } from "./ConsentAccessHistory";
@@ -122,8 +122,22 @@ export function ConsentRecordDetail({
             gap: 1.75,
           }}
         >
-          <Meta label="Purpose" value={record.purpose_label ?? record.purpose_code ?? record.purpose_id} />
-          <Meta label="Channel" value={record.channel} />
+          <Meta
+            label="Purpose"
+            value={
+              record.purpose_label ??
+              (record.purpose_code
+                ? (PURPOSE_LABELS[record.purpose_code] ??
+                   record.purpose_code.replaceAll("_", " ").replace(/\b\w/g, (l) => l.toUpperCase()))
+                : "General Clinical")
+            }
+          />
+          <Meta
+            label="Channel"
+            value={
+              CONSENT_CHANNEL_LABELS[record.channel as keyof typeof CONSENT_CHANNEL_LABELS] ?? record.channel
+            }
+          />
           <Meta
             label="Expires"
             value={record.expires_at ? formatDate(record.expires_at) : "open-ended"}
