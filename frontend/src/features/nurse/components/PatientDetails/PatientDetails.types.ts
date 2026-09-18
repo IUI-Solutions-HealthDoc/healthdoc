@@ -11,6 +11,12 @@ export interface Patient {
   guardian_name: string | null;
   guardian_relationship: string | null;
   mobile: string | null;
+  photo_file_id?: string | null;
+  address_line?: string | null;
+  village_town?: string | null;
+  district?: string | null;
+  state_code?: string | null;
+  pincode?: string | null;
 }
 export interface PatientAdmissionContext {
   ward_name?: string;

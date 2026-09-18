@@ -43,6 +43,7 @@ from app.queue.schemas import (
     RosterOut,
     TokenPriorityElevate,
     TokenReassign,
+    VisitWithoutTokenOut,
 )
 
 router = APIRouter(prefix="/queue", tags=["queue"])
@@ -247,6 +248,23 @@ async def list_queue_opening_options(
         service_date=business_date,
         items=[QueueOpeningOptionOut(**row) for row in rows],
     ).model_dump(mode="json")
+
+
+@router.get(
+    "/visits-without-tokens",
+    response_model=list[VisitWithoutTokenOut],
+    dependencies=[Depends(require_roles("receptionist", "nurse", "emergency", "doctor", "admin"))],
+)
+async def list_visits_without_tokens(
+    current_db_user: CurrentDbUser,
+    limit: int = Query(default=50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+) -> list[VisitWithoutTokenOut]:
+    """Registered visits in caller facility requiring queue tokens that have not been issued."""
+    rows = await service.list_visits_without_tokens(
+        db, current_db_user.facility_id, limit=limit
+    )
+    return [VisitWithoutTokenOut.model_validate(row) for row in rows]
 
 
 # ---------------- CREATE TOKEN ----------------

@@ -6,9 +6,11 @@ import { toast } from "@/components/ui/toast";
 import { ApiError, formatDateTime, newIdempotencyKey } from "@/lib/api";
 import {
   createQueue,
+  issueToken,
   listQueueOpeningOptions,
   listQueueTokens,
   listQueues,
+  listVisitsWithoutTokens,
   updateTokenPriority,
 } from "@/features/receptionist/api";
 import type {
@@ -16,7 +18,9 @@ import type {
   QueueSummary,
   QueueTokenList,
   TokenPriorityUpdate,
+  VisitWithoutToken,
 } from "@/features/receptionist/types";
+
 
 /**
  * Reception's view of today's queues (#171).
@@ -40,15 +44,23 @@ export default function Page() {
   const [priority, setPriority] = useState<TokenPriorityUpdate["priority"]>("senior_citizen");
   const [priorityReason, setPriorityReason] = useState("");
   const [updatingPriority, setUpdatingPriority] = useState(false);
+  const [unassignedVisits, setUnassignedVisits] = useState<VisitWithoutToken[] | null>(null);
+  const [showUnassignedVisits, setShowUnassignedVisits] = useState(false);
+  const [assigningVisit, setAssigningVisit] = useState<VisitWithoutToken | null>(null);
+  const [assignQueueId, setAssignQueueId] = useState("");
+  const [assignPriority, setAssignPriority] = useState("normal");
+  const [assigningBusy, setAssigningBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const [rows, options] = await Promise.all([
+      const [rows, options, unassigned] = await Promise.all([
         listQueues(),
         listQueueOpeningOptions(),
+        listVisitsWithoutTokens().catch(() => [] as VisitWithoutToken[]),
       ]);
       setQueues(rows);
       setOpeningOptions(options);
+      setUnassignedVisits(unassigned);
       setOptionId((current) =>
         options.items.some((option) => option.roster_id === current)
           ? current
@@ -147,6 +159,33 @@ export default function Page() {
     }
   };
 
+  const handleIssueTokenForVisit = async () => {
+    if (!assigningVisit || !assignQueueId) return;
+    setAssigningBusy(true);
+    setError(null);
+    try {
+      const issued = await issueToken(
+        {
+          queue_id: assignQueueId,
+          visit_id: assigningVisit.visit_id,
+          priority: assignPriority,
+        },
+        newIdempotencyKey(),
+      );
+      toast.success("Token issued", `Token ${issued.token_display} issued for ${assigningVisit.patient_name}`);
+      setAssigningVisit(null);
+      await load();
+      if (selected) {
+        const refreshed = await listQueueTokens(selected);
+        setTokens(refreshed);
+      }
+    } catch (reason) {
+      setError(reason instanceof ApiError ? reason.message : "Could not issue token for visit");
+    } finally {
+      setAssigningBusy(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -160,6 +199,22 @@ export default function Page() {
             is push-based; polling here would add load for a screen someone
             looks at when a patient asks, not continuously. */}
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setShowUnassignedVisits((shown) => !shown)}
+            className={`relative rounded-md border px-3 py-2 text-sm font-medium transition ${
+              showUnassignedVisits
+                ? "border-primary bg-primary/10 text-primary"
+                : "border-border bg-card text-foreground hover:bg-muted"
+            }`}
+          >
+            Visits Awaiting Token
+            {unassignedVisits && unassignedVisits.length > 0 ? (
+              <span className="ml-2 rounded-full bg-amber-500 px-1.5 py-0.5 text-[11px] font-bold text-white">
+                {unassignedVisits.length}
+              </span>
+            ) : null}
+          </button>
           <button
             type="button"
             onClick={() => setShowOpenQueue((shown) => !shown)}
@@ -177,6 +232,123 @@ export default function Page() {
         <p role="alert" className="text-sm text-danger">
           {error}
         </p>
+      )}
+
+      {showUnassignedVisits && (
+        <section className="surface-card space-y-4 p-5" aria-labelledby="unassigned-visits-title">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 id="unassigned-visits-title" className="text-lg font-semibold">
+                Visits Awaiting Queue Token ({unassignedVisits?.length ?? 0})
+              </h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Visits created today where queue token issuance was interrupted or skipped.
+              </p>
+            </div>
+          </div>
+
+          {unassignedVisits && unassignedVisits.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No visits currently awaiting queue tokens.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full border-collapse">
+                <thead className="bg-muted/40 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  <tr>
+                    <th className="px-4 py-2.5 text-left">Visit #</th>
+                    <th className="px-4 py-2.5 text-left">Patient</th>
+                    <th className="px-4 py-2.5 text-left">Department</th>
+                    <th className="px-4 py-2.5 text-left">Visit Date</th>
+                    <th className="px-4 py-2.5 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border text-sm">
+                  {unassignedVisits?.map((v) => (
+                    <tr key={v.visit_id} className="hover:bg-muted/20 transition-colors">
+                      <td className="px-4 py-3 font-mono font-bold text-primary">{v.visit_number}</td>
+                      <td className="px-4 py-3">
+                        <span className="block font-medium text-foreground">{v.patient_name}</span>
+                        <span className="font-mono text-xs text-muted-foreground">{v.uhid ?? v.thid ?? "No UHID"}</span>
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground">{v.department_name ?? "General"}</td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground">{formatDateTime(v.visit_date)}</td>
+                      <td className="px-4 py-3 text-right">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAssigningVisit(v);
+                            setAssignQueueId(queues?.[0]?.id ?? "");
+                            setAssignPriority("normal");
+                          }}
+                          className="rounded-md bg-primary px-3 py-1 text-xs font-semibold text-white shadow-xs hover:bg-primary/90 transition"
+                        >
+                          Issue Token
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {assigningVisit && (
+            <div className="rounded-lg border border-primary/30 bg-primary/5 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-foreground">
+                  Issue Token for {assigningVisit.patient_name} ({assigningVisit.visit_number})
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setAssigningVisit(null)}
+                  className="text-xs text-muted-foreground underline"
+                >
+                  Cancel
+                </button>
+              </div>
+              {queues && queues.length === 0 ? (
+                <p className="text-xs text-danger">No open queues available. Open a clinic queue first.</p>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-[2fr_1fr_auto] sm:items-end">
+                  <label className="space-y-1 text-xs">
+                    <span className="text-muted-foreground">Select Clinic / Doctor *</span>
+                    <select
+                      value={assignQueueId}
+                      onChange={(e) => setAssignQueueId(e.target.value)}
+                      className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm"
+                    >
+                      {queues?.map((q) => (
+                        <option key={q.id} value={q.id}>
+                          {q.doctor_name ?? "Doctor"} {q.room_number ? `· Room ${q.room_number}` : ""} ({q.waiting_count} waiting)
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="space-y-1 text-xs">
+                    <span className="text-muted-foreground">Priority</span>
+                    <select
+                      value={assignPriority}
+                      onChange={(e) => setAssignPriority(e.target.value)}
+                      className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm"
+                    >
+                      <option value="normal">Normal</option>
+                      <option value="senior_citizen">Senior citizen</option>
+                      <option value="pregnant">Pregnant patient</option>
+                      <option value="follow_up_recall">Follow-up recall</option>
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    disabled={assigningBusy || !assignQueueId}
+                    onClick={() => void handleIssueTokenForVisit()}
+                    className="rounded-md bg-primary px-4 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+                  >
+                    {assigningBusy ? "Issuing…" : "Confirm Token"}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </section>
       )}
 
       {showOpenQueue && (

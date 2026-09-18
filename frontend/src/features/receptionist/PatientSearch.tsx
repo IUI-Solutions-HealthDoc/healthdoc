@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { PatientAvatar } from "@/components/ui";
 import { ApiError } from "@/lib/api";
 
 import { searchPatients } from "./api";
@@ -276,7 +277,12 @@ export function PatientSearch({ onSelect, selectLabel = "Select" }: Props) {
                   <td className="px-4 py-3 font-mono text-sm">
                     {patient.uhid ?? "—"}
                   </td>
-                  <td className="px-4 py-3 font-medium">{patient.full_name}</td>
+                  <td className="px-4 py-3 font-medium">
+                    <div className="flex items-center gap-2.5">
+                      <PatientAvatar patientId={patient.id} name={patient.full_name} size="sm" />
+                      <span>{patient.full_name}</span>
+                    </div>
+                  </td>
                   <td className="px-4 py-3 text-sm">
                     {patient.sex}
                     {patient.age_years !== null ? ` · ${patient.age_years}y` : ""}

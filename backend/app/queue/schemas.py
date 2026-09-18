@@ -49,6 +49,21 @@ class QueueTokenOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class VisitWithoutTokenOut(BaseModel):
+    visit_id: uuid.UUID
+    visit_number: str
+    patient_id: uuid.UUID
+    patient_name: str
+    uhid: str | None = None
+    thid: str | None = None
+    department_id: uuid.UUID | None = None
+    department_name: str | None = None
+    visit_type: str
+    visit_date: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class QueueTokenGenerateRequest(BaseModel):
     """visit_id is required — complete_by_visit_id() needs it to trigger
     automatic call-next."""
