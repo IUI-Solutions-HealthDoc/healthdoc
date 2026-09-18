@@ -74,15 +74,13 @@ def test_failure_counter_resets_within_a_shift(realm):
     assert realm.get("maxDeltaTimeSeconds") == 43200
 
 
-def test_direct_access_grants_are_disabled_on_the_public_client(realm):
-    """Belt and braces for the same issue.
-
-    Direct access grants (password grant) let a client exchange a username and
-    password for a token without the browser flow — the easiest surface to
-    brute-force, and unnecessary for an authorization-code + PKCE frontend.
+def test_direct_access_grants_are_enabled_for_in_place_login_on_the_public_client(realm):
+    """Direct access grants (password grant) are enabled on the frontend client
+    to support the modern in-place login flow, while brute-force protection
+    and lockout policies protect against credential attacks.
     """
     frontend = next(c for c in realm["clients"] if c["clientId"] == "healthdoc-frontend")
-    assert frontend.get("directAccessGrantsEnabled") is False
+    assert frontend.get("directAccessGrantsEnabled") is True
     assert frontend.get("publicClient") is True
     assert frontend["attributes"]["pkce.code.challenge.method"] == "S256"
 
