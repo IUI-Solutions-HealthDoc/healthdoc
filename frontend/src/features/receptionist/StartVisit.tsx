@@ -39,6 +39,8 @@ const RECEPTION_PRIORITIES = [
 export function StartVisit({ patient }: { patient: VisitPatient }) {
   const { user } = useAuth();
   const canAccessBilling = canRoleAccessPath(user?.role ?? null, "/billing");
+  const canAccessEmergency = canRoleAccessPath(user?.role ?? null, "/emergency");
+  const canAccessIpd = canRoleAccessPath(user?.role ?? null, "/ipd");
   const [queues, setQueues] = useState<QueueSummary[] | null>(null);
   const [queueId, setQueueId] = useState<string>("");
   const [busy, setBusy] = useState(false);
@@ -149,12 +151,12 @@ export function StartVisit({ patient }: { patient: VisitPatient }) {
               View queue
             </Link>
           )}
-          {visitType === "emergency" && (
+          {visitType === "emergency" && canAccessEmergency && (
             <Link href="/emergency" className="font-medium underline">
               Emergency department
             </Link>
           )}
-          {visitType === "ipd" && (
+          {visitType === "ipd" && canAccessIpd && (
             <Link href="/ipd" className="font-medium underline">
               Inpatient admission
             </Link>
@@ -190,7 +192,7 @@ export function StartVisit({ patient }: { patient: VisitPatient }) {
         )}
         {visitType === "teleconsult" && (
           <p className="text-xs text-muted-foreground">
-            Teleconsultation visit created. Patient will be notified for their scheduled session.
+            Teleconsultation visit registered. Advise patient of scheduled consultation details.
           </p>
         )}
       </div>

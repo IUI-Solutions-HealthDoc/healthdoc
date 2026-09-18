@@ -14,6 +14,16 @@ import {
 import { getDefaultRouteForRole } from "@/lib/auth/routes";
 import { useAuth } from "@/providers/auth-provider";
 
+function isSafeInternalPath(url: string | null): boolean {
+  if (!url) return false;
+  return (
+    url.startsWith("/") &&
+    !url.startsWith("//") &&
+    !url.startsWith("/\\") &&
+    !url.includes("://")
+  );
+}
+
 export function LoginScreen() {
   const searchParams = useSearchParams();
   const { user, isAuthenticated, isLoading } = useAuth();
@@ -58,8 +68,8 @@ export function LoginScreen() {
       }
       const redirect = searchParams.get("redirect");
       const target =
-        redirect && redirect.startsWith("/")
-          ? redirect
+        isSafeInternalPath(redirect)
+          ? redirect!
           : result.landingPath || (result.user.role ? getDefaultRouteForRole(result.user.role) : "/");
       window.location.replace(target);
     } catch (err) {

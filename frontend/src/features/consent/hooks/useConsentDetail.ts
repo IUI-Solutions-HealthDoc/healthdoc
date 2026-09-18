@@ -20,6 +20,18 @@ export function useConsentDetail(patientId: string | null, id: string | null) {
   const idRef = useRef(id);
   idRef.current = id;
 
+  const [prevId, setPrevId] = useState(id);
+  const [prevPatientId, setPrevPatientId] = useState(patientId);
+
+  // Synchronously reset record during render when id or patientId changes
+  // so the previous record never flashes while fetching the new one.
+  if (id !== prevId || patientId !== prevPatientId) {
+    setPrevId(id);
+    setPrevPatientId(patientId);
+    setRecord(null);
+    setError(null);
+  }
+
   const load = useCallback(async () => {
     const current = idRef.current;
     if (!current || !patientId) {

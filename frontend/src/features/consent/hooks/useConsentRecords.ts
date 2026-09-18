@@ -11,35 +11,36 @@ export function useConsentRecords(initial: ConsentListFilters = { status: "all" 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const activeReqRef = useRef(0);
+  const [prevPatientId, setPrevPatientId] = useState(initial.patient_id);
 
-  // The dashboard starts with no patient and supplies one after the shared
-  // patient picker resolves. useState(initial) reads `initial` only once, so
-  // without this sync the hook kept patient_id=undefined forever and rendered
-  // an honest-looking empty ledger without making the records request at all.
-  useEffect(() => {
-    setFilters((current) => {
-      if (current.patient_id === initial.patient_id) return current;
-      setRows([]);
-      return { ...current, patient_id: initial.patient_id };
-    });
-  }, [initial.patient_id]);
+  // Synchronously clear rows and increment request counter during render when
+  // patient_id changes so Patient A's rows never flash on Patient B's initial frame.
+  if (initial.patient_id !== prevPatientId) {
+    setPrevPatientId(initial.patient_id);
+    setRows([]);
+    setError(null);
+    setLoading(true);
+    activeReqRef.current += 1;
+    setFilters((current) => ({ ...current, patient_id: initial.patient_id }));
+  }
 
   const refresh = useCallback(async () => {
     const reqId = ++activeReqRef.current;
+    const targetPatientId = filters.patient_id;
     setLoading(true);
     setError(null);
     try {
       const data = await listConsentRecords(filters);
-      if (reqId === activeReqRef.current) {
+      if (reqId === activeReqRef.current && filters.patient_id === targetPatientId) {
         setRows(data);
       }
     } catch (e) {
-      if (reqId === activeReqRef.current) {
+      if (reqId === activeReqRef.current && filters.patient_id === targetPatientId) {
         setRows([]);
         setError(e instanceof Error ? e.message : "Failed to load consents");
       }
     } finally {
-      if (reqId === activeReqRef.current) {
+      if (reqId === activeReqRef.current && filters.patient_id === targetPatientId) {
         setLoading(false);
       }
     }

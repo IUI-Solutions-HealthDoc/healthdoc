@@ -22,7 +22,13 @@ from app.common.enums import (
 from app.nursing import incidents as inc
 from app.nursing.schemas import IncidentReport, IncidentReviewRequest
 from app.nursing.service import (
-    OrderAlreadyCompleted, OrderNotFound, accept_order, complete_order, pending_orders,
+    DiagnosticOrderRequiresFulfillment,
+    OrderAlreadyCompleted,
+    OrderCancelledError,
+    OrderNotFound,
+    accept_order,
+    complete_order,
+    pending_orders,
 )
 from app.orders.models import Order
 
@@ -31,7 +37,7 @@ pytestmark = pytest.mark.asyncio
 NOW = datetime(2026, 8, 17, 9, 0, tzinfo=timezone.utc)
 
 
-async def _order(db, *, status=OrderStatus.PLACED.value, order_type="lab", patient_id=None):
+async def _order(db, *, status=OrderStatus.PLACED.value, order_type="procedure", patient_id=None):
     order = Order(
         id=uuid.uuid4(),
         order_number=f"ORD-{uuid.uuid4().hex[:10]}",
@@ -258,3 +264,26 @@ async def test_incidents_cannot_be_deleted():
     assert incident_routes, "expected incident routes to exist"
     for route in incident_routes:
         assert "DELETE" not in getattr(route, "methods", set())
+
+
+# ---------------------------------------------------------------- task safety guards
+
+async def test_cancelled_order_cannot_be_accepted(db):
+    order = await _order(db, status=OrderStatus.CANCELLED.value, order_type="procedure")
+    with pytest.raises(OrderCancelledError):
+        await accept_order(db, order.id, accepted_by=uuid.uuid4())
+
+
+async def test_cancelled_order_cannot_be_completed(db):
+    order = await _order(db, status=OrderStatus.CANCELLED.value, order_type="procedure")
+    with pytest.raises(OrderCancelledError):
+        await complete_order(db, order.id, completed_by=uuid.uuid4())
+
+
+async def test_diagnostic_order_cannot_be_generic_completed(db):
+    for diag_type in ("lab", "radiology"):
+        order = await _order(db, status=OrderStatus.PLACED.value, order_type=diag_type)
+        with pytest.raises(DiagnosticOrderRequiresFulfillment) as exc_info:
+            await complete_order(db, order.id, completed_by=uuid.uuid4())
+        assert exc_info.value.order_type == diag_type
+

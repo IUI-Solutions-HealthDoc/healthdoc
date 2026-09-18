@@ -264,6 +264,21 @@ class OrderAlreadyCompleted(Exception):
         self.completed_at = completed_at
 
 
+class OrderCancelledError(Exception):
+    """A cancelled order cannot be accepted or completed."""
+
+    def __init__(self, order_id: uuid.UUID) -> None:
+        self.order_id = order_id
+
+
+class DiagnosticOrderRequiresFulfillment(Exception):
+    """Diagnostic orders (lab, radiology) cannot be completed by generic nursing check-off."""
+
+    def __init__(self, order_id: uuid.UUID, order_type: str) -> None:
+        self.order_id = order_id
+        self.order_type = order_type
+
+
 async def pending_orders(
     db: AsyncSession,
     *,
@@ -298,9 +313,14 @@ async def accept_order(
     """Take ownership of an order. Idempotent: re-accepting keeps the first
     acceptance, because the first is the one that says when the ward picked
     it up."""
-    order = await db.get(Order, order_id)
+    stmt = select(Order).where(Order.id == order_id).with_for_update()
+    result = await db.execute(stmt)
+    order = result.scalar_one_or_none()
     if order is None:
         raise OrderNotFound(order_id)
+
+    if order.status == OrderStatus.CANCELLED.value:
+        raise OrderCancelledError(order_id)
 
     if order.accepted_at is None:
         order.accepted_at = datetime.now(timezone.utc)
@@ -325,9 +345,15 @@ async def complete_order(
     timestamp and actor, and in a dispute about when something was given, the
     original entry is the only one that matters.
     """
-    order = await db.get(Order, order_id)
+    stmt = select(Order).where(Order.id == order_id).with_for_update()
+    result = await db.execute(stmt)
+    order = result.scalar_one_or_none()
     if order is None:
         raise OrderNotFound(order_id)
+    if order.status == OrderStatus.CANCELLED.value:
+        raise OrderCancelledError(order_id)
+    if order.order_type in ("lab", "radiology"):
+        raise DiagnosticOrderRequiresFulfillment(order_id, order.order_type)
     if order.completed_at is not None:
         raise OrderAlreadyCompleted(order_id, order.completed_at)
 
