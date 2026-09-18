@@ -192,6 +192,7 @@ do not merge out of order.**
 | 0071 | abdm_m2_reply_recovery | ALTER abdm_callback_replies | Encrypted, expiring discovery/init/refusal/profile response snapshots and durable jobs; never retain OTP plaintext. |
 | 0072 | billing_identifier_width | ALTER invoices, payments, refunds | Billing number columns widened to varchar(50) for permitted 20-character facility codes; no number rewrite; downgrade refuses truncation. |
 | 0073 | abdm_callback_receipts | abdm_callback_receipts | Independent HTTP receipts; correlation/status metadata and bounded encrypted redacted body/header/IP snapshots; seven-day operational retention, not milestone certification. |
+| 0074 | appointments_and_scheduling | appointment_services, appointments | Scheduling services and patient appointments with conflict prevention and queue check-in. |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -1742,6 +1743,40 @@ inspection requires existing local DB/crypto operator access. The cleanup-only
 worker prunes expired receipts; DB failure emits a metric and safe log message,
 not a changed clinical HTTP outcome. This table is not an NHA transaction ledger
 or certification evidence by itself. See `abdm-callback-diagnostics-2026-09-14.md`.
+
+**appointment_services** (0074) — bookable clinic services catalogue
+```
+facility_id UUID NOT NULL REFERENCES facilities(id)
+department_id UUID NULL REFERENCES departments(id)
+name varchar(100) NOT NULL
+duration_minutes integer NOT NULL DEFAULT 15
+is_active boolean NOT NULL DEFAULT true
+description text NULL
+```
+
+**appointments** (0074) — scheduled patient visits and follow-ups
+```
+facility_id UUID NOT NULL REFERENCES facilities(id)
+patient_id UUID NOT NULL REFERENCES patients(id)
+department_id UUID NOT NULL REFERENCES departments(id)
+doctor_user_id UUID NULL REFERENCES users(id)
+service_id UUID NULL REFERENCES appointment_services(id)
+service_name varchar(100) NOT NULL DEFAULT 'Consultation'
+duration_minutes integer NOT NULL DEFAULT 15
+appointment_date date NOT NULL
+start_time varchar(10) NOT NULL
+end_time varchar(10) NOT NULL
+status varchar(50) NOT NULL DEFAULT 'booked'
+is_walk_in boolean NOT NULL DEFAULT false
+is_teleconsult boolean NOT NULL DEFAULT false
+teleconsult_status varchar(50) NULL
+notes text NULL
+follow_up_from_visit_id UUID NULL REFERENCES visits(id)
+visit_id UUID NULL REFERENCES visits(id)
+token_id UUID NULL REFERENCES queue_tokens(id)
+cancellation_reason text NULL
+```
+
 
 **abdm_callback_replies** (0067) — committed reply intent, not a clinical inbox
 ```
