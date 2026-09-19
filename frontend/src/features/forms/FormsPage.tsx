@@ -59,27 +59,12 @@ export function FormsPage() {
       if (defs.length > 0 && !selectedForm) {
         setSelectedForm(defs[0]);
       }
-
-      // Default patient
-      const patientsRes = await api<PatientSearchResult>("/patients/search", {
-        method: "POST",
-        body: JSON.stringify({ full_name: "Demo", page: 1, page_size: 5 }),
-      }).catch(() => null);
-
-      if (patientsRes?.items && patientsRes.items.length > 0 && !activePatient) {
-        const p = patientsRes.items[0];
-        setActivePatient({
-          id: p.id,
-          uhid: p.uhid,
-          full_name: p.full_name || `${p.first_name || ""} ${p.last_name || ""}`.trim() || "Patient",
-        });
-      }
     } catch (err) {
       console.error("Failed to load forms data:", err);
     } finally {
       setLoading(false);
     }
-  }, [activePatient, selectedForm]);
+  }, [selectedForm]);
 
   useEffect(() => {
     loadData();
@@ -101,7 +86,7 @@ export function FormsPage() {
       const isDigits = /^\d+$/.test(patientSearch.trim());
       const body = isDigits
         ? { mobile: patientSearch.trim(), page: 1, page_size: 5 }
-        : { full_name: patientSearch.trim(), page: 1, page_size: 5 };
+        : { uhid: patientSearch.trim(), page: 1, page_size: 5 };
       const res = await api<PatientSearchResult>("/patients/search", {
         method: "POST",
         body: JSON.stringify(body),

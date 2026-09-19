@@ -48,6 +48,10 @@ export function BloodCrossmatchModal({
   const handlePatientSearch = async () => {
     if (!patientSearch.trim()) return;
     try {
+      const isDigits = /^\d+$/.test(patientSearch.trim());
+      const body = isDigits
+        ? { mobile: patientSearch.trim(), page: 1, page_size: 5 }
+        : { uhid: patientSearch.trim(), page: 1, page_size: 5 };
       const res = await api<{
         items: Array<{
           id: string;
@@ -58,7 +62,7 @@ export function BloodCrossmatchModal({
         }>;
       }>("/patients/search", {
         method: "POST",
-        body: JSON.stringify({ query: patientSearch.trim(), limit: 5 }),
+        body: JSON.stringify(body),
       });
       if (res?.items?.length > 0) {
         const p = res.items[0];

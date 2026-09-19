@@ -46,21 +46,6 @@ export function ImmunizationPage() {
         setLoadingCatalogue(true);
         const cat = await fetchVaccineCatalogue();
         setCatalogue(cat);
-
-        // Fetch recent patient as default if none selected
-        const patientsRes = await api<PatientSearchResult>("/patients/search", {
-          method: "POST",
-          body: JSON.stringify({ full_name: "Demo", page: 1, page_size: 5 }),
-        }).catch(() => null);
-
-        if (patientsRes?.items && patientsRes.items.length > 0) {
-          const first = patientsRes.items[0];
-          setActivePatient({
-            id: first.id,
-            uhid: first.uhid,
-            full_name: first.full_name || `${first.first_name || ""} ${first.last_name || ""}`.trim() || "Patient",
-          });
-        }
       } catch (err: unknown) {
         console.error("Failed to load vaccine catalogue:", err);
       } finally {
@@ -77,7 +62,7 @@ export function ImmunizationPage() {
       const isDigits = /^\d+$/.test(patientSearch.trim());
       const body = isDigits
         ? { mobile: patientSearch.trim(), page: 1, page_size: 5 }
-        : { full_name: patientSearch.trim(), page: 1, page_size: 5 };
+        : { uhid: patientSearch.trim(), page: 1, page_size: 5 };
       const res = await api<PatientSearchResult>("/patients/search", {
         method: "POST",
         body: JSON.stringify(body),
