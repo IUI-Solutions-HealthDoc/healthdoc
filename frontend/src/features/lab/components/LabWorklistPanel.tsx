@@ -1,6 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  AlertCircle,
+  Clock,
+  History,
+  RotateCcw,
+  X,
+  XCircle,
+} from "lucide-react";
 
 import {
   amendLabResult,
@@ -9,9 +17,18 @@ import {
   getLabResultHistory,
   getTestAnalytes,
   listLabWork,
+  listSpecimenEvents,
+  receiveLabSpecimen,
+  recollectLabSpecimen,
+  rejectLabSpecimen,
   verifyLabResult,
 } from "@/features/lab/api";
-import type { LabAnalyte, LabOrderItem, LabResult } from "@/features/lab/types";
+import type {
+  LabAnalyte,
+  LabOrderItem,
+  LabResult,
+  LabSpecimenEvent,
+} from "@/features/lab/types";
 import { ApiError, formatDateTime } from "@/lib/api";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/AsyncState";
 import { useAuth } from "@/providers/auth-provider";
@@ -39,6 +56,25 @@ function StatusChip({ status }: { status: string }) {
   return (
     <span className={`rounded-full px-2 py-1 text-xs font-medium ${tone}`}>
       {status.replaceAll("_", " ")}
+    </span>
+  );
+}
+
+function SpecimenStatusChip({ status }: { status?: string | null }) {
+  const s = status || "pending_collection";
+  const tone =
+    s === "received"
+      ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300"
+      : s === "collected"
+        ? "bg-blue-100 text-blue-800 dark:bg-blue-950/50 dark:text-blue-300"
+        : s === "rejected"
+          ? "bg-red-100 text-red-800 dark:bg-red-950/50 dark:text-red-300 font-bold"
+          : s === "recollected"
+            ? "bg-purple-100 text-purple-800 dark:bg-purple-950/50 dark:text-purple-300"
+            : "bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300";
+  return (
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${tone}`}>
+      {s.replaceAll("_", " ")}
     </span>
   );
 }
@@ -93,6 +129,13 @@ export function LabWorklistPanel() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+
+  const [rejectModalOpen, setRejectModalOpen] = useState(false);
+  const [rejectionReason, setRejectionReason] = useState("hemolyzed");
+  const [rejectionNotes, setRejectionNotes] = useState("");
+  const [timelineModalOpen, setTimelineModalOpen] = useState(false);
+  const [specimenEvents, setSpecimenEvents] = useState<LabSpecimenEvent[]>([]);
+  const [loadingEvents, setLoadingEvents] = useState(false);
 
   const selected = useMemo(
     () => rows?.find((row) => row.id === selectedId) ?? null,
@@ -205,6 +248,70 @@ export function LabWorklistPanel() {
       setError(reason instanceof ApiError ? reason.message : "Sample collection failed");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function handleReceiveSpecimen() {
+    if (!selected) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const updated = await receiveLabSpecimen(selected.id);
+      updateRow(updated);
+      setMessage("Specimen successfully received at laboratory bench.");
+    } catch (reason) {
+      setError(reason instanceof ApiError ? reason.message : "Failed to receive specimen");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRejectSpecimen() {
+    if (!selected) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const updated = await rejectLabSpecimen(selected.id, rejectionReason, rejectionNotes);
+      updateRow(updated);
+      setRejectModalOpen(false);
+      setRejectionNotes("");
+      setMessage(
+        `Specimen rejected (${rejectionReason.replaceAll("_", " ")}). Recollection can now be ordered.`,
+      );
+    } catch (reason) {
+      setError(reason instanceof ApiError ? reason.message : "Failed to reject specimen");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRecollectSpecimen() {
+    if (!selected) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const newLinkedItem = await recollectLabSpecimen(selected.id);
+      setMessage(`Recollection ordered! New linked accession: ${newLinkedItem.accession_number}`);
+      void load();
+      selectRow(newLinkedItem);
+    } catch (reason) {
+      setError(reason instanceof ApiError ? reason.message : "Failed to order specimen recollection");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleOpenTimeline() {
+    if (!selected) return;
+    setTimelineModalOpen(true);
+    setLoadingEvents(true);
+    try {
+      const events = await listSpecimenEvents(selected.id);
+      setSpecimenEvents(events);
+    } catch {
+      setSpecimenEvents([]);
+    } finally {
+      setLoadingEvents(false);
     }
   }
 
@@ -357,6 +464,7 @@ export function LabWorklistPanel() {
                       "Test",
                       "Sample",
                       "Barcode",
+                      "Specimen",
                       "Status",
                       "Ordered",
                       "Actions",
@@ -374,6 +482,9 @@ export function LabWorklistPanel() {
                       <td className="px-4 py-3 font-medium">{row.test_name}</td>
                       <td className="px-4 py-3">{row.sample_type}</td>
                       <td className="px-4 py-3">{row.barcode ?? "Not collected"}</td>
+                      <td className="px-4 py-3">
+                        <SpecimenStatusChip status={row.specimen_status} />
+                      </td>
                       <td className="px-4 py-3">
                         <StatusChip status={row.status} />
                       </td>
@@ -433,6 +544,88 @@ export function LabWorklistPanel() {
               Read-only result view. Sample collection, result entry and verification are handled by lab professionals.
             </p>
           )}
+
+          {/* Specimen Quality Control & Lifecycle */}
+          <div className="rounded-lg border border-border bg-muted/20 p-4 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Specimen Status:
+                </span>
+                <SpecimenStatusChip status={selected.specimen_status} />
+                {selected.recollected_from_id && (
+                  <span className="rounded-full bg-purple-500/10 px-2 py-0.5 text-[10px] font-medium text-purple-600 dark:text-purple-300">
+                    Linked Recollection
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleOpenTimeline()}
+                className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+              >
+                <History size={13} /> Specimen Timeline
+              </button>
+            </div>
+
+            {selected.specimen_status === "rejected" && (
+              <div className="rounded-md border border-red-300 bg-red-50 p-3 text-xs text-red-800 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200">
+                <div className="font-semibold flex items-center gap-1.5 text-red-700 dark:text-red-300">
+                  <XCircle size={15} /> Specimen Rejected: {selected.rejection_reason?.replaceAll("_", " ")}
+                </div>
+                <p className="mt-1 text-muted-foreground">
+                  The collected sample did not meet lab quality standards. Order a linked recollection to notify phlebotomy.
+                </p>
+                {canManageResults && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void handleRecollectSpecimen()}
+                    className="mt-3 inline-flex items-center gap-1.5 rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-red-700 disabled:opacity-50"
+                  >
+                    <RotateCcw size={13} /> Order Recollection (Spawn Linked Specimen)
+                  </button>
+                )}
+              </div>
+            )}
+
+            {canManageResults && selected.specimen_status === "collected" && (
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void handleReceiveSpecimen()}
+                  className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-emerald-700 disabled:opacity-50"
+                >
+                  Receive at Bench
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setRejectModalOpen(true)}
+                  className="rounded-md border border-red-300 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 shadow-xs hover:bg-red-100 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300 disabled:opacity-50"
+                >
+                  Reject Specimen
+                </button>
+              </div>
+            )}
+
+            {canManageResults && selected.specimen_status === "received" && (
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
+                  ✓ Sample verified & ready for bench testing
+                </span>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setRejectModalOpen(true)}
+                  className="rounded-md border border-red-200 px-2.5 py-1 text-xs text-red-600 hover:bg-red-50 dark:border-red-900 dark:hover:bg-red-950/30"
+                >
+                  Reject on Bench Defect
+                </button>
+              </div>
+            )}
+          </div>
 
           {canManageResults && selected.status === "placed" ? (
             <div className="space-y-3">
@@ -621,6 +814,146 @@ export function LabWorklistPanel() {
           <ResultHistory items={history} />
         </section>
       ) : null}
+
+      {/* Specimen Rejection Modal */}
+      {rejectModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-xs"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <h3 className="font-semibold text-base text-foreground flex items-center gap-2 text-red-600 dark:text-red-400">
+                <AlertCircle size={18} /> Reject Laboratory Specimen
+              </h3>
+              <button
+                type="button"
+                onClick={() => setRejectModalOpen(false)}
+                className="rounded-lg p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-4">
+              <label className="block space-y-1 text-xs">
+                <span className="font-semibold text-foreground">Rejection Reason *</span>
+                <select
+                  value={rejectionReason}
+                  onChange={(e) => setRejectionReason(e.target.value)}
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                >
+                  <option value="hemolyzed">Hemolyzed sample</option>
+                  <option value="clotted">Clotted sample</option>
+                  <option value="insufficient_quantity">Insufficient specimen volume (QNS)</option>
+                  <option value="wrong_container">Wrong specimen container / additive</option>
+                  <option value="unlabeled">Unlabeled or mislabeled specimen</option>
+                  <option value="broken_tube">Broken container or leak in transit</option>
+                  <option value="other">Other reason</option>
+                </select>
+              </label>
+
+              <label className="block space-y-1 text-xs">
+                <span className="font-semibold text-foreground">Notes / Observations</span>
+                <textarea
+                  value={rejectionNotes}
+                  onChange={(e) => setRejectionNotes(e.target.value)}
+                  placeholder="Describe specimen defect or reason for rejection..."
+                  rows={3}
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+              </label>
+            </div>
+
+            <div className="mt-6 flex justify-end gap-2 border-t border-border pt-4">
+              <button
+                type="button"
+                onClick={() => setRejectModalOpen(false)}
+                className="rounded-lg border border-border px-4 py-2 text-xs font-medium text-foreground hover:bg-muted"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void handleRejectSpecimen()}
+                className="rounded-lg bg-red-600 px-4 py-2 text-xs font-semibold text-white shadow-xs hover:bg-red-700 disabled:opacity-50"
+              >
+                {busy ? "Rejecting..." : "Confirm Rejection"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Specimen Timeline Modal */}
+      {timelineModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-xs"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="w-full max-w-lg rounded-xl border border-border bg-card p-6 shadow-xl">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <h3 className="font-semibold text-base text-foreground flex items-center gap-2">
+                <History size={18} /> Specimen Audit Timeline
+              </h3>
+              <button
+                type="button"
+                onClick={() => setTimelineModalOpen(false)}
+                className="rounded-lg p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="mt-4 max-h-80 overflow-y-auto space-y-3">
+              {loadingEvents ? (
+                <div className="py-8 text-center text-xs text-muted-foreground animate-pulse">
+                  Loading specimen events...
+                </div>
+              ) : specimenEvents.length === 0 ? (
+                <div className="py-8 text-center text-xs text-muted-foreground">
+                  No lifecycle events recorded for this specimen yet.
+                </div>
+              ) : (
+                <div className="relative pl-6 space-y-4 border-l-2 border-primary/30 ml-2">
+                  {specimenEvents.map((evt) => (
+                    <div key={evt.id} className="relative text-xs">
+                      <div className="absolute -left-[31px] top-0.5 h-3 w-3 rounded-full bg-primary ring-4 ring-background" />
+                      <div className="font-semibold uppercase tracking-wider text-foreground">
+                        {evt.event_type.replaceAll("_", " ")}
+                      </div>
+                      <div className="text-[11px] text-muted-foreground flex items-center gap-2 mt-0.5">
+                        <Clock size={11} /> {formatDateTime(evt.created_at)}
+                      </div>
+                      {evt.rejection_reason && (
+                        <div className="mt-1 text-red-600 dark:text-red-400 font-medium">
+                          Reason: {evt.rejection_reason.replaceAll("_", " ")}
+                        </div>
+                      )}
+                      {evt.notes && (
+                        <div className="mt-1 text-muted-foreground italic">&ldquo;{evt.notes}&rdquo;</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="mt-6 flex justify-end border-t border-border pt-3">
+              <button
+                type="button"
+                onClick={() => setTimelineModalOpen(false)}
+                className="rounded-lg border border-border px-4 py-1.5 text-xs font-medium text-foreground hover:bg-muted"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

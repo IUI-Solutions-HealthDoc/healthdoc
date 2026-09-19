@@ -15,6 +15,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    func,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -294,4 +295,55 @@ class FacilitySettings(Base, Timestamps):
             "stock_deduction_policy IN ('on_acceptance','on_dispense')",
             name="stock_deduction_policy",
         ),
+    )
+
+
+class PharmacyReturn(Base, UUIDPk):
+    """Returned medicines with quarantine vs resalable disposition and ledger tracking (HD-24, §3 0077)."""
+
+    __tablename__ = "pharmacy_returns"
+
+    facility_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False
+    )
+    patient_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("patients.id", ondelete="RESTRICT"), nullable=False
+    )
+    dispense_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("pharmacy_dispenses.id", ondelete="RESTRICT"), nullable=True
+    )
+    item_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("inventory_items.id", ondelete="RESTRICT"), nullable=False
+    )
+    batch_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("inventory_batches.id", ondelete="RESTRICT"), nullable=True
+    )
+    quantity: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    return_reason: Mapped[str] = mapped_column(Text, nullable=False)
+    disposition: Mapped[str] = mapped_column(String(50), nullable=False)
+    status: Mapped[str] = mapped_column(String(50), nullable=False, server_default="completed")
+    returned_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint("quantity > 0", name="ck_pharmacy_returns_quantity_positive"),
+        CheckConstraint(
+            "disposition IN ('resalable', 'quarantine', 'damaged', 'expired')",
+            name="ck_pharmacy_returns_disposition",
+        ),
+        CheckConstraint(
+            "status IN ('completed', 'pending_inspection', 'cancelled')",
+            name="ck_pharmacy_returns_status",
+        ),
+        Index("ix_pharmacy_returns_facility_id", "facility_id"),
+        Index("ix_pharmacy_returns_patient_id", "patient_id"),
+        Index("ix_pharmacy_returns_dispense_id", "dispense_id"),
+        Index("ix_pharmacy_returns_item_id", "item_id"),
+        Index("ix_pharmacy_returns_batch_id", "batch_id"),
+        Index("ix_pharmacy_returns_returned_by", "returned_by"),
+        Index("ix_pharmacy_returns_created_at", "created_at"),
     )

@@ -2,11 +2,15 @@
 radiology module router - issue #203: order receive + scheduling;
 radiologist draft + sign-off.
 """
+import asyncio
+import hashlib
+import io
 import uuid
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile
+from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,10 +19,15 @@ from app.auth.deps import CurrentDbUser, require_roles
 from app.common.accession import RADIOLOGY, allocate_accession_number
 from app.common.db import get_db
 from app.common.idempotency import check_idempotency, hash_request_body, record_idempotent_response
+from app.files.minio_client import ensure_bucket, get_minio_client
+from app.files.service import MAX_FILE_SIZE_BYTES, sniff_content_type
+from app.orders.models import Order
 from app.radiology.fhir import build_diagnostic_report_bundle
-from app.radiology.models import RadiologyOrderItem, RadiologyReport
+from app.radiology.models import RadiologyAttachment, RadiologyOrderItem, RadiologyReport
 from app.radiology.schemas import (
     CancelScanRequest,
+    RadiologyAttachmentListOut,
+    RadiologyAttachmentOut,
     RadiologyOrderItemCreate,
     RadiologyOrderItemListOut,
     RadiologyOrderItemOut,
@@ -568,4 +577,186 @@ async def _write_audit_log(db: AsyncSession, *, table_name: str, row_id: uuid.UU
         old_value=old_value,
         new_value=new_value,
         reason=reason,
+    )
+
+
+# ---------------- HD-23: PACS & MULTI-FILE DICOM / ATTACHMENTS ----------------
+
+
+@router.post(
+    "/orders/{order_id}/attachments",
+    response_model=RadiologyAttachmentOut,
+    dependencies=[Depends(require_roles("doctor", "radiologist", "admin"))],
+)
+async def upload_order_attachment(
+    current_db_user: CurrentDbUser,
+    order_id: uuid.UUID,
+    file: UploadFile = File(...),
+    radiology_order_item_id: uuid.UUID | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    order = await db.get(Order, order_id)
+    if order is None or order.facility_id != current_db_user.facility_id:
+        raise HTTPException(status_code=404, detail="Order not found in current facility")
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=422, detail="Empty file")
+    if len(data) > MAX_FILE_SIZE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File exceeds maximum allowed size of {MAX_FILE_SIZE_BYTES} bytes",
+        )
+
+    mime_type = sniff_content_type(data) or file.content_type or "application/octet-stream"
+    checksum = hashlib.sha256(data).hexdigest()
+
+    file_id = uuid.uuid4()
+    file_key = f"{order.facility_id}/{order.id}/{file_id}_{file.filename}"
+    bucket = "radiology-attachments"
+
+    client = get_minio_client()
+    try:
+        await asyncio.to_thread(ensure_bucket, bucket)
+        await asyncio.to_thread(
+            client.put_object,
+            bucket,
+            file_key,
+            io.BytesIO(data),
+            len(data),
+            content_type=mime_type,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to save file to object storage: {e}",
+        )
+
+    attachment = RadiologyAttachment(
+        id=file_id,
+        facility_id=order.facility_id,
+        order_id=order.id,
+        patient_id=order.patient_id,
+        radiology_order_item_id=radiology_order_item_id,
+        file_key=file_key,
+        file_name=file.filename or f"attachment_{file_id}",
+        mime_type=mime_type,
+        file_size_bytes=len(data),
+        checksum_sha256=checksum,
+        uploaded_by=current_db_user.id,
+    )
+    db.add(attachment)
+
+    await _write_audit_log(
+        db,
+        table_name="radiology_attachments",
+        row_id=attachment.id,
+        action="upload",
+        actor_id=current_db_user.id,
+        facility_id=current_db_user.facility_id,
+        new_value={
+            "file_name": attachment.file_name,
+            "mime_type": attachment.mime_type,
+            "size_bytes": attachment.file_size_bytes,
+            "checksum": attachment.checksum_sha256,
+        },
+    )
+    await db.flush()
+    await db.refresh(attachment)
+    return attachment
+
+
+@router.get(
+    "/orders/{order_id}/attachments",
+    response_model=RadiologyAttachmentListOut,
+    dependencies=[Depends(require_roles("doctor", "radiologist", "admin"))],
+)
+async def list_order_attachments(
+    current_db_user: CurrentDbUser,
+    order_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    order = await db.get(Order, order_id)
+    if order is None or order.facility_id != current_db_user.facility_id:
+        raise HTTPException(status_code=404, detail="Order not found in current facility")
+
+    stmt = (
+        select(RadiologyAttachment)
+        .where(
+            RadiologyAttachment.order_id == order_id,
+            RadiologyAttachment.facility_id == current_db_user.facility_id,
+        )
+        .order_by(RadiologyAttachment.uploaded_at.desc())
+    )
+    res = await db.execute(stmt)
+    items = list(res.scalars().all())
+    return RadiologyAttachmentListOut(
+        items=[RadiologyAttachmentOut.model_validate(x) for x in items],
+        total=len(items),
+    )
+
+
+@router.get(
+    "/order-items/{item_id}/attachments",
+    response_model=RadiologyAttachmentListOut,
+    dependencies=[Depends(require_roles("doctor", "radiologist", "admin"))],
+)
+async def list_item_attachments(
+    current_db_user: CurrentDbUser,
+    item_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    item = await _scoped_item(db, item_id, current_db_user.facility_id)
+    stmt = (
+        select(RadiologyAttachment)
+        .where(
+            RadiologyAttachment.facility_id == current_db_user.facility_id,
+            (RadiologyAttachment.radiology_order_item_id == item_id)
+            | (RadiologyAttachment.order_id == item.order_id),
+        )
+        .order_by(RadiologyAttachment.uploaded_at.desc())
+    )
+    res = await db.execute(stmt)
+    items = list(res.scalars().all())
+    return RadiologyAttachmentListOut(
+        items=[RadiologyAttachmentOut.model_validate(x) for x in items],
+        total=len(items),
+    )
+
+
+@router.get(
+    "/attachments/{attachment_id}/download",
+    dependencies=[Depends(require_roles("doctor", "radiologist", "admin"))],
+)
+async def download_attachment(
+    current_db_user: CurrentDbUser,
+    attachment_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = select(RadiologyAttachment).where(
+        RadiologyAttachment.id == attachment_id,
+        RadiologyAttachment.facility_id == current_db_user.facility_id,
+    )
+    attachment = (await db.execute(stmt)).scalar_one_or_none()
+    if attachment is None:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+
+    client = get_minio_client()
+    bucket = "radiology-attachments"
+
+    try:
+        response = await asyncio.to_thread(client.get_object, bucket, attachment.file_key)
+        data = response.read()
+        response.close()
+        response.release_conn()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch object from storage: {e}")
+
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type=attachment.mime_type,
+        headers={
+            "Content-Disposition": f'inline; filename="{attachment.file_name}"',
+            "Content-Length": str(len(data)),
+        },
     )

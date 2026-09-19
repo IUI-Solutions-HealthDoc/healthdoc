@@ -275,7 +275,15 @@ class TestOPDCoreJourney:
         # --- Step 4b: result entry + pathologist verify ---
         result_resp = client.post(
             f"/api/v1/pathology/order-items/{lab_item_id}/results",
-            json={"result_data": {"hemoglobin_g_dl": 13.5}, "remarks": "Journey test result"},
+            json={
+                "result_data": {
+                    "hemoglobin_g_dl": 13.5,
+                    "wbc": 7.2,
+                    "plt": 250.0,
+                    "rbc": 4.8,
+                },
+                "remarks": "Journey test result",
+            },
         )
         assert result_resp.status_code == 201, result_resp.text
 

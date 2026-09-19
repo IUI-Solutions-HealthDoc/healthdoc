@@ -30,6 +30,20 @@ class LabOrderItem(Base, UUIDPk, Timestamps, Blame):
     )
     estimated_minutes = Column(Integer, nullable=True)
 
+    # Specimen lifecycle & rejection tracking (HD-22, migration 0077)
+    specimen_status = Column(
+        String(50),
+        nullable=False,
+        server_default=text("'pending_collection'")
+    )
+    rejection_reason = Column(String(50), nullable=True)
+    recollected_from_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("lab_order_items.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True
+    )
+
 
 class LabResult(Base, UUIDPk, Timestamps):
     """
@@ -92,4 +106,75 @@ class LabAnalyte(Base, UUIDPk):
     is_required = Column(Boolean, nullable=False, server_default=text("true"))
     version = Column(Integer, nullable=False, server_default=text("1"))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class LabSpecimenEvent(Base, UUIDPk):
+    """Laboratory specimen collection, rejection and recollection audit trail (§3 0077)."""
+
+    __tablename__ = "lab_specimen_events"
+
+    lab_order_item_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("lab_order_items.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    event_type = Column(String(50), nullable=False)  # collected, received, rejected, recollected
+    rejection_reason = Column(String(50), nullable=True)
+    notes = Column(Text, nullable=True)
+    performed_by = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
+
+
+class CriticalAlert(Base, UUIDPk):
+    """Durable panic/critical laboratory alert and acknowledgement outbox (§3 0077)."""
+
+    __tablename__ = "critical_alerts"
+
+    facility_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("facilities.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    patient_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("patients.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    visit_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("visits.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    order_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("orders.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    test_code = Column(String(50), nullable=False)
+    analyte_code = Column(String(50), nullable=False)
+    analyte_name = Column(String(100), nullable=False)
+    value = Column(Numeric(10, 3), nullable=False)
+    unit = Column(String(30), nullable=True)
+    critical_low = Column(Numeric(10, 3), nullable=True)
+    critical_high = Column(Numeric(10, 3), nullable=True)
+    severity = Column(String(50), nullable=False, server_default=text("'critical'"))
+    status = Column(String(50), nullable=False, server_default=text("'unacknowledged'"), index=True)
+    acknowledged_by = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    acknowledged_at = Column(DateTime(timezone=True), nullable=True)
+    acknowledgement_note = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
 

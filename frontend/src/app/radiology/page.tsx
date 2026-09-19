@@ -8,18 +8,22 @@ import {
   draftRadiologyReport,
   getRadiologyFhirBundle,
   getRadiologyReports,
+  listOrderAttachments,
   listRadiologyWork,
   markScanComplete,
   rescheduleScan,
   scheduleScan,
   signOffRadiologyReport,
+  uploadOrderAttachment,
 } from "@/features/radiology/api";
 import type {
+  RadiologyAttachment,
   RadiologyOrderItem,
   RadiologyReport,
 } from "@/features/radiology/types";
-import { ApiError, formatDateTime } from "@/lib/api";
+import { ApiError, downloadBlob, formatDateTime } from "@/lib/api";
 import { useAuth } from "@/providers/auth-provider";
+import { Download, FileUp, Image as ImageIcon } from "lucide-react";
 
 const WORKFLOW: { status: string; label: string; hint: string }[] = [
   { status: "placed", label: "To schedule", hint: "Ordered, not yet booked onto a machine" },
@@ -71,6 +75,11 @@ function RadiologyPageContent() {
   const [fhirError, setFhirError] = useState<string | null>(null);
   const [fhirLoading, setFhirLoading] = useState(false);
 
+  const [attachments, setAttachments] = useState<RadiologyAttachment[]>([]);
+  const [attachmentsLoading, setAttachmentsLoading] = useState(false);
+  const [uploadingFile, setUploadingFile] = useState(false);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
+
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
@@ -113,6 +122,19 @@ function RadiologyPageContent() {
     }
   }, []);
 
+  const loadAttachments = useCallback(async (orderId: string) => {
+    setAttachmentsLoading(true);
+    setAttachmentError(null);
+    try {
+      const res = await listOrderAttachments(orderId);
+      setAttachments(res.items);
+    } catch {
+      setAttachments([]);
+    } finally {
+      setAttachmentsLoading(false);
+    }
+  }, []);
+
   const openItem = useCallback(
     async (item: RadiologyOrderItem) => {
       setSelected(item);
@@ -128,9 +150,42 @@ function RadiologyPageContent() {
       setFhirBundle(null);
       setFhirError(null);
       await loadReports(item.id);
+      void loadAttachments(item.order_id);
     },
-    [loadReports],
+    [loadReports, loadAttachments],
   );
+
+  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !selected) return;
+    setUploadingFile(true);
+    setAttachmentError(null);
+    try {
+      await uploadOrderAttachment(selected.order_id, file, selected.id);
+      await loadAttachments(selected.order_id);
+    } catch (err) {
+      setAttachmentError(err instanceof Error ? err.message : "Failed to upload attachment");
+    } finally {
+      setUploadingFile(false);
+      e.target.value = "";
+    }
+  }
+
+  async function handleDownloadAttachment(att: RadiologyAttachment) {
+    try {
+      const blob = await downloadBlob(`/radiology/attachments/${att.id}/download`);
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = att.file_name;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch {
+      setAttachmentError("Could not download attachment");
+    }
+  }
 
   const syncSelected = useCallback(
     async (itemId: string, freshItems?: RadiologyOrderItem[]) => {
@@ -579,6 +634,69 @@ function RadiologyPageContent() {
                   ) : null}
                 </div>
               )}
+
+              <div className="border-t border-border pt-4">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <div className="flex items-center gap-1.5">
+                    <ImageIcon className="h-4 w-4 text-primary" />
+                    <p className="text-sm font-medium">DICOM & Attachments</p>
+                    <span className="text-xs text-muted-foreground">({attachments.length})</span>
+                  </div>
+                  <label className={`flex items-center gap-1 text-xs bg-primary text-primary-foreground px-2.5 py-1 rounded cursor-pointer hover:bg-primary/90 transition-colors ${uploadingFile ? "opacity-50 pointer-events-none" : ""}`}>
+                    <FileUp className="h-3.5 w-3.5" />
+                    <span>{uploadingFile ? "Uploading…" : "Upload File"}</span>
+                    <input
+                      type="file"
+                      className="hidden"
+                      onChange={(e) => void handleFileUpload(e)}
+                      disabled={uploadingFile}
+                    />
+                  </label>
+                </div>
+
+                {attachmentError && (
+                  <p className="mb-2 text-xs text-danger">{attachmentError}</p>
+                )}
+
+                {attachmentsLoading ? (
+                  <p className="text-xs text-muted-foreground">Loading attachments…</p>
+                ) : attachments.length === 0 ? (
+                  <p className="text-xs text-muted-foreground italic">
+                    No DICOM or radiology attachments uploaded yet.
+                  </p>
+                ) : (
+                  <div className="space-y-2 mt-2">
+                    {attachments.map((att) => (
+                      <div
+                        key={att.id}
+                        className="flex items-center justify-between gap-2 rounded border border-border bg-card p-2 text-xs"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-medium text-foreground">{att.file_name}</p>
+                          <div className="flex items-center gap-2 text-[11px] text-muted-foreground mt-0.5">
+                            <span>{(att.file_size_bytes / 1024).toFixed(1)} KB</span>
+                            <span>•</span>
+                            <span className="truncate max-w-[120px]">{att.mime_type}</span>
+                            <span>•</span>
+                            <span className="font-mono text-[10px]" title={`SHA-256: ${att.checksum_sha256}`}>
+                              SHA: {att.checksum_sha256.slice(0, 8)}…
+                            </span>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => void handleDownloadAttachment(att)}
+                          className="flex items-center gap-1 rounded bg-secondary px-2 py-1 text-xs text-secondary-foreground hover:bg-secondary/80"
+                          title="Download attachment"
+                        >
+                          <Download className="h-3 w-3" />
+                          <span>Get</span>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               {selected.pacs_study_uid && (
                 <p className="border-t border-border pt-4 font-mono text-xs text-muted-foreground">

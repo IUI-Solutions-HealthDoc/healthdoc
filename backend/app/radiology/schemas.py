@@ -113,3 +113,26 @@ class RadiologyReportOut(BaseModel):
     tat_minutes: int | None = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class RadiologyAttachmentOut(BaseModel):
+    id: uuid.UUID
+    facility_id: uuid.UUID
+    order_id: uuid.UUID
+    patient_id: uuid.UUID
+    radiology_order_item_id: uuid.UUID | None = None
+    file_key: str
+    file_name: str
+    mime_type: str
+    file_size_bytes: int
+    checksum_sha256: str
+    uploaded_by: uuid.UUID
+    uploaded_at: datetime
+    download_url: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RadiologyAttachmentListOut(BaseModel):
+    items: list[RadiologyAttachmentOut]
+    total: int
