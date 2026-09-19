@@ -7,13 +7,15 @@ import {
   collectLabSample,
   enterLabResult,
   getLabResultHistory,
+  getTestAnalytes,
   listLabWork,
   verifyLabResult,
 } from "@/features/lab/api";
-import type { LabOrderItem, LabResult } from "@/features/lab/types";
+import type { LabAnalyte, LabOrderItem, LabResult } from "@/features/lab/types";
 import { ApiError, formatDateTime } from "@/lib/api";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/AsyncState";
 import { useAuth } from "@/providers/auth-provider";
+import StructuredResultForm from "./StructuredResultForm";
 
 const STATUS_FILTERS = [
   { value: "all", label: "All" },
@@ -83,6 +85,8 @@ export function LabWorklistPanel() {
   const [barcode, setBarcode] = useState("");
   const [resultJson, setResultJson] = useState("{}\n");
   const [remarks, setRemarks] = useState("");
+  const [analytes, setAnalytes] = useState<LabAnalyte[]>([]);
+  const [useStructured, setUseStructured] = useState(true);
   const [amendReason, setAmendReason] = useState("");
   const [amendJson, setAmendJson] = useState("");
   const [amendRemarks, setAmendRemarks] = useState("");
@@ -163,6 +167,22 @@ export function LabWorklistPanel() {
     setAmendReason("");
     setMessage(null);
     setError(null);
+    setAnalytes([]);
+    setUseStructured(true);
+    const code =
+      item.test_code ||
+      (item.test_name.toLowerCase().includes("hemoglobin")
+        ? "HEMOGLOBIN"
+        : item.test_name.toUpperCase());
+    if (code) {
+      getTestAnalytes(code)
+        .then((res) => {
+          if (res && res.items && res.items.length > 0) {
+            setAnalytes(res.items);
+          }
+        })
+        .catch(() => setAnalytes([]));
+    }
     void loadHistory(item);
   }
 
@@ -438,43 +458,98 @@ export function LabWorklistPanel() {
 
           {canManageResults && selected.status === "in_progress" ? (
             <div className="space-y-4">
-              <label className="block space-y-1 text-sm">
-                <span className="text-muted-foreground">Result data (JSON object)</span>
-                <textarea
-                  className="min-h-48 w-full rounded-md border border-border px-3 py-2 font-mono text-sm"
-                  value={resultJson}
-                  onChange={(event) => setResultJson(event.target.value)}
-                  spellCheck={false}
-                />
-              </label>
-              {selected.test_name.toLowerCase().includes("hemoglobin") ? (
-                <p className="text-xs text-muted-foreground">
-                  Use numeric field <code>hemoglobin_g_dl</code>; configured critical limits are
-                  below 7.0 or above 20.0 g/dL.
-                </p>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  Enter fields authorized by the lab SOP; the server preserves the JSON exactly.
-                </p>
+              {analytes.length > 0 && (
+                <div className="flex items-center justify-between border-b border-border pb-2">
+                  <span className="text-xs text-muted-foreground">
+                    {useStructured
+                      ? "Structured analyte entry mode"
+                      : "Raw JSON object mode"}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setUseStructured(!useStructured)}
+                    className="text-xs text-primary underline hover:text-primary/80"
+                  >
+                    {useStructured
+                      ? "Switch to Raw JSON"
+                      : "Switch to Structured Form"}
+                  </button>
+                </div>
               )}
-              <label className="block space-y-1 text-sm">
-                <span className="text-muted-foreground">Remarks</span>
-                <textarea
-                  className="min-h-20 w-full rounded-md border border-border px-3 py-2"
-                  value={remarks}
-                  onChange={(event) => setRemarks(event.target.value)}
+
+              {analytes.length > 0 && useStructured ? (
+                <StructuredResultForm
+                  analytes={analytes}
+                  testName={selected.test_name}
+                  initialRemarks={remarks}
+                  busy={busy}
+                  onSubmit={async (resultData, formRemarks) => {
+                    setBusy(true);
+                    setError(null);
+                    try {
+                      const result = await enterLabResult(
+                        selected.id,
+                        resultData,
+                        formRemarks,
+                      );
+                      updateRow({ ...selected, status: "completed" });
+                      setHistory([result]);
+                      setMessage(
+                        "Preliminary result saved with structured clinical flags. A different lab professional must verify and release it.",
+                      );
+                    } catch (reason) {
+                      setError(
+                        reason instanceof ApiError
+                          ? reason.message
+                          : "Result entry failed",
+                      );
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
                 />
-              </label>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void enterResult()}
-                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
-              >
-                {busy ? "Saving…" : "Save preliminary result"}
-              </button>
+              ) : (
+                <>
+                  <label className="block space-y-1 text-sm">
+                    <span className="text-muted-foreground">Result data (JSON object)</span>
+                    <textarea
+                      className="min-h-48 w-full rounded-md border border-border px-3 py-2 font-mono text-sm"
+                      value={resultJson}
+                      onChange={(event) => setResultJson(event.target.value)}
+                      spellCheck={false}
+                    />
+                  </label>
+                  {selected.test_name.toLowerCase().includes("hemoglobin") ? (
+                    <p className="text-xs text-muted-foreground">
+                      Use numeric field <code>hemoglobin_g_dl</code>; configured critical limits are
+                      below 7.0 or above 20.0 g/dL.
+                    </p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      Enter fields authorized by the lab SOP; the server preserves the JSON exactly.
+                    </p>
+                  )}
+                  <label className="block space-y-1 text-sm">
+                    <span className="text-muted-foreground">Remarks</span>
+                    <textarea
+                      className="min-h-20 w-full rounded-md border border-border px-3 py-2"
+                      value={remarks}
+                      onChange={(event) => setRemarks(event.target.value)}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void enterResult()}
+                    className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+                  >
+                    {busy ? "Saving…" : "Save preliminary result"}
+                  </button>
+                </>
+              )}
             </div>
           ) : null}
+
 
           {canManageResults && selected.status === "completed" ? (
             <div className="space-y-3 rounded-md border border-warning bg-warning-muted p-4 text-sm">

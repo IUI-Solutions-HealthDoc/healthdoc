@@ -112,6 +112,7 @@ class PrescriptionItemCreate(BaseModel):
     duration_days: int | None = None
     route: str | None = None
     instructions: str | None = None
+    priority: str = "routine"
     #: Required when a retry is needed after the first save came back
     #: with an allergy conflict (app.allergies.service.AllergyConflict).
     #: Ignored if there was no conflict. Anaphylaxis can never be
@@ -136,6 +137,7 @@ class PrescriptionItemOut(BaseModel):
     route: str | None
     instructions: str | None
     status: str
+    priority: str = "routine"
     allergy_override_reason: str | None
     allergy_override_by: UUID | None
     model_config = {"from_attributes": True}

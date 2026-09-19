@@ -115,3 +115,24 @@ class LabMISSummaryOut(BaseModel):
     total_orders: int
     total_results: int
     panic_frequency: list[PanicFrequencyOut]
+
+
+class LabAnalyteOut(BaseModel):
+    id: uuid.UUID
+    test_code: str
+    analyte_code: str
+    analyte_name: str
+    value_type: str
+    unit: str | None = None
+    reference_low: float | None = None
+    reference_high: float | None = None
+    critical_low: float | None = None
+    critical_high: float | None = None
+    is_required: bool
+    version: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class LabAnalyteListOut(BaseModel):
+    items: list[LabAnalyteOut]

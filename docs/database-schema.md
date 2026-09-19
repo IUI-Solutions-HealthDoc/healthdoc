@@ -194,6 +194,7 @@ do not merge out of order.**
 | 0073 | abdm_callback_receipts | abdm_callback_receipts | Independent HTTP receipts; correlation/status metadata and bounded encrypted redacted body/header/IP snapshots; seven-day operational retention, not milestone certification. |
 | 0074 | appointments_and_scheduling | appointment_services, appointments | Scheduling services and patient appointments with conflict prevention and queue check-in. |
 | 0075 | inpatient_dispositions_and_checklists | clinical_dispositions, admission_checklist_tasks | Inpatient disposition intent tracking and standardized admission nursing checklists with mandatory skip reasons. |
+| 0076 | emar_triage_analytes_urgency | emergency_triages, emergency_triage_logs, lab_analytes | eMAR dose identity & corrections, ED triage tracking and re-triage logs, structured lab analyte bounds, and prescription priority. |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -764,7 +765,9 @@ medicine_name   text NOT NULL                    -- free-text fallback / snapsho
 dosage varchar(50) · frequency varchar(50) · duration_days int · route varchar(30)
 instructions text
 status varchar(50) NOT NULL DEFAULT 'prescribed' -- PrescriptionItemStatus enum
+priority varchar(50) NOT NULL DEFAULT 'routine'
 INDEX ix_prescription_items_prescription_id (prescription_id)
+
 allergy_override_by     UUID NULL → users       -- 0031. Prescribing against a recorded allergy is
 allergy_override_reason text NULL               -- 0031. permitted but never silent.
 ```
@@ -1415,6 +1418,13 @@ patient_id UUID NOT NULL → patients
 scheduled_at timestamptz NULL · administered_at timestamptz NOT NULL DEFAULT now()
 status varchar(30) NOT NULL          -- given|held|refused
 dose_given varchar(100) NULL · reason text NULL · notes text NULL
+route varchar(30) NULL
+correction_of_id UUID NULL REFERENCES medication_administration(id)
+is_correction boolean NOT NULL DEFAULT false
+correction_reason text NULL
+requires_acknowledgement boolean NOT NULL DEFAULT false
+acknowledged_by UUID NULL REFERENCES users(id)
+acknowledged_at timestamptz NULL
 CHECK status = 'given' OR reason IS NOT NULL AND length(trim(reason)) > 0
 notes        text NULL                          -- 0043. Administering nurse's remark.
 ```
@@ -1809,6 +1819,49 @@ notes text NULL
 ```
 
 
+**emergency_triages** (0076) — emergency department triage assessment, acuity level, and disposition
+```
+facility_id UUID NOT NULL REFERENCES facilities(id)
+patient_id UUID NOT NULL REFERENCES patients(id)
+visit_id UUID NOT NULL REFERENCES visits(id)
+acuity_level varchar(50) NOT NULL
+chief_complaint text NOT NULL
+triage_notes text NULL
+assigned_doctor_id UUID NULL REFERENCES users(id)
+assigned_bay varchar(50) NULL
+status varchar(50) NOT NULL DEFAULT 'waiting'
+triaged_at timestamptz NOT NULL
+triaged_by UUID NOT NULL REFERENCES users(id)
+clinician_seen_at timestamptz NULL
+disposition varchar(50) NULL
+disposition_at timestamptz NULL
+disposition_notes text NULL
+```
+
+**emergency_triage_logs** (0076) — emergency department acuity changes and re-triage audit trail
+```
+triage_id UUID NOT NULL REFERENCES emergency_triages(id)
+previous_acuity varchar(50) NOT NULL
+new_acuity varchar(50) NOT NULL
+reason text NOT NULL
+changed_by UUID NOT NULL REFERENCES users(id)
+changed_at timestamptz NOT NULL
+```
+
+**lab_analytes** (0076) — structured laboratory analyte catalogue and reference/critical bounds
+```
+test_code varchar(50) NOT NULL
+analyte_code varchar(50) NOT NULL
+analyte_name varchar(100) NOT NULL
+value_type varchar(50) NOT NULL DEFAULT 'numeric'
+unit varchar(30) NULL
+reference_low numeric(10, 3) NULL
+reference_high numeric(10, 3) NULL
+critical_low numeric(10, 3) NULL
+critical_high numeric(10, 3) NULL
+is_required boolean NOT NULL DEFAULT true
+version integer NOT NULL DEFAULT 1
+```
 **abdm_callback_replies** (0067) — committed reply intent, not a clinical inbox
 ```
 facility_id UUID NOT NULL → facilities
