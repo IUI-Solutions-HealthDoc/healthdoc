@@ -196,6 +196,7 @@ do not merge out of order.**
 | 0075 | inpatient_dispositions_and_checklists | clinical_dispositions, admission_checklist_tasks | Inpatient disposition intent tracking and standardized admission nursing checklists with mandatory skip reasons. |
 | 0076 | emar_triage_analytes_urgency | emergency_triages, emergency_triage_logs, lab_analytes | eMAR dose identity & corrections, ED triage tracking and re-triage logs, structured lab analyte bounds, and prescription priority. |
 | 0077 | critical_alerts_lis_pacs_returns | critical_alerts, lab_specimen_events, radiology_attachments, pharmacy_returns | Critical alerts outbox & acknowledgement, LIS specimen tracking & rejection, radiology imaging attachments, and pharmacy returns with quarantine disposition. |
+| 0078 | ot_and_longitudinal_programs | care_programs, program_enrolments, program_visits | Operation Theatre lifecycle enhancements, WHO surgical safety checklist, and longitudinal care program registries. |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -1179,8 +1180,8 @@ issued_to_patient_id UUID NULL → patients
 
 ### 0017 — OT stubs (B3, schema only)
 
-**ot_schedules** `[Blame]` — `facility_id UUID NOT NULL → facilities · visit_id → visits · patient_id → patients · scheduled_start timestamptz · scheduled_end timestamptz · procedure_name text · status varchar(30) (scheduled|completed|cancelled)`
-**ot_records** — `ot_schedule_id → ot_schedules · started_at · ended_at · surgeon_user_id → users · anesthetist_user_id UUID NULL → users · notes text`
+**ot_schedules** `[Blame]` — `facility_id UUID NOT NULL → facilities · visit_id → visits · patient_id → patients · scheduled_start timestamptz · scheduled_end timestamptz · procedure_name text · status varchar(50) (scheduled|in_progress|completed|cancelled) · theatre_number varchar(50) · admission_id UUID NULL → admissions · pre_op_checklist jsonb NULL · cancel_reason text NULL · surgical_safety_confirmed boolean`
+**ot_records** — `ot_schedule_id → ot_schedules · started_at · ended_at · surgeon_user_id → users · anesthetist_user_id UUID NULL → users · notes text · pre_op_diagnosis text NULL · post_op_diagnosis text NULL · procedure_performed text NULL · anesthesia_type varchar(50) NULL · scrub_nurse text NULL · circulating_nurse text NULL · implants_used jsonb NULL · sponge_needle_count_correct boolean NULL · specimens_sent jsonb NULL · complications text NULL · recovery_status varchar(50) NULL`
 
 ### 0019 — files (B7)
 
@@ -1924,6 +1925,41 @@ disposition varchar(50) NOT NULL
 status varchar(50) NOT NULL
 returned_by UUID NOT NULL REFERENCES users(id)
 ```
+
+**care_programs** (0078) — standardized chronic, maternal, and longitudinal care program catalog
+```
+program_code varchar(50) NOT NULL
+program_name varchar(100) NOT NULL
+category varchar(50) NOT NULL
+description text NULL
+is_active boolean NOT NULL
+```
+
+**program_enrolments** (0078) — longitudinal care program enrolments with active duplicate prevention
+```
+facility_id UUID NOT NULL REFERENCES facilities(id)
+patient_id UUID NOT NULL REFERENCES patients(id)
+program_code varchar(50) NOT NULL
+program_name varchar(100) NOT NULL
+enrolment_date date NOT NULL
+status varchar(50) NOT NULL
+exit_date date NULL
+exit_reason text NULL
+target_outcomes jsonb NULL
+enrolled_by UUID NOT NULL REFERENCES users(id)
+```
+
+**program_visits** (0078) — longitudinal care follow-up visit encounters and clinical indicator trajectories
+```
+enrolment_id UUID NOT NULL REFERENCES program_enrolments(id)
+scheduled_date date NOT NULL
+completed_date date NULL
+status varchar(50) NOT NULL
+metrics jsonb NULL
+clinical_summary text NULL
+conducted_by UUID NULL REFERENCES users(id)
+```
+
 **abdm_callback_replies** (0067) — committed reply intent, not a clinical inbox
 ```
 facility_id UUID NOT NULL → facilities

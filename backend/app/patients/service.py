@@ -546,6 +546,7 @@ REPOINTED_ON_MERGE: frozenset[str] = frozenset(
         "critical_alerts",
         "pharmacy_returns",
         "radiology_attachments",
+        "program_enrolments",
         # ABDM M2/M3. A merged-away chart that keeps its care contexts and
         # links means the surviving patient's ABHA no longer reaches records
         # that are theirs — and the dead chart still offers them to the
@@ -665,6 +666,7 @@ async def approve_merge(
     await _repoint_critical_alerts(db, source=source, target=target)
     await _repoint_pharmacy_returns(db, source=source, target=target)
     await _repoint_radiology_attachments(db, source=source, target=target)
+    await _repoint_program_enrolments(db, source=source, target=target)
     await _reconcile_patient_portal_bindings(
         db, source=source, target=target, approved_by=approved_by
     )
@@ -1114,6 +1116,18 @@ async def _repoint_radiology_attachments(db: AsyncSession, *, source: Patient, t
         {"target_id": target.id, "source_id": source.id},
     )
     await db.flush()
+
+
+async def _repoint_program_enrolments(db: AsyncSession, *, source: Patient, target: Patient) -> None:
+    """Moves source's program_enrolments rows onto target."""
+    await db.execute(
+        text(
+            "UPDATE program_enrolments SET patient_id = :target_id WHERE patient_id = :source_id"
+        ),
+        {"target_id": target.id, "source_id": source.id},
+    )
+    await db.flush()
+
 
 
 async def _repoint_clinical_incidents(db: AsyncSession, *, source: Patient, target: Patient) -> None:

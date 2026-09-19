@@ -726,22 +726,22 @@ async def build_invoice(
 
 _PMJAY_STUB_CONFIG = {
     "enabled": True,
-    "default_status": "not_determined",
+    "default_status": "unavailable",
 }
 
 
 def check_pmjay_eligibility(patient_id: uuid.UUID, visit_id: uuid.UUID) -> PMJAYEligibilityResponse:
-    """STUB — does not call ABDM/PM-JAY. Always 'not_determined' unless
-    disabled, routed through a config dict (not hardcoded) so a real
-    eligibility table can replace it later without changing the
-    response shape. Do not wire this into automatic scheme_adjustment
-    on invoices — see schemas.py docstring on PMJAYEligibilityResponse."""
+    """STUB — does not call live ABDM/PM-JAY beneficiary service. Returns
+    'unavailable' to fail-closed and avoid presenting simulated eligibility
+    as verified coverage during gateway outages. Front desk should verify
+    the beneficiary card/ABHA manually."""
     if not _PMJAY_STUB_CONFIG["enabled"]:
         return PMJAYEligibilityResponse(
             patient_id=patient_id,
             visit_id=visit_id,
             eligibility_status="not_eligible",
             reason="PM-JAY eligibility check is disabled for this deployment.",
+            is_stub=True,
         )
 
     return PMJAYEligibilityResponse(
@@ -749,10 +749,11 @@ def check_pmjay_eligibility(patient_id: uuid.UUID, visit_id: uuid.UUID) -> PMJAY
         visit_id=visit_id,
         eligibility_status=_PMJAY_STUB_CONFIG["default_status"],
         reason=(
-            "PM-JAY eligibility is not yet verified automatically — this is "
-            "a stub pending ABDM/PM-JAY beneficiary API integration. Front "
-            "desk should verify the beneficiary card/ABHA manually."
+            "PM-JAY eligibility gateway is currently unavailable or pending live "
+            "ABDM/PM-JAY integration. Front desk must manually inspect beneficiary card / "
+            "PM-JAY golden card before applying scheme tariff."
         ),
+        is_stub=True,
     )
 
 
@@ -1177,6 +1178,7 @@ async def record_payment(
         collected_at = datetime.now(UTC)
 
     payment = Payment(
+        id=uuid.uuid4(),
         receipt_number=receipt_number,
         invoice_id=invoice.id,
         amount=amount,
@@ -1245,6 +1247,8 @@ async def create_refund(
     payment_id: uuid.UUID,
     body: RefundCreate,
     actor_user_id: uuid.UUID,
+    *,
+    prevent_self_approval: bool = False,
 ) -> RefundOut:
     """
     Insert one immutable refunds row (a reversal ledger entry — this
@@ -1259,6 +1263,12 @@ async def create_refund(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"No payment found for payment_id={payment_id}.",
+        )
+
+    if prevent_self_approval and payment.created_by == actor_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cashier who collected payment cannot self-approve refund (segregation of duties required).",
         )
 
     if payment.status != PaymentStatus.SUCCESS.value:
@@ -1301,6 +1311,7 @@ async def create_refund(
     refund_number = await _allocate_billing_number(db, invoice.facility_id, "refund", "RFD")
 
     refund = Refund(
+        id=uuid.uuid4(),
         refund_number=refund_number,
         payment_id=payment.id,
         amount=amount,
