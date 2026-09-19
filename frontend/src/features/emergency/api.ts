@@ -174,9 +174,12 @@ export interface EmergencyTriageUpdateInput {
 }
 
 export function listEmergencyTriages(status?: string): Promise<EmergencyTriageOut[]> {
-  const query = status ? `?status=${encodeURIComponent(status)}` : "";
-  return api<EmergencyTriageOut[]>(`/emergency/triages${query}`);
+  if (status) {
+    return api<EmergencyTriageOut[]>(`/emergency/triages?status=${encodeURIComponent(status)}`);
+  }
+  return api<EmergencyTriageOut[]>("/emergency/triages");
 }
+
 
 export function getEmergencyMetrics(): Promise<EmergencyMetricsOut> {
   return api<EmergencyMetricsOut>("/emergency/metrics");
