@@ -113,6 +113,7 @@ def upgrade() -> None:
     op.create_index("ix_program_enrolments_facility_id", "program_enrolments", ["facility_id"])
     op.create_index("ix_program_enrolments_patient_id", "program_enrolments", ["patient_id"])
     op.create_index("ix_program_enrolments_program_code", "program_enrolments", ["program_code"])
+    op.create_index("ix_program_enrolments_enrolled_by", "program_enrolments", ["enrolled_by"])
     op.create_index(
         "uq_active_program_enrolment",
         "program_enrolments",
@@ -136,12 +137,15 @@ def upgrade() -> None:
     )
     op.create_index("ix_program_visits_enrolment_id", "program_visits", ["enrolment_id"])
     op.create_index("ix_program_visits_scheduled_date", "program_visits", ["scheduled_date"])
+    op.create_index("ix_program_visits_conducted_by", "program_visits", ["conducted_by"])
 
 
 def downgrade() -> None:
+    op.drop_index("ix_program_visits_conducted_by", table_name="program_visits")
     op.drop_index("ix_program_visits_scheduled_date", table_name="program_visits")
     op.drop_index("ix_program_visits_enrolment_id", table_name="program_visits")
     op.drop_table("program_visits")
+    op.drop_index("ix_program_enrolments_enrolled_by", table_name="program_enrolments")
 
     op.drop_index("uq_active_program_enrolment", table_name="program_enrolments")
     op.drop_index("ix_program_enrolments_program_code", table_name="program_enrolments")

@@ -39,7 +39,7 @@ class ProgramEnrolment(Base, UUIDPk, Timestamps):
     exit_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     target_outcomes: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     enrolled_by: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
     )
 
     __table_args__ = (
@@ -59,5 +59,5 @@ class ProgramVisit(Base, UUIDPk, Timestamps):
     metrics: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     clinical_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     conducted_by: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )

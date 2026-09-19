@@ -26,7 +26,7 @@ from app.reports.service import KPI_CATALOG, get_ed_census, get_receptionist_sum
 router = APIRouter(prefix="/reports", tags=["reports"])
 
 # Same audience as billing MIS: this is a management view, not counter work.
-_REPORT_ROLES = ("supervisor", "admin", "auditor", "receptionist", "doctor", "nurse")
+_REPORT_ROLES = ("supervisor", "admin", "auditor", "receptionist", "doctor", "nurse", "billing")
 
 
 def _window(period: str, date_from: date | None, date_to: date | None) -> tuple[date, date]:
