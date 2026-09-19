@@ -9,7 +9,7 @@ import uuid
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import case, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.allergies.interactions import check_interactions
@@ -355,6 +355,7 @@ async def create_prescription(
             route=item.route,
             instructions=item.instructions,
             status="prescribed",
+            priority=item.priority.lower() if item.priority else "routine",
             allergy_override_reason=allergy_override_reason,
             allergy_override_by=allergy_override_by,
         )
@@ -402,9 +403,14 @@ async def get_prescription_items(db: AsyncSession, prescription_id: UUID) -> lis
     fetched as a separate query rather than via ORM-relationship
     loading -- callers that need a full PrescriptionOut (header +
     items) must call this alongside get_prescription()/create_prescription()."""
+    priority_order = case(
+        (PrescriptionItem.priority == "stat", 1),
+        (PrescriptionItem.priority == "urgent", 2),
+        else_=3,
+    )
     result = await db.execute(
         select(PrescriptionItem)
         .where(PrescriptionItem.prescription_id == prescription_id)
-        .order_by(PrescriptionItem.created_at.asc())
+        .order_by(priority_order, PrescriptionItem.created_at.asc())
     )
     return list(result.scalars().all())

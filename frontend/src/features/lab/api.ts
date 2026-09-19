@@ -1,6 +1,7 @@
 import { api } from "@/lib/api";
 
 import type {
+  LabAnalyteList,
   LabMisSummary,
   LabOrderItem,
   LabOrderItemList,
@@ -8,6 +9,7 @@ import type {
   LabResultHistory,
   LabWorklistParams,
 } from "./types";
+
 
 function worklistQuery(params: LabWorklistParams = {}): string {
   const search = new URLSearchParams({
@@ -77,3 +79,8 @@ export function getLabMisSummary(dateFrom: string, dateTo: string): Promise<LabM
   });
   return api<LabMisSummary>(`/pathology/mis/summary?${params.toString()}`);
 }
+
+export function getTestAnalytes(testCode: string): Promise<LabAnalyteList> {
+  return api<LabAnalyteList>(`/pathology/catalogue/${encodeURIComponent(testCode)}/analytes`);
+}
+

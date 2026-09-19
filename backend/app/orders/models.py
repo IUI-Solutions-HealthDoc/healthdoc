@@ -177,6 +177,7 @@ class PrescriptionItem(Base, UUIDPk, Timestamps):
     route = Column(String(30), nullable=True)
     instructions = Column(Text, nullable=True)
     status = Column(String(50), nullable=False, server_default="prescribed")
+    priority = Column(String(20), nullable=False, server_default="routine")
 
     # Allergy override trail (migration 0032). Both NULL = no conflict was
     # ever raised for this item. Both set = a conflict was raised and a
@@ -190,6 +191,7 @@ class PrescriptionItem(Base, UUIDPk, Timestamps):
 
     __table_args__ = (
         Index("ix_prescription_items_prescription_id", "prescription_id"),
+        Index("ix_prescription_items_priority", "priority"),
         CheckConstraint(
             "(allergy_override_reason IS NULL AND allergy_override_by IS NULL) "
             "OR (char_length(allergy_override_reason) >= 20 AND allergy_override_by IS NOT NULL)",

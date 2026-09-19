@@ -43,6 +43,26 @@ export interface CriticalLabAlert {
   accession_number: string;
 }
 
+export interface LabAnalyte {
+  id: string;
+  test_code: string;
+  analyte_code: string;
+  analyte_name: string;
+  value_type: "numeric" | "text" | string;
+  unit: string | null;
+  reference_low: number | null;
+  reference_high: number | null;
+  critical_low: number | null;
+  critical_high: number | null;
+  is_required: boolean;
+  version: number;
+}
+
+export interface LabAnalyteList {
+  items: LabAnalyte[];
+}
+
+
 export interface LabWorklistParams {
   page?: number;
   page_size?: number;

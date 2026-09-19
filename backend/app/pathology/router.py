@@ -42,7 +42,10 @@ from app.common.db import SessionLocal, get_db
 from app.common.idempotency import check_idempotency, hash_request_body, record_idempotent_response
 from app.orders.models import Order
 from app.pathology.models import LabOrderItem, LabResult
+from app.pathology.analyte_service import evaluate_result_analytes, get_analytes_for_test
 from app.pathology.schemas import (
+    LabAnalyteListOut,
+    LabAnalyteOut,
     LabMISSummaryOut,
     LabOrderItemCreate,
     LabOrderItemListOut,
@@ -301,6 +304,20 @@ def _check_critical(result_data: dict) -> list[str]:
     return flagged
 
 
+@router.get(
+    "/catalogue/{test_code}/analytes",
+    response_model=LabAnalyteListOut,
+    dependencies=[Depends(require_roles("lab_tech", "doctor", "nurse", "admin"))],
+    summary="Get configured analytes and reference intervals for a lab test (HD-19)",
+)
+async def get_test_analytes(
+    test_code: str,
+    db: AsyncSession = Depends(get_db),
+) -> LabAnalyteListOut:
+    analytes = await get_analytes_for_test(db, test_code)
+    return LabAnalyteListOut(items=[LabAnalyteOut.model_validate(a) for a in analytes])
+
+
 @router.post(
     "/order-items/{item_id}/results",
     response_model=LabResultOut,
@@ -340,11 +357,21 @@ async def enter_result(
             detail={"code": "result_already_exists", "result_id": str(existing.id)},
         )
 
+    try:
+        evaluated_data, flagged = await evaluate_result_analytes(
+            db, item.test_code, payload.result_data
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "invalid_result_value", "message": str(e)},
+        )
+
     result = LabResult(
         lab_order_item_id=item_id,
         version=1,
         is_current=True,
-        result_data=payload.result_data,
+        result_data=evaluated_data,
         remarks=payload.remarks,
         status="preliminary",
         created_by=current_db_user.id,
@@ -352,9 +379,7 @@ async def enter_result(
     db.add(result)
     item.status = "completed"
 
-    # #185: wire the critical-value check + doctor notification back in -
-    # this call was missing entirely in this version, so alerts never fired.
-    flagged = _check_critical(payload.result_data)
+    # #185 & HD-19: wire the critical-value check + doctor notification
     if flagged:
         await _publish_critical_alert(db, item, flagged)
 

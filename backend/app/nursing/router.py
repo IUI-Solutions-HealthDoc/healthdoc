@@ -31,6 +31,7 @@ from app.nursing.schemas import (
     HandoverNoteOut,
     FluidBalanceOut, IncidentOut, IncidentReport, IncidentReviewRequest,
     IntakeOutputCreate, IntakeOutputOut,
+    MedicationAdministrationAcknowledge,
     MedicationAdministrationCreate, MedicationAdministrationOut,
     OrderCompleteRequest, OrderTaskOut, VitalsCreate, VitalsOut,
 )
@@ -271,6 +272,24 @@ async def get_admission_emar(
     await _require_admission_scope(db, admission_id, current_db_user.facility_id)
     rows = await service.list_administrations(db, admission_id)
     return [MedicationAdministrationOut.model_validate(r) for r in rows]
+
+
+@router.post(
+    "/medication-administrations/{id}/acknowledge",
+    response_model=MedicationAdministrationOut,
+    dependencies=[Depends(require_roles("doctor", "admin"))],
+)
+async def acknowledge_medication_administration(
+    id: UUID,
+    payload: MedicationAdministrationAcknowledge,
+    current_db_user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+) -> MedicationAdministrationOut:
+    """Doctor sign-off / acknowledgement of STAT, PRN or high-alert medication administration."""
+    record = await service.acknowledge_administration(
+        db, id, acknowledged_by=current_db_user.id, notes=payload.notes
+    )
+    return MedicationAdministrationOut.model_validate(record)
 
 
 @router.post(

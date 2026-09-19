@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text, text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 from app.common.db import Base
@@ -70,3 +70,26 @@ class LabResult(Base, UUIDPk, Timestamps):
     # UNIQUE(lab_order_item_id, version) + partial unique index WHERE is_current
     # Declared in Alembic migration (0010_lab.py), not here because
     # SQLAlchemy cannot define PostgreSQL partial unique indexes portably.
+
+
+class LabAnalyte(Base, UUIDPk):
+    """Structured analyte and reference interval definition for lab tests (§3 0076)."""
+
+    __tablename__ = "lab_analytes"
+    __table_args__ = (
+        Index("ix_lab_analytes_test_code_version", "test_code", "version"),
+    )
+
+    test_code = Column(String(50), nullable=False)
+    analyte_code = Column(String(50), nullable=False)
+    analyte_name = Column(String(100), nullable=False)
+    value_type = Column(String(20), nullable=False, server_default=text("'numeric'"))
+    unit = Column(String(30), nullable=True)
+    reference_low = Column(Numeric(10, 3), nullable=True)
+    reference_high = Column(Numeric(10, 3), nullable=True)
+    critical_low = Column(Numeric(10, 3), nullable=True)
+    critical_high = Column(Numeric(10, 3), nullable=True)
+    is_required = Column(Boolean, nullable=False, server_default=text("true"))
+    version = Column(Integer, nullable=False, server_default=text("1"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
