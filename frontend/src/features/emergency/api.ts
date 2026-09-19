@@ -141,17 +141,19 @@ export interface EmergencyTriageOut {
 }
 
 export interface EmergencyMetricsOut {
-  facility_id: string;
-  generated_at: string;
-  total_census: number;
   active_census: number;
+  waiting_count: number;
+  in_treatment_count: number;
   resuscitation_count: number;
   emergent_count: number;
   urgent_count: number;
   non_urgent_count: number;
   avg_door_to_clinician_minutes: number | null;
   lwbs_count: number;
-  lwbs_rate: number;
+  facility_id?: string;
+  generated_at?: string;
+  total_census?: number;
+  lwbs_rate?: number;
 }
 
 export interface EmergencyTriageCreateInput {

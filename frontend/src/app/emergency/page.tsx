@@ -281,7 +281,7 @@ export default function Page() {
       {/* Header & Tabs */}
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Emergency Department</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Emergency registration & arrivals</h1>
           <p className="text-sm text-muted-foreground">
             Acuity Triage Tracking Board, Door-to-Clinician Intervals, and Fast-Track THID Registration.
           </p>
@@ -308,7 +308,7 @@ export default function Page() {
                 : "bg-muted text-foreground hover:bg-muted/80"
             }`}
           >
-            Registration & Arrivals
+            Emergency registration
           </button>
         </div>
       </div>
@@ -325,7 +325,9 @@ export default function Page() {
           <div className="surface-card p-4 rounded-lg border border-border">
             <span className="text-xs text-muted-foreground uppercase font-semibold">Active Census</span>
             <div className="mt-1 text-2xl font-bold text-foreground">{metrics.active_census}</div>
-            <div className="text-xs text-muted-foreground mt-0.5">Total registered: {metrics.total_census}</div>
+            <div className="text-xs text-muted-foreground mt-0.5">
+              Waiting: {metrics.waiting_count} · In Tx: {metrics.in_treatment_count}
+            </div>
           </div>
 
           <div className="surface-card p-4 rounded-lg border border-border">
@@ -351,7 +353,9 @@ export default function Page() {
           <div className="surface-card p-4 rounded-lg border border-border">
             <span className="text-xs text-muted-foreground uppercase font-semibold">LWBS Rate</span>
             <div className="mt-1 text-2xl font-bold text-foreground">
-              {metrics.lwbs_rate.toFixed(1)}%
+              {metrics.active_census + metrics.lwbs_count > 0
+                ? ((metrics.lwbs_count / (metrics.active_census + metrics.lwbs_count)) * 100).toFixed(1)
+                : "0.0"}%
             </div>
             <div className="text-xs text-muted-foreground mt-0.5">{metrics.lwbs_count} left without being seen</div>
           </div>

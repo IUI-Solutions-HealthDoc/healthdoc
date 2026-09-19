@@ -41,7 +41,11 @@ async def evaluate_result_analytes(
 
     if test_code:
         analytes = await get_analytes_for_test(db, test_code)
-        if analytes:
+        has_structured_analyte = any(
+            (a.analyte_code in result_data or a.analyte_code.lower() in result_data)
+            for a in analytes
+        )
+        if analytes and has_structured_analyte:
             evaluations: dict[str, dict[str, Any]] = {}
             for analyte in analytes:
                 # Support exact key or lowercase key
