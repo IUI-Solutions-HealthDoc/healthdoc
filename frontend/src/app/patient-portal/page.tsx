@@ -111,10 +111,12 @@ export default function Page() {
       {view.status === "ready" ? (
         <>
           {/* Navigation Tab Bar (ARIA compliant) */}
-          <nav aria-label="Portal section tabs" className="flex border-b border-border">
+          <div role="tablist" aria-label="Portal section tabs" className="flex border-b border-border">
             <button
+              id="portal-tab-documents"
               role="tab"
               aria-selected={activeTab === "documents"}
+              aria-controls="portal-panel-documents"
               type="button"
               onClick={() => setActiveTab("documents")}
               className={`border-b-2 px-5 py-3 text-sm font-semibold transition-colors ${
@@ -126,8 +128,10 @@ export default function Page() {
               My Clinical Documents
             </button>
             <button
+              id="portal-tab-permissions"
               role="tab"
               aria-selected={activeTab === "permissions"}
+              aria-controls="portal-panel-permissions"
               type="button"
               onClick={() => setActiveTab("permissions")}
               className={`border-b-2 px-5 py-3 text-sm font-semibold transition-colors ${
@@ -139,8 +143,10 @@ export default function Page() {
               Consent & Access History
             </button>
             <button
+              id="portal-tab-identity"
               role="tab"
               aria-selected={activeTab === "identity"}
+              aria-controls="portal-panel-identity"
               type="button"
               onClick={() => setActiveTab("identity")}
               className={`border-b-2 px-5 py-3 text-sm font-semibold transition-colors ${
@@ -151,38 +157,44 @@ export default function Page() {
             >
               ABHA & Identity
             </button>
-          </nav>
+          </div>
 
           {/* Tab 1: Clinical Documents */}
-          {activeTab === "documents" && <ReleasedDocumentsTab />}
+          {activeTab === "documents" && (
+            <div id="portal-panel-documents" role="tabpanel" aria-labelledby="portal-tab-documents">
+              <ReleasedDocumentsTab />
+            </div>
+          )}
 
           {/* Tab 3: ABHA & Identity */}
           {activeTab === "identity" && (
-            <section className="grid gap-4 md:grid-cols-2">
-              <article className="surface-card p-5">
-                <p className="text-sm text-muted-foreground">ABHA identity</p>
-                <p className="mt-2 text-xl font-semibold">{view.data.abha.abha_number ?? "Not linked"}</p>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  {view.data.abha.linked_at
-                    ? `Linked ${formatDateTime(view.data.abha.linked_at)}`
-                    : "Registration can link ABHA only after verified OTP; this portal never accepts an unverified number."}
-                </p>
-              </article>
-              <article className="surface-card p-5">
-                <p className="text-sm text-muted-foreground">Portal identity verified by</p>
-                <p className="mt-2 text-xl font-semibold">
-                  {verificationLabels[view.data.binding.verification_method]}
-                </p>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  Verified {formatDateTime(view.data.binding.verified_at)}
-                </p>
-              </article>
-            </section>
+            <div id="portal-panel-identity" role="tabpanel" aria-labelledby="portal-tab-identity">
+              <section className="grid gap-4 md:grid-cols-2">
+                <article className="surface-card p-5">
+                  <p className="text-sm text-muted-foreground">ABHA identity</p>
+                  <p className="mt-2 text-xl font-semibold">{view.data.abha.abha_number ?? "Not linked"}</p>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    {view.data.abha.linked_at
+                      ? `Linked ${formatDateTime(view.data.abha.linked_at)}`
+                      : "Registration can link ABHA only after verified OTP; this portal never accepts an unverified number."}
+                  </p>
+                </article>
+                <article className="surface-card p-5">
+                  <p className="text-sm text-muted-foreground">Portal identity verified by</p>
+                  <p className="mt-2 text-xl font-semibold">
+                    {verificationLabels[view.data.binding.verification_method]}
+                  </p>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Verified {formatDateTime(view.data.binding.verified_at)}
+                  </p>
+                </article>
+              </section>
+            </div>
           )}
 
           {/* Tab 2: Consents & Data Access History */}
           {activeTab === "permissions" && (
-            <>
+            <div id="portal-panel-permissions" role="tabpanel" aria-labelledby="portal-tab-permissions" className="space-y-8">
           <section className="grid gap-4 md:grid-cols-2">
             <article className="surface-card p-5">
               <p className="text-sm text-muted-foreground">ABHA identity</p>
@@ -287,7 +299,7 @@ export default function Page() {
               </div>
             )}
           </section>
-        </>
+        </div>
       )}
     </>
   ) : null}
