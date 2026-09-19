@@ -7,8 +7,16 @@ export {
   completeEncounter,
   saveVitals,
   searchIcd,
+  searchTerminology,
   saveDiagnosis,
   listDiagnoses,
+  getSpecialtyTemplates,
+  getEncounterSpecialty,
+  saveEncounterSpecialty,
+  type TerminologyConcept,
+  type SpecialtyTemplate,
+  type SpecialtyTemplateField,
+  type SpecialtyAssessmentRecord,
 } from "./consultation";
 export {
   listOrders,

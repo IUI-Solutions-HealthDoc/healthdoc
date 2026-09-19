@@ -237,7 +237,7 @@ export interface VitalsInput {
 // Diagnoses (diagnoses + icd_codes catalog)
 // ---------------------------------------------------------------------------
 
-export type IcdVersion = "icd10" | "icd11";
+export type IcdVersion = "icd10" | "icd11" | "snomed";
 export type DiagnosisType = "provisional" | "final" | "differential";
 
 export interface IcdConcept {

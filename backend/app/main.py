@@ -60,6 +60,7 @@ MODULES = [
     "registration",
     "reports",
     "security_audit",
+    "terminology",
     "users",
     "wards",
 ]
@@ -268,6 +269,7 @@ _B1_ROUTERS = [
     # is at 0041c — so the blocker was stale, not real. Emergency access is a NABH
     # DHS and DPDP control; having the audit tables without the enforcement path
     # is the worse half to be missing.
+    "app.integrations.abdm.scan_share_router",
     "app.security_audit.breakglass",
 ]
 for path in _B1_ROUTERS:

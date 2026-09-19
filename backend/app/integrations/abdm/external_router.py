@@ -686,6 +686,34 @@ async def profile_share(
             },
         )
     token_number = identity.group(1).lstrip("0") or "0"
+    from app.integrations.abdm.models import ScanShareTicket
+    ticket = ScanShareTicket(
+        id=uuid.uuid4(),
+        facility_id=facility_id,
+        token_number=token_number,
+        abha_address=shared.abha_address,
+        profile_data={
+            "full_name": patient.full_name,
+            "gender": patient.sex,
+            "birth_date": str(patient.dob) if patient.dob else None,
+            "age_years": patient.age_years,
+            "mobile": patient.mobile,
+            "abha_number": patient.abha_number,
+            "address": {
+                "line": shared.address.line if shared.address else None,
+                "district": shared.address.district if shared.address else None,
+                "state": shared.address.state if shared.address else None,
+                "pincode": shared.address.pincode if shared.address else None,
+            } if shared.address else None,
+        },
+        status="active",
+        counter=None,
+        patient_id=patient.id,
+        expires_at=datetime.now(UTC) + timedelta(seconds=1800),
+    )
+    db.add(ticket)
+    await db.flush()
+
     await callback_replies.schedule(
         db,
         facility_id=facility_id,
