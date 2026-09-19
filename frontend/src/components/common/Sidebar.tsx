@@ -10,6 +10,7 @@ import {
   Calendar,
   ChevronRight,
   ClipboardList,
+  Droplets,
   FileText,
   FlaskConical,
   LayoutDashboard,
@@ -21,6 +22,7 @@ import {
   Search,
   Shield,
   Stethoscope,
+  Syringe,
   UserRound,
   Users,
   X,
@@ -63,7 +65,10 @@ const NAV_ITEMS: readonly NavItem[] = [
   { href: "/emergency", label: "Emergency", icon: Stethoscope, area: "clinical", roles: [ROLES.EMERGENCY] },
   { href: "/supervisor/merges", label: "Identity merges", icon: Shield, area: "audit", roles: [ROLES.SUPERVISOR] },
   { href: "/consent", label: "Consent", icon: FileText, area: "clinical", roles: [ROLES.RECEPTIONIST, ROLES.DOCTOR, ROLES.NURSE] },
+  { href: "/immunization", label: "Immunization", icon: Syringe, area: "clinical", roles: [ROLES.DOCTOR, ROLES.NURSE, ROLES.ADMIN] },
+  { href: "/forms", label: "Clinical Forms", icon: FileText, area: "clinical", roles: [ROLES.DOCTOR, ROLES.NURSE, ROLES.ADMIN] },
   { href: "/lab", label: "Laboratory", icon: FlaskConical, area: "diagnostics", roles: [ROLES.LAB_TECH, ROLES.DOCTOR] },
+  { href: "/blood-bank", label: "Blood Bank", icon: Droplets, area: "diagnostics", roles: [ROLES.LAB_TECH, ROLES.DOCTOR, ROLES.ADMIN] },
   { href: "/radiology", label: "Radiology", icon: Radio, area: "diagnostics", roles: [ROLES.RADIOLOGY_TECH, ROLES.DOCTOR] },
   { href: "/pharmacy/prescription-queue", label: "Pharmacy queue", icon: Pill, area: "clinical", roles: [ROLES.PHARMACIST] },
   { href: "/pharmacy/dispense", label: "Dispense", icon: Package, area: "clinical", roles: [ROLES.PHARMACIST] },
@@ -84,6 +89,7 @@ const NAV_ITEMS: readonly NavItem[] = [
   // All three tables shipped in 0022a with nothing able to read or write them.
   { href: "/admin/data-protection", label: "Data protection", icon: Shield, area: "admin", roles: [ROLES.ADMIN, ROLES.AUDITOR] },
   { href: "/admin/maintenance", label: "Equipment maintenance", icon: Building2, area: "admin", roles: [ROLES.ADMIN, ROLES.LAB_TECH, ROLES.RADIOLOGY_TECH] },
+  { href: "/admin/integration", label: "Integration & Outbox DLQ", icon: Radio, area: "admin", roles: [ROLES.ADMIN] },
 ];
 
 const AREA_LABELS: Record<NavItem["area"], string> = {

@@ -26,6 +26,7 @@ CORE_MODULES = frozenset({
     "billing", "consent", "audit", "files", "users", "notifications",
     "inventory", "ipd", "emergency", "patient_portal", "abdm",
     "orders", "procedures", "nursing", "wards", "reports", "outbox", "security_audit",
+    "immunization", "forms",
 })
 _DB_DEPENDENCY = Depends(get_db)
 

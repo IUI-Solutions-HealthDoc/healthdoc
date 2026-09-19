@@ -53,6 +53,9 @@ class VisitType(CheckedEnum):
     DAY_CARE = "day_care"
     EMERGENCY = "emergency"
     TELECONSULT = "teleconsult"
+    #: Direct walk-in service encounter (e.g. direct lab test or pharmacy purchase)
+    #: without requiring a consultation token or doctor note (HD-32).
+    DIRECT_SERVICE = "direct_service"
 
     #: Visit types that take a ward bed. Admission and ward occupancy read this
     #: rather than testing for a literal, so adding a fifth bed-occupying type

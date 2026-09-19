@@ -126,6 +126,9 @@ const ROLE_DASHBOARDS = [
           { method: "GET", pathPrefix: "/api/v1/consent/patients/", pathSuffix: "/records" },
         ],
       },
+      { path: "/immunization", expectCalls: true },
+      { path: "/blood-bank", expectCalls: true },
+      { path: "/forms", expectCalls: true },
     ],
   },
   {
@@ -145,6 +148,8 @@ const ROLE_DASHBOARDS = [
           { method: "GET", pathPrefix: "/api/v1/consent/patients/", pathSuffix: "/records" },
         ],
       },
+      { path: "/immunization", expectCalls: true },
+      { path: "/forms", expectCalls: true },
     ],
   },
   {
@@ -156,6 +161,7 @@ const ROLE_DASHBOARDS = [
       // Maintenance is explicitly writable by lab technicians; testing only
       // the admin path would leave that advertised role unproved.
       { path: "/admin/maintenance", expectCalls: true },
+      { path: "/blood-bank", expectCalls: true },
     ],
   },
   {
@@ -269,6 +275,10 @@ const ROLE_DASHBOARDS = [
       { path: "/reports", expectCalls: true },
       { path: "/billing", expectCalls: true },
       { path: "/billing/tariffs", expectCalls: true, requiredRequests: [{ method: "GET", path: "/api/v1/billing/charge-master" }] },
+      { path: "/immunization", expectCalls: true },
+      { path: "/blood-bank", expectCalls: true },
+      { path: "/forms", expectCalls: true },
+      { path: "/admin/integration", expectCalls: true },
     ],
   },
   {
