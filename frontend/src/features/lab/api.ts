@@ -127,7 +127,7 @@ export function listCriticalAlerts(
   if (status && status !== "all") search.set("status", status);
   if (sinceCursor) search.set("since_cursor", sinceCursor);
   const q = search.toString();
-  return api<CriticalAlertList>(`/pathology/critical-alerts${q ? `?${q}` : ""}`);
+  return api<CriticalAlertList>(`/pathology/critical-alerts?${q}`);
 }
 
 export function acknowledgeCriticalAlert(

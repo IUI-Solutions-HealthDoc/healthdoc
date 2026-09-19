@@ -21,9 +21,9 @@ import type {
   RadiologyOrderItem,
   RadiologyReport,
 } from "@/features/radiology/types";
-import { ApiError, formatDateTime, getAccessToken } from "@/lib/api";
+import { ApiError, downloadBlob, formatDateTime } from "@/lib/api";
 import { useAuth } from "@/providers/auth-provider";
-import { Download, FileUp, FileText, Image as ImageIcon } from "lucide-react";
+import { Download, FileUp, Image as ImageIcon } from "lucide-react";
 
 const WORKFLOW: { status: string; label: string; hint: string }[] = [
   { status: "placed", label: "To schedule", hint: "Ordered, not yet booked onto a machine" },
@@ -173,13 +173,7 @@ function RadiologyPageContent() {
 
   async function handleDownloadAttachment(att: RadiologyAttachment) {
     try {
-      const res = await fetch(`/api/v1/radiology/attachments/${att.id}/download`, {
-        headers: {
-          Authorization: `Bearer ${getAccessToken()}`,
-        },
-      });
-      if (!res.ok) throw new Error("Download failed");
-      const blob = await res.blob();
+      const blob = await downloadBlob(`/radiology/attachments/${att.id}/download`);
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;

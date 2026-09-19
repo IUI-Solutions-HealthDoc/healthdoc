@@ -184,3 +184,21 @@ export function formatDateTime(iso: string, timeZone = "Asia/Kolkata"): string {
 export function newIdempotencyKey(): string {
   return crypto.randomUUID();
 }
+
+/** Authenticated file download helper returning a Blob. */
+export async function downloadBlob(path: string): Promise<Blob> {
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    headers: {
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+    },
+  });
+  if (!res.ok) {
+    if (res.status === 401) handleExpiredSession();
+    throw new ApiError(
+      res.status,
+      userFacingApiError(res.status),
+      res.headers.get("x-request-id") ?? undefined,
+    );
+  }
+  return res.blob();
+}

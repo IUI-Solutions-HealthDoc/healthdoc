@@ -88,7 +88,7 @@ export function listPharmacyReturns(params: {
   if (params.disposition && params.disposition !== "all") query.set("disposition", params.disposition);
   if (params.patient_id) query.set("patient_id", params.patient_id);
   const qStr = query.toString();
-  return api<PharmacyReturnListResponse>(`/pharmacy/returns${qStr ? `?${qStr}` : ""}`);
+  return api<PharmacyReturnListResponse>(`/pharmacy/returns?${qStr}`);
 }
 
 export function createPharmacyReturn(payload: PharmacyReturnCreateInput): Promise<PharmacyReturn> {

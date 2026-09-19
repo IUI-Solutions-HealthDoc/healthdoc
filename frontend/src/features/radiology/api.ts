@@ -143,8 +143,10 @@ export function uploadOrderAttachment(
 ): Promise<RadiologyAttachment> {
   const formData = new FormData();
   formData.append("file", file);
-  const q = orderItemId ? `?order_item_id=${encodeURIComponent(orderItemId)}` : "";
-  return api<RadiologyAttachment>(`/radiology/orders/${orderId}/attachments${q}`, {
+  const search = new URLSearchParams();
+  if (orderItemId) search.set("radiology_order_item_id", orderItemId);
+  const q = search.toString();
+  return api<RadiologyAttachment>(`/radiology/orders/${orderId}/attachments?${q}`, {
     method: "POST",
     idempotencyKey: null,
     body: formData,

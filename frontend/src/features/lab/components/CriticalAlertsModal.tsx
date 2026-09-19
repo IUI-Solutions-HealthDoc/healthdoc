@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertTriangle, CheckCircle, Clock, FileText, X } from "lucide-react";
+import { AlertTriangle, CheckCircle, Clock, X } from "lucide-react";
 import { acknowledgeCriticalAlert, listCriticalAlerts } from "@/features/lab/api";
 import type { CriticalAlert } from "@/features/lab/types";
 import { formatDateTime } from "@/lib/api";
