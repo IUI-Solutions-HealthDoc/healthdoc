@@ -196,6 +196,7 @@ do not merge out of order.**
 | 0075 | inpatient_dispositions_and_checklists | clinical_dispositions, admission_checklist_tasks | Inpatient disposition intent tracking and standardized admission nursing checklists with mandatory skip reasons. |
 | 0076 | emar_triage_analytes_urgency | emergency_triages, emergency_triage_logs, lab_analytes | eMAR dose identity & corrections, ED triage tracking and re-triage logs, structured lab analyte bounds, and prescription priority. |
 | 0077 | critical_alerts_lis_pacs_returns | critical_alerts, lab_specimen_events, radiology_attachments, pharmacy_returns | Critical alerts outbox & acknowledgement, LIS specimen tracking & rejection, radiology imaging attachments, and pharmacy returns with quarantine disposition. |
+| 0078 | ot_and_longitudinal_programs | care_programs, program_enrolments, program_visits | Operation Theatre lifecycle enhancements, WHO surgical safety checklist, and longitudinal care program registries. |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
