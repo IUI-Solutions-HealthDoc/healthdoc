@@ -83,7 +83,7 @@ class LabAnalyte(Base, UUIDPk):
     test_code = Column(String(50), nullable=False)
     analyte_code = Column(String(50), nullable=False)
     analyte_name = Column(String(100), nullable=False)
-    value_type = Column(String(20), nullable=False, server_default=text("'numeric'"))
+    value_type = Column(String(50), nullable=False, server_default=text("'numeric'"))
     unit = Column(String(30), nullable=True)
     reference_low = Column(Numeric(10, 3), nullable=True)
     reference_high = Column(Numeric(10, 3), nullable=True)

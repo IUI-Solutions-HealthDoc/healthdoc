@@ -72,7 +72,7 @@ def upgrade() -> None:
     # ---------------- 2. PRESCRIPTION ITEM PRIORITY (HD-20) ----------------
     op.add_column(
         "prescription_items",
-        sa.Column("priority", sa.String(length=20), nullable=False, server_default="routine"),
+        sa.Column("priority", sa.String(length=50), nullable=False, server_default="routine"),
     )
     op.create_index("ix_prescription_items_priority", "prescription_items", ["priority"])
 
@@ -98,7 +98,7 @@ def upgrade() -> None:
             sa.ForeignKey("visits.id", ondelete="RESTRICT"),
             nullable=False,
         ),
-        sa.Column("acuity_level", sa.String(length=30), nullable=False),
+        sa.Column("acuity_level", sa.String(length=50), nullable=False),
         sa.Column("chief_complaint", sa.Text(), nullable=False),
         sa.Column("triage_notes", sa.Text(), nullable=True),
         sa.Column(
@@ -108,7 +108,7 @@ def upgrade() -> None:
             nullable=True,
         ),
         sa.Column("assigned_bay", sa.String(length=50), nullable=True),
-        sa.Column("status", sa.String(length=30), nullable=False, server_default="waiting"),
+        sa.Column("status", sa.String(length=50), nullable=False, server_default="waiting"),
         sa.Column("triaged_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column(
             "triaged_by",
@@ -117,7 +117,7 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.Column("clinician_seen_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("disposition", sa.String(length=30), nullable=True),
+        sa.Column("disposition", sa.String(length=50), nullable=True),
         sa.Column("disposition_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("disposition_notes", sa.Text(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
@@ -154,8 +154,8 @@ def upgrade() -> None:
             sa.ForeignKey("emergency_triages.id", ondelete="CASCADE"),
             nullable=False,
         ),
-        sa.Column("previous_acuity", sa.String(length=30), nullable=False),
-        sa.Column("new_acuity", sa.String(length=30), nullable=False),
+        sa.Column("previous_acuity", sa.String(length=50), nullable=False),
+        sa.Column("new_acuity", sa.String(length=50), nullable=False),
         sa.Column("reason", sa.Text(), nullable=False),
         sa.Column(
             "changed_by",
@@ -175,7 +175,8 @@ def upgrade() -> None:
         sa.Column("test_code", sa.String(length=50), nullable=False),
         sa.Column("analyte_code", sa.String(length=50), nullable=False),
         sa.Column("analyte_name", sa.String(length=100), nullable=False),
-        sa.Column("value_type", sa.String(length=20), nullable=False, server_default="numeric"),
+        sa.Column("value_type", sa.String(length=50), nullable=False, server_default="numeric"),
+
         sa.Column("unit", sa.String(length=30), nullable=True),
         sa.Column("reference_low", sa.Numeric(precision=10, scale=3), nullable=True),
         sa.Column("reference_high", sa.Numeric(precision=10, scale=3), nullable=True),

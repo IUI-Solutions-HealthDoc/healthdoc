@@ -57,7 +57,7 @@ class EmergencyTriage(Base, UUIDPk):
         UUID(as_uuid=True), ForeignKey("visits.id", ondelete="RESTRICT"), nullable=False
     )
 
-    acuity_level = Column(String(30), nullable=False)
+    acuity_level = Column(String(50), nullable=False)
     chief_complaint = Column(Text, nullable=False)
     triage_notes = Column(Text, nullable=True)
 
@@ -65,7 +65,7 @@ class EmergencyTriage(Base, UUIDPk):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=True
     )
     assigned_bay = Column(String(50), nullable=True)
-    status = Column(String(30), nullable=False, server_default=text("'waiting'"))
+    status = Column(String(50), nullable=False, server_default=text("'waiting'"))
 
     triaged_at = Column(DateTime(timezone=True), nullable=False)
     triaged_by = Column(
@@ -74,7 +74,7 @@ class EmergencyTriage(Base, UUIDPk):
 
     clinician_seen_at = Column(DateTime(timezone=True), nullable=True)
 
-    disposition = Column(String(30), nullable=True)
+    disposition = Column(String(50), nullable=True)
     disposition_at = Column(DateTime(timezone=True), nullable=True)
     disposition_notes = Column(Text, nullable=True)
 
@@ -89,20 +89,15 @@ class EmergencyTriage(Base, UUIDPk):
 
 
 class EmergencyTriageLog(Base, UUIDPk):
-    """Immutable audit trail of acuity re-evaluations with mandatory clinical reasoning."""
-
     __tablename__ = "emergency_triage_logs"
-    __table_args__ = (
-        Index("ix_emergency_triage_logs_triage", "triage_id", "changed_at"),
-        Index("ix_emergency_triage_logs_changed_by", "changed_by"),
-    )
 
     triage_id = Column(
         UUID(as_uuid=True), ForeignKey("emergency_triages.id", ondelete="CASCADE"), nullable=False
     )
-    previous_acuity = Column(String(30), nullable=False)
-    new_acuity = Column(String(30), nullable=False)
+    previous_acuity = Column(String(50), nullable=False)
+    new_acuity = Column(String(50), nullable=False)
     reason = Column(Text, nullable=False)
+
     changed_by = Column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )

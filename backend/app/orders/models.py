@@ -177,7 +177,7 @@ class PrescriptionItem(Base, UUIDPk, Timestamps):
     route = Column(String(30), nullable=True)
     instructions = Column(Text, nullable=True)
     status = Column(String(50), nullable=False, server_default="prescribed")
-    priority = Column(String(20), nullable=False, server_default="routine")
+    priority = Column(String(50), nullable=False, server_default="routine")
 
     # Allergy override trail (migration 0032). Both NULL = no conflict was
     # ever raised for this item. Both set = a conflict was raised and a

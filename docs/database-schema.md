@@ -765,8 +765,9 @@ medicine_name   text NOT NULL                    -- free-text fallback / snapsho
 dosage varchar(50) · frequency varchar(50) · duration_days int · route varchar(30)
 instructions text
 status varchar(50) NOT NULL DEFAULT 'prescribed' -- PrescriptionItemStatus enum
-priority varchar(20) NOT NULL DEFAULT 'routine'
+priority varchar(50) NOT NULL DEFAULT 'routine'
 INDEX ix_prescription_items_prescription_id (prescription_id)
+
 allergy_override_by     UUID NULL → users       -- 0031. Prescribing against a recorded allergy is
 allergy_override_reason text NULL               -- 0031. permitted but never silent.
 ```
@@ -1823,16 +1824,16 @@ notes text NULL
 facility_id UUID NOT NULL REFERENCES facilities(id)
 patient_id UUID NOT NULL REFERENCES patients(id)
 visit_id UUID NOT NULL REFERENCES visits(id)
-acuity_level varchar(30) NOT NULL
+acuity_level varchar(50) NOT NULL
 chief_complaint text NOT NULL
 triage_notes text NULL
 assigned_doctor_id UUID NULL REFERENCES users(id)
 assigned_bay varchar(50) NULL
-status varchar(30) NOT NULL DEFAULT 'waiting'
+status varchar(50) NOT NULL DEFAULT 'waiting'
 triaged_at timestamptz NOT NULL
 triaged_by UUID NOT NULL REFERENCES users(id)
 clinician_seen_at timestamptz NULL
-disposition varchar(30) NULL
+disposition varchar(50) NULL
 disposition_at timestamptz NULL
 disposition_notes text NULL
 ```
@@ -1840,8 +1841,8 @@ disposition_notes text NULL
 **emergency_triage_logs** (0076) — emergency department acuity changes and re-triage audit trail
 ```
 triage_id UUID NOT NULL REFERENCES emergency_triages(id)
-previous_acuity varchar(30) NOT NULL
-new_acuity varchar(30) NOT NULL
+previous_acuity varchar(50) NOT NULL
+new_acuity varchar(50) NOT NULL
 reason text NOT NULL
 changed_by UUID NOT NULL REFERENCES users(id)
 changed_at timestamptz NOT NULL
@@ -1852,7 +1853,7 @@ changed_at timestamptz NOT NULL
 test_code varchar(50) NOT NULL
 analyte_code varchar(50) NOT NULL
 analyte_name varchar(100) NOT NULL
-value_type varchar(20) NOT NULL DEFAULT 'numeric'
+value_type varchar(50) NOT NULL DEFAULT 'numeric'
 unit varchar(30) NULL
 reference_low numeric(10, 3) NULL
 reference_high numeric(10, 3) NULL
