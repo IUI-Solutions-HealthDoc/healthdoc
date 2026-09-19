@@ -96,8 +96,10 @@ export interface PortalDocumentDetail {
 }
 
 export async function getPortalDocuments(category?: string): Promise<PortalDocumentsOut> {
-  const query = category && category !== "all" ? `?category=${encodeURIComponent(category)}` : "";
-  return api<PortalDocumentsOut>(`/patient-portal/me/documents${query}`);
+  if (category && category !== "all") {
+    return api<PortalDocumentsOut>(`/patient-portal/me/documents?category=${encodeURIComponent(category)}`);
+  }
+  return api<PortalDocumentsOut>("/patient-portal/me/documents");
 }
 
 export async function getPortalDocumentDetail(

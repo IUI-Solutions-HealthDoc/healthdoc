@@ -30,8 +30,6 @@ clinical_router = APIRouter(
 )
 
 router = APIRouter()
-router.include_router(terminology_router)
-router.include_router(clinical_router)
 
 DbSession = Annotated[AsyncSession, Depends(get_db)]
 
@@ -141,3 +139,8 @@ async def get_encounter_specialty_assessments(
 
     records = await service.get_specialty_encounters(db, encounter_id=encounter_id)
     return [SpecialtyEncounterOut.model_validate(r) for r in records]
+
+
+router.include_router(terminology_router)
+router.include_router(clinical_router)
+

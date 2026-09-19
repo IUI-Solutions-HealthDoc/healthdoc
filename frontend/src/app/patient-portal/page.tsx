@@ -87,7 +87,7 @@ export default function Page() {
       <header role="banner" className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-sm font-medium uppercase tracking-wide text-primary">Patient portal</p>
-          <h1 className="mt-2 text-3xl font-semibold">My Health Record & Documents</h1>
+          <h1 className="mt-2 text-3xl font-semibold">My health-data permissions</h1>
           <p className="mt-2 text-muted-foreground">
             Access released clinical documents, download printable reports, manage ABHA identity, and review data access history.
           </p>
