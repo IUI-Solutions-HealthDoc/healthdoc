@@ -10,7 +10,47 @@ export interface LabOrderItem {
   department_id: string | null;
   status: "placed" | "in_progress" | "completed" | "released" | string;
   estimated_minutes: number | null;
+  specimen_status?: "pending_collection" | "collected" | "received" | "rejected" | "recollected" | string;
+  rejection_reason?: string | null;
+  recollected_from_id?: string | null;
   created_at: string;
+}
+
+export interface LabSpecimenEvent {
+  id: string;
+  lab_order_item_id: string;
+  event_type: "collected" | "received" | "rejected" | "recollected" | string;
+  rejection_reason: string | null;
+  notes: string | null;
+  performed_by: string;
+  created_at: string;
+}
+
+export interface CriticalAlert {
+  id: string;
+  facility_id: string;
+  patient_id: string;
+  visit_id: string | null;
+  order_id: string;
+  test_code: string;
+  analyte_code: string;
+  analyte_name: string;
+  value: number;
+  unit: string | null;
+  critical_low: number | null;
+  critical_high: number | null;
+  severity: string;
+  status: "unacknowledged" | "acknowledged" | string;
+  acknowledged_by: string | null;
+  acknowledged_at: string | null;
+  acknowledgement_note: string | null;
+  created_at: string;
+}
+
+export interface CriticalAlertList {
+  items: CriticalAlert[];
+  cursor: string | null;
+  total: number;
 }
 
 export interface LabOrderItemList {

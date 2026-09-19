@@ -10,6 +10,9 @@ import type {
   PrescriptionDetail,
   PrescriptionQueueResponse,
   ReorderAlertsResponse,
+  PharmacyReturn,
+  PharmacyReturnListResponse,
+  PharmacyReturnCreateInput,
 } from "./types";
 
 export function listPrescriptionQueue(params: {
@@ -76,3 +79,22 @@ export function expiryTracker(thresholdDays = 90): Promise<ExpiryTrackerResponse
 export function listReorderAlerts(): Promise<ReorderAlertsResponse> {
   return api<ReorderAlertsResponse>("/pharmacy/inventory/reorder-alerts");
 }
+
+export function listPharmacyReturns(params: {
+  disposition?: string;
+  patient_id?: string;
+} = {}): Promise<PharmacyReturnListResponse> {
+  const query = new URLSearchParams();
+  if (params.disposition && params.disposition !== "all") query.set("disposition", params.disposition);
+  if (params.patient_id) query.set("patient_id", params.patient_id);
+  const qStr = query.toString();
+  return api<PharmacyReturnListResponse>(`/pharmacy/returns${qStr ? `?${qStr}` : ""}`);
+}
+
+export function createPharmacyReturn(payload: PharmacyReturnCreateInput): Promise<PharmacyReturn> {
+  return api<PharmacyReturn>("/pharmacy/returns", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+

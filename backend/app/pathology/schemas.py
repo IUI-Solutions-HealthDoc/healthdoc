@@ -30,6 +30,9 @@ class LabOrderItemOut(BaseModel):
     status: str
     estimated_minutes: int | None
     created_at: datetime
+    specimen_status: str = "pending_collection"
+    rejection_reason: str | None = None
+    recollected_from_id: uuid.UUID | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -136,3 +139,64 @@ class LabAnalyteOut(BaseModel):
 
 class LabAnalyteListOut(BaseModel):
     items: list[LabAnalyteOut]
+
+
+class SpecimenRejectRequest(BaseModel):
+    """Body for POST /pathology/order-items/{id}/specimen/reject."""
+    rejection_reason: str = Field(..., min_length=1, max_length=50)
+    notes: str | None = None
+
+
+class SpecimenCollectRequest(BaseModel):
+    """Body for POST /pathology/order-items/{id}/specimen/collect."""
+    barcode: str = Field(..., min_length=1, max_length=50)
+    collected_at: datetime | None = None
+
+
+class LabSpecimenEventOut(BaseModel):
+    """Response shape for specimen lifecycle audit events."""
+    id: uuid.UUID
+    lab_order_item_id: uuid.UUID
+    event_type: str
+    rejection_reason: str | None = None
+    notes: str | None = None
+    performed_by: uuid.UUID
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CriticalAlertOut(BaseModel):
+    """Response shape for durable panic / critical laboratory alert."""
+    id: uuid.UUID
+    facility_id: uuid.UUID
+    patient_id: uuid.UUID
+    visit_id: uuid.UUID | None = None
+    order_id: uuid.UUID
+    test_code: str
+    analyte_code: str
+    analyte_name: str
+    value: float
+    unit: str | None = None
+    critical_low: float | None = None
+    critical_high: float | None = None
+    severity: str
+    status: str
+    acknowledged_by: uuid.UUID | None = None
+    acknowledged_at: datetime | None = None
+    acknowledgement_note: str | None = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CriticalAlertAcknowledgeRequest(BaseModel):
+    """Body for POST /pathology/critical-alerts/{alert_id}/acknowledge."""
+    acknowledgement_note: str | None = None
+
+
+class CriticalAlertListOut(BaseModel):
+    """List response for critical alerts."""
+    items: list[CriticalAlertOut]
+    cursor: str | None = None
+    total: int

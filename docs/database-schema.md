@@ -195,6 +195,7 @@ do not merge out of order.**
 | 0074 | appointments_and_scheduling | appointment_services, appointments | Scheduling services and patient appointments with conflict prevention and queue check-in. |
 | 0075 | inpatient_dispositions_and_checklists | clinical_dispositions, admission_checklist_tasks | Inpatient disposition intent tracking and standardized admission nursing checklists with mandatory skip reasons. |
 | 0076 | emar_triage_analytes_urgency | emergency_triages, emergency_triage_logs, lab_analytes | eMAR dose identity & corrections, ED triage tracking and re-triage logs, structured lab analyte bounds, and prescription priority. |
+| 0077 | critical_alerts_lis_pacs_returns | critical_alerts, lab_specimen_events, radiology_attachments, pharmacy_returns | Critical alerts outbox & acknowledgement, LIS specimen tracking & rejection, radiology imaging attachments, and pharmacy returns with quarantine disposition. |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -911,6 +912,9 @@ status varchar(50) NOT NULL DEFAULT 'placed'     -- OrderStatus enum
 estimated_minutes int
 barcode varchar(50) UNIQUE NULL                  -- assigned at collection, not at ordering (0020b)
 collected_at timestamptz NULL                    -- sample collection time (0020b)
+specimen_status varchar(50) NOT NULL DEFAULT 'pending_collection' -- pending_collection, collected, received, rejected, recollected (0077)
+rejection_reason varchar(50) NULL                -- hemolyzed, clotted, insufficient_volume, wrong_tube, etc. (0077)
+recollected_from_id UUID NULL → lab_order_items  -- previous rejected specimen link (0077)
 ```
 
 **lab_results** — append-only, versioned (corrections = new row)
@@ -1861,6 +1865,64 @@ critical_low numeric(10, 3) NULL
 critical_high numeric(10, 3) NULL
 is_required boolean NOT NULL DEFAULT true
 version integer NOT NULL DEFAULT 1
+```
+
+**critical_alerts** (0077) — durable panic critical laboratory alerts, transactional outbox and acknowledgement
+```
+facility_id UUID NOT NULL REFERENCES facilities(id)
+patient_id UUID NOT NULL REFERENCES patients(id)
+visit_id UUID NULL REFERENCES visits(id)
+order_id UUID NOT NULL REFERENCES orders(id)
+test_code varchar(50) NOT NULL
+analyte_code varchar(50) NOT NULL
+analyte_name varchar(100) NOT NULL
+value numeric(10, 3) NOT NULL
+unit varchar(30) NULL
+critical_low numeric(10, 3) NULL
+critical_high numeric(10, 3) NULL
+severity varchar(50) NOT NULL
+status varchar(50) NOT NULL
+acknowledged_by UUID NULL REFERENCES users(id)
+acknowledged_at timestamptz NULL
+acknowledgement_note text NULL
+```
+
+**lab_specimen_events** (0077) — laboratory specimen collection, rejection and recollection audit trail
+```
+lab_order_item_id UUID NOT NULL REFERENCES lab_order_items(id)
+event_type varchar(50) NOT NULL
+rejection_reason varchar(50) NULL
+notes text NULL
+performed_by UUID NOT NULL REFERENCES users(id)
+```
+
+**radiology_attachments** (0077) — upload-only radiology imaging files, DICOM and PDF attachments
+```
+facility_id UUID NOT NULL REFERENCES facilities(id)
+order_id UUID NOT NULL REFERENCES orders(id)
+patient_id UUID NOT NULL REFERENCES patients(id)
+radiology_order_item_id UUID NULL REFERENCES radiology_order_items(id)
+file_key varchar(255) NOT NULL
+file_name varchar(255) NOT NULL
+mime_type varchar(100) NOT NULL
+file_size_bytes integer NOT NULL
+checksum_sha256 varchar(64) NOT NULL
+uploaded_by UUID NOT NULL REFERENCES users(id)
+uploaded_at timestamptz NOT NULL
+```
+
+**pharmacy_returns** (0077) — returned medicines with quarantine vs resalable disposition and ledger tracking
+```
+facility_id UUID NOT NULL REFERENCES facilities(id)
+patient_id UUID NOT NULL REFERENCES patients(id)
+dispense_id UUID NULL REFERENCES pharmacy_dispenses(id)
+item_id UUID NOT NULL REFERENCES inventory_items(id)
+batch_id UUID NULL REFERENCES inventory_batches(id)
+quantity numeric(12, 2) NOT NULL
+return_reason text NOT NULL
+disposition varchar(50) NOT NULL
+status varchar(50) NOT NULL
+returned_by UUID NOT NULL REFERENCES users(id)
 ```
 **abdm_callback_replies** (0067) — committed reply intent, not a clinical inbox
 ```

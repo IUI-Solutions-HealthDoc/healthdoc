@@ -50,3 +50,22 @@ export interface RadiologyReport {
 export interface RadiologyReportHistory {
   items: RadiologyReport[];
 }
+
+export interface RadiologyAttachment {
+  id: string;
+  facility_id: string;
+  order_id: string;
+  order_item_id: string | null;
+  file_name: string;
+  file_size_bytes: number;
+  mime_type: string;
+  checksum_sha256: string;
+  storage_bucket: string;
+  uploaded_by: string;
+  created_at: string;
+}
+
+export interface RadiologyAttachmentList {
+  items: RadiologyAttachment[];
+  total: number;
+}

@@ -210,3 +210,37 @@ export const BUCKET_LABELS: Record<ExpiryBucket, string> = {
   "60": "31–60 days",
   "90": "61–90 days",
 };
+
+/** HD-24: Medicine Stock Returns */
+export interface PharmacyReturn {
+  id: string;
+  facility_id: string;
+  patient_id: string;
+  dispense_id: string | null;
+  item_id: string;
+  batch_id: string | null;
+  quantity: string;
+  return_reason: string;
+  disposition: "resalable" | "quarantine" | "damaged" | "expired";
+  status: string;
+  returned_by: string;
+  created_at: string;
+  item_name?: string | null;
+  batch_number?: string | null;
+}
+
+export interface PharmacyReturnListResponse {
+  items: PharmacyReturn[];
+  total: number;
+}
+
+export interface PharmacyReturnCreateInput {
+  patient_id: string;
+  dispense_id?: string | null;
+  item_id: string;
+  batch_id?: string | null;
+  quantity: number | string;
+  return_reason: string;
+  disposition: "resalable" | "quarantine" | "damaged" | "expired";
+}
+

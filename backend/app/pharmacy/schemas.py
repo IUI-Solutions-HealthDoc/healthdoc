@@ -492,3 +492,37 @@ class AdjustmentListItem(BaseModel):
 
 class AdjustmentListOut(BaseModel):
     items: list[AdjustmentListItem]
+
+
+class PharmacyReturnCreate(BaseModel):
+    patient_id: UUID
+    dispense_id: UUID | None = None
+    item_id: UUID
+    batch_id: UUID | None = None
+    quantity: Decimal = Field(..., gt=0)
+    return_reason: str = Field(..., min_length=1)
+    disposition: str = Field(..., pattern="^(resalable|quarantine|damaged|expired)$")
+
+
+class PharmacyReturnOut(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: UUID
+    facility_id: UUID
+    patient_id: UUID
+    dispense_id: UUID | None = None
+    item_id: UUID
+    batch_id: UUID | None = None
+    quantity: Decimal
+    return_reason: str
+    disposition: str
+    status: str
+    returned_by: UUID
+    created_at: datetime
+    item_name: str | None = None
+    batch_number: str | None = None
+
+
+class PharmacyReturnListOut(BaseModel):
+    items: list[PharmacyReturnOut]
+    total: int

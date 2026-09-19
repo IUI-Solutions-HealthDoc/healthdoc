@@ -1,12 +1,15 @@
 import { api } from "@/lib/api";
 
 import type {
+  CriticalAlert,
+  CriticalAlertList,
   LabAnalyteList,
   LabMisSummary,
   LabOrderItem,
   LabOrderItemList,
   LabResult,
   LabResultHistory,
+  LabSpecimenEvent,
   LabWorklistParams,
 } from "./types";
 
@@ -82,5 +85,58 @@ export function getLabMisSummary(dateFrom: string, dateTo: string): Promise<LabM
 
 export function getTestAnalytes(testCode: string): Promise<LabAnalyteList> {
   return api<LabAnalyteList>(`/pathology/catalogue/${encodeURIComponent(testCode)}/analytes`);
+}
+
+export function receiveLabSpecimen(itemId: string): Promise<LabOrderItem> {
+  return api<LabOrderItem>(`/pathology/order-items/${itemId}/specimen/receive`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export function rejectLabSpecimen(
+  itemId: string,
+  rejectionReason: string,
+  notes?: string,
+): Promise<LabOrderItem> {
+  return api<LabOrderItem>(`/pathology/order-items/${itemId}/specimen/reject`, {
+    method: "POST",
+    body: JSON.stringify({
+      rejection_reason: rejectionReason,
+      notes: notes?.trim() || null,
+    }),
+  });
+}
+
+export function recollectLabSpecimen(itemId: string): Promise<LabOrderItem> {
+  return api<LabOrderItem>(`/pathology/order-items/${itemId}/specimen/recollect`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export function listSpecimenEvents(itemId: string): Promise<LabSpecimenEvent[]> {
+  return api<LabSpecimenEvent[]>(`/pathology/order-items/${itemId}/specimen/events`);
+}
+
+export function listCriticalAlerts(
+  status?: string,
+  sinceCursor?: string,
+): Promise<CriticalAlertList> {
+  const search = new URLSearchParams();
+  if (status && status !== "all") search.set("status", status);
+  if (sinceCursor) search.set("since_cursor", sinceCursor);
+  const q = search.toString();
+  return api<CriticalAlertList>(`/pathology/critical-alerts${q ? `?${q}` : ""}`);
+}
+
+export function acknowledgeCriticalAlert(
+  alertId: string,
+  note?: string,
+): Promise<CriticalAlert> {
+  return api<CriticalAlert>(`/pathology/critical-alerts/${alertId}/acknowledge`, {
+    method: "POST",
+    body: JSON.stringify({ acknowledgement_note: note?.trim() || null }),
+  });
 }
 
