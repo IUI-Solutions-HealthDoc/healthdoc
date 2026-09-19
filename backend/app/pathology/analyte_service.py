@@ -53,12 +53,20 @@ async def evaluate_result_analytes(
         if analytes:
             evaluations: dict[str, dict[str, Any]] = {}
             for analyte in analytes:
-                # Support exact key or lowercase key
+                # Support exact code, lowercase code, or analyte name / unit-qualified key (e.g. hemoglobin_g_dl)
                 code = analyte.analyte_code
                 val = result_data.get(code)
                 if val is None and code.lower() in result_data:
-                    code = code.lower()
-                    val = result_data.get(code)
+                    val = result_data.get(code.lower())
+                if val is None:
+                    a_name = analyte.analyte_name.lower().replace("-", "_").replace(" ", "_")
+                    for k, v in result_data.items():
+                        if k.startswith("_"):
+                            continue
+                        k_norm = k.lower().replace("-", "_").replace(" ", "_")
+                        if k_norm == a_name or k_norm.startswith(f"{a_name}_") or a_name.startswith(f"{k_norm}_"):
+                            val = v
+                            break
 
                 if val is None:
                     if analyte.is_required:

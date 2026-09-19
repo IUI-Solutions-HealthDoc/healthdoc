@@ -543,6 +543,9 @@ REPOINTED_ON_MERGE: frozenset[str] = frozenset(
         "patient_grievances",
         "patient_portal_bindings",
         "emergency_triages",
+        "critical_alerts",
+        "pharmacy_returns",
+        "radiology_attachments",
         # ABDM M2/M3. A merged-away chart that keeps its care contexts and
         # links means the surviving patient's ABHA no longer reaches records
         # that are theirs — and the dead chart still offers them to the
@@ -659,6 +662,9 @@ async def approve_merge(
     await _repoint_fhir_bundle_transactions(db, source=source, target=target)
     await _repoint_abdm_records(db, source=source, target=target)
     await _repoint_emergency_triages(db, source=source, target=target)
+    await _repoint_critical_alerts(db, source=source, target=target)
+    await _repoint_pharmacy_returns(db, source=source, target=target)
+    await _repoint_radiology_attachments(db, source=source, target=target)
     await _reconcile_patient_portal_bindings(
         db, source=source, target=target, approved_by=approved_by
     )
@@ -1071,6 +1077,39 @@ async def _repoint_emergency_triages(db: AsyncSession, *, source: Patient, targe
     await db.execute(
         text(
             "UPDATE emergency_triages SET patient_id = :target_id WHERE patient_id = :source_id"
+        ),
+        {"target_id": target.id, "source_id": source.id},
+    )
+    await db.flush()
+
+
+async def _repoint_critical_alerts(db: AsyncSession, *, source: Patient, target: Patient) -> None:
+    """Moves source's critical_alerts rows onto target."""
+    await db.execute(
+        text(
+            "UPDATE critical_alerts SET patient_id = :target_id WHERE patient_id = :source_id"
+        ),
+        {"target_id": target.id, "source_id": source.id},
+    )
+    await db.flush()
+
+
+async def _repoint_pharmacy_returns(db: AsyncSession, *, source: Patient, target: Patient) -> None:
+    """Moves source's pharmacy_returns rows onto target."""
+    await db.execute(
+        text(
+            "UPDATE pharmacy_returns SET patient_id = :target_id WHERE patient_id = :source_id"
+        ),
+        {"target_id": target.id, "source_id": source.id},
+    )
+    await db.flush()
+
+
+async def _repoint_radiology_attachments(db: AsyncSession, *, source: Patient, target: Patient) -> None:
+    """Moves source's radiology_attachments rows onto target."""
+    await db.execute(
+        text(
+            "UPDATE radiology_attachments SET patient_id = :target_id WHERE patient_id = :source_id"
         ),
         {"target_id": target.id, "source_id": source.id},
     )
