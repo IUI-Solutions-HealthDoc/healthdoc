@@ -50,10 +50,8 @@ export function FormsPage() {
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
-      const [defs, sets] = await Promise.all([
-        fetchFormDefinitions(),
-        fetchOrderSets(),
-      ]);
+      const defs = await fetchFormDefinitions();
+      const sets = await fetchOrderSets();
       setFormDefs(defs);
       setOrderSets(sets);
       if (defs.length > 0 && !selectedForm) {

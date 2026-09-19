@@ -122,12 +122,15 @@ DEFAULT_NATIONAL_VACCINES = [
 
 
 async def ensure_catalogue_seeded(db: AsyncSession) -> None:
-    res = await db.execute(select(VaccineCatalogue).limit(1))
-    if res.scalars().first() is None:
-        for item in DEFAULT_NATIONAL_VACCINES:
-            vc = VaccineCatalogue(id=uuid.uuid4(), **item)
-            db.add(vc)
-        await db.commit()
+    try:
+        res = await db.execute(select(VaccineCatalogue).limit(1))
+        if res.scalars().first() is None:
+            for item in DEFAULT_NATIONAL_VACCINES:
+                vc = VaccineCatalogue(id=uuid.uuid4(), **item)
+                db.add(vc)
+            await db.commit()
+    except Exception:
+        await db.rollback()
 
 
 async def get_catalogue(db: AsyncSession) -> list[VaccineCatalogue]:

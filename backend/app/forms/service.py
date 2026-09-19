@@ -108,16 +108,19 @@ FORMULA_INJECTION_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 
 
 async def ensure_defaults_seeded(db: AsyncSession, admin_id: uuid.UUID) -> None:
-    f_res = await db.execute(select(FormDefinition).limit(1))
-    if f_res.scalars().first() is None:
-        for f in DEFAULT_FORMS:
-            db.add(FormDefinition(id=uuid.uuid4(), **f, created_by=admin_id))
+    try:
+        f_res = await db.execute(select(FormDefinition).limit(1))
+        if f_res.scalars().first() is None:
+            for f in DEFAULT_FORMS:
+                db.add(FormDefinition(id=uuid.uuid4(), **f, created_by=admin_id))
 
-    o_res = await db.execute(select(ClinicalOrderSet).limit(1))
-    if o_res.scalars().first() is None:
-        for o in DEFAULT_ORDER_SETS:
-            db.add(ClinicalOrderSet(id=uuid.uuid4(), **o))
-    await db.commit()
+        o_res = await db.execute(select(ClinicalOrderSet).limit(1))
+        if o_res.scalars().first() is None:
+            for o in DEFAULT_ORDER_SETS:
+                db.add(ClinicalOrderSet(id=uuid.uuid4(), **o))
+        await db.commit()
+    except Exception:
+        await db.rollback()
 
 
 async def list_form_definitions(
