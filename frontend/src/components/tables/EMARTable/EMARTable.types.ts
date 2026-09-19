@@ -35,6 +35,7 @@ export interface MedicationRecord {
   /** What was PRESCRIBED. */
   dosage: string | null;
   route: string | null;
+  priority?: "routine" | "urgent" | "stat" | "prn" | string | null;
 
   scheduled_at: string | null;
   administered_at: string;
@@ -46,6 +47,17 @@ export interface MedicationRecord {
   reason: string | null;
   notes: string | null;
 
+  /** Dose correction audit trail (HD-17) */
+  correction_of_id?: string | null;
+  is_correction?: boolean;
+  correction_reason?: string | null;
+
+  /** Urgency & clinician acknowledgement (HD-20) */
+  requires_acknowledgement?: boolean;
+  acknowledged_by?: string | null;
+  acknowledged_at?: string | null;
+
   created_by: string;
   created_at: string;
 }
+

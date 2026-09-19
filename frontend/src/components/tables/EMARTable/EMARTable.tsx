@@ -3,10 +3,14 @@ import { MedicationRecord } from "./EMARTable.types";
 
 type EMARTableProps = {
   medications: MedicationRecord[];
+  onCorrect?: (medication: MedicationRecord) => void;
+  onAcknowledge?: (medication: MedicationRecord) => void;
 };
 
 export default function EMARTable({
   medications,
+  onCorrect,
+  onAcknowledge,
 }: EMARTableProps) {
   if (medications.length === 0) {
     return (
@@ -61,6 +65,10 @@ export default function EMARTable({
               <th className="px-4 py-3 text-left">
                 Status
               </th>
+
+              <th className="px-4 py-3 text-right">
+                Actions
+              </th>
             </tr>
           </thead>
 
@@ -69,6 +77,8 @@ export default function EMARTable({
               <MedicationRow
                 key={medication.id}
                 medication={medication}
+                onCorrect={onCorrect}
+                onAcknowledge={onAcknowledge}
               />
             ))}
           </tbody>

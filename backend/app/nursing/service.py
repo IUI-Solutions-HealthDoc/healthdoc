@@ -115,6 +115,41 @@ async def record_administration(
     0043 CHECK both enforce it, deliberately — the API should reject it with a
     422 that names the field, and the database should still refuse if anything
     ever writes around the API."""
+    # 1. Validate prescription item exists and is not stopped (#HD-17)
+    item = await db.get(PrescriptionItem, payload.prescription_item_id)
+    if item is not None and item.status == "stopped":
+        raise HTTPException(409, "Cannot administer dose: prescription item has been stopped")
+
+    # 2. Concurrency safeguard: prevent duplicate dose for same schedule (#HD-17)
+    if payload.scheduled_at is not None and not payload.is_correction:
+        existing = (
+            await db.execute(
+                select(MedicationAdministration).where(
+                    MedicationAdministration.prescription_item_id == payload.prescription_item_id,
+                    MedicationAdministration.scheduled_at == payload.scheduled_at,
+                    MedicationAdministration.is_correction.is_(False),
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            raise HTTPException(
+                409,
+                f"A dose for this scheduled time was already recorded at {existing.administered_at.isoformat()}",
+            )
+
+    # 3. Dose correction verification: points to existing row, same admission/item (#HD-17)
+    if payload.is_correction or payload.correction_of_id is not None:
+        if payload.correction_of_id is None:
+            raise HTTPException(400, "correction_of_id is required for a dose correction")
+        original = await db.get(MedicationAdministration, payload.correction_of_id)
+        if original is None:
+            raise HTTPException(404, "Original administration record to correct not found")
+        if original.admission_id != payload.admission_id or original.prescription_item_id != payload.prescription_item_id:
+            raise HTTPException(400, "Correction must belong to the same admission and prescription item")
+
+    # 4. Determine acknowledgement requirement (STAT / URGENT orders require clinician sign-off) (#HD-20)
+    requires_ack = payload.requires_acknowledgement or (item is not None and item.priority in ("stat", "urgent"))
+
     record = MedicationAdministration(
         id=uuid.uuid4(),
         prescription_item_id=payload.prescription_item_id,
@@ -126,6 +161,11 @@ async def record_administration(
         dose_given=payload.dose_given,
         reason=payload.reason,
         notes=payload.notes,
+        route=payload.route or (item.route if item else None),
+        correction_of_id=payload.correction_of_id,
+        is_correction=bool(payload.is_correction or payload.correction_of_id),
+        correction_reason=payload.correction_reason,
+        requires_acknowledgement=requires_ack,
         created_by=recorded_by,
     )
     db.add(record)
@@ -136,8 +176,28 @@ async def record_administration(
     return await _attach_medicine(db, record)
 
 
+async def acknowledge_administration(
+    db: AsyncSession,
+    administration_id: uuid.UUID,
+    *,
+    acknowledged_by: uuid.UUID,
+    notes: str | None = None,
+) -> MedicationAdministration:
+    """Doctor sign-off for STAT, PRN or high-alert medication administration (#HD-20)."""
+    record = await db.get(MedicationAdministration, administration_id)
+    if record is None:
+        raise HTTPException(404, "Medication administration record not found")
+    record.acknowledged_by = acknowledged_by
+    record.acknowledged_at = datetime.now(timezone.utc)
+    if notes:
+        record.notes = f"{record.notes}\n[Ack note]: {notes}" if record.notes else f"[Ack note]: {notes}"
+    await db.flush()
+    await db.refresh(record)
+    return await _attach_medicine(db, record)
+
+
 async def _attach_medicine(db: AsyncSession, record: MedicationAdministration) -> MedicationAdministration:
-    """Copy the prescribed drug name, dose and route onto one record.
+    """Copy the prescribed drug name, dose, route, and priority onto one record.
 
     Same reason as the join in list_administrations: a caller holding only
     prescription_item_id cannot say what was given.
@@ -145,7 +205,9 @@ async def _attach_medicine(db: AsyncSession, record: MedicationAdministration) -
     item = await db.get(PrescriptionItem, record.prescription_item_id)
     record.medicine_name = item.medicine_name if item else None
     record.dosage = item.dosage if item else None
-    record.route = item.route if item else None
+    if not record.route:
+        record.route = item.route if item else None
+    record.priority = item.priority if item else None
     return record
 
 
@@ -154,18 +216,7 @@ async def list_administrations(
 ) -> list[MedicationAdministration]:
     """The ward eMAR table for one admission, most recent first.
 
-    Joined to prescription_items for the drug name, prescribed dose and route.
-    Without them the response carries only prescription_item_id, and an eMAR
-    that cannot say which drug a dose was is not an eMAR — the screen would
-    have to fetch every item separately, one request per row.
-
-    LEFT join, not inner: a dose that was actually given must never disappear
-    from the record because its prescription item did. The name renders as
-    unknown; the administration stays.
-
-    `dosage` (what was prescribed) and `dose_given` (what the nurse recorded)
-    are deliberately both present. They are the same number most of the time,
-    and the times they are not are the ones worth seeing.
+    Joined to prescription_items for the drug name, prescribed dose, route and priority.
     """
     rows = await db.execute(
         select(
@@ -173,6 +224,7 @@ async def list_administrations(
             PrescriptionItem.medicine_name,
             PrescriptionItem.dosage,
             PrescriptionItem.route,
+            PrescriptionItem.priority,
         )
         .outerjoin(
             PrescriptionItem,
@@ -183,10 +235,12 @@ async def list_administrations(
     )
 
     records: list[MedicationAdministration] = []
-    for record, medicine_name, dosage, route in rows.all():
+    for record, medicine_name, dosage, route, priority in rows.all():
         record.medicine_name = medicine_name
         record.dosage = dosage
-        record.route = route
+        if not record.route:
+            record.route = route
+        record.priority = priority
         records.append(record)
     return records
 

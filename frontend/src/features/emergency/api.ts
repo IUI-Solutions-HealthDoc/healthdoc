@@ -116,3 +116,111 @@ export function createEmergencyVisit(patientId: string): Promise<EmergencyVisitR
   });
 }
 
+export type EmergencyAcuity = "resuscitation" | "emergent" | "urgent" | "non_urgent";
+export type EmergencyTriageStatus = "waiting" | "in_treatment" | "admitted" | "discharged" | "lwbs";
+export type EmergencyDisposition = "admit" | "discharge" | "lwbs" | "transfer";
+
+export interface EmergencyTriageOut {
+  id: string;
+  facility_id: string;
+  patient_id: string;
+  visit_id: string;
+  acuity_level: EmergencyAcuity;
+  chief_complaint: string;
+  triage_notes: string | null;
+  assigned_doctor_id: string | null;
+  assigned_bay: string | null;
+  status: EmergencyTriageStatus;
+  triaged_at: string;
+  triaged_by: string;
+  clinician_seen_at: string | null;
+  disposition: EmergencyDisposition | null;
+  disposition_at: string | null;
+  disposition_notes: string | null;
+  door_to_clinician_minutes: number | null;
+}
+
+export interface EmergencyMetricsOut {
+  active_census: number;
+  waiting_count: number;
+  in_treatment_count: number;
+  resuscitation_count: number;
+  emergent_count: number;
+  urgent_count: number;
+  non_urgent_count: number;
+  avg_door_to_clinician_minutes: number | null;
+  lwbs_count: number;
+  facility_id?: string;
+  generated_at?: string;
+  total_census?: number;
+  lwbs_rate?: number;
+}
+
+export interface EmergencyTriageCreateInput {
+  patient_id: string;
+  visit_id: string;
+  acuity_level: EmergencyAcuity;
+  chief_complaint: string;
+  triage_notes?: string | null;
+  assigned_doctor_id?: string | null;
+  assigned_bay?: string | null;
+}
+
+export interface EmergencyTriageUpdateInput {
+  status?: EmergencyTriageStatus | null;
+  assigned_doctor_id?: string | null;
+  assigned_bay?: string | null;
+  clinician_seen_at?: string | null;
+  disposition?: EmergencyDisposition | null;
+  disposition_notes?: string | null;
+}
+
+export function listEmergencyTriages(status?: string): Promise<EmergencyTriageOut[]> {
+  if (status) {
+    return api<EmergencyTriageOut[]>(`/emergency/triages?status=${encodeURIComponent(status)}`);
+  }
+  return api<EmergencyTriageOut[]>("/emergency/triages");
+}
+
+
+export function getEmergencyMetrics(): Promise<EmergencyMetricsOut> {
+  return api<EmergencyMetricsOut>("/emergency/metrics");
+}
+
+export function createEmergencyTriage(
+  payload: EmergencyTriageCreateInput
+): Promise<EmergencyTriageOut> {
+  return api<EmergencyTriageOut>("/emergency/triages", {
+    method: "POST",
+    body: JSON.stringify(payload),
+    idempotencyKey: newIdempotencyKey(),
+  });
+}
+
+export function reTriageEmergencyPatient(
+  triageId: string,
+  newAcuity: EmergencyAcuity,
+  reason: string
+): Promise<EmergencyTriageOut> {
+  return api<EmergencyTriageOut>(`/emergency/triages/${triageId}/re-triage`, {
+    method: "POST",
+    body: JSON.stringify({
+      new_acuity: newAcuity,
+      reason: reason.trim(),
+    }),
+    idempotencyKey: newIdempotencyKey(),
+  });
+}
+
+export function updateEmergencyTriage(
+  triageId: string,
+  payload: EmergencyTriageUpdateInput
+): Promise<EmergencyTriageOut> {
+  return api<EmergencyTriageOut>(`/emergency/triages/${triageId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+    idempotencyKey: newIdempotencyKey(),
+  });
+}
+
+

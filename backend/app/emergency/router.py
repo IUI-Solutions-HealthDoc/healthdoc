@@ -19,12 +19,15 @@ from app.audit.service import write_audit_log
 from app.auth.deps import CurrentDbUser, require_roles
 from app.common.db import get_db
 from app.emergency.schemas import (
-    EmergencyPatientCreate, EmergencyPatientOut,
-    EmergencyWorklistItem, PromotionOut, PromotionRequest, UnmergeRequest,
+    EmergencyMetricsOut, EmergencyPatientCreate, EmergencyPatientOut,
+    EmergencyReTriageRequest, EmergencyTriageCreate, EmergencyTriageOut,
+    EmergencyTriageUpdate, EmergencyWorklistItem, PromotionOut,
+    PromotionRequest, UnmergeRequest,
 )
 from app.emergency.service import (
-    approve_promotion, generate_thid, get_emergency_worklist,
-    request_promotion, unmerge_promotion,
+    approve_promotion, create_triage, generate_thid, get_emergency_metrics,
+    get_emergency_worklist, list_active_triages, re_triage, request_promotion,
+    unmerge_promotion, update_triage,
 )
 from app.patients.models import Patient
 from app.users.models import Facility
@@ -249,4 +252,112 @@ async def list_emergency_worklist(
     """Facility-scoped list of active emergency visits and their patient details."""
     rows = await get_emergency_worklist(db, current_db_user.facility_id)
     return [EmergencyWorklistItem(**r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# HD-18: ED Triage and Tracking Endpoints
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/triages",
+    response_model=EmergencyTriageOut,
+    status_code=201,
+    dependencies=[Depends(require_roles("nurse", "doctor", "emergency", "admin"))],
+    summary="Record initial emergency department triage assessment",
+)
+async def record_emergency_triage(
+    payload: EmergencyTriageCreate,
+    current_db_user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+) -> EmergencyTriageOut:
+    triage = await create_triage(
+        db, payload, facility_id=current_db_user.facility_id, triaged_by=current_db_user.id
+    )
+    # Fetch row with patient / user info
+    board = await list_active_triages(db, current_db_user.facility_id, status_filter=triage.status)
+    match = next((item for item in board if item["id"] == triage.id), None)
+    if match:
+        return EmergencyTriageOut(**match)
+    return EmergencyTriageOut.model_validate(triage)
+
+
+@router.post(
+    "/triages/{triage_id}/re-triage",
+    response_model=EmergencyTriageOut,
+    dependencies=[Depends(require_roles("nurse", "doctor", "emergency", "admin"))],
+    summary="Re-triage an ED patient with mandatory clinical justification",
+)
+async def retriage_emergency_patient(
+    triage_id: uuid.UUID,
+    payload: EmergencyReTriageRequest,
+    current_db_user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+) -> EmergencyTriageOut:
+    try:
+        triage = await re_triage(
+            db, triage_id, payload, changed_by=current_db_user.id
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    board = await list_active_triages(db, current_db_user.facility_id, status_filter=triage.status)
+    match = next((item for item in board if item["id"] == triage.id), None)
+    if match:
+        return EmergencyTriageOut(**match)
+    return EmergencyTriageOut.model_validate(triage)
+
+
+@router.patch(
+    "/triages/{triage_id}",
+    response_model=EmergencyTriageOut,
+    dependencies=[Depends(require_roles("nurse", "doctor", "emergency", "admin"))],
+    summary="Update ED patient status, clinician, bay, or disposition",
+)
+async def update_emergency_triage(
+    triage_id: uuid.UUID,
+    payload: EmergencyTriageUpdate,
+    current_db_user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+) -> EmergencyTriageOut:
+    try:
+        triage = await update_triage(
+            db, triage_id, payload, updated_by=current_db_user.id
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    board = await list_active_triages(db, current_db_user.facility_id, status_filter=triage.status)
+    match = next((item for item in board if item["id"] == triage.id), None)
+    if match:
+        return EmergencyTriageOut(**match)
+    return EmergencyTriageOut.model_validate(triage)
+
+
+@router.get(
+    "/triages",
+    response_model=list[EmergencyTriageOut],
+    dependencies=[Depends(require_roles("doctor", "nurse", "emergency", "receptionist", "admin"))],
+    summary="Active emergency department tracking board",
+)
+async def get_emergency_triages(
+    current_db_user: CurrentDbUser,
+    status: str | None = None,
+    db: AsyncSession = Depends(get_db),
+) -> list[EmergencyTriageOut]:
+    items = await list_active_triages(db, current_db_user.facility_id, status_filter=status)
+    return [EmergencyTriageOut(**item) for item in items]
+
+
+@router.get(
+    "/metrics",
+    response_model=EmergencyMetricsOut,
+    dependencies=[Depends(require_roles("doctor", "nurse", "emergency", "receptionist", "admin"))],
+    summary="Emergency department metrics and census KPI summary",
+)
+async def get_ed_metrics(
+    current_db_user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+) -> EmergencyMetricsOut:
+    metrics = await get_emergency_metrics(db, current_db_user.facility_id)
+    return EmergencyMetricsOut(**metrics)
 

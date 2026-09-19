@@ -108,6 +108,14 @@ class MedicationAdministrationCreate(BaseModel):
                     "cannot be reconstructed in an adverse-event review.",
     )
     notes: str | None = None
+    route: str | None = None
+    correction_of_id: UUID | None = None
+    is_correction: bool = False
+    correction_reason: str | None = Field(
+        default=None,
+        description="Required when is_correction is True (minimum 10 characters).",
+    )
+    requires_acknowledgement: bool = False
 
     @model_validator(mode="after")
     def _valid_status_and_reason(self) -> "MedicationAdministrationCreate":
@@ -116,7 +124,17 @@ class MedicationAdministrationCreate(BaseModel):
         if self.status != MedicationAdministrationStatus.GIVEN.value:
             if self.reason is None or not self.reason.strip():
                 raise ValueError(f"reason is required when status is '{self.status}'")
+        if self.is_correction or self.correction_of_id is not None:
+            if self.correction_of_id is None:
+                raise ValueError("correction_of_id is required for a dose correction")
+            if not self.correction_reason or len(self.correction_reason.strip()) < 10:
+                raise ValueError("correction_reason of at least 10 characters is required for a dose correction")
+            self.is_correction = True
         return self
+
+
+class MedicationAdministrationAcknowledge(BaseModel):
+    notes: str | None = None
 
 
 class MedicationAdministrationOut(BaseModel):
@@ -142,6 +160,14 @@ class MedicationAdministrationOut(BaseModel):
     #: What was PRESCRIBED. `dose_given` above is what the nurse recorded.
     dosage: str | None = None
     route: str | None = None
+    priority: str | None = None
+
+    correction_of_id: UUID | None = None
+    is_correction: bool = False
+    correction_reason: str | None = None
+    requires_acknowledgement: bool = False
+    acknowledged_by: UUID | None = None
+    acknowledged_at: datetime | None = None
 
 
 class IntakeOutputCreate(BaseModel):

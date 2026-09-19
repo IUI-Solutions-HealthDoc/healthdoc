@@ -13,7 +13,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import (
-    CheckConstraint, DateTime, ForeignKey, Index, Integer, Numeric,
+    Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, Numeric,
     SmallInteger, String, Text,
 )
 from sqlalchemy.dialects.postgresql import UUID
@@ -110,6 +110,8 @@ class MedicationAdministration(Base, UUIDPk, Timestamps, Blame):
             name="reason_required"),
         Index("ix_medication_administration_admission_at", "admission_id", "administered_at"),
         Index("ix_medication_administration_item", "prescription_item_id"),
+        Index("ix_medication_administration_correction", "correction_of_id"),
+        Index("ix_medication_administration_ack_by", "acknowledged_by"),
     )
 
     prescription_item_id: Mapped[uuid.UUID] = mapped_column(
@@ -127,6 +129,16 @@ class MedicationAdministration(Base, UUIDPk, Timestamps, Blame):
     dose_given: Mapped[str | None] = mapped_column(String(100), nullable=True)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    correction_of_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("medication_administration.id", ondelete="RESTRICT"), nullable=True)
+    is_correction: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    correction_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    route: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    requires_acknowledgement: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    acknowledged_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=True)
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class NursingHandoverNote(Base, UUIDPk, Timestamps, Blame):
