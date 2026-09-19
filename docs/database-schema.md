@@ -1862,7 +1862,6 @@ critical_high numeric(10, 3) NULL
 is_required boolean NOT NULL DEFAULT true
 version integer NOT NULL DEFAULT 1
 ```
-
 **abdm_callback_replies** (0067) — committed reply intent, not a clinical inbox
 ```
 facility_id UUID NOT NULL → facilities

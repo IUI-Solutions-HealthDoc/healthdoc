@@ -94,7 +94,6 @@ were reported upgraded to 0073 on 14 September; verify the actual target before 
 
 
 
-
 ## Required entry — duplicate for each package actually worked on
 
 ### HD-01 — Role-Correct Post-Visit Actions
