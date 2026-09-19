@@ -38,6 +38,8 @@ MODULES = [
     "emergency",
     "encounters",
     "files",
+    "forms",
+    "immunization",
     "inventory",
     "ipd",
     "notifications",
