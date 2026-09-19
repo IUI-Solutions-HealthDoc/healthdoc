@@ -174,6 +174,7 @@ const ROLE_DASHBOARDS = [
     dashboards: [
       { path: "/pharmacy/prescription-queue", expectCalls: true },
       { path: "/pharmacy/dispense", expectCalls: true },
+      { path: "/pharmacy/returns", expectCalls: true },
       // Loads reorder alerts and the expiry tracker on mount; the five stock
       // tabs are separate components and are not exercised by a page load.
       { path: "/inventory", expectCalls: true },

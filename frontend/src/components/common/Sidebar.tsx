@@ -67,7 +67,7 @@ const NAV_ITEMS: readonly NavItem[] = [
   { href: "/radiology", label: "Radiology", icon: Radio, area: "diagnostics", roles: [ROLES.RADIOLOGY_TECH, ROLES.DOCTOR] },
   { href: "/pharmacy/prescription-queue", label: "Pharmacy queue", icon: Pill, area: "clinical", roles: [ROLES.PHARMACIST] },
   { href: "/pharmacy/dispense", label: "Dispense", icon: Package, area: "clinical", roles: [ROLES.PHARMACIST] },
-  { href: "/pharmacy/returns", label: "Medicine returns", icon: RotateCcw, area: "clinical", roles: [ROLES.PHARMACIST, ROLES.ADMIN] },
+  { href: "/pharmacy/returns", label: "Medicine returns", icon: RotateCcw, area: "clinical", roles: [ROLES.PHARMACIST] },
   { href: "/inventory", label: "Inventory", icon: Package, area: "clinical", roles: [ROLES.PHARMACIST, ROLES.HOD] },
   { href: "/billing", label: "Billing", icon: Receipt, area: "finance", roles: [ROLES.BILLING, ROLES.ADMIN] },
   { href: "/billing/tariffs", label: "Tariff catalogue", icon: Receipt, area: "finance", roles: [ROLES.BILLING, ROLES.ADMIN] },
