@@ -18,7 +18,7 @@ from app.common.business_date import get_business_date
 from app.common.db import get_db
 from app.common.idempotency import check_idempotency, hash_request_body, record_idempotent_response
 from app.common.redis import publish_event, queue_channel, subscribe
-from app.queue import service
+from app.queue import reconciliation, service
 from app.queue.schemas import (
     CompleteAdvanceOut,
     DepartmentWorkloadOut,
@@ -41,6 +41,9 @@ from app.queue.schemas import (
     RosterCandidateOut,
     RosterCreate,
     RosterOut,
+    StaleVisitsReconcileRequest,
+    StaleVisitsReconcileResult,
+    StaleVisitsReportOut,
     TokenPriorityElevate,
     TokenReassign,
     VisitWithoutTokenOut,
@@ -718,3 +721,67 @@ async def get_pending_approvals(
     _require_hod_dashboard_department(current_db_user, department_id)
     approvals = await service.get_pending_approvals(db, department_id, current_db_user.facility_id)
     return {"items": [PendingApprovalOut(**item).model_dump(mode="json") for item in approvals]}
+
+
+# ---------------- HD-12: STALE-VISIT RECONCILIATION ----------------
+@router.get(
+    "/stale-visits",
+    response_model=StaleVisitsReportOut,
+    dependencies=[Depends(require_roles("receptionist", "admin", "hod"))],
+)
+async def get_stale_visits(
+    current_db_user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """Retrieve stale unclosed visits from previous business days for review."""
+    return await reconciliation.get_stale_visits_candidates(
+        db, current_db_user.facility_id
+    )
+
+
+@router.post(
+    "/reconcile-stale-visits",
+    response_model=StaleVisitsReconcileResult,
+    dependencies=[Depends(require_roles("receptionist", "admin", "hod"))],
+)
+async def reconcile_stale_visits(
+    payload: StaleVisitsReconcileRequest,
+    current_db_user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+):
+    """Safely reconcile stale visits (e.g. mark LWBS, close consultations, cancel live tokens)."""
+    endpoint = "POST /queue/reconcile-stale-visits"
+    if idempotency_key:
+        cached = await check_idempotency(
+            db,
+            idempotency_key,
+            endpoint,
+            hash_request_body(payload),
+            user_id=current_db_user.id,
+        )
+        if cached is not None:
+            return cached.response_body
+
+    result = await reconciliation.reconcile_stale_visits(
+        db,
+        facility_id=current_db_user.facility_id,
+        actor_id=current_db_user.id,
+        visit_ids=payload.visit_ids,
+        reason=payload.reason,
+    )
+    await db.commit()
+
+    if idempotency_key:
+        await record_idempotent_response(
+            db,
+            idempotency_key,
+            endpoint,
+            200,
+            result.model_dump(mode="json"),
+            user_id=current_db_user.id,
+        )
+        await db.commit()
+
+    return result
+

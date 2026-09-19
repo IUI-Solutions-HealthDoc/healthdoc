@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { Printer } from "lucide-react";
 
 import { ApiError, newIdempotencyKey } from "@/lib/api";
 import { PatientAvatar } from "@/components/ui/PatientAvatar";
@@ -8,6 +9,7 @@ import { PatientAvatar } from "@/components/ui/PatientAvatar";
 import { registerPatient, uploadPatientPhoto } from "./api";
 import { AbhaIdentityPanel } from "./AbhaIdentityPanel";
 import { StartVisit } from "./StartVisit";
+import { PatientCardModal } from "./PatientCardModal";
 import type { Patient, PatientCreate } from "./types";
 import {
   deriveAgeFromDob,
@@ -47,6 +49,7 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [registered, setRegistered] = useState<Patient | null>(null);
+  const [showCardModal, setShowCardModal] = useState(false);
 
   /**
    * Generated once when the form mounts, not per submit.
@@ -180,6 +183,17 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
                 .join(", ")}
             </p>
           )}
+
+          <div className="pt-2">
+            <button
+              type="button"
+              onClick={() => setShowCardModal(true)}
+              className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-4 py-2 text-sm font-semibold hover:bg-muted shadow-sm"
+            >
+              <Printer size={16} />
+              Print Patient Card
+            </button>
+          </div>
         </div>
 
         <AbhaIdentityPanel patient={registered} />
@@ -200,6 +214,14 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
             Register another patient
           </button>
         </div>
+
+        {showCardModal && (
+          <PatientCardModal
+            open={showCardModal}
+            onClose={() => setShowCardModal(false)}
+            patient={registered}
+          />
+        )}
       </div>
     );
   }

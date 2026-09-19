@@ -27,6 +27,7 @@ log = logging.getLogger("healthdoc")
 
 MODULES = [
     "allergies",
+    "appointments",
     "audit",
     "billing",
     "blood_bank",

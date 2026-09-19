@@ -18,6 +18,8 @@ import type {
   Visit,
   VisitCreate,
   VisitWithoutToken,
+  StaleVisitsReport,
+  StaleVisitsReconcileResult,
 } from "./types";
 import {
   digitsOnly,
@@ -261,4 +263,25 @@ export function updatePatientDemographics(
     body: JSON.stringify(payload),
   });
 }
+
+/** HD-12: Retrieve stale visits report. */
+export function getStaleVisits(): Promise<StaleVisitsReport> {
+  return api<StaleVisitsReport>("/queue/stale-visits");
+}
+
+/** HD-12: Reconcile stale visits (e.g. mark LWBS/closed). */
+export function reconcileStaleVisits(
+  visitIds?: string[],
+  reason?: string,
+): Promise<StaleVisitsReconcileResult> {
+  return api<StaleVisitsReconcileResult>("/queue/reconcile-stale-visits", {
+    method: "POST",
+    idempotencyKey: crypto.randomUUID(),
+    body: JSON.stringify({
+      visit_ids: visitIds && visitIds.length > 0 ? visitIds : null,
+      reason: reason || "Authorized end-of-day stale visit reconciliation (LWBS / no-show)",
+    }),
+  });
+}
+
 

@@ -244,19 +244,28 @@ async def search_patients_endpoint(
         page=payload.page,
         page_size=payload.page_size,
     )
-    items = [
-        PatientSearchResult(
-            id=patient.id,
-            uhid=patient.uhid,
-            full_name=patient.full_name,
-            sex=patient.sex,
-            age_years=patient.age_years,
-            mobile_masked=mask_mobile(patient.mobile),
-            match_score=round(score, 3),
-            matched_on=matched_on,
+    items = []
+    for item in results:
+        if len(item) == 4:
+            patient, score, matched_on, merged_from = item
+        else:
+            patient, score, matched_on = item
+            merged_from = None
+        items.append(
+            PatientSearchResult(
+                id=patient.id,
+                uhid=patient.uhid,
+                thid=patient.thid,
+                full_name=patient.full_name,
+                sex=patient.sex,
+                age_years=patient.age_years,
+                dob=patient.dob,
+                mobile_masked=mask_mobile(patient.mobile),
+                match_score=round(score, 3),
+                matched_on=matched_on,
+                merged_from_uhid=merged_from,
+            )
         )
-        for patient, score, matched_on in results
-    ]
     return PatientSearchResponse(
         items=items, page=payload.page, page_size=payload.page_size, total=total,
     )
