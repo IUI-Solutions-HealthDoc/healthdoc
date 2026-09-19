@@ -14,13 +14,15 @@ import uuid
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, case, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admissions.models import (
     Admission,
+    AdmissionChecklistTask,
     Bed,
+    ClinicalDisposition,
     Discharge,
     DischargeNotification,
     PatientMovementLog,
@@ -79,6 +81,20 @@ class TransferDestinationRequired(Exception):
     Postgres CHECK-constraint error."""
 
 
+class ClinicalDispositionNotFound(Exception):
+    def __init__(self, disposition_id: UUID):
+        self.disposition_id = disposition_id
+
+
+class ChecklistTaskNotFound(Exception):
+    def __init__(self, task_id: UUID):
+        self.task_id = task_id
+
+
+class ChecklistSkipReasonRequired(Exception):
+    pass
+
+
 _DISCHARGE_NOTIFICATION_TARGETS = ("pharmacy", "billing", "nursing", "lab", "radiology", "patient")
 
 
@@ -100,7 +116,10 @@ async def admit_patient(
     if ward is None or (facility_id is not None and ward.facility_id != facility_id):
         raise WardNotFound(ward_id)
 
-    bed = await db.get(Bed, bed_id)
+    bed_res = await db.execute(
+        select(Bed).where(Bed.id == bed_id).with_for_update()
+    )
+    bed = bed_res.scalar_one_or_none()
     if bed is None or bed.ward_id != ward_id:
         raise BedNotFound(bed_id)
     if bed.status not in ("vacant", "reserved"):
@@ -113,6 +132,39 @@ async def admit_patient(
     )
     db.add(admission)
     bed.status = "occupied"
+
+    # HD-13: Auto-update matching pending disposition to admitted
+    disposition_res = await db.execute(
+        select(ClinicalDisposition).where(
+            ClinicalDisposition.visit_id == visit_id,
+            ClinicalDisposition.disposition_type == "admit",
+            ClinicalDisposition.status == "pending",
+        )
+    )
+    for disp in disposition_res.scalars().all():
+        disp.status = "admitted"
+        disp.updated_by = created_by
+
+    # HD-16: Auto-seed standard admission checklist tasks
+    standard_tasks = [
+        ("id_wristband", "Verify patient identity & apply ID wristband", "identification", True),
+        ("baseline_vitals", "Record baseline vital signs", "clinical", True),
+        ("allergy_diet", "Confirm allergies, adverse reactions & dietary restrictions", "safety", True),
+        ("med_reconciliation", "Medication reconciliation with current prescriptions", "pharmacy", True),
+        ("fall_safety_risk", "Assess fall risk (Morse) and pressure injury risk", "safety", True),
+        ("ward_orientation", "Ward orientation, nurse call-bell instruction & visiting guidance", "orientation", False),
+    ]
+    for task_code, title, category, is_mandatory in standard_tasks:
+        db.add(AdmissionChecklistTask(
+            id=uuid.uuid4(),
+            admission_id=admission.id,
+            facility_id=visit.facility_id,
+            task_code=task_code,
+            title=title,
+            category=category,
+            is_mandatory=is_mandatory,
+            status="pending",
+        ))
 
     try:
         await db.flush()
@@ -138,23 +190,39 @@ async def transfer_patient(
     reason: str | None = None,
     facility_id: UUID | None = None,
 ) -> Admission:
-    if admission.status != "admitted":
-        raise AdmissionNotActive(admission.id, admission.status)
+    # Row-lock the admission
+    adm_res = await db.execute(
+        select(Admission).where(Admission.id == admission.id).with_for_update()
+    )
+    locked_adm = adm_res.scalar_one_or_none()
+    if locked_adm is None:
+        raise AdmissionNotFound(admission.id)
+    if locked_adm.status != "admitted":
+        raise AdmissionNotActive(locked_adm.id, locked_adm.status)
 
     to_ward = await db.get(Ward, to_ward_id)
     if to_ward is None or (facility_id is not None and to_ward.facility_id != facility_id):
         raise WardNotFound(to_ward_id)
-    to_bed = await db.get(Bed, to_bed_id)
+
+    # Row-lock target bed
+    to_bed_res = await db.execute(
+        select(Bed).where(Bed.id == to_bed_id).with_for_update()
+    )
+    to_bed = to_bed_res.scalar_one_or_none()
     if to_bed is None or to_bed.ward_id != to_ward_id:
         raise BedNotFound(to_bed_id)
     if to_bed.status not in ("vacant", "reserved"):
         raise BedNotAvailable(to_bed_id)
 
-    old_ward_id, old_bed_id = admission.ward_id, admission.bed_id
-    old_bed = await db.get(Bed, old_bed_id)
+    old_ward_id, old_bed_id = locked_adm.ward_id, locked_adm.bed_id
+    # Row-lock old bed
+    old_bed_res = await db.execute(
+        select(Bed).where(Bed.id == old_bed_id).with_for_update()
+    )
+    old_bed = old_bed_res.scalar_one_or_none()
 
     db.add(PatientMovementLog(
-        id=uuid.uuid4(), admission_id=admission.id, from_ward_id=old_ward_id, from_bed_id=old_bed_id,
+        id=uuid.uuid4(), admission_id=locked_adm.id, from_ward_id=old_ward_id, from_bed_id=old_bed_id,
         to_ward_id=to_ward_id, to_bed_id=to_bed_id, moved_at=datetime.now(UTC),
         reason=reason, moved_by=moved_by,
     ))
@@ -162,9 +230,9 @@ async def transfer_patient(
     if old_bed is not None:
         old_bed.status = "vacant"
     to_bed.status = "occupied"
-    admission.ward_id = to_ward_id
-    admission.bed_id = to_bed_id
-    admission.updated_by = moved_by
+    locked_adm.ward_id = to_ward_id
+    locked_adm.bed_id = to_bed_id
+    locked_adm.updated_by = moved_by
 
     try:
         await db.flush()
@@ -173,14 +241,14 @@ async def transfer_patient(
             raise BedNotAvailable(to_bed_id)
         raise
 
-    visit = await db.get(Visit, admission.visit_id)
+    visit = await db.get(Visit, locked_adm.visit_id)
     await write_audit_log(
         db, facility_id=visit.facility_id, action="transfer", resource_type="admissions",
-        resource_id=admission.id, user_id=moved_by, patient_id=admission.patient_id, visit_id=admission.visit_id,
+        resource_id=locked_adm.id, user_id=moved_by, patient_id=locked_adm.patient_id, visit_id=locked_adm.visit_id,
         old_value={"ward_id": str(old_ward_id), "bed_id": str(old_bed_id)},
         new_value={"ward_id": str(to_ward_id), "bed_id": str(to_bed_id)},
     )
-    return admission
+    return locked_adm
 
 
 async def get_admission(
@@ -395,3 +463,462 @@ async def reconcile_bed_status(db: AsyncSession, facility_id: UUID | None = None
             })
 
     return mismatches
+
+
+# ---------------- HD-13: CLINICAL DISPOSITIONS ----------------
+
+async def create_clinical_disposition(
+    db: AsyncSession,
+    *,
+    facility_id: UUID,
+    patient_id: UUID,
+    visit_id: UUID,
+    disposition_type: str,
+    created_by: UUID,
+    priority: str = "routine",
+    encounter_id: UUID | None = None,
+    recommended_ward_id: UUID | None = None,
+    recommended_department_id: UUID | None = None,
+    reason: str | None = None,
+    notes: str | None = None,
+) -> ClinicalDisposition:
+    visit = await db.get(Visit, visit_id)
+    if visit is None or visit.facility_id != facility_id:
+        raise VisitNotFound(visit_id)
+
+    disp = ClinicalDisposition(
+        id=uuid.uuid4(),
+        facility_id=facility_id,
+        patient_id=patient_id,
+        visit_id=visit_id,
+        encounter_id=encounter_id,
+        disposition_type=disposition_type,
+        priority=priority,
+        recommended_ward_id=recommended_ward_id,
+        recommended_department_id=recommended_department_id,
+        reason=reason,
+        status="pending",
+        notes=notes,
+        created_by=created_by,
+    )
+    db.add(disp)
+    await db.flush()
+
+    await write_audit_log(
+        db,
+        facility_id=facility_id,
+        action="create",
+        resource_type="clinical_dispositions",
+        resource_id=disp.id,
+        user_id=created_by,
+        patient_id=patient_id,
+        visit_id=visit_id,
+        new_value={"disposition_type": disposition_type, "priority": priority, "status": "pending"},
+    )
+    return disp
+
+
+async def list_pending_admissions(
+    db: AsyncSession, *, facility_id: UUID
+) -> list[dict]:
+    from app.departments.models import Department
+    from app.users.models import User
+
+    query = (
+        select(
+            ClinicalDisposition.id.label("disposition_id"),
+            Patient.id.label("patient_id"),
+            Patient.full_name.label("patient_name"),
+            Patient.uhid.label("patient_uhid"),
+            Patient.sex.label("patient_sex"),
+            Patient.dob.label("patient_dob"),
+            Patient.age_years.label("patient_age_years"),
+            Visit.id.label("visit_id"),
+            Visit.visit_number.label("visit_number"),
+            ClinicalDisposition.encounter_id,
+            ClinicalDisposition.priority,
+            ClinicalDisposition.recommended_ward_id,
+            Ward.name.label("recommended_ward_name"),
+            ClinicalDisposition.recommended_department_id,
+            Department.name.label("recommended_department_name"),
+            ClinicalDisposition.reason,
+            ClinicalDisposition.created_by.label("doctor_id"),
+            User.full_name.label("doctor_name"),
+            ClinicalDisposition.created_at,
+        )
+        .join(Patient, Patient.id == ClinicalDisposition.patient_id)
+        .join(Visit, Visit.id == ClinicalDisposition.visit_id)
+        .outerjoin(Ward, Ward.id == ClinicalDisposition.recommended_ward_id)
+        .outerjoin(Department, Department.id == ClinicalDisposition.recommended_department_id)
+        .outerjoin(User, User.id == ClinicalDisposition.created_by)
+        .where(
+            ClinicalDisposition.facility_id == facility_id,
+            ClinicalDisposition.disposition_type == "admit",
+            ClinicalDisposition.status == "pending",
+        )
+        .order_by(
+            case(
+                (ClinicalDisposition.priority == "emergency", 1),
+                (ClinicalDisposition.priority == "urgent", 2),
+                else_=3,
+            ),
+            ClinicalDisposition.created_at.asc(),
+        )
+    )
+    rows = await db.execute(query)
+    results = []
+    for r in rows.mappings():
+        item = dict(r)
+        age = item.get("patient_age_years")
+        if age is None and item.get("patient_dob"):
+            today = datetime.now(UTC).date()
+            dob = item["patient_dob"]
+            age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+        item["patient_age"] = age
+        item.pop("patient_dob", None)
+        item.pop("patient_age_years", None)
+        if not item.get("patient_uhid"):
+            item["patient_uhid"] = "Pending UHID"
+        results.append(item)
+    return results
+
+
+async def list_pending_discharges(
+    db: AsyncSession, *, facility_id: UUID
+) -> list[dict]:
+    from app.users.models import User
+
+    query = (
+        select(
+            Admission.id.label("admission_id"),
+            Patient.id.label("patient_id"),
+            Patient.full_name.label("patient_name"),
+            Patient.uhid.label("patient_uhid"),
+            Ward.id.label("ward_id"),
+            Ward.name.label("ward_name"),
+            Bed.id.label("bed_id"),
+            Bed.bed_number.label("bed_number"),
+            Admission.admitted_at,
+            ClinicalDisposition.created_by.label("recommended_by_id"),
+            User.full_name.label("recommended_by_name"),
+            ClinicalDisposition.reason,
+            ClinicalDisposition.created_at,
+        )
+        .join(Admission, Admission.patient_id == ClinicalDisposition.patient_id)
+        .join(Patient, Patient.id == Admission.patient_id)
+        .join(Ward, Ward.id == Admission.ward_id)
+        .join(Bed, Bed.id == Admission.bed_id)
+        .outerjoin(User, User.id == ClinicalDisposition.created_by)
+        .where(
+            ClinicalDisposition.facility_id == facility_id,
+            ClinicalDisposition.disposition_type == "discharge",
+            ClinicalDisposition.status == "pending",
+            Admission.status == "admitted",
+        )
+        .order_by(ClinicalDisposition.created_at.asc())
+    )
+    rows = await db.execute(query)
+    results = []
+    for r in rows.mappings():
+        item = dict(r)
+        if not item.get("patient_uhid"):
+            item["patient_uhid"] = "Pending UHID"
+        results.append(item)
+    return results
+
+
+async def update_clinical_disposition(
+    db: AsyncSession,
+    disposition_id: UUID,
+    *,
+    status: str | None = None,
+    notes: str | None = None,
+    updated_by: UUID,
+    facility_id: UUID,
+) -> ClinicalDisposition:
+    disp = await db.get(ClinicalDisposition, disposition_id)
+    if disp is None or disp.facility_id != facility_id:
+        raise ClinicalDispositionNotFound(disposition_id)
+    if status is not None:
+        disp.status = status
+    if notes is not None:
+        disp.notes = notes
+    disp.updated_by = updated_by
+    await db.flush()
+    await db.refresh(disp)
+    return disp
+
+
+# ---------------- HD-16: ADMISSION CHECKLIST ----------------
+
+async def get_admission_checklist(
+    db: AsyncSession, admission_id: UUID, facility_id: UUID
+) -> list[dict]:
+    from app.users.models import User
+
+    admission = await get_admission(db, admission_id, facility_id)
+    if admission is None:
+        raise AdmissionNotFound(admission_id)
+
+    query = (
+        select(
+            AdmissionChecklistTask,
+            User.full_name.label("completed_by_name"),
+        )
+        .outerjoin(User, User.id == AdmissionChecklistTask.completed_by)
+        .where(
+            AdmissionChecklistTask.admission_id == admission_id,
+            AdmissionChecklistTask.facility_id == facility_id,
+        )
+        .order_by(AdmissionChecklistTask.created_at.asc())
+    )
+    rows = await db.execute(query)
+    items = []
+    for task, completed_by_name in rows.all():
+        data = {
+            "id": task.id,
+            "admission_id": task.admission_id,
+            "task_code": task.task_code,
+            "title": task.title,
+            "category": task.category,
+            "is_mandatory": task.is_mandatory,
+            "status": task.status,
+            "completed_at": task.completed_at,
+            "completed_by": task.completed_by,
+            "completed_by_name": completed_by_name,
+            "skipped_reason": task.skipped_reason,
+            "notes": task.notes,
+            "created_at": task.created_at,
+            "updated_at": task.updated_at,
+        }
+        items.append(data)
+    return items
+
+
+async def update_checklist_task(
+    db: AsyncSession,
+    *,
+    admission_id: UUID,
+    task_id: UUID,
+    status: str,
+    skipped_reason: str | None = None,
+    notes: str | None = None,
+    updated_by: UUID,
+    facility_id: UUID,
+) -> dict:
+    from app.users.models import User
+
+    task = await db.get(AdmissionChecklistTask, task_id)
+    if task is None or task.admission_id != admission_id or task.facility_id != facility_id:
+        raise ChecklistTaskNotFound(task_id)
+
+    if status == "skipped" and (not skipped_reason or not skipped_reason.strip()):
+        raise ChecklistSkipReasonRequired("Mandatory skipped_reason is required when skipping a checklist task")
+
+    task.status = status
+    if status in ("completed", "skipped"):
+        task.completed_at = datetime.now(UTC)
+        task.completed_by = updated_by
+    else:
+        task.completed_at = None
+        task.completed_by = None
+
+    task.skipped_reason = skipped_reason.strip() if skipped_reason else None
+    if notes is not None:
+        task.notes = notes
+
+    await db.flush()
+    await db.refresh(task)
+
+    user_name = None
+    if task.completed_by:
+        u = await db.get(User, task.completed_by)
+        if u:
+            user_name = u.full_name
+
+    return {
+        "id": task.id,
+        "admission_id": task.admission_id,
+        "task_code": task.task_code,
+        "title": task.title,
+        "category": task.category,
+        "is_mandatory": task.is_mandatory,
+        "status": task.status,
+        "completed_at": task.completed_at,
+        "completed_by": task.completed_by,
+        "completed_by_name": user_name,
+        "skipped_reason": task.skipped_reason,
+        "notes": task.notes,
+        "created_at": task.created_at,
+        "updated_at": task.updated_at,
+    }
+
+
+# ---------------- HD-15: ADMISSION CHART ----------------
+
+async def get_admission_chart(
+    db: AsyncSession, admission_id: UUID, facility_id: UUID
+) -> dict:
+    admission = await get_admission(db, admission_id, facility_id)
+    if admission is None:
+        raise AdmissionNotFound(admission_id)
+
+    patient = await db.get(Patient, admission.patient_id)
+    ward = await db.get(Ward, admission.ward_id)
+    bed = await db.get(Bed, admission.bed_id)
+
+    # Patient info
+    patient_info = {
+        "id": str(patient.id) if patient else "",
+        "full_name": patient.full_name if patient else "",
+        "uhid": patient.uhid or "Pending UHID" if patient else "",
+        "sex": getattr(patient, "sex", None),
+        "dob": str(patient.dob) if patient and getattr(patient, "dob", None) else None,
+        "age_years": getattr(patient, "age_years", None),
+        "mobile": getattr(patient, "mobile", None),
+    }
+
+    # Admission info
+    admission_info = {
+        "id": str(admission.id),
+        "admitted_at": admission.admitted_at.isoformat() if admission.admitted_at else None,
+        "status": admission.status,
+        "ward_id": str(admission.ward_id),
+        "ward_name": ward.name if ward else "",
+        "bed_id": str(admission.bed_id),
+        "bed_number": bed.bed_number if bed else "",
+        "reason": admission.reason,
+    }
+
+    # Vitals (filtered by admission_id or patient_id)
+    from app.nursing.models import Vitals
+    vitals_res = await db.execute(
+        select(Vitals)
+        .where(
+            (Vitals.admission_id == admission_id) |
+            ((Vitals.patient_id == admission.patient_id) & (Vitals.measured_at >= admission.admitted_at))
+        )
+        .order_by(Vitals.measured_at.desc())
+        .limit(20)
+    )
+    vitals_list = []
+    for v in vitals_res.scalars().all():
+        vitals_list.append({
+            "id": str(v.id),
+            "measured_at": v.measured_at.isoformat() if v.measured_at else None,
+            "temp_c": float(v.temp_c) if v.temp_c is not None else None,
+            "pulse_bpm": v.pulse_bpm,
+            "resp_rate": v.resp_rate,
+            "bp_systolic": v.bp_systolic,
+            "bp_diastolic": v.bp_diastolic,
+            "spo2_pct": v.spo2_pct,
+            "pain_score": v.pain_score,
+        })
+
+    # Allergies
+    from app.allergies.models import Allergy
+    allergies_res = await db.execute(
+        select(Allergy)
+        .where(Allergy.patient_id == admission.patient_id, Allergy.status == "active")
+        .order_by(Allergy.created_at.desc())
+    )
+    allergies_list = []
+    for a in allergies_res.scalars().all():
+        allergies_list.append({
+            "id": str(a.id),
+            "allergen_type": a.allergen_type,
+            "substance_text": a.substance_text,
+            "severity": a.severity,
+            "reaction": a.reaction,
+            "is_blocking": a.is_blocking,
+        })
+
+    # Diagnoses
+    from app.opd.models import Diagnosis, Encounter
+    diagnoses_res = await db.execute(
+        select(Diagnosis)
+        .join(Encounter, Encounter.id == Diagnosis.encounter_id)
+        .where(Encounter.visit_id == admission.visit_id)
+        .order_by(Diagnosis.is_primary.desc(), Diagnosis.created_at.desc())
+    )
+    diagnoses_list = []
+    for d in diagnoses_res.scalars().all():
+        diagnoses_list.append({
+            "id": str(d.id),
+            "icd_code": d.icd_code,
+            "icd_version": d.icd_version,
+            "diagnosis_text": d.diagnosis_text,
+            "diagnosis_type": d.diagnosis_type,
+            "is_primary": d.is_primary,
+        })
+
+    # Orders (Labs, Radiology, Procedures)
+    from app.orders.models import Order
+    orders_res = await db.execute(
+        select(Order)
+        .where(Order.patient_id == admission.patient_id)
+        .order_by(Order.ordered_at.desc())
+        .limit(20)
+    )
+    orders_list = []
+    for o in orders_res.scalars().all():
+        orders_list.append({
+            "id": str(o.id),
+            "order_number": o.order_number,
+            "order_type": o.order_type,
+            "priority": o.priority,
+            "status": o.status,
+            "ordered_at": o.ordered_at.isoformat() if o.ordered_at else None,
+        })
+
+    # Medications (Prescriptions)
+    from app.orders.models import Prescription, PrescriptionItem
+    presc_res = await db.execute(
+        select(PrescriptionItem)
+        .join(Prescription, Prescription.id == PrescriptionItem.prescription_id)
+        .where(Prescription.patient_id == admission.patient_id)
+        .order_by(PrescriptionItem.created_at.desc())
+        .limit(20)
+    )
+    medications_list = []
+    for pi in presc_res.scalars().all():
+        medications_list.append({
+            "id": str(pi.id),
+            "medicine_name": pi.medicine_name,
+            "dosage": pi.dosage,
+            "frequency": pi.frequency,
+            "duration_days": pi.duration_days,
+            "route": pi.route,
+            "status": pi.status,
+            "instructions": pi.instructions,
+        })
+
+    # Checklist summary
+    tasks_res = await db.execute(
+        select(AdmissionChecklistTask).where(AdmissionChecklistTask.admission_id == admission.id)
+    )
+    all_tasks = tasks_res.scalars().all()
+    completed_count = sum(1 for t in all_tasks if t.status == "completed")
+    skipped_count = sum(1 for t in all_tasks if t.status == "skipped")
+    pending_count = sum(1 for t in all_tasks if t.status == "pending")
+    total_count = len(all_tasks)
+
+    checklist_summary = {
+        "total": total_count,
+        "completed": completed_count,
+        "skipped": skipped_count,
+        "pending": pending_count,
+        "percent_complete": round((completed_count + skipped_count) / total_count * 100) if total_count > 0 else 0,
+    }
+
+    return {
+        "admission_id": admission.id,
+        "patient": patient_info,
+        "admission": admission_info,
+        "vitals": vitals_list,
+        "allergies": allergies_list,
+        "diagnoses": diagnoses_list,
+        "orders": orders_list,
+        "medications": medications_list,
+        "checklist_summary": checklist_summary,
+    }

@@ -20,6 +20,7 @@ import { PrescriptionWorkspace } from "./PrescriptionWorkspace";
 import { SoapNotePanel } from "./SoapNotePanel";
 import { StaleWritePanel } from "./StaleWritePanel";
 import { VitalsPanel } from "./VitalsPanel";
+import { ClinicalDispositionPanel } from "@/features/ipd/components/ClinicalDispositionPanel";
 
 export interface ConsultationWorkspaceProps {
   context: EncounterContext;
@@ -75,6 +76,7 @@ export function ConsultationWorkspace({ context }: ConsultationWorkspaceProps) {
           <DiagnosesPanel encounter={encounter} />
           <OrdersPanel encounter={encounter} patientLabel={`${context.patient_name} · ${context.uhid || context.patient_id}`} />
           <PrescriptionWorkspace context={context} encounter={encounter} />
+          <ClinicalDispositionPanel context={context} encounter={encounter} />
         </>
       ) : !ended ? (
         <Alert severity="info">

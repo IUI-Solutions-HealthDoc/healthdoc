@@ -149,3 +149,90 @@ class DischargeNotification(Base, UUIDPk, Timestamps):
         ),
         Index("ix_discharge_notifications_discharge_id", "discharge_id"),
     )
+
+
+class ClinicalDisposition(Base, UUIDPk, Timestamps, Blame):
+    """Clinical disposition intent recorded during consultation/emergency (HD-13).
+
+    Tracks clinician disposition decisions (admit, discharge, transfer, follow_up)
+    with priority and target ward/department recommendations, driving the 'To Admit'
+    and 'To Discharge' queues.
+    """
+    __tablename__ = "clinical_dispositions"
+    __audit_resource_type__ = "clinical_dispositions"
+    __audit_facility_id_field__ = "facility_id"
+    __audit_patient_id_field__ = "patient_id"
+
+    facility_id = Column(UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False)
+    patient_id = Column(UUID(as_uuid=True), ForeignKey("patients.id", ondelete="RESTRICT"), nullable=False)
+    visit_id = Column(UUID(as_uuid=True), ForeignKey("visits.id", ondelete="RESTRICT"), nullable=False)
+    encounter_id = Column(UUID(as_uuid=True), ForeignKey("encounters.id", ondelete="RESTRICT"), nullable=True)
+    disposition_type = Column(String(50), nullable=False)  # admit, discharge, transfer, follow_up
+    priority = Column(String(50), nullable=False, server_default="routine")  # routine, urgent, emergency
+    recommended_ward_id = Column(UUID(as_uuid=True), ForeignKey("wards.id", ondelete="RESTRICT"), nullable=True)
+    recommended_department_id = Column(UUID(as_uuid=True), ForeignKey("departments.id", ondelete="RESTRICT"), nullable=True)
+    reason = Column(Text, nullable=True)
+    status = Column(String(50), nullable=False, server_default="pending")  # pending, admitted, discharged, transferred, cancelled
+    notes = Column(Text, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "disposition_type IN ('admit', 'discharge', 'transfer', 'follow_up')",
+            name="ck_clinical_dispositions_disposition_type",
+        ),
+        CheckConstraint(
+            "priority IN ('routine', 'urgent', 'emergency')",
+            name="ck_clinical_dispositions_priority",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'admitted', 'discharged', 'transferred', 'cancelled')",
+            name="ck_clinical_dispositions_status",
+        ),
+        Index("ix_clinical_dispositions_facility_id", "facility_id"),
+        Index("ix_clinical_dispositions_patient_id", "patient_id"),
+        Index("ix_clinical_dispositions_visit_id", "visit_id"),
+        Index("ix_clinical_dispositions_encounter_id", "encounter_id"),
+        Index("ix_clinical_dispositions_recommended_ward_id", "recommended_ward_id"),
+        Index("ix_clinical_dispositions_recommended_department_id", "recommended_department_id"),
+        Index("ix_clinical_dispositions_created_by", "created_by"),
+        Index("ix_clinical_dispositions_updated_by", "updated_by"),
+        Index("ix_clinical_dispositions_status", "facility_id", "status"),
+    )
+
+
+class AdmissionChecklistTask(Base, UUIDPk, Timestamps):
+    """Standard admission checklist task (HD-16).
+
+    Auto-initialized upon patient admission. Requires mandatory justification
+    when any step is skipped.
+    """
+    __tablename__ = "admission_checklist_tasks"
+    __audit_resource_type__ = "admission_checklist_tasks"
+    __audit_facility_id_field__ = "facility_id"
+
+    admission_id = Column(UUID(as_uuid=True), ForeignKey("admissions.id", ondelete="CASCADE"), nullable=False)
+    facility_id = Column(UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False)
+    task_code = Column(String(50), nullable=False)
+    title = Column(String(200), nullable=False)
+    category = Column(String(50), nullable=False, server_default="general")
+    is_mandatory = Column(Boolean, nullable=False, server_default="true")
+    status = Column(String(50), nullable=False, server_default="pending")  # pending, completed, skipped
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    completed_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=True)
+    skipped_reason = Column(Text, nullable=True)
+    notes = Column(Text, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("admission_id", "task_code", name="uq_admission_checklist_tasks_admission_task"),
+        CheckConstraint(
+            "status IN ('pending', 'completed', 'skipped')",
+            name="ck_admission_checklist_tasks_status",
+        ),
+        CheckConstraint(
+            "status <> 'skipped' OR (skipped_reason IS NOT NULL AND length(trim(skipped_reason)) > 0)",
+            name="ck_admission_checklist_tasks_skip_reason_required",
+        ),
+        Index("ix_admission_checklist_tasks_admission_id", "admission_id"),
+        Index("ix_admission_checklist_tasks_facility_id", "facility_id"),
+        Index("ix_admission_checklist_tasks_completed_by", "completed_by"),
+    )

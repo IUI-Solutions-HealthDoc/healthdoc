@@ -121,6 +121,85 @@ async def list_discharges(
     return [schemas.DischargeOut.model_validate(row) for row in rows]
 
 
+# ---------------- HD-13: CLINICAL DISPOSITION ENDPOINTS ----------------
+
+@router.post("/dispositions", response_model=schemas.ClinicalDispositionOut, status_code=status.HTTP_201_CREATED)
+async def create_disposition(
+    body: schemas.ClinicalDispositionCreate,
+    current_db_user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+    user: AuthUser = Depends(require_roles(*_IPD_ROLES)),
+    _actor: AuditActor = Depends(get_current_actor_dependency),
+) -> schemas.ClinicalDispositionOut:
+    actor_id = await service.resolve_actor_user_id(
+        db, keycloak_sub=getattr(user, "sub", None), fallback_id=getattr(user, "id", None)
+    )
+    try:
+        disp = await service.create_clinical_disposition(
+            db,
+            facility_id=current_db_user.facility_id,
+            patient_id=body.patient_id,
+            visit_id=body.visit_id,
+            encounter_id=body.encounter_id,
+            disposition_type=body.disposition_type,
+            priority=body.priority,
+            recommended_ward_id=body.recommended_ward_id,
+            recommended_department_id=body.recommended_department_id,
+            reason=body.reason,
+            notes=body.notes,
+            created_by=actor_id,
+        )
+    except service.VisitNotFound:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Visit not found")
+    return schemas.ClinicalDispositionOut.model_validate(disp)
+
+
+@router.get("/to-admit", response_model=list[schemas.PendingAdmissionItemOut])
+async def list_pending_admissions(
+    current_db_user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+    _user: AuthUser = Depends(require_roles(*_IPD_ROLES)),
+) -> list[schemas.PendingAdmissionItemOut]:
+    items = await service.list_pending_admissions(db, facility_id=current_db_user.facility_id)
+    return [schemas.PendingAdmissionItemOut.model_validate(item) for item in items]
+
+
+@router.get("/to-discharge", response_model=list[schemas.PendingDischargeItemOut])
+async def list_pending_discharges(
+    current_db_user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+    _user: AuthUser = Depends(require_roles(*_IPD_ROLES)),
+) -> list[schemas.PendingDischargeItemOut]:
+    items = await service.list_pending_discharges(db, facility_id=current_db_user.facility_id)
+    return [schemas.PendingDischargeItemOut.model_validate(item) for item in items]
+
+
+@router.patch("/dispositions/{disposition_id}", response_model=schemas.ClinicalDispositionOut)
+async def update_disposition(
+    disposition_id: uuid.UUID,
+    body: schemas.ClinicalDispositionUpdate,
+    current_db_user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+    user: AuthUser = Depends(require_roles(*_IPD_ROLES)),
+    _actor: AuditActor = Depends(get_current_actor_dependency),
+) -> schemas.ClinicalDispositionOut:
+    actor_id = await service.resolve_actor_user_id(
+        db, keycloak_sub=getattr(user, "sub", None), fallback_id=getattr(user, "id", None)
+    )
+    try:
+        disp = await service.update_clinical_disposition(
+            db,
+            disposition_id=disposition_id,
+            status=body.status,
+            notes=body.notes,
+            updated_by=actor_id,
+            facility_id=current_db_user.facility_id,
+        )
+    except service.ClinicalDispositionNotFound:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Clinical disposition not found")
+    return schemas.ClinicalDispositionOut.model_validate(disp)
+
+
 @router.get("/{admission_id}", response_model=schemas.AdmissionOut)
 async def get_admission(
     admission_id: uuid.UUID,
@@ -226,3 +305,70 @@ async def discharge_summary(
         discharge=schemas.DischargeOut.model_validate(discharge) if discharge else None,
         movements=[schemas.MovementOut.model_validate(m) for m in movements],
     )
+
+
+# ---------------- HD-15: ADMISSION CHART ----------------
+
+@router.get("/{admission_id}/chart", response_model=schemas.AdmissionChartOut)
+async def get_admission_chart(
+    admission_id: uuid.UUID,
+    current_db_user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+    _user: AuthUser = Depends(require_roles(*_IPD_ROLES)),
+) -> schemas.AdmissionChartOut:
+    try:
+        chart_data = await service.get_admission_chart(
+            db, admission_id, current_db_user.facility_id
+        )
+    except service.AdmissionNotFound:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Admission not found")
+    return schemas.AdmissionChartOut.model_validate(chart_data)
+
+
+# ---------------- HD-16: ADMISSION CHECKLIST ----------------
+
+@router.get("/{admission_id}/checklist", response_model=list[schemas.AdmissionChecklistTaskOut])
+async def get_admission_checklist(
+    admission_id: uuid.UUID,
+    current_db_user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+    _user: AuthUser = Depends(require_roles(*_IPD_ROLES)),
+) -> list[schemas.AdmissionChecklistTaskOut]:
+    try:
+        tasks = await service.get_admission_checklist(
+            db, admission_id, current_db_user.facility_id
+        )
+    except service.AdmissionNotFound:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Admission not found")
+    return [schemas.AdmissionChecklistTaskOut.model_validate(t) for t in tasks]
+
+
+@router.patch("/{admission_id}/checklist/{task_id}", response_model=schemas.AdmissionChecklistTaskOut)
+async def update_checklist_task(
+    admission_id: uuid.UUID,
+    task_id: uuid.UUID,
+    body: schemas.AdmissionChecklistTaskUpdate,
+    current_db_user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+    user: AuthUser = Depends(require_roles(*_IPD_ROLES)),
+    _actor: AuditActor = Depends(get_current_actor_dependency),
+) -> schemas.AdmissionChecklistTaskOut:
+    actor_id = await service.resolve_actor_user_id(
+        db, keycloak_sub=getattr(user, "sub", None), fallback_id=getattr(user, "id", None)
+    )
+    try:
+        updated_task = await service.update_checklist_task(
+            db,
+            admission_id=admission_id,
+            task_id=task_id,
+            status=body.status,
+            skipped_reason=body.skipped_reason,
+            notes=body.notes,
+            updated_by=actor_id,
+            facility_id=current_db_user.facility_id,
+        )
+    except service.ChecklistTaskNotFound:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Checklist task not found")
+    except service.ChecklistSkipReasonRequired:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "skipped_reason is required when skipping a checklist task")
+    return schemas.AdmissionChecklistTaskOut.model_validate(updated_task)
