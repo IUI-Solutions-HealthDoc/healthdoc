@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Text, Integer, Boolean, DateTime, ForeignKey
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from app.common.models import UUIDPk, Timestamps, Blame
 from app.common.db import Base
@@ -40,3 +40,50 @@ class RadiologyReport(Base, UUIDPk, Timestamps):
     # no updated_by column, since these rows are append-only/versioned and
     # never updated in place.
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+
+
+class RadiologyAttachment(Base, UUIDPk):
+    """Upload-only radiology imaging files, DICOM and PDF attachments (HD-23, §3 0077)."""
+
+    __tablename__ = "radiology_attachments"
+
+    facility_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("facilities.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    order_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("orders.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    patient_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("patients.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    radiology_order_item_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("radiology_order_items.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    file_key = Column(String(255), nullable=False)
+    file_name = Column(String(255), nullable=False)
+    mime_type = Column(String(100), nullable=False)
+    file_size_bytes = Column(Integer, nullable=False)
+    checksum_sha256 = Column(String(64), nullable=False)
+    uploaded_by = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    uploaded_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        index=True,
+    )

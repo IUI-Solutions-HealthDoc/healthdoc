@@ -2,20 +2,24 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import UTC, datetime
 from datetime import date as _date
 from datetime import timedelta as _timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException
-from sqlalchemy import text
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.allergies.service import AllergyConflict, check_prescription_item
 from app.audit.service import write_audit_log
 from app.common.enums import DispenseStatus, NotificationStatus
 from app.common.redis import publish_event, stock_alert_channel
+from app.inventory.models import InventoryBatch, InventoryItem, StockLedger
+from app.patients.models import Patient
 from app.pharmacy.interactions import DrugInteractionConflict, check_against_existing
+from app.pharmacy.models import PharmacyReturn
 from app.pharmacy.schemas import (
     AdjustmentApprovalRequest,
     AdjustmentCreate,
@@ -55,6 +59,9 @@ from app.pharmacy.schemas import (
     SubstitutionApprovalRequest,
     SupplierListOut,
     SupplierOut,
+    PharmacyReturnCreate,
+    PharmacyReturnListOut,
+    PharmacyReturnOut,
 )
 from app.pharmacy.schemas import PharmacyMisReport as _PharmacyMisReport
 
@@ -2336,3 +2343,178 @@ async def list_adjustments(
         )
     ).mappings().all()
     return AdjustmentListOut(items=[AdjustmentListItem(**dict(r)) for r in rows])
+
+
+# ---------------- HD-24: PHARMACY STOCK RETURNS & QUARANTINE DISPOSITION ----------------
+
+
+async def create_pharmacy_return(
+    db: AsyncSession,
+    *,
+    facility_id: UUID,
+    user_id: UUID,
+    payload: PharmacyReturnCreate,
+) -> PharmacyReturnOut:
+    """Process a patient/ward medicine return with resalable vs quarantine/damaged disposition."""
+    # 1. Validate patient
+    patient_res = await db.execute(
+        select(Patient.id).where(Patient.id == payload.patient_id)
+    )
+    if not patient_res.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Patient not found")
+
+    # 2. Validate inventory item
+    item_res = (
+        await db.execute(
+            select(InventoryItem.id, InventoryItem.name).where(InventoryItem.id == payload.item_id)
+        )
+    ).first()
+    if not item_res:
+        raise HTTPException(status_code=404, detail="Inventory item not found")
+    item_name = item_res.name
+
+    # 3. Validate batch if provided
+    batch_number = None
+    if payload.batch_id:
+        batch_res = (
+            await db.execute(
+                select(InventoryBatch.id, InventoryBatch.batch_number, InventoryBatch.quantity).where(
+                    InventoryBatch.id == payload.batch_id
+                )
+            )
+        ).first()
+        if not batch_res:
+            raise HTTPException(status_code=404, detail="Inventory batch not found")
+        batch_number = batch_res.batch_number
+
+    # 4. Insert into pharmacy_returns
+    return_id = uuid4()
+    return_obj = PharmacyReturn(
+        id=return_id,
+        facility_id=facility_id,
+        patient_id=payload.patient_id,
+        dispense_id=payload.dispense_id,
+        item_id=payload.item_id,
+        batch_id=payload.batch_id,
+        quantity=payload.quantity,
+        return_reason=payload.return_reason,
+        disposition=payload.disposition,
+        status="completed",
+        returned_by=user_id,
+    )
+    db.add(return_obj)
+    await db.flush()
+
+    # 5. Stock Ledger & Batch Update:
+    # A returned medicine must NEVER automatically become usable stock unless explicitly verified resalable!
+    ledger_id = uuid4()
+    if payload.disposition == "resalable":
+        if payload.batch_id:
+            await db.execute(
+                update(InventoryBatch)
+                .where(InventoryBatch.id == payload.batch_id)
+                .values(quantity=InventoryBatch.quantity + payload.quantity)
+            )
+        ledger_entry = StockLedger(
+            id=ledger_id,
+            item_id=payload.item_id,
+            batch_id=payload.batch_id,
+            transaction_type="return",
+            quantity=payload.quantity,
+            reference_type="pharmacy_return",
+            reference_id=return_id,
+            performed_by=user_id,
+            reason=f"Returned to stock (resalable): {payload.return_reason}",
+        )
+        db.add(ledger_entry)
+    else:
+        # Quarantine / damaged / expired: Isolated, not added to available batch quantity
+        ledger_entry = StockLedger(
+            id=ledger_id,
+            item_id=payload.item_id,
+            batch_id=payload.batch_id,
+            transaction_type="write_off",
+            quantity=-payload.quantity,
+            reference_type="pharmacy_return",
+            reference_id=return_id,
+            performed_by=user_id,
+            reason=f"Quarantined/Damaged return ({payload.disposition}): {payload.return_reason}",
+        )
+        db.add(ledger_entry)
+
+    # 6. Audit log
+    await write_audit_log(
+        db,
+        facility_id=facility_id,
+        user_id=user_id,
+        action="return",
+        resource_type="pharmacy_returns",
+        resource_id=return_id,
+        new_value={
+            "patient_id": str(payload.patient_id),
+            "item_id": str(payload.item_id),
+            "quantity": str(payload.quantity),
+            "disposition": payload.disposition,
+            "return_reason": payload.return_reason,
+        },
+    )
+    await db.flush()
+
+    return PharmacyReturnOut(
+        id=return_obj.id,
+        facility_id=return_obj.facility_id,
+        patient_id=return_obj.patient_id,
+        dispense_id=return_obj.dispense_id,
+        item_id=return_obj.item_id,
+        batch_id=return_obj.batch_id,
+        quantity=return_obj.quantity,
+        return_reason=return_obj.return_reason,
+        disposition=return_obj.disposition,
+        status=return_obj.status,
+        returned_by=return_obj.returned_by,
+        created_at=return_obj.created_at,
+        item_name=item_name,
+        batch_number=batch_number,
+    )
+
+
+async def list_pharmacy_returns(
+    db: AsyncSession,
+    *,
+    facility_id: UUID,
+    disposition: str | None = None,
+    patient_id: UUID | None = None,
+) -> PharmacyReturnListOut:
+    """List pharmacy returns for the facility."""
+    stmt = (
+        select(
+            PharmacyReturn.id,
+            PharmacyReturn.facility_id,
+            PharmacyReturn.patient_id,
+            PharmacyReturn.dispense_id,
+            PharmacyReturn.item_id,
+            PharmacyReturn.batch_id,
+            PharmacyReturn.quantity,
+            PharmacyReturn.return_reason,
+            PharmacyReturn.disposition,
+            PharmacyReturn.status,
+            PharmacyReturn.returned_by,
+            PharmacyReturn.created_at,
+            InventoryItem.name.label("item_name"),
+            InventoryBatch.batch_number.label("batch_number"),
+        )
+        .join(InventoryItem, InventoryItem.id == PharmacyReturn.item_id)
+        .outerjoin(InventoryBatch, InventoryBatch.id == PharmacyReturn.batch_id)
+        .where(PharmacyReturn.facility_id == facility_id)
+    )
+    if disposition:
+        stmt = stmt.where(PharmacyReturn.disposition == disposition)
+    if patient_id:
+        stmt = stmt.where(PharmacyReturn.patient_id == patient_id)
+
+    stmt = stmt.order_by(PharmacyReturn.created_at.desc()).limit(200)
+    res = await db.execute(stmt)
+    rows = res.mappings().all()
+
+    items = [PharmacyReturnOut(**dict(r)) for r in rows]
+    return PharmacyReturnListOut(items=items, total=len(items))

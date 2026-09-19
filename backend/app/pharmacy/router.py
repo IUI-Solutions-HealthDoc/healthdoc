@@ -37,8 +37,13 @@ from app.pharmacy.schemas import (
     AdjustmentCreate,
     AdjustmentOut,
     AdjustmentApprovalRequest,
+    PharmacyReturnCreate,
+    PharmacyReturnListOut,
+    PharmacyReturnOut,
 )
 from app.pharmacy.service import (
+    create_pharmacy_return,
+    list_pharmacy_returns,
     list_adjustment_candidates,
     list_grns,
     list_indents,
@@ -665,3 +670,51 @@ async def list_adjustments_endpoint(
 ) -> AdjustmentListOut:
     """Stock adjustments. The second approver's worklist."""
     return await list_adjustments(db, facility_id=current_user.facility_id, status=status)
+
+
+# ---------------- HD-24: PHARMACY STOCK RETURNS ----------------
+
+
+@router.post(
+    "/returns",
+    response_model=PharmacyReturnOut,
+    dependencies=[
+        Depends(require_module("pharmacy")),
+        Depends(require_roles("pharmacist", "admin")),
+    ],
+)
+async def create_return_endpoint(
+    payload: PharmacyReturnCreate,
+    current_user: CurrentDbUser,
+    db: DbSession,
+) -> PharmacyReturnOut:
+    """Process a patient/ward medicine return with quarantine vs resalable disposition."""
+    return await create_pharmacy_return(
+        db,
+        facility_id=current_user.facility_id,
+        user_id=current_user.id,
+        payload=payload,
+    )
+
+
+@router.get(
+    "/returns",
+    response_model=PharmacyReturnListOut,
+    dependencies=[
+        Depends(require_module("pharmacy")),
+        Depends(require_roles("pharmacist", "admin", "doctor", "nurse")),
+    ],
+)
+async def list_returns_endpoint(
+    current_user: CurrentDbUser,
+    db: DbSession,
+    disposition: str | None = Query(None, description="resalable | quarantine | damaged | expired"),
+    patient_id: UUID | None = Query(None, description="Filter by patient ID"),
+) -> PharmacyReturnListOut:
+    """List medicine returns for the facility."""
+    return await list_pharmacy_returns(
+        db,
+        facility_id=current_user.facility_id,
+        disposition=disposition,
+        patient_id=patient_id,
+    )

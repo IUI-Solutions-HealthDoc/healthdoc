@@ -1,11 +1,12 @@
-"use client";
-
-import { Menu, LogOut, User, Languages } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Menu, LogOut, User, Languages, AlertTriangle } from "lucide-react";
 import { REALM_ROLE_LABELS } from "@/features/admin/constants";
 import { useAuth } from "@/providers/auth-provider";
 import { useLocale } from "@/lib/i18n";
 import { useDeskCounter } from "@/features/receptionist/useDeskCounter";
 import { HealthDocBrand } from "./HealthDocBrand";
+import { listCriticalAlerts } from "@/features/lab/api";
+import { CriticalAlertsModal } from "@/features/lab/components/CriticalAlertsModal";
 
 interface NavbarProps {
   open: boolean;
@@ -16,6 +17,34 @@ export default function Navbar({ open, setOpen }: NavbarProps) {
   const { user, logout } = useAuth();
   const { locale, setLocale, t } = useLocale();
   const { counter, setDeskCounter, availableCounters } = useDeskCounter();
+  const [unackAlertCount, setUnackAlertCount] = useState(0);
+  const [alertModalOpen, setAlertModalOpen] = useState(false);
+
+  const canSeeAlerts =
+    user?.role === "doctor" ||
+    user?.role === "nurse" ||
+    user?.role === "lab_tech" ||
+    user?.role === "admin";
+
+  const refreshAlertCount = async () => {
+    if (!canSeeAlerts) return;
+    try {
+      const res = await listCriticalAlerts("unacknowledged");
+      setUnackAlertCount(res.total);
+    } catch {
+      // Non-intrusive
+    }
+  };
+
+  useEffect(() => {
+    if (canSeeAlerts) {
+      void refreshAlertCount();
+      const interval = setInterval(() => {
+        void refreshAlertCount();
+      }, 20000);
+      return () => clearInterval(interval);
+    }
+  }, [canSeeAlerts]);
 
   const roleLabel = user?.role
     ? (REALM_ROLE_LABELS[user.role] ?? user.role)
@@ -119,6 +148,27 @@ export default function Navbar({ open, setOpen }: NavbarProps) {
           </div>
         </div>
 
+        {canSeeAlerts && (
+          <button
+            type="button"
+            onClick={() => setAlertModalOpen(true)}
+            className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition-all ${
+              unackAlertCount > 0
+                ? "border border-red-300 bg-red-500/10 text-red-600 hover:bg-red-500/20 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300 animate-pulse"
+                : "border border-border/80 bg-muted/40 text-muted-foreground hover:text-foreground"
+            }`}
+            title="Critical Panic Lab Alerts"
+            aria-label={`Critical alerts: ${unackAlertCount} pending`}
+          >
+            <AlertTriangle size={14} className={unackAlertCount > 0 ? "text-red-600 dark:text-red-400" : "text-muted-foreground"} />
+            <span>
+              {unackAlertCount > 0
+                ? `${unackAlertCount} Panic Alert${unackAlertCount > 1 ? "s" : ""}`
+                : "Lab Alerts"}
+            </span>
+          </button>
+        )}
+
         <button
           type="button"
           onClick={() => void logout()}
@@ -129,6 +179,12 @@ export default function Navbar({ open, setOpen }: NavbarProps) {
           <LogOut size={16} />
         </button>
       </div>
+
+      <CriticalAlertsModal
+        isOpen={alertModalOpen}
+        onClose={() => setAlertModalOpen(false)}
+        onAlertAcknowledged={() => void refreshAlertCount()}
+      />
     </header>
   );
 }

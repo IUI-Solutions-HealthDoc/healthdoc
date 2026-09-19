@@ -41,9 +41,12 @@ from app.common.accession import LAB, allocate_accession_number
 from app.common.db import SessionLocal, get_db
 from app.common.idempotency import check_idempotency, hash_request_body, record_idempotent_response
 from app.orders.models import Order
-from app.pathology.models import LabOrderItem, LabResult
+from app.pathology.models import CriticalAlert, LabAnalyte, LabOrderItem, LabResult, LabSpecimenEvent
 from app.pathology.analyte_service import evaluate_result_analytes, get_analytes_for_test
 from app.pathology.schemas import (
+    CriticalAlertAcknowledgeRequest,
+    CriticalAlertListOut,
+    CriticalAlertOut,
     LabAnalyteListOut,
     LabAnalyteOut,
     LabMISSummaryOut,
@@ -55,8 +58,11 @@ from app.pathology.schemas import (
     LabResultHistoryOut,
     LabResultOut,
     LabResultVerify,
+    LabSpecimenEventOut,
     PanicFrequencyOut,
     SampleCollectionRequest,
+    SpecimenCollectRequest,
+    SpecimenRejectRequest,
     StatusCountOut,
     TATByTestOut,
 )
@@ -196,7 +202,7 @@ async def collect_sample(
         db, item_id, current_db_user.facility_id, for_update=True
     )
 
-    if item.status != "placed":
+    if item.status != "placed" and item.specimen_status not in ("pending_collection", "rejected"):
         raise HTTPException(status_code=409, detail="Sample already collected for this item")
 
     duplicate = (await db.execute(
@@ -207,14 +213,221 @@ async def collect_sample(
         raise HTTPException(status_code=409, detail="Duplicate barcode")
 
     item.status = "in_progress"
+    item.specimen_status = "collected"
     item.barcode = payload.barcode
     item.collected_at = payload.collected_at or datetime.now(UTC)
+
+    event = LabSpecimenEvent(
+        lab_order_item_id=item.id,
+        event_type="collected",
+        performed_by=current_db_user.id,
+        notes=f"Barcode assigned: {payload.barcode}",
+    )
+    db.add(event)
 
     await _write_audit_log(db, table_name="lab_order_items", row_id=item.id,
                             action="update", actor_id=current_db_user.id,
                             facility_id=current_db_user.facility_id)
+    await db.flush()
     await db.refresh(item)
     return item
+
+
+@router.post(
+    "/order-items/{item_id}/specimen/collect",
+    response_model=LabOrderItemOut,
+    dependencies=[Depends(require_roles("lab_tech"))],
+)
+async def specimen_collect(
+    current_db_user: CurrentDbUser,
+    item_id: uuid.UUID,
+    payload: SpecimenCollectRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    item = await _get_scoped_lab_item(
+        db, item_id, current_db_user.facility_id, for_update=True
+    )
+    if item.status != "placed" and item.specimen_status not in ("pending_collection", "rejected"):
+        raise HTTPException(status_code=409, detail="Sample already collected for this item")
+
+    duplicate = (await db.execute(
+        select(func.count()).select_from(LabOrderItem)
+        .where(LabOrderItem.barcode == payload.barcode)
+    )).scalar()
+    if duplicate:
+        raise HTTPException(status_code=409, detail="Duplicate barcode")
+
+    item.status = "in_progress"
+    item.specimen_status = "collected"
+    item.barcode = payload.barcode
+    item.collected_at = payload.collected_at or datetime.now(UTC)
+
+    event = LabSpecimenEvent(
+        lab_order_item_id=item.id,
+        event_type="collected",
+        performed_by=current_db_user.id,
+        notes=f"Barcode assigned: {payload.barcode}",
+    )
+    db.add(event)
+
+    await _write_audit_log(db, table_name="lab_order_items", row_id=item.id,
+                            action="update", actor_id=current_db_user.id,
+                            facility_id=current_db_user.facility_id)
+    await db.flush()
+    await db.refresh(item)
+    return item
+
+
+@router.post(
+    "/order-items/{item_id}/specimen/receive",
+    response_model=LabOrderItemOut,
+    dependencies=[Depends(require_roles("lab_tech"))],
+)
+async def specimen_receive(
+    current_db_user: CurrentDbUser,
+    item_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    item = await _get_scoped_lab_item(
+        db, item_id, current_db_user.facility_id, for_update=True
+    )
+    if item.specimen_status not in ("collected", "pending_collection"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot receive specimen with current status: {item.specimen_status}",
+        )
+
+    item.specimen_status = "received"
+    event = LabSpecimenEvent(
+        lab_order_item_id=item.id,
+        event_type="received",
+        performed_by=current_db_user.id,
+    )
+    db.add(event)
+    await db.flush()
+    await db.refresh(item)
+    return item
+
+
+@router.post(
+    "/order-items/{item_id}/specimen/reject",
+    response_model=LabOrderItemOut,
+    dependencies=[Depends(require_roles("lab_tech"))],
+)
+async def specimen_reject(
+    current_db_user: CurrentDbUser,
+    item_id: uuid.UUID,
+    payload: SpecimenRejectRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    item = await _get_scoped_lab_item(
+        db, item_id, current_db_user.facility_id, for_update=True
+    )
+    if item.status in ("completed", "released"):
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot reject specimen for completed or released test",
+        )
+
+    item.specimen_status = "rejected"
+    item.rejection_reason = payload.rejection_reason
+
+    event = LabSpecimenEvent(
+        lab_order_item_id=item.id,
+        event_type="rejected",
+        rejection_reason=payload.rejection_reason,
+        notes=payload.notes,
+        performed_by=current_db_user.id,
+    )
+    db.add(event)
+
+    await _write_audit_log(
+        db, table_name="lab_order_items", row_id=item.id,
+        action="update", actor_id=current_db_user.id,
+        facility_id=current_db_user.facility_id,
+    )
+    await db.flush()
+    await db.refresh(item)
+    return item
+
+
+@router.post(
+    "/order-items/{item_id}/specimen/recollect",
+    response_model=LabOrderItemOut,
+    dependencies=[Depends(require_roles("lab_tech", "doctor"))],
+)
+async def specimen_recollect(
+    current_db_user: CurrentDbUser,
+    item_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    item = await _get_scoped_lab_item(
+        db, item_id, current_db_user.facility_id, for_update=True
+    )
+    if item.specimen_status != "rejected":
+        raise HTTPException(
+            status_code=409,
+            detail="Recollection can only be initiated for rejected specimens",
+        )
+
+    item.specimen_status = "recollected"
+
+    recollected_acc = await allocate_accession_number(
+        db, prefix=LAB, facility_id=current_db_user.facility_id
+    )
+    new_item = LabOrderItem(
+        id=uuid.uuid4(),
+        order_id=item.order_id,
+        accession_number=recollected_acc,
+        test_code=item.test_code,
+        test_name=item.test_name,
+        sample_type=item.sample_type,
+        department_id=item.department_id,
+        status="placed",
+        specimen_status="pending_collection",
+        recollected_from_id=item.id,
+        estimated_minutes=item.estimated_minutes,
+        created_by=current_db_user.id,
+    )
+    db.add(new_item)
+    await db.flush()
+
+    event = LabSpecimenEvent(
+        lab_order_item_id=item.id,
+        event_type="recollected",
+        notes=f"Recollected into new item {new_item.id} ({recollected_acc})",
+        performed_by=current_db_user.id,
+    )
+    db.add(event)
+
+    await _write_audit_log(
+        db, table_name="lab_order_items", row_id=new_item.id,
+        action="create", actor_id=current_db_user.id,
+        facility_id=current_db_user.facility_id,
+    )
+    await db.flush()
+    await db.refresh(new_item)
+    return new_item
+
+
+@router.get(
+    "/order-items/{item_id}/specimen/events",
+    response_model=list[LabSpecimenEventOut],
+    dependencies=[Depends(require_roles("lab_tech", "doctor", "nurse", "admin"))],
+)
+async def list_specimen_events(
+    current_db_user: CurrentDbUser,
+    item_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    await _get_scoped_lab_item(db, item_id, current_db_user.facility_id)
+    stmt = (
+        select(LabSpecimenEvent)
+        .where(LabSpecimenEvent.lab_order_item_id == item_id)
+        .order_by(LabSpecimenEvent.created_at.asc())
+    )
+    res = await db.execute(stmt)
+    return list(res.scalars().all())
 
 
 @router.get(
@@ -379,9 +592,9 @@ async def enter_result(
     db.add(result)
     item.status = "completed"
 
-    # #185 & HD-19: wire the critical-value check + doctor notification
+    # #185 & HD-19 & HD-21: wire the critical-value check + doctor notification + durable outbox
     if flagged:
-        await _publish_critical_alert(db, item, flagged)
+        await _publish_critical_alert(db, item, flagged, evaluated_data)
 
     await _write_audit_log(db, table_name="lab_results", row_id=result.id,
                             action="create", actor_id=current_db_user.id,
@@ -651,52 +864,175 @@ async def _resolve_ordering_doctor_id(db: AsyncSession, item: LabOrderItem) -> u
     return encounter.provider_user_id
 
 
-async def _publish_critical_alert(db: AsyncSession, item: LabOrderItem,
-                                   flagged_fields: list[str]) -> None:
+async def _publish_critical_alert(
+    db: AsyncSession,
+    item: LabOrderItem,
+    flagged_fields: list[str],
+    result_data: dict | None = None,
+) -> None:
     doctor_id = await _resolve_ordering_doctor_id(db, item)
 
-    try:
-        from app.notifications.models import NotificationHistory
-    except ImportError:
-        return
-
-    # facility comes off the order, not the caller and not the department:
-    # lab_order_items.department_id is nullable, orders.facility_id is not
-    # (0022). A critical-result alert belongs to the facility that ran the
-    # test, whoever happens to be entering the result.
     from app.orders.models import Order
     order = await db.get(Order, item.order_id)
     if order is None:
         return
 
-    notification = NotificationHistory(
-        event_type="lab_critical_result",
-        payload={
-            "lab_order_item_id": str(item.id),
-            "accession_number": item.accession_number,
-            "flagged_field_count": len(flagged_fields),
-        },
-        department_id=item.department_id,
-        facility_id=order.facility_id,
-    )
-    db.add(notification)
-    await db.flush()
+    # HD-21: Persist durable CriticalAlert records in the database transaction
+    analytes_dict = (result_data or {}).get("_analytes", {})
+    created_alert_ids: list[str] = []
+    for field in flagged_fields:
+        analyte_info = analytes_dict.get(field, {})
+        raw_val = analyte_info.get("value")
+        if raw_val is None and result_data:
+            raw_val = result_data.get(field)
+        try:
+            num_val = float(raw_val) if raw_val is not None else 0.0
+        except (ValueError, TypeError):
+            num_val = 0.0
+
+        alert = CriticalAlert(
+            id=uuid.uuid4(),
+            facility_id=order.facility_id,
+            patient_id=getattr(order, "patient_id", None) or uuid.uuid4(),
+            visit_id=getattr(order, "visit_id", None),
+            order_id=getattr(order, "id", None) or item.order_id,
+            test_code=getattr(item, "test_code", None) or "UNKNOWN",
+            analyte_code=field,
+            analyte_name=analyte_info.get("analyte_name", field),
+            value=num_val,
+            unit=analyte_info.get("unit"),
+            critical_low=analyte_info.get("critical_low"),
+            critical_high=analyte_info.get("critical_high"),
+            severity="critical",
+            status="unacknowledged",
+        )
+        db.add(alert)
+        await db.flush()
+        created_alert_ids.append(str(alert.id))
+
+    try:
+        from app.notifications.models import NotificationHistory
+        notification = NotificationHistory(
+            event_type="lab_critical_result",
+            payload={
+                "lab_order_item_id": str(item.id),
+                "accession_number": item.accession_number,
+                "flagged_field_count": len(flagged_fields),
+                "critical_alert_ids": created_alert_ids,
+            },
+            department_id=item.department_id,
+            facility_id=order.facility_id,
+        )
+        db.add(notification)
+        await db.flush()
+    except ImportError:
+        pass
 
     live_message = json.dumps({
         "lab_order_item_id": str(item.id),
         "accession_number": item.accession_number,
+        "critical_alert_ids": created_alert_ids,
+        "patient_id": str(getattr(order, "patient_id", "") or ""),
     })
     subscriber_keys = [f"facility:{order.facility_id}:lab"]
     if doctor_id is not None:
         subscriber_keys.append(f"doctor:{doctor_id}")
-    # A dual-role account can be connected through only one key, but guard
-    # against delivering twice if that changes later.
     delivered: set[int] = set()
     for subscriber_key in subscriber_keys:
         for queue in _critical_alert_subscribers.get(subscriber_key, []):
             if id(queue) not in delivered:
                 await queue.put(live_message)
                 delivered.add(id(queue))
+
+
+@router.get(
+    "/critical-alerts",
+    response_model=CriticalAlertListOut,
+    dependencies=[Depends(require_roles("doctor", "nurse", "lab_tech", "admin"))],
+)
+async def list_critical_alerts(
+    current_db_user: CurrentDbUser,
+    status: str | None = None,
+    patient_id: uuid.UUID | None = None,
+    since_cursor: datetime | None = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = (
+        select(CriticalAlert)
+        .where(CriticalAlert.facility_id == current_db_user.facility_id)
+    )
+    if status and status != "all":
+        stmt = stmt.where(CriticalAlert.status == status)
+    if patient_id is not None:
+        stmt = stmt.where(CriticalAlert.patient_id == patient_id)
+    if since_cursor is not None:
+        stmt = stmt.where(CriticalAlert.created_at > since_cursor)
+
+    stmt = stmt.order_by(CriticalAlert.created_at.desc()).limit(limit)
+    res = await db.execute(stmt)
+    items = list(res.scalars().all())
+
+    count_stmt = (
+        select(func.count())
+        .select_from(CriticalAlert)
+        .where(CriticalAlert.facility_id == current_db_user.facility_id)
+    )
+    if status and status != "all":
+        count_stmt = count_stmt.where(CriticalAlert.status == status)
+    total = (await db.execute(count_stmt)).scalar() or len(items)
+
+    next_cursor = items[0].created_at.isoformat() if items else None
+    return CriticalAlertListOut(
+        items=[CriticalAlertOut.model_validate(x) for x in items],
+        cursor=next_cursor,
+        total=total,
+    )
+
+
+@router.post(
+    "/critical-alerts/{alert_id}/acknowledge",
+    response_model=CriticalAlertOut,
+    dependencies=[Depends(require_roles("doctor", "nurse"))],
+)
+async def acknowledge_critical_alert(
+    current_db_user: CurrentDbUser,
+    alert_id: uuid.UUID,
+    payload: CriticalAlertAcknowledgeRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = select(CriticalAlert).where(
+        CriticalAlert.id == alert_id,
+        CriticalAlert.facility_id == current_db_user.facility_id,
+    ).with_for_update()
+    alert = (await db.execute(stmt)).scalar_one_or_none()
+    if alert is None:
+        raise HTTPException(status_code=404, detail="Critical alert not found")
+
+    if alert.status == "acknowledged":
+        return CriticalAlertOut.model_validate(alert)
+
+    alert.status = "acknowledged"
+    alert.acknowledged_by = current_db_user.id
+    alert.acknowledged_at = datetime.now(UTC)
+    alert.acknowledgement_note = payload.acknowledgement_note
+
+    await write_audit_log(
+        db,
+        facility_id=current_db_user.facility_id,
+        user_id=current_db_user.id,
+        action="acknowledge",
+        resource_type="critical_alerts",
+        resource_id=alert.id,
+        new_value={
+            "status": "acknowledged",
+            "acknowledged_at": alert.acknowledged_at.isoformat(),
+            "note": alert.acknowledgement_note,
+        },
+    )
+    await db.flush()
+    await db.refresh(alert)
+    return CriticalAlertOut.model_validate(alert)
 
 
 @router.get("/critical-alerts/stream")

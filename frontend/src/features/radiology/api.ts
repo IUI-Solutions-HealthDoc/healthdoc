@@ -10,6 +10,8 @@
 import { api } from "@/lib/api";
 
 import type {
+  RadiologyAttachment,
+  RadiologyAttachmentList,
   RadiologyOrderItem,
   RadiologyOrderItemList,
   RadiologyReport,
@@ -124,4 +126,29 @@ export function signOffRadiologyReport(
 /** FHIR DiagnosticReport bundle for the current signed report on this item. */
 export function getRadiologyFhirBundle(itemId: string): Promise<Record<string, unknown>> {
   return api<Record<string, unknown>>(`/radiology/order-items/${itemId}/fhir-bundle`);
+}
+
+export function listOrderAttachments(orderId: string): Promise<RadiologyAttachmentList> {
+  return api<RadiologyAttachmentList>(`/radiology/orders/${orderId}/attachments`);
+}
+
+export function listOrderItemAttachments(itemId: string): Promise<RadiologyAttachmentList> {
+  return api<RadiologyAttachmentList>(`/radiology/order-items/${itemId}/attachments`);
+}
+
+export function uploadOrderAttachment(
+  orderId: string,
+  file: File,
+  orderItemId?: string,
+): Promise<RadiologyAttachment> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const search = new URLSearchParams();
+  if (orderItemId) search.set("radiology_order_item_id", orderItemId);
+  const q = search.toString();
+  return api<RadiologyAttachment>(`/radiology/orders/${orderId}/attachments?${q}`, {
+    method: "POST",
+    idempotencyKey: null,
+    body: formData,
+  });
 }
