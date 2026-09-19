@@ -64,6 +64,7 @@ from app.audit.deps import get_current_actor_dependency
 from app.auth.deps import AuthUser, CurrentDbUser, require_roles
 from app.billing import service
 from app.billing.models import Invoice, InvoiceItem, Payment, Refund
+from app.opd.models import Visit
 from app.billing.schemas import (
     DailyRevenueResponse,
     InvoiceBuildRequest,
@@ -255,9 +256,9 @@ async def list_invoices(
     db: AsyncSession = Depends(get_db),
 ) -> InvoiceListOut:
     filters = [Invoice.facility_id == current_db_user.facility_id]
-    if status_filter:
+    if isinstance(status_filter, str) and status_filter:
         filters.append(Invoice.status == status_filter)
-    if q and q.strip():
+    if isinstance(q, str) and q.strip():
         filters.append(or_(*[
             column.icontains(q.strip(), autoescape=True)
             for column in (Invoice.invoice_number, Patient.full_name, Patient.uhid, Patient.thid)
@@ -268,8 +269,9 @@ async def list_invoices(
                          .join(Patient, Patient.id == Invoice.patient_id).where(*filters))
     ).scalar_one()
     result = await db.execute(
-        select(Invoice, Patient.full_name, Patient.uhid, Patient.thid)
+        select(Invoice, Patient.full_name, Patient.uhid, Patient.thid, Visit.visit_type)
         .join(Patient, Patient.id == Invoice.patient_id)
+        .outerjoin(Visit, Visit.id == Invoice.visit_id)
         .where(*filters)
         .order_by(Invoice.created_at.desc(), Invoice.id.desc())
         .offset((page - 1) * page_size)
@@ -289,8 +291,9 @@ async def list_invoices(
             scheme_code=invoice.scheme_code,
             row_version=invoice.row_version,
             created_at=invoice.created_at,
+            care_setting=visit_type,
         )
-        for invoice, patient_full_name, uhid, thid in result.all()
+        for invoice, patient_full_name, uhid, thid, visit_type in result.all()
     ]
     return InvoiceListOut(items=items, page=page, page_size=page_size, total=total)
 
@@ -393,8 +396,9 @@ async def get_invoice(
 
     row = (
         await db.execute(
-            select(Invoice, Patient.full_name, Patient.uhid, Patient.thid)
+            select(Invoice, Patient.full_name, Patient.uhid, Patient.thid, Visit.visit_type)
             .join(Patient, Patient.id == Invoice.patient_id)
+            .outerjoin(Visit, Visit.id == Invoice.visit_id)
             .where(Invoice.id == invoice_id)
         )
     ).one_or_none()
@@ -402,7 +406,7 @@ async def get_invoice(
         # _assert_invoice_in_facility already passed, so this is a patient row
         # that vanished — not a scoping failure.
         raise HTTPException(status_code=404, detail={"code": "invoice_not_found"})
-    invoice, patient_full_name, uhid, thid = row
+    invoice, patient_full_name, uhid, thid, visit_type = row
 
     lines = (
         (
@@ -481,6 +485,7 @@ async def get_invoice(
         total_paid=total_paid,
         total_refunded=total_refunded,
         balance_due=balance_due,
+        care_setting=visit_type,
     )
 
 
@@ -637,7 +642,9 @@ async def record_payment_refund(
     if cached is not None:
         return RefundOut.model_validate(cached)
 
-    result = await service.create_refund(db, payment_id=payment_id, body=body, actor_user_id=actor_user_id)
+    result = await service.create_refund(
+        db, payment_id=payment_id, body=body, actor_user_id=actor_user_id, prevent_self_approval=True
+    )
     await service.store_idempotency(db, key, endpoint, request_body, actor_user_id, result.model_dump(mode="json"))
     return result
 

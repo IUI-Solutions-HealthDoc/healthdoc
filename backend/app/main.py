@@ -50,6 +50,7 @@ MODULES = [
     "pathology",
     "patients",
     "procedures",
+    "programs",
     "pharmacy",
     "platform",
     "queue",

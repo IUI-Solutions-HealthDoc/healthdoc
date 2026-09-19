@@ -34,6 +34,7 @@ class InvoiceListItemOut(BaseModel):
     scheme_code: str | None
     row_version: int
     created_at: datetime
+    care_setting: str | None = None
 
 
 class InvoiceListOut(BaseModel):
@@ -90,7 +91,7 @@ class InvoiceBuildResponse(BaseModel):
 
 
 # PM-JAY eligibility — STUB, not a real ABDM check yet.
-PMJAYEligibilityStatus = Literal["eligible", "not_eligible", "not_determined"]
+PMJAYEligibilityStatus = Literal["eligible", "not_eligible", "not_determined", "preauth_required", "exhausted", "unavailable"]
 
 
 class PMJAYEligibilityResponse(BaseModel):
@@ -208,6 +209,7 @@ class InvoiceDetailOut(BaseModel):
     total_paid: Money
     total_refunded: Money
     balance_due: Money
+    care_setting: str | None = None
 
 
 

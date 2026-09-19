@@ -58,6 +58,7 @@ interface InvoiceListRow {
   scheme_code: string | null;
   row_version: number;
   created_at: string;
+  care_setting?: string | null;
 }
 
 /** The wire shape of GET /billing/invoices/{id} — lines, receipts and balance. */
@@ -96,6 +97,7 @@ function toInvoiceWithItems(detail: InvoiceDetail): InvoiceWithItems {
       uhid: detail.patient_identifier,
       full_name: detail.patient_full_name,
     },
+    visit: detail.care_setting ? { visit_type: detail.care_setting as import("../types").VisitType } : undefined,
   };
 }
 
