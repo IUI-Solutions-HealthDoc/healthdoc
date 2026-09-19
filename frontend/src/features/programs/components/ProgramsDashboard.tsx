@@ -2,12 +2,10 @@
 
 import { useEffect, useState } from "react";
 import AddIcon from "@mui/icons-material/Add";
-import CheckIcon from "@mui/icons-material/Check";
 import EventNoteIcon from "@mui/icons-material/EventNote";
 import HistoryIcon from "@mui/icons-material/History";
 import MonitorHeartOutlinedIcon from "@mui/icons-material/MonitorHeartOutlined";
 import RefreshIcon from "@mui/icons-material/Refresh";
-import TrendingUpIcon from "@mui/icons-material/TrendingUp";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Card from "@mui/material/Card";
@@ -180,8 +178,8 @@ export function ProgramsDashboard() {
       toast.success("Patient enrolled into care program successfully");
       setEnrolModalOpen(false);
       void loadData();
-    } catch (e: any) {
-      toast.error(e?.message || "Failed to enrol patient");
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to enrol patient");
     }
   };
 
@@ -201,8 +199,8 @@ export function ProgramsDashboard() {
       toast.success("Follow-up visit and indicators recorded");
       setVisitModalOpen(false);
       void loadData();
-    } catch (e: any) {
-      toast.error(e?.message || "Failed to record visit");
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to record visit");
     }
   };
 
@@ -251,8 +249,8 @@ export function ProgramsDashboard() {
       toast.success("Patient discharged from program");
       setExitModalOpen(false);
       void loadData();
-    } catch (e: any) {
-      toast.error(e?.message || "Failed to exit program");
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to exit program");
     }
   };
 

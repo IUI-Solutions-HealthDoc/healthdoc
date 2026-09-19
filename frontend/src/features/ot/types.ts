@@ -45,9 +45,9 @@ export type OtRecord = {
   anesthesia_type?: string | null;
   scrub_nurse?: string | null;
   circulating_nurse?: string | null;
-  implants_used?: any;
+  implants_used?: unknown;
   sponge_needle_count_correct?: boolean | null;
-  specimens_sent?: any;
+  specimens_sent?: unknown;
   complications?: string | null;
   recovery_status?: string | null;
   created_at: string;
@@ -65,7 +65,7 @@ export type CreateOtScheduleInput = {
   scheduled_end: string;
   procedure_name: string;
   admission_id?: string | null;
-  pre_op_checklist?: any;
+  pre_op_checklist?: Record<string, unknown> | null;
 };
 
 export type UpdateWhoChecklistInput = {
@@ -88,9 +88,9 @@ export type CompleteOtCaseInput = {
   anesthesia_type?: string;
   scrub_nurse?: string;
   circulating_nurse?: string;
-  implants_used?: any;
+  implants_used?: unknown;
   sponge_needle_count_correct: boolean;
-  specimens_sent?: any;
+  specimens_sent?: unknown;
   complications?: string;
   recovery_status?: string;
 };

@@ -21,7 +21,7 @@ export type ProgramEnrolment = {
   status: "active" | "exited" | "completed";
   exit_date?: string | null;
   exit_reason?: string | null;
-  target_outcomes?: Record<string, any> | null;
+  target_outcomes?: Record<string, unknown> | null;
   enrolled_by: string;
   created_at: string;
 };
@@ -32,7 +32,7 @@ export type ProgramVisit = {
   scheduled_date: string;
   completed_date?: string | null;
   status: "scheduled" | "completed" | "missed";
-  metrics?: Record<string, any> | null;
+  metrics?: Record<string, unknown> | null;
   clinical_summary?: string | null;
   conducted_by?: string | null;
   created_at: string;
@@ -47,7 +47,7 @@ export type EnrolPatientInput = {
   patient_id: string;
   program_code: string;
   enrolment_date?: string;
-  target_outcomes?: Record<string, any>;
+  target_outcomes?: Record<string, unknown>;
 };
 
 export type ExitEnrolmentInput = {
@@ -58,6 +58,6 @@ export type ExitEnrolmentInput = {
 export type RecordProgramVisitInput = {
   scheduled_date: string;
   completed_date?: string;
-  metrics?: Record<string, any>;
+  metrics?: Record<string, unknown>;
   clinical_summary?: string;
 };

@@ -62,6 +62,8 @@ export async function cancelOtCase(scheduleId: string, cancelReason: string): Pr
 }
 
 export async function getTheatreDayList(targetDate?: string): Promise<Record<string, OtSchedule[]>> {
-  const query = targetDate ? `?target_date=${encodeURIComponent(targetDate)}` : "";
-  return api<Record<string, OtSchedule[]>>(`/ot/day-list${query}`);
+  if (targetDate) {
+    return api<Record<string, OtSchedule[]>>(`/ot/day-list?target_date=${encodeURIComponent(targetDate)}`);
+  }
+  return api<Record<string, OtSchedule[]>>("/ot/day-list");
 }

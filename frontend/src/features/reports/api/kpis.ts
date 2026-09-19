@@ -96,8 +96,12 @@ export async function produceKpis(
 export async function getReceptionistSummary(
   forDate?: string,
 ): Promise<import("../types").ReceptionistSummary> {
-  const query = forDate ? `?for_date=${encodeURIComponent(forDate)}` : "";
-  return api<import("../types").ReceptionistSummary>(`/reports/receptionist-summary${query}`);
+  if (forDate) {
+    return api<import("../types").ReceptionistSummary>(
+      `/reports/receptionist-summary?for_date=${encodeURIComponent(forDate)}`
+    );
+  }
+  return api<import("../types").ReceptionistSummary>("/reports/receptionist-summary");
 }
 
 /**

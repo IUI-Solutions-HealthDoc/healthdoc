@@ -19,9 +19,7 @@ import DialogActions from "@mui/material/DialogActions";
 import DialogContent from "@mui/material/DialogContent";
 import DialogTitle from "@mui/material/DialogTitle";
 import FormControlLabel from "@mui/material/FormControlLabel";
-import IconButton from "@mui/material/IconButton";
 import MenuItem from "@mui/material/MenuItem";
-import Stack from "@mui/material/Stack";
 import Tab from "@mui/material/Tab";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
@@ -58,14 +56,14 @@ export function OtDashboard() {
   const [activeSchedule, setActiveSchedule] = useState<OtSchedule | null>(null);
 
   // Form states
-  const [newSchedule, setNewSchedule] = useState({
+  const [newSchedule, setNewSchedule] = useState(() => ({
     patient_id: "00000000-0000-0000-0000-000000000001",
     visit_id: "00000000-0000-0000-0000-000000000002",
     theatre_number: "OT-1",
     scheduled_start: new Date(Date.now() + 3600000).toISOString().slice(0, 16),
     scheduled_end: new Date(Date.now() + 7200000).toISOString().slice(0, 16),
     procedure_name: "Laparoscopic Cholecystectomy",
-  });
+  }));
 
   const [checklist, setChecklist] = useState({
     sign_in: true,
@@ -74,7 +72,7 @@ export function OtDashboard() {
     notes: "Patient identity, surgical site, consent, pulse oximeter, antibiotic prophylaxis verified.",
   });
 
-  const [completeForm, setCompleteForm] = useState({
+  const [completeForm, setCompleteForm] = useState(() => ({
     started_at: new Date(Date.now() - 3600000).toISOString().slice(0, 16),
     ended_at: new Date().toISOString().slice(0, 16),
     surgeon_user_id: "00000000-0000-0000-0000-000000000003",
@@ -85,7 +83,7 @@ export function OtDashboard() {
     sponge_needle_count_correct: true,
     recovery_status: "stable_in_pacu",
     notes: "Uncomplicated procedure, haemostasis secured, port sites closed in layers.",
-  });
+  }));
 
   const [cancelReason, setCancelReason] = useState("");
 
@@ -167,8 +165,8 @@ export function OtDashboard() {
       toast.success("OT Case scheduled successfully");
       setScheduleModalOpen(false);
       void loadSchedules();
-    } catch (e: any) {
-      toast.error(e?.message || "Failed to schedule OT case");
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to schedule OT case");
     }
   };
 
@@ -184,8 +182,8 @@ export function OtDashboard() {
       toast.success("WHO Surgical Safety Checklist recorded");
       setChecklistModalOpen(false);
       void loadSchedules();
-    } catch (e: any) {
-      toast.error(e?.message || "Failed to update safety checklist");
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to update safety checklist");
     }
   };
 
@@ -194,8 +192,8 @@ export function OtDashboard() {
       await startOtCase(schedule.id);
       toast.success(`Case started in ${schedule.theatre_number}`);
       void loadSchedules();
-    } catch (e: any) {
-      toast.error(e?.message || "Failed to start case");
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to start case");
     }
   };
 
@@ -217,8 +215,8 @@ export function OtDashboard() {
       toast.success("Case completed and operative record committed");
       setCompleteModalOpen(false);
       void loadSchedules();
-    } catch (e: any) {
-      toast.error(e?.message || "Failed to complete surgery");
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to complete surgery");
     }
   };
 
@@ -229,8 +227,8 @@ export function OtDashboard() {
       toast.success("OT Case cancelled");
       setCancelModalOpen(false);
       void loadSchedules();
-    } catch (e: any) {
-      toast.error(e?.message || "Failed to cancel case");
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to cancel case");
     }
   };
 

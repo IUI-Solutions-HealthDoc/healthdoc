@@ -97,7 +97,7 @@ function toInvoiceWithItems(detail: InvoiceDetail): InvoiceWithItems {
       uhid: detail.patient_identifier,
       full_name: detail.patient_full_name,
     },
-    visit: detail.care_setting ? { visit_type: detail.care_setting as any } : undefined,
+    visit: detail.care_setting ? { visit_type: detail.care_setting as import("../types").VisitType } : undefined,
   };
 }
 
