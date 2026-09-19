@@ -1,5 +1,6 @@
 @layer theme, base, mui, components, utilities;
 @import "tailwindcss";
+@import "./print-document.css";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
@@ -377,11 +378,29 @@
   }
 
   #opd-fee-receipt,
-  #opd-fee-receipt * {
+  #opd-fee-receipt *,
+  #portal-document-print-root,
+  #portal-document-print-root *,
+  #scan-share-slip-print-root,
+  #scan-share-slip-print-root *,
+  #prescription-print-root,
+  #prescription-print-root *,
+  #lab-report-print-root,
+  #lab-report-print-root *,
+  #radiology-report-print-root,
+  #radiology-report-print-root *,
+  #discharge-summary-print-root,
+  #discharge-summary-print-root * {
     visibility: visible;
   }
 
-  #opd-fee-receipt {
+  #opd-fee-receipt,
+  #portal-document-print-root,
+  #scan-share-slip-print-root,
+  #prescription-print-root,
+  #lab-report-print-root,
+  #radiology-report-print-root,
+  #discharge-summary-print-root {
     position: absolute;
     left: 0;
     top: 0;

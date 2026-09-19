@@ -284,4 +284,61 @@ export function reconcileStaleVisits(
   });
 }
 
+/** HD-36: ABDM M1 Scan & Share Ticket types and endpoints */
+export interface ScanShareTicketItem {
+  id: string;
+  token_number: string;
+  facility_id: string;
+  abha_number?: string | null;
+  abha_address?: string | null;
+  name: string;
+  gender: string;
+  year_of_birth?: number | null;
+  day_of_birth?: number | null;
+  month_of_birth?: number | null;
+  mobile?: string | null;
+  address?: Record<string, unknown> | null;
+  status: "active" | "checked_in" | "expired";
+  shared_at: string;
+  expires_at: string;
+  checked_in_at?: string | null;
+  counter_id?: string | null;
+}
+
+export interface ScanShareTicketsListResponse {
+  items: ScanShareTicketItem[];
+  total: number;
+}
+
+export function listScanShareTickets(
+  status = "active",
+  limit = 20,
+): Promise<ScanShareTicketsListResponse> {
+  return api<ScanShareTicketsListResponse>(
+    `/abdm/scan-share/tickets?status=${encodeURIComponent(status)}&limit=${limit}`,
+  );
+}
+
+export function getScanShareTicket(tokenNumber: string): Promise<ScanShareTicketItem> {
+  return api<ScanShareTicketItem>(`/abdm/scan-share/tickets/${encodeURIComponent(tokenNumber)}`);
+}
+
+export function checkInScanShareTicket(
+  tokenNumber: string,
+  counterId = "COUNTER-1",
+  operatorId = "Receptionist",
+): Promise<ScanShareTicketItem> {
+  return api<ScanShareTicketItem>(
+    `/abdm/scan-share/tickets/${encodeURIComponent(tokenNumber)}/check-in`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        counter_id: counterId,
+        operator_id: operatorId,
+      }),
+    },
+  );
+}
+
+
 

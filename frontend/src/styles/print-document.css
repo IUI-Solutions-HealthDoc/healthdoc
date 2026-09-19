@@ -1,0 +1,223 @@
+/**
+ * HealthDoc HIMS — Unified Medical Document Print Stylesheet (HD-35)
+ * Supports:
+ * - A4 Portrait clinical documents (Prescriptions, Lab, Radiology, Discharge, Vaccines)
+ * - 80mm Thermal Receipt Slips (ABDM Scan & Share Reception Tickets, OPD Token Slips)
+ * - Anti-break guards for tables, headers, signatures, and diagnoses
+ */
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 12mm 15mm;
+  }
+
+  /* Reset background and text colors for maximum contrast & crisp ink output */
+  *,
+  *::before,
+  *::after {
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+
+  html,
+  body {
+    background: #ffffff !important;
+    color: #111827 !important;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+    font-size: 11pt !important;
+    line-height: 1.4 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Hide navigation, sidebars, interactive buttons, overlays by default */
+  nav,
+  header[role="banner"]:not(.print-header),
+  aside,
+  button,
+  .no-print,
+  [data-no-print="true"] {
+    display: none !important;
+    visibility: hidden !important;
+  }
+
+  /* When an active print root is specified, make only that root visible */
+  body.printing-portal-doc > *:not(#portal-document-print-root),
+  body.printing-scan-share > *:not(#scan-share-slip-print-root) {
+    display: none !important;
+  }
+
+  #portal-document-print-root,
+  #scan-share-slip-print-root,
+  #opd-fee-receipt,
+  #prescription-print-root,
+  #lab-report-print-root,
+  #radiology-report-print-root,
+  #discharge-summary-print-root {
+    visibility: visible !important;
+    display: block !important;
+    width: 100% !important;
+    margin: 0 auto !important;
+    background: #ffffff !important;
+    color: #111827 !important;
+    page-break-after: auto;
+  }
+
+  /* Avoid page breaks inside critical medical components */
+  .avoid-break,
+  .print-header,
+  .print-patient-banner,
+  .print-signature-block,
+  tr,
+  blockquote,
+  .surface-card {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  /* Clinical Document Header */
+  .print-header {
+    border-bottom: 2px solid #001f54;
+    padding-bottom: 8px;
+    margin-bottom: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+  }
+
+  .print-header-logo {
+    font-size: 18pt;
+    font-weight: 800;
+    color: #001f54 !important;
+    letter-spacing: -0.02em;
+  }
+
+  .print-header-facility {
+    font-size: 10pt;
+    color: #4b5563 !important;
+  }
+
+  .print-header-doc-title {
+    font-size: 13pt;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: #001f54 !important;
+    text-align: right;
+  }
+
+  /* Patient Demographic Banner */
+  .print-patient-banner {
+    background-color: #f8fafc !important;
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    padding: 8px 12px;
+    margin-bottom: 14px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px 12px;
+    font-size: 9pt;
+  }
+
+  .print-patient-banner dt {
+    font-weight: 600;
+    color: #475569;
+    font-size: 8pt;
+    text-transform: uppercase;
+  }
+
+  .print-patient-banner dd {
+    margin: 0;
+    font-weight: 600;
+    color: #0f172a;
+  }
+
+  /* Tables in Printed Reports */
+  .print-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 10px 0;
+    font-size: 9pt;
+  }
+
+  .print-table th {
+    background-color: #f1f5f9 !important;
+    color: #0f172a !important;
+    font-weight: 700;
+    border-bottom: 1.5px solid #001f54;
+    padding: 6px 8px;
+    text-align: left;
+    text-transform: uppercase;
+    font-size: 8pt;
+  }
+
+  .print-table td {
+    border-bottom: 1px solid #e2e8f0;
+    padding: 6px 8px;
+    color: #1e293b;
+    vertical-align: top;
+  }
+
+  /* Signatures */
+  .print-signature-block {
+    margin-top: 24px;
+    padding-top: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    font-size: 9pt;
+  }
+
+  .print-signature-line {
+    border-top: 1px solid #64748b;
+    width: 200px;
+    text-align: center;
+    padding-top: 4px;
+    font-weight: 600;
+  }
+
+  /* Footer */
+  .print-footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    border-top: 1px solid #cbd5e1;
+    padding-top: 4px;
+    font-size: 7.5pt;
+    color: #64748b;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  /* 80mm Thermal Slip for ABDM Scan & Share and Counter Tokens */
+  .thermal-slip {
+    max-width: 72mm !important;
+    width: 72mm !important;
+    margin: 0 auto !important;
+    padding: 2mm !important;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+    font-size: 8.5pt !important;
+    line-height: 1.25 !important;
+    color: #000000 !important;
+    border: none !important;
+  }
+
+  .thermal-slip .token-number {
+    font-size: 22pt !important;
+    font-weight: 900 !important;
+    text-align: center;
+    margin: 4px 0;
+    letter-spacing: 0.05em;
+  }
+
+  .thermal-slip .barcode-block {
+    text-align: center;
+    margin: 6px 0;
+  }
+
+  .thermal-divider {
+    border-top: 1px dashed #000000;
+    margin: 6px 0;
+  }
+}

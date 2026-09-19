@@ -552,6 +552,8 @@ REPOINTED_ON_MERGE: frozenset[str] = frozenset(
         "blood_crossmatches",
         "form_submissions",
         "immunization_records",
+        "specialty_encounters",
+        "scan_share_tickets",
         # ABDM M2/M3. A merged-away chart that keeps its care contexts and
         # links means the surviving patient's ABHA no longer reaches records
         # that are theirs — and the dead chart still offers them to the
@@ -675,6 +677,8 @@ async def approve_merge(
     await _repoint_blood_records(db, source=source, target=target)
     await _repoint_form_submissions(db, source=source, target=target)
     await _repoint_immunization_records(db, source=source, target=target)
+    await _repoint_specialty_encounters(db, source=source, target=target)
+    await _repoint_scan_share_tickets(db, source=source, target=target)
     await _reconcile_patient_portal_bindings(
         db, source=source, target=target, approved_by=approved_by
     )
@@ -1167,6 +1171,24 @@ async def _repoint_immunization_records(db: AsyncSession, *, source: Patient, ta
     """Moves source's immunization_records rows onto target."""
     await db.execute(
         text("UPDATE immunization_records SET patient_id = :target_id WHERE patient_id = :source_id"),
+        {"target_id": target.id, "source_id": source.id},
+    )
+    await db.flush()
+
+
+async def _repoint_specialty_encounters(db: AsyncSession, *, source: Patient, target: Patient) -> None:
+    """Moves source's specialty_encounters rows onto target."""
+    await db.execute(
+        text("UPDATE specialty_encounters SET patient_id = :target_id WHERE patient_id = :source_id"),
+        {"target_id": target.id, "source_id": source.id},
+    )
+    await db.flush()
+
+
+async def _repoint_scan_share_tickets(db: AsyncSession, *, source: Patient, target: Patient) -> None:
+    """Moves source's scan_share_tickets rows onto target."""
+    await db.execute(
+        text("UPDATE scan_share_tickets SET patient_id = :target_id WHERE patient_id = :source_id"),
         {"target_id": target.id, "source_id": source.id},
     )
     await db.flush()

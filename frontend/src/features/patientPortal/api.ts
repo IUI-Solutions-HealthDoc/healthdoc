@@ -58,3 +58,54 @@ export async function getPortalDashboard(): Promise<PortalDashboard> {
   ]);
   return { binding, abha, consents, accessHistory };
 }
+
+export interface PortalDocumentItem {
+  id: string;
+  document_type: "prescription" | "lab_report" | "radiology" | "discharge_summary" | "vaccine";
+  title: string;
+  date: string;
+  doctor_name: string | null;
+  facility_name: string | null;
+  status: string;
+  summary: string;
+  details?: Record<string, unknown> | null;
+}
+
+export interface PortalDocumentsOut {
+  total: number;
+  limit: number;
+  offset: number;
+  items: PortalDocumentItem[];
+}
+
+export interface PortalDocumentDetail {
+  id: string;
+  document_type: string;
+  title: string;
+  date: string;
+  doctor_name: string | null;
+  facility_name: string | null;
+  facility_address: string | null;
+  patient_uhid: string | null;
+  patient_name: string;
+  patient_age_gender: string | null;
+  status: string;
+  summary: string;
+  content: Record<string, unknown>;
+  verified_at: string | null;
+}
+
+export async function getPortalDocuments(category?: string): Promise<PortalDocumentsOut> {
+  const query = category && category !== "all" ? `?category=${encodeURIComponent(category)}` : "";
+  return api<PortalDocumentsOut>(`/patient-portal/me/documents${query}`);
+}
+
+export async function getPortalDocumentDetail(
+  docType: string,
+  docId: string,
+): Promise<PortalDocumentDetail> {
+  return api<PortalDocumentDetail>(
+    `/patient-portal/me/documents/${encodeURIComponent(docType)}/${encodeURIComponent(docId)}`,
+  );
+}
+
