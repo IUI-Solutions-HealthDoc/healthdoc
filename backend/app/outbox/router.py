@@ -7,7 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.deps import DbSession, require_roles
+from app.auth.deps import CurrentDbUser, DbSession, require_roles
 from app.outbox import service
 from app.outbox.schemas import OutboxDeadLetterOut, OutboxEventOut, OutboxMetricsOut
 
@@ -17,7 +17,7 @@ router = APIRouter(prefix="/outbox", tags=["outbox"])
 @router.get(
     "/events",
     response_model=list[OutboxEventOut],
-    dependencies=[Depends(require_roles("admin", "superadmin", "auditor"))],
+    dependencies=[Depends(require_roles("admin", "auditor"))],
 )
 async def list_outbox_events(
     db: DbSession,
@@ -33,7 +33,7 @@ async def list_outbox_events(
 @router.get(
     "/dead-letter",
     response_model=list[OutboxDeadLetterOut],
-    dependencies=[Depends(require_roles("admin", "superadmin", "auditor"))],
+    dependencies=[Depends(require_roles("admin", "auditor"))],
 )
 async def list_dead_letter_queue(
     db: DbSession,
@@ -47,7 +47,7 @@ async def list_dead_letter_queue(
 @router.post(
     "/dead-letter/{id}/replay",
     response_model=OutboxEventOut,
-    dependencies=[Depends(require_roles("admin", "superadmin"))],
+    dependencies=[Depends(require_roles("admin"))],
 )
 async def replay_dead_letter_event(
     id: uuid.UUID,
@@ -64,7 +64,7 @@ async def replay_dead_letter_event(
 @router.get(
     "/metrics",
     response_model=OutboxMetricsOut,
-    dependencies=[Depends(require_roles("admin", "superadmin", "auditor"))],
+    dependencies=[Depends(require_roles("admin", "auditor"))],
 )
 async def get_outbox_metrics(
     db: DbSession,
