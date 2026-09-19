@@ -18,12 +18,49 @@ export type KpiListResponse = {
   items: import("@/types/kpi").KpiSnapshot[];
   period_start: string;
   period_end: string;
-  /**
-   * True when the facility has no snapshots in this window at all.
-   *
-   * Not the same as every value being zero, and a chart cannot show the
-   * difference. Surface it as "not yet computed" — the writer job for these
-   * KPIs does not exist yet, so this is the expected state today.
-   */
   no_snapshots: boolean;
+};
+
+export type KpiCatalogItem = {
+  kpi_code: string;
+  name: string;
+  category: string;
+  unit: string;
+  description: string;
+  formula: string;
+};
+
+export type ReceptionistSummary = {
+  facility_id: string;
+  report_date: string;
+  total_registered: number;
+  waiting: number;
+  in_consultation: number;
+  completed: number;
+  cancelled_or_lwbs: number;
+  average_wait_minutes: number;
+};
+
+export type EdCensus = {
+  facility_id: string;
+  as_of: string;
+  total_emergency_today: number;
+  active_patients: number;
+  lwbs_count: number;
+  admitted_to_ipd: number;
+  triage_acuity_distribution: Record<string, number>;
+};
+
+export type KpiProduceRequest = {
+  period_start: string;
+  period_end: string;
+  kpi_codes?: string[];
+};
+
+export type KpiProduceResponse = {
+  facility_id: string;
+  period_start: string;
+  period_end: string;
+  snapshots_created: number;
+  items: import("@/types/kpi").KpiSnapshot[];
 };

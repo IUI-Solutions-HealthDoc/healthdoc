@@ -233,7 +233,13 @@ export type PMJAYEligibilityResponse = {
   patient_id: string;
   visit_id: string;
   scheme_code: "PMJAY";
-  eligibility_status: "eligible" | "not_eligible" | "not_determined";
+  eligibility_status:
+    | "eligible"
+    | "not_eligible"
+    | "not_determined"
+    | "preauth_required"
+    | "exhausted"
+    | "unavailable";
   reason: string;
   is_stub: boolean;
 };

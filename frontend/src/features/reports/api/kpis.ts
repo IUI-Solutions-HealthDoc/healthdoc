@@ -70,3 +70,39 @@ export async function listKpiCodes(): Promise<string[]> {
   const response = await api<{ items: string[] }>("/reports/kpis/codes");
   return response.items;
 }
+
+/**
+  * GET /reports/kpis/catalog — metadata catalog of all standard KPIs.
+  */
+export async function getKpiCatalog(): Promise<import("../types").KpiCatalogItem[]> {
+  return api<import("../types").KpiCatalogItem[]>("/reports/kpis/catalog");
+}
+
+/**
+  * POST /reports/kpis/produce — calculate and commit closed-period snapshots.
+  */
+export async function produceKpis(
+  body: import("../types").KpiProduceRequest,
+): Promise<import("../types").KpiProduceResponse> {
+  return api<import("../types").KpiProduceResponse>("/reports/kpis/produce", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+  * GET /reports/receptionist-summary — live front desk tracker for today.
+  */
+export async function getReceptionistSummary(
+  forDate?: string,
+): Promise<import("../types").ReceptionistSummary> {
+  const query = forDate ? `?for_date=${encodeURIComponent(forDate)}` : "";
+  return api<import("../types").ReceptionistSummary>(`/reports/receptionist-summary${query}`);
+}
+
+/**
+  * GET /reports/ed-census — live emergency census and triage acuity.
+  */
+export async function getEdCensus(): Promise<import("../types").EdCensus> {
+  return api<import("../types").EdCensus>("/reports/ed-census");
+}
