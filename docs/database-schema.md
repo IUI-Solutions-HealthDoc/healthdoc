@@ -198,6 +198,7 @@ do not merge out of order.**
 | 0077 | critical_alerts_lis_pacs_returns | critical_alerts, lab_specimen_events, radiology_attachments, pharmacy_returns | Critical alerts outbox & acknowledgement, LIS specimen tracking & rejection, radiology imaging attachments, and pharmacy returns with quarantine disposition. |
 | 0078 | ot_and_longitudinal_programs | care_programs, program_enrolments, program_visits | Operation Theatre lifecycle enhancements, WHO surgical safety checklist, and longitudinal care program registries. |
 | 0079 | suite_8_immunization_blood_forms | vaccine_catalogue, immunization_records, blood_crossmatches, form_definitions, form_submissions, clinical_order_sets, outbox_dead_letter | Immunization lifecycle, blood bank crossmatch & issue, dynamic clinical forms, order sets, safe outbox dead-letter queue, and direct-service walk-in encounters (HD-29 to HD-32). |
+| 0080 | suite_9_portal_terminology_specialty_scan_share | specialty_encounters, scan_share_tickets | Structured specialty encounter clinical evaluations and ABDM M1 scan-and-share reception tickets (HD-33 to HD-36). |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -2045,6 +2046,27 @@ payload_redacted jsonb NOT NULL
 error_message text NOT NULL
 failed_at timestamptz NOT NULL
 replay_count integer NOT NULL
+```
+
+**specialty_encounters** (0080) — structured clinical specialty assessments and milestones
+```
+encounter_id UUID NOT NULL REFERENCES encounters(id)
+patient_id UUID NOT NULL REFERENCES patients(id)
+specialty_type varchar(50) NOT NULL
+clinical_data jsonb NOT NULL
+created_by UUID NOT NULL REFERENCES users(id)
+```
+
+**scan_share_tickets** (0080) — ABDM M1 scan-and-share reception desk check-in tickets
+```
+facility_id UUID NOT NULL REFERENCES facilities(id)
+token_number varchar(30) NOT NULL
+abha_address varchar(100) NOT NULL
+profile_data jsonb NOT NULL
+status varchar(50) NOT NULL
+counter varchar(50) NULL
+patient_id UUID NULL REFERENCES patients(id)
+expires_at timestamptz NOT NULL
 ```
 
 **abdm_callback_replies** (0067) — committed reply intent, not a clinical inbox
