@@ -3,30 +3,53 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Any, Literal
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class FormFieldOption(BaseModel):
-    label: str
-    value: str
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    label: str = Field(min_length=1, max_length=200)
+    value: str = Field(min_length=1, max_length=200)
 
 
 class FormFieldDef(BaseModel):
-    id: str
-    label: str
-    type: str = Field(description="text | number | select | checkbox | textarea | date")
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    id: str = Field(pattern=r"^[a-zA-Z][a-zA-Z0-9_]{0,63}$")
+    label: str = Field(min_length=1, max_length=200)
+    type: Literal["text", "number", "select", "checkbox", "textarea", "date"]
     required: bool = False
     options: list[FormFieldOption] | None = None
-    placeholder: str | None = None
+    placeholder: str | None = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def validate_options(self):
+        if self.type == "select":
+            if not self.options or len(self.options) > 100:
+                raise ValueError("Select fields need between 1 and 100 options")
+            values = [option.value for option in self.options]
+            if len(set(values)) != len(values):
+                raise ValueError("Option values must be unique")
+        elif self.options:
+            raise ValueError("Options are only supported for select fields")
+        return self
 
 
 class FormDefinitionCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     code: str = Field(..., min_length=2, max_length=50)
     title: str = Field(..., min_length=2, max_length=150)
     version: int = Field(default=1, ge=1)
-    status: str = Field(default="published", description="draft | published | retired")
-    fields_schema: list[dict[str, Any]] = Field(default_factory=list)
+    status: Literal["draft", "published", "retired"] = "published"
+    fields_schema: list[dict[str, Any]] = Field(min_length=1, max_length=100)
+
+    @field_validator("fields_schema")
+    @classmethod
+    def validate_fields(cls, values):
+        fields = [FormFieldDef.model_validate(field) for field in values]
+        if len({field.id for field in fields}) != len(fields):
+            raise ValueError("Form field IDs must be unique")
+        return [field.model_dump(exclude_none=True) for field in fields]
 
 
 class FormDefinitionOut(BaseModel):
@@ -43,6 +66,7 @@ class FormDefinitionOut(BaseModel):
 
 
 class FormSubmissionCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     patient_id: uuid.UUID
     visit_id: uuid.UUID | None = None
     form_id: uuid.UUID

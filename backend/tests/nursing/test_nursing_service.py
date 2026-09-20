@@ -121,9 +121,24 @@ def _emar(admission_id, patient_id, **over):
     return MedicationAdministrationCreate(**base)
 
 
+async def _prescribed_item(db, patient_id, actor):
+    from app.orders.models import Prescription, PrescriptionItem
+    prescription = Prescription(id=uuid.uuid4(), encounter_id=uuid.uuid4(), facility_id=uuid.uuid4(),
+                                patient_id=patient_id, created_by=actor)
+    db.add(prescription)
+    await db.flush()
+    item = PrescriptionItem(id=uuid.uuid4(), prescription_id=prescription.id,
+                            medicine_name="Synthetic test medicine", dosage="Recorded dose")
+    db.add(item)
+    await db.flush()
+    return item
+
+
 async def test_given_needs_no_reason(db):
     admission_id, patient_id = uuid.uuid4(), uuid.uuid4()
-    rec = await record_administration(db, _emar(admission_id, patient_id), recorded_by=uuid.uuid4())
+    actor = uuid.uuid4()
+    item = await _prescribed_item(db, patient_id, actor)
+    rec = await record_administration(db, _emar(admission_id, patient_id, prescription_item_id=item.id), recorded_by=actor)
     assert rec.status == "given"
     assert rec.reason is None
 
@@ -149,10 +164,11 @@ async def test_unknown_status_is_rejected():
 
 async def test_emar_lists_most_recent_first(db):
     admission_id, patient_id, actor = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    item = await _prescribed_item(db, patient_id, actor)
     await record_administration(
-        db, _emar(admission_id, patient_id, administered_at=NOW), recorded_by=actor)
+        db, _emar(admission_id, patient_id, prescription_item_id=item.id, administered_at=NOW), recorded_by=actor)
     await record_administration(
-        db, _emar(admission_id, patient_id, administered_at=NOW + timedelta(hours=8),
+        db, _emar(admission_id, patient_id, prescription_item_id=item.id, administered_at=NOW + timedelta(hours=8),
                   status="refused", reason="patient declined"),
         recorded_by=actor)
 
@@ -232,8 +248,14 @@ async def test_a_dose_survives_a_missing_prescription_item(db):
     from the record because the item it referenced is gone — the name goes
     unknown, the administration stays."""
     admission_id, patient_id = uuid.uuid4(), uuid.uuid4()
-    await record_administration(
-        db, _emar(admission_id, patient_id), recorded_by=uuid.uuid4())
+    # Deliberately seed a broken historical reference for the read test; new
+    # administration writes must not be allowed to create that inconsistency.
+    from app.nursing.models import MedicationAdministration
+    db.add(MedicationAdministration(
+        id=uuid.uuid4(), prescription_item_id=uuid.uuid4(), admission_id=admission_id,
+        patient_id=patient_id, status="given", administered_at=NOW, created_by=uuid.uuid4(),
+    ))
+    await db.flush()
 
     (row,) = await list_administrations(db, admission_id)
     assert row.medicine_name is None

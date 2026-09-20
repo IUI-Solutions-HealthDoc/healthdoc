@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertCircle, CheckCircle2, FileText, Send } from "lucide-react";
 import { submitForm } from "../api";
 import type { FormDefinition, FormSubmission } from "../types";
@@ -12,7 +12,11 @@ interface DynamicFormRendererProps {
   onSuccess: (submission: FormSubmission) => void;
 }
 
-export function DynamicFormRenderer({
+export function DynamicFormRenderer(props: DynamicFormRendererProps) {
+  return <FormEditor key={`${props.patientId}:${props.visitId ?? ""}:${props.formDef.id}:${props.formDef.version}`} {...props} />;
+}
+
+function FormEditor({
   formDef,
   patientId,
   visitId,
@@ -22,6 +26,11 @@ export function DynamicFormRenderer({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   const handleFieldChange = (fieldId: string, value: unknown) => {
     setFormData((prev) => ({ ...prev, [fieldId]: value }));
@@ -48,13 +57,16 @@ export function DynamicFormRenderer({
         form_id: formDef.id,
         form_data: formData,
       });
+      if (!mounted.current) return;
+      if (sub.patient_id !== patientId || sub.form_id !== formDef.id)
+        throw new Error("The saved form does not match the selected patient and form.");
       setSuccessMsg("Clinical form submitted and recorded successfully!");
       setFormData({});
       onSuccess(sub);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to submit form responses.");
+      if (mounted.current) setError(err instanceof Error ? err.message : "Failed to submit form responses.");
     } finally {
-      setIsSubmitting(false);
+      if (mounted.current) setIsSubmitting(false);
     }
   };
 
@@ -113,6 +125,7 @@ export function DynamicFormRenderer({
               {field.type === "number" && (
                 <input
                   type="number"
+                  step="any"
                   placeholder={field.placeholder || ""}
                   value={value}
                   onChange={(e) => handleFieldChange(field.id, e.target.value === "" ? "" : Number(e.target.value))}
@@ -162,7 +175,7 @@ export function DynamicFormRenderer({
                 <label className="flex items-center gap-2 pt-1 text-xs cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={!!value}
+                    checked={rawVal === true}
                     onChange={(e) => handleFieldChange(field.id, e.target.checked)}
                     className="rounded border-input text-primary focus:ring-primary h-4 w-4"
                   />

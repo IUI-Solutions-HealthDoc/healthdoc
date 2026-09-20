@@ -14,6 +14,7 @@ from fastapi import HTTPException
 from app.common.patient_scope import actor_facility, require_patient_scope, require_visit_scope
 
 from app.forms.models import ClinicalOrderSet, FormDefinition, FormSubmission
+from app.forms.validation import validate_submission
 from app.forms.schemas import (
     ApplyOrderSetResult,
     ClinicalOrderSetCreate,
@@ -22,6 +23,7 @@ from app.forms.schemas import (
     CsvValidationResult,
     FormDefinitionCreate,
     FormDefinitionOut,
+    FormFieldDef,
     FormSubmissionCreate,
     FormSubmissionOut,
 )
@@ -164,11 +166,18 @@ async def create_submission(
     if not form or form.status != "published":
         raise ValueError(f"Form definition {payload.form_id} not found")
 
-    # Validate required fields
-    for field in form.fields_schema:
-        fid = field.get("id")
-        if field.get("required") and (fid not in payload.form_data or payload.form_data[fid] in (None, "")):
-            raise ValueError(f"Missing required field: {field.get('label', fid)}")
+    # Existing schema versions are not silently rewritten. Refuse malformed
+    # legacy definitions and require administrator review before new submissions.
+    try:
+        fields = [FormFieldDef.model_validate(field) for field in form.fields_schema]
+        if not fields or len({field.id for field in fields}) != len(fields):
+            raise ValueError("Invalid field definitions")
+    except ValueError as exc:
+        raise HTTPException(409, {
+            "code": "form_schema_unavailable",
+            "message": "This form definition requires administrator review",
+        }) from exc
+    validate_submission(fields, payload.form_data)
 
     sub = FormSubmission(
         id=uuid.uuid4(),

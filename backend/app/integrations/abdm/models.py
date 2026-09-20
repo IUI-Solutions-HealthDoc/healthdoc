@@ -33,6 +33,7 @@ class ScanShareTicket(Base, UUIDPk, Timestamps):
         UUID(as_uuid=True), ForeignKey("patients.id", ondelete="RESTRICT"), nullable=True
     )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    checked_in_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         Index("ix_scan_share_tickets_facility_id", "facility_id"),

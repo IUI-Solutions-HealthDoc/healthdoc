@@ -4,7 +4,7 @@ Hospital management system for Indian facilities. FastAPI + PostgreSQL backend,
 Next.js 16 + Electron frontend, Keycloak OIDC, all behind nginx in Docker
 Compose. Targeting ABDM certification and a CERT-In WASA audit.
 
-## Current project status — safety fixes, 20 September 2026
+## Current project status — ten-suite acceptance and safety fixes, 20 September 2026
 
 **This section supersedes the dated 18 September review below. Implementation
 has advanced substantially; acceptance and ABDM certification have not been
@@ -13,14 +13,20 @@ established by counting commits or test cases.**
 - Reviewed base: `35d8cc4` on `feat/suite-9-portal-terminology-a11y-m1`.
   Work is isolated on **`fix/clinical-safety-keycloak-return`** in a separate
   worktree; the implementing agent's original branch and untracked files are
-  preserved. No push, merge, deployment or participant operation in this pass.
+  preserved. Staging 6505e63 (Suite 9 squash PR #583) was integrated on this
+  safety branch. Work is pushed in **[PR #584 → staging](https://github.com/IUI-Solutions-HealthDoc/healthdoc/pull/584)**.
+  No PR merge, production deployment or participant operation has been performed.
 - Suite 7 (HD-25–28), Suite 8 (HD-29–32) and Suite 9 (HD-33–36) implementation
   commits are now present. The older statement that only HD-01/02 have been
   implemented is no longer current. HD-01–36 are **not 36 accepted packages**:
   there are incomplete features, negative-case defects and policy decisions
   within those packages. Do not label the product “90% complete” on that basis.
 - Full review, verified results, deployment order and remaining work:
-  [clinical safety review](docs/clinical-safety-review-2026-09-20.md).
+  [ten-suite / all forty packages acceptance ledger](docs/ten-suite-acceptance-status-2026-09-20.md)
+  and [earlier clinical safety review](docs/clinical-safety-review-2026-09-20.md).
+  **All ten suites are not complete.** Suites 1–9 contain implementation;
+  Suite 10 and material parts of earlier suites still need implementation,
+  live acceptance or approved policy. The detailed ledger distinguishes these.
 
 ### Safety changes on this branch
 
@@ -34,17 +40,22 @@ established by counting commits or test cases.**
 | KPI truthfulness | OPD wait uses visit/first-encounter timestamps, lab TAT uses collection/first verify audit event, ED acuity uses recorded triage. Missing measurements stay unavailable. **Migration 0081** adds timing calculation provenance; legacy values remain stored but are hidden until recalculated. |
 | Consent context | List, detail and access-history hooks reject stale callbacks/responses, including A → B → A. Late creation cannot select A's record in B; changing patient/record remounts mutation UI and suppresses stale success notifications. |
 | Keycloak | Native themed authorization-code + S256 PKCE login via this deployment's origin, with safe original-route/query/fragment return. Password grant/manual token restoration removed; legacy `hd_rt` storage cleared. Realm template disables direct grants. Existing deployed realms still need the explicit configuration change. |
+| Scan-and-Share desk | Correct array/field/counter contract; immutable ticket UUIDs; ambiguous short tokens refused; expiry/status/patient scope checked. Locked same-counter retries preserve original check-in time (0082); counter reassignment refused. Confirmed read-back hands the bound patient to StartVisit. No fake accreditation, counters/DOB, barcode, or ABHA in printed QR. |
+| Forms | Definitions and stored-version submissions validate supported types/options, unique IDs, finite numbers and actual dates before writes. Boolean/decimal controls repaired; patient/visit/form switches discard old completion. Order-set writer, general CSV and governance remain incomplete. |
+| Portal release | Prescription list/detail require a finished encounter with matching patient/facility/visit, reusing the existing ABDM finalization boundary. Privacy withholding/proxy approval is still outstanding. |
+| eMAR contention | Prescription-item row lock precedes duplicate-dose check; missing/stopped items refused and corrections distinguished. A real two-session PostgreSQL regression is included; approved scheduled-dose/PRN policy is still not supplied by this patch. |
 
 ### Validation and release boundary
 
-- Focused backend suite: **63 passed** (security regressions, Suites 6–9 and
-  realm lockout/PKCE policy). Frontend suite: **130 passed**. TypeScript and
+- Earlier focused safety backend suite: **63 passed**. Continuation focused
+  forms/Suite 8/ticket suite: **43 passed**; portal/eMAR/Suite 9: **29 passed,
+  one PostgreSQL test skipped locally**. Frontend suite: **136 passed**. TypeScript and
   ESLint on changed source pass. Route contract check: **311 valid calls**;
   this checker does not validate payload shape or prove live authorization.
-- Migration chain: **88 migrations, linear, head 0081**; PostgreSQL offline
-  upgrade SQL generated successfully. The new migration has **not** been
-  applied to a running database in this pass.
-- Final non-ABDM/backend sweep: **939 passed, 346 skipped** with infrastructure
+- Migration chain: **89 migrations, linear, head 0082**; PostgreSQL offline
+  upgrade SQL generated successfully. No migration applied to the user's local
+  or production database; initial PR CI applied 0081 in its disposable DB.
+- Latest non-ABDM/backend sweep: **975 passed, 348 skipped** with infrastructure
   test files explicitly excluded; exact command and earlier failures are in the
   review. Schema drift: zero blockers/warnings. No full PostgreSQL or browser acceptance claim:
   Docker daemon is unavailable; host Java runtime is missing; socket-dependent
@@ -52,7 +63,11 @@ established by counting commits or test cases.**
 - Convention checks have **zero blockers but remaining warnings** about
   idempotency and date presentation. Do not describe them as warning-free.
   Row-lock behavior must still be exercised with concurrent PostgreSQL sessions.
-- Before deployment: migrate to 0081; rebuild backend/frontend together; apply
+- Initial PR CI at e33e1d0: frontend, release-policy and nurse-auth/browser job
+  passed. Backend stopped at spec drift because the new migration map used a
+  column name as a table. Fixed the documentation format; local spec check now
+  passes (133 tables, 68 enums). Check the **latest PR SHA**, not that older run.
+- Before deployment: migrate to **0082**; rebuild backend/frontend together; apply
   the existing realm's native-flow settings without overwriting users; test
   deep-link login, logout/expiry, required actions/MFA, and all changed clinical
   actions. Do not promote directly to main; retain staging/review gates.
@@ -61,7 +76,7 @@ established by counting commits or test cases.**
 
 | Milestone | Built / historical evidence | Still required |
 |---|---|---|
-| M1 | Identity/OTP UI and backend, historical existing-ABHA verification/binding; Suite 9 adds Scan-and-Share reception code. | Full assigned NHA cases with a currently consenting participant, private OTP entry, persisted identity read-back and negative cases. Scan-and-Share code is not live case acceptance; review expiry, duplicate ticket and check-in behavior. |
+| M1 | Identity/OTP UI and backend, historical existing-ABHA verification/binding; Scan-and-Share reception contract/expiry/retry fixes now have synthetic regression coverage. | Full assigned NHA cases with a currently consenting participant, private OTP entry, persisted identity read-back and negative cases. Real profile-share/counter acceptance and protected profile retention remain; synthetic ticket tests are not live NHA evidence. |
 | M2 | v3 callbacks, outbound linking, document-scoped care contexts, durable transfer jobs, FHIR export/encryption and callback diagnostics. | Genuine confirmed link, PHR visibility/consent, clinical transfer and recipient receipt, plus rejection/expiry/retry evidence. Owner's latest report was no support response; no inbox or gateway recheck here. Mediated linking still needs an approved SMS/OTP relay. |
 | M3 | Consent/artefact APIs, encrypted receive/decrypt handling, protected viewer and requester-identity fields. | Genuine/NHA-approved clinician metadata, PHR approval/denial, authorized counterparty exchange, view/receipt, revoke/expire/retry evidence and NHA assessment. |
 

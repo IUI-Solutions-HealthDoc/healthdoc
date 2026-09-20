@@ -199,7 +199,8 @@ do not merge out of order.**
 | 0078 | ot_and_longitudinal_programs | care_programs, program_enrolments, program_visits | Operation Theatre lifecycle enhancements, WHO surgical safety checklist, and longitudinal care program registries. |
 | 0079 | suite_8_immunization_blood_forms | vaccine_catalogue, immunization_records, blood_crossmatches, form_definitions, form_submissions, clinical_order_sets, outbox_dead_letter | Immunization lifecycle, blood bank crossmatch & issue, dynamic clinical forms, order sets, safe outbox dead-letter queue, and direct-service walk-in encounters (HD-29 to HD-32). |
 | 0080 | suite_9_portal_terminology_specialty_scan_share | specialty_encounters, scan_share_tickets | Structured specialty encounter clinical evaluations and ABDM M1 scan-and-share reception tickets (HD-33 to HD-36). |
-| 0081 | kpi_calculation_provenance | kpi_snapshots.calculation_version | Marks evidence-derived timing calculations; legacy OPD-wait/lab-TAT snapshots remain stored but are excluded from MIS until recomputed. |
+| 0081 | kpi_calculation_provenance | kpi_snapshots | Adds calculation_version; legacy OPD-wait/lab-TAT snapshots remain stored but are excluded from MIS until recomputed. |
+| 0082 | scan_share_checkin_timestamp | scan_share_tickets | Adds checked_in_at; historical unknown times remain null. |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -2069,6 +2070,7 @@ status varchar(50) NOT NULL
 counter varchar(50) NULL
 patient_id UUID NULL REFERENCES patients(id)
 expires_at timestamptz NOT NULL
+checked_in_at timestamptz NULL                    -- 0082: original successful check-in; no invented legacy backfill
 ```
 
 **abdm_callback_replies** (0067) — committed reply intent, not a clinical inbox

@@ -116,21 +116,28 @@ async def record_administration(
     422 that names the field, and the database should still refuse if anything
     ever writes around the API."""
     # 1. Validate prescription item exists and is not stopped (#HD-17)
-    item = await db.get(PrescriptionItem, payload.prescription_item_id)
-    if item is not None and item.status == "stopped":
+    # Serialize administrations for this prescription item before checking for
+    # an existing dose. A check-then-insert without a lock lets two nurses both pass.
+    item = (await db.execute(
+        select(PrescriptionItem).where(PrescriptionItem.id == payload.prescription_item_id)
+        .with_for_update().execution_options(populate_existing=True)
+    )).scalar_one_or_none()
+    if item is None:
+        raise HTTPException(404, "Prescription item not found")
+    if item.status == "stopped":
         raise HTTPException(409, "Cannot administer dose: prescription item has been stopped")
 
     # 2. Concurrency safeguard: prevent duplicate dose for same schedule (#HD-17)
-    if payload.scheduled_at is not None and not payload.is_correction:
+    if payload.scheduled_at is not None and not (payload.is_correction or payload.correction_of_id):
         existing = (
             await db.execute(
                 select(MedicationAdministration).where(
                     MedicationAdministration.prescription_item_id == payload.prescription_item_id,
                     MedicationAdministration.scheduled_at == payload.scheduled_at,
                     MedicationAdministration.is_correction.is_(False),
-                )
+                ).limit(1)
             )
-        ).scalar_one_or_none()
+        ).scalars().first()
         if existing is not None:
             raise HTTPException(
                 409,

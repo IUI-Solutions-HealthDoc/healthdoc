@@ -340,7 +340,7 @@ async def test_dynamic_forms_and_submissions(db):
             form_id=pre_op_form.id,
             form_data={
                 "npo_hours": 8,
-                "airway_mallampati": "Class II",
+                "airway_mallampati": "II",
                 "consent_signed": True,
                 "pac_fitness": "Fit for general anesthesia ASA Grade 1",
             },

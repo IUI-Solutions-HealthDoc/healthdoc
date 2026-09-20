@@ -1,5 +1,12 @@
 # Clinical safety and Keycloak review — 20 September 2026
 
+**Continuation:** work is now pushed in PR #584 to staging. Additional ticket,
+form, portal-release and eMAR fixes, migration 0082, the latest test counts and
+the full ten-suite status are recorded in
+[the continuation ledger](ten-suite-acceptance-status-2026-09-20.md) and CLAUDE.md.
+The no-push statement and counts below describe the earlier review snapshot,
+not the later PR state.
+
 Branch: `fix/clinical-safety-keycloak-return`. Base: `35d8cc4`.
 Implementation and tests were performed in an isolated worktree; the other
 agent's `feat/suite-9-portal-terminology-a11y-m1` workspace was not edited.
