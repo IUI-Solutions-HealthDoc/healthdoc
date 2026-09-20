@@ -71,7 +71,7 @@ that no code change will be needed when exercised.
 | HD-14 | Competing bed allocation and failed transfer rollback; no seed dependency for ward onboarding. |
 | HD-15 | Two admissions of one patient remain separate; late chart responses cannot mix them. |
 | HD-16 | Approved checklist generation/version, shift/due ownership, skip/correction history and concurrency. |
-| HD-17 | PostgreSQL nurse contention gate plus approved schedule/dose/correction semantics. Row locking is not a scheduling subsystem. |
+| HD-17 | PostgreSQL nurse contention gate passed at ab83a25. Approved schedule/dose/correction semantics remain: row locking is not a scheduling subsystem. |
 | HD-18 | Approved triage scheme/history, disposition metrics and bounded break-glass/THID flow. |
 | HD-19 | Versioned approved analyte rules and removal/replacement of unapproved fallback interpretation; independent verify/amend/FHIR read-back. |
 | HD-20 | Real ED order priority survives delivery and fulfilment; approved medication acknowledgement rules. |
@@ -152,6 +152,17 @@ Fresh outcome counts and final CI state are maintained in CLAUDE.md / PR #584.
   Redis/MinIO, browser/restore and Java crypto gates must use the configured
   isolated stack/CI. Explicit skipped/excluded tests are not passes.
 - Convention warnings about other write endpoints' idempotency remain.
+- Subsequent isolated CI at **ab83a25**, run
+  [35505210441](https://github.com/IUI-Solutions-HealthDoc/healthdoc/actions/runs/35505210441):
+  **2054 backend tests passed, zero skipped, 7 warnings; 36 script tests passed**.
+  Both new PostgreSQL contention tests executed. Migrations through 0082,
+  Redis/MinIO and the Java-backed crypto suite ran there, not on the local Mac.
+  Frontend (136 tests plus build), release-policy and the **entire browser job
+  passed**: auth/bearer, print/PDF, per-dashboard smoke, invoice-switch,
+  external-results, ABDM PDF/consent-refresh, tariff and superadmin gates.
+  Four required checks are green; the weekly Electron job was skipped.
+  This is not a genuine ABDM exchange, all-function clinical acceptance or
+  production restore. Check latest PR gates after the documentation update.
 
 ## Deployment and human/external gates
 

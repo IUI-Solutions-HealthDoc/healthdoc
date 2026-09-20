@@ -43,7 +43,7 @@ established by counting commits or test cases.**
 | Scan-and-Share desk | Correct array/field/counter contract; immutable ticket UUIDs; ambiguous short tokens refused; expiry/status/patient scope checked. Locked same-counter retries preserve original check-in time (0082); counter reassignment refused. Confirmed read-back hands the bound patient to StartVisit. No fake accreditation, counters/DOB, barcode, or ABHA in printed QR. |
 | Forms | Definitions and stored-version submissions validate supported types/options, unique IDs, finite numbers and actual dates before writes. Boolean/decimal controls repaired; patient/visit/form switches discard old completion. Order-set writer, general CSV and governance remain incomplete. |
 | Portal release | Prescription list/detail require a finished encounter with matching patient/facility/visit, reusing the existing ABDM finalization boundary. Privacy withholding/proxy approval is still outstanding. |
-| eMAR contention | Prescription-item row lock precedes duplicate-dose check; missing/stopped items refused and corrections distinguished. A real two-session PostgreSQL regression is included; approved scheduled-dose/PRN policy is still not supplied by this patch. |
+| eMAR contention | Prescription-item row lock precedes duplicate-dose check; missing/stopped items refused and corrections distinguished. The real two-session PostgreSQL regression passed in CI; approved scheduled-dose/PRN policy is still not supplied by this patch. |
 
 ### Validation and release boundary
 
@@ -54,15 +54,17 @@ established by counting commits or test cases.**
   this checker does not validate payload shape or prove live authorization.
 - Migration chain: **89 migrations, linear, head 0082**; PostgreSQL offline
   upgrade SQL generated successfully. No migration applied to the user's local
-  or production database; initial PR CI applied 0081 in its disposable DB.
+  or production database; CI at ab83a25 applied through 0082 in its disposable DB.
 - Latest non-ABDM/backend sweep: **975 passed, 348 skipped** with infrastructure
   test files explicitly excluded; exact command and earlier failures are in the
-  review. Schema drift: zero blockers/warnings. No full PostgreSQL or browser acceptance claim:
+  review. Repeated without a PYTHONPATH override with the same counts. Schema
+  drift: zero blockers/warnings. This local run alone is not PostgreSQL/browser acceptance:
   Docker daemon is unavailable; host Java runtime is missing; socket-dependent
   Redis/SSE tests and backup configuration need their real test environment.
 - Convention checks have **zero blockers but remaining warnings** about
   idempotency and date presentation. Do not describe them as warning-free.
-  Row-lock behavior must still be exercised with concurrent PostgreSQL sessions.
+  The new row-lock regressions subsequently passed with concurrent PostgreSQL
+  sessions in the isolated CI environment (see revision-specific result below).
 - Initial PR CI at e33e1d0: frontend, release-policy and nurse-auth/browser job
   passed. Backend stopped at spec drift because the new migration map used a
   column name as a table. Fixed the documentation format; local spec check now
@@ -72,8 +74,20 @@ established by counting commits or test cases.**
   tests as top-level modules. The earlier local `PYTHONPATH=.:tests` command
   masked that collection error. Imports now use the `tests` package; with
   `PYTHONPATH` unset, **2054 tests collect** and the two affected files have
-  **30 passing tests**. Collection is not execution; the corrected SHA still
-  needs its full CI run. Do not add `tests/` to CI's import path to hide this.
+  **30 passing tests**. Do not add `tests/` to CI's import path to hide this.
+- **Verified CI application revision ab83a25**, run
+  [35505210441](https://github.com/IUI-Solutions-HealthDoc/healthdoc/actions/runs/35505210441):
+  backend **2054 passed, zero skipped, 7 warnings**, plus **36 script tests**.
+  This includes actual PostgreSQL eMAR/ticket contention, migrations, Redis,
+  MinIO and Java crypto gates. Frontend **136 passed, zero skipped**, build,
+  and release-policy passed. The **complete nurse-auth-e2e job passed**:
+  staff/patient authentication and bearer requests, print/PDF, per-dashboard
+  smoke, invoice-switch, external-results, ABDM PDF/consent-refresh, tariff
+  maintenance and superadmin isolation. All **four required checks passed**;
+  the weekly Electron job was **skipped**, not passed. Some workflow transports
+  are deliberately synthetic/intercepted: this is not all-role clinical or
+  NHA certification. A subsequent documentation-only commit does not constitute
+  a new application test run; always check its latest PR gates too.
 - Before deployment: migrate to **0082**; rebuild backend/frontend together; apply
   the existing realm's native-flow settings without overwriting users; test
   deep-link login, logout/expiry, required actions/MFA, and all changed clinical

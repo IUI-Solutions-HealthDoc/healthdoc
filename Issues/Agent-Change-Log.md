@@ -28,11 +28,21 @@ full-suite acceptance. All ten suites are **not** fully accepted.
   exclusions; frontend 136 passes / zero skips. TypeScript, changed-source lint,
   migration/spec/schema checks pass. The new PostgreSQL contention tests
   require explicit TEST_DATABASE_URL and are not claimed as local passes.
+- Isolated CI at **ab83a25**, run 35505210441: **2054 backend tests passed,
+  zero skipped, 7 warnings; 36 script tests passed**. The eMAR and reception
+  concurrency tests executed against PostgreSQL. Redis/MinIO/Java-backed
+  gates and migrations through 0082 passed there; frontend/release-policy
+  also passed. The full browser job then passed: auth/bearer, print/PDF,
+  dashboards, invoice-switch, external-results, ABDM PDF/consent-refresh,
+  tariff maintenance and superadmin isolation. All four required gates passed;
+  the weekly Electron job was skipped. These are synthetic CI results, not
+  live ABDM certification or full clinical acceptance.
 - Initial PR CI browser/frontend passed; backend spec-map failure corrected.
   The next backend run passed those checks but failed test collection: two
   sibling imports depended on the local `PYTHONPATH=.:tests` override. Fixed
   package imports; 2054 tests collect and 30 affected tests pass with the
-  override removed. No backend CI pass is claimed before the corrected run.
+  override removed. The earlier failed runs remain failures; the backend
+  success above is specifically the corrected ab83a25 run.
   Latest-SHA CI and review are required. M1/M2/M3 certification, clinical policy,
   full recovery and all-package live acceptance remain open.
 
