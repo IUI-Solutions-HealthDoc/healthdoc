@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from app.opd.models import Encounter, Visit
 from app.orders.models import Prescription
 from app.patients.portal_self_router import get_my_documents, get_my_document_detail
-from test_suite_9_portal_terminology_a11y import suite_9_seed
+from tests.test_suite_9_portal_terminology_a11y import suite_9_seed
 
 pytestmark = pytest.mark.asyncio
 

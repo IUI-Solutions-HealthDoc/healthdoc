@@ -67,6 +67,13 @@ established by counting commits or test cases.**
   passed. Backend stopped at spec drift because the new migration map used a
   column name as a table. Fixed the documentation format; local spec check now
   passes (133 tables, 68 enums). Check the **latest PR SHA**, not that older run.
+- Follow-up CI at 915083f passed the spec/schema/contract gates and frontend,
+  but backend **did not execute tests**: two regression modules imported sibling
+  tests as top-level modules. The earlier local `PYTHONPATH=.:tests` command
+  masked that collection error. Imports now use the `tests` package; with
+  `PYTHONPATH` unset, **2054 tests collect** and the two affected files have
+  **30 passing tests**. Collection is not execution; the corrected SHA still
+  needs its full CI run. Do not add `tests/` to CI's import path to hide this.
 - Before deployment: migrate to **0082**; rebuild backend/frontend together; apply
   the existing realm's native-flow settings without overwriting users; test
   deep-link login, logout/expiry, required actions/MFA, and all changed clinical

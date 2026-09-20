@@ -29,6 +29,10 @@ full-suite acceptance. All ten suites are **not** fully accepted.
   migration/spec/schema checks pass. The new PostgreSQL contention tests
   require explicit TEST_DATABASE_URL and are not claimed as local passes.
 - Initial PR CI browser/frontend passed; backend spec-map failure corrected.
+  The next backend run passed those checks but failed test collection: two
+  sibling imports depended on the local `PYTHONPATH=.:tests` override. Fixed
+  package imports; 2054 tests collect and 30 affected tests pass with the
+  override removed. No backend CI pass is claimed before the corrected run.
   Latest-SHA CI and review are required. M1/M2/M3 certification, clinical policy,
   full recovery and all-package live acceptance remain open.
 

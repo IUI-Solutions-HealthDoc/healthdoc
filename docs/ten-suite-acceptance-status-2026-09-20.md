@@ -127,6 +127,10 @@ that no code change will be needed when exercised.
 8. Corrected the migration-map documentation format that failed the first
    backend CI run. The first run's frontend and browser job passed; its failed
    backend job stopped before tests and must not be described as a backend pass.
+9. Corrected two package-relative regression-test imports found by the next
+   CI run. Local `PYTHONPATH=.:tests` had masked the collection failure. Without
+   that override, all 2054 tests collect and both affected files pass (30 tests).
+   The CI configuration and test gates were not relaxed.
 
 ## Evidence and limits
 

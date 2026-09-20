@@ -36,7 +36,7 @@ from app.radiology.models import RadiologyOrderItem
 from app.radiology.router import upload_order_attachment
 from app.terminology.router import router as specialty_router
 from app.terminology.models import SpecialtyEncounter
-from test_suite_8_immunization_blood_forms import _setup_suite_8_fixture
+from tests.test_suite_8_immunization_blood_forms import _setup_suite_8_fixture
 
 pytestmark = pytest.mark.asyncio
 
