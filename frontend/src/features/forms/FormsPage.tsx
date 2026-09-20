@@ -70,11 +70,14 @@ export function FormsPage() {
 
   // Load submissions when patient changes
   useEffect(() => {
+    let cancelled = false;
+    setSubmissions([]);
     if (activePatient?.id) {
       fetchPatientSubmissions(activePatient.id)
-        .then((subs) => setSubmissions(subs))
-        .catch(() => setSubmissions([]));
+        .then((subs) => { if (!cancelled) setSubmissions(subs); })
+        .catch(() => { if (!cancelled) setSubmissions([]); });
     }
+    return () => { cancelled = true; };
   }, [activePatient]);
 
   const handlePatientSearch = async (e: React.FormEvent) => {
@@ -129,7 +132,7 @@ export function FormsPage() {
             className="flex items-center gap-1.5 rounded-xl bg-primary px-3.5 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors shadow-sm"
           >
             <Layers className="h-4 w-4" />
-            Apply Order Set
+            Preview Order Sets
           </button>
         </div>
       </div>
@@ -226,6 +229,7 @@ export function FormsPage() {
             {activeTab === "fill" ? (
               selectedForm && activePatient ? (
                 <DynamicFormRenderer
+                  key={`${activePatient.id}:${selectedForm.id}`}
                   formDef={selectedForm}
                   patientId={activePatient.id}
                   onSuccess={(sub) => {
@@ -290,9 +294,6 @@ export function FormsPage() {
           isOpen={isOrderSetOpen}
           onClose={() => setIsOrderSetOpen(false)}
           orderSets={orderSets}
-          patientId={activePatient.id}
-          visitId={activePatient.id}
-          onSuccess={() => {}}
         />
       )}
 

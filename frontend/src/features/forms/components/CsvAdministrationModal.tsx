@@ -11,7 +11,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { exportCsvUrl, importCsv, validateCsv } from "../api";
+import { downloadCsv, importCsv, validateCsv } from "../api";
 import type { CsvImportResult, CsvValidationResult } from "../types";
 
 interface CsvAdministrationModalProps {
@@ -85,8 +85,14 @@ export function CsvAdministrationModal({
     }
   };
 
-  const handleDownloadExport = () => {
-    window.open(exportCsvUrl(entityType), "_blank");
+  const handleDownloadExport = async () => {
+    try {
+      const blob = await downloadCsv(entityType);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url; link.download = entityType + ".csv"; link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err) { setError(err instanceof Error ? err.message : "Export failed."); }
   };
 
   return (
@@ -133,8 +139,7 @@ export function CsvAdministrationModal({
                 className="w-full rounded-xl border border-input bg-background px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary"
               >
                 <option value="vaccines">Vaccine Catalogue</option>
-                <option value="forms">Form Definitions</option>
-                <option value="inventory">Inventory Catalog</option>
+
               </select>
             </div>
 
@@ -171,7 +176,7 @@ export function CsvAdministrationModal({
             </label>
             <textarea
               rows={4}
-              placeholder="code,name,target_disease,schedule_age_months,dose_number,route,site&#10;BCG,BCG,Tuberculosis,0,1,Intradermal,Left Forearm"
+              placeholder="code,name,target_disease,standard_doses,min_age_days,route,site,dose_quantity"
               value={csvText}
               onChange={(e) => {
                 setCsvText(e.target.value);
@@ -213,7 +218,7 @@ export function CsvAdministrationModal({
 
                 {validationResult.warnings.length > 0 && (
                   <div className="pt-1 text-amber-600 dark:text-amber-400">
-                    <span className="font-semibold block">Formula Injection Warnings (Sanitized):</span>
+                    <span className="font-semibold block">Rejected Formula-like Values:</span>
                     <ul className="list-disc list-inside">
                       {validationResult.warnings.map((w, i) => (
                         <li key={i}>{w}</li>

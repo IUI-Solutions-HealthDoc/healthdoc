@@ -38,7 +38,7 @@ export type ReceptionistSummary = {
   in_consultation: number;
   completed: number;
   cancelled_or_lwbs: number;
-  average_wait_minutes: number;
+  average_wait_minutes: number | null;
 };
 
 export type EdCensus = {

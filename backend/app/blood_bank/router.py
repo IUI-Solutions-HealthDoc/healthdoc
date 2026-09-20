@@ -29,11 +29,12 @@ router = APIRouter(prefix="/blood-bank", tags=["blood_bank"])
 )
 async def list_blood_donors(
     db: DbSession,
+    current_user: CurrentDbUser,
     blood_group: str | None = Query(default=None),
     is_eligible: bool | None = Query(default=None),
 ) -> list[BloodDonorOut]:
     """List blood donors with optional filter by blood group and eligibility."""
-    donors = await service.list_donors(db, blood_group=blood_group, is_eligible=is_eligible)
+    donors = await service.list_donors(db, current_user.facility_id, blood_group=blood_group, is_eligible=is_eligible)
     return [BloodDonorOut.model_validate(d) for d in donors]
 
 
@@ -59,13 +60,14 @@ async def register_blood_donor(
 )
 async def list_blood_units(
     db: DbSession,
+    current_user: CurrentDbUser,
     unit_status: str | None = Query(default=None, alias="status"),
     blood_group: str | None = Query(default=None),
     screening_status: str | None = Query(default=None),
 ) -> list[BloodUnitOut]:
     """List blood units with status and blood group filtering."""
     units = await service.list_units(
-        db, status=unit_status, blood_group=blood_group, screening_status=screening_status
+        db, current_user.facility_id, status=unit_status, blood_group=blood_group, screening_status=screening_status
     )
     return [BloodUnitOut.model_validate(u) for u in units]
 
@@ -79,10 +81,11 @@ async def list_blood_units(
 async def add_blood_unit(
     payload: BloodUnitCreate,
     db: DbSession,
+    current_user: CurrentDbUser,
 ) -> BloodUnitOut:
     """Add a newly collected and screened blood unit to inventory."""
     try:
-        return await service.create_unit(db, payload)
+        return await service.create_unit(db, payload, current_user.id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 

@@ -160,7 +160,7 @@ function handleExpiredSession(): void {
   clearAuthToken();
   setAccessToken(null);
   window.location.replace(
-    sessionExpiredPath(window.location.pathname, window.location.search),
+    sessionExpiredPath(window.location.pathname, window.location.search, window.location.hash),
   );
 }
 

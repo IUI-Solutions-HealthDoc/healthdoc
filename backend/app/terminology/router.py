@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import CurrentDbUser, require_roles
 from app.common.db import get_db
+from app.common.patient_scope import require_patient_access
 from app.opd.models import Encounter, Visit
 from app.terminology import service
 from app.terminology.schemas import (
@@ -74,6 +75,7 @@ async def get_specialty_template(specialty_type: str) -> SpecialtyTemplateOut:
     "/encounters/{encounter_id}/specialty",
     response_model=SpecialtyEncounterOut,
     status_code=201,
+    dependencies=[Depends(require_roles("doctor", "admin"))],
 )
 async def record_encounter_specialty_assessment(
     encounter_id: uuid.UUID,
@@ -86,7 +88,8 @@ async def record_encounter_specialty_assessment(
     stmt = (
         select(Encounter, Visit.patient_id, Visit.facility_id)
         .join(Visit, Visit.id == Encounter.visit_id)
-        .where(Encounter.id == encounter_id)
+        .where(Encounter.id == encounter_id, Encounter.facility_id == current_user.facility_id,
+               Visit.facility_id == current_user.facility_id)
     )
     row = (await db.execute(stmt)).first()
     if row is None:
@@ -95,6 +98,7 @@ async def record_encounter_specialty_assessment(
     encounter, patient_id, facility_id = row
     if current_user.facility_id != facility_id:
         raise HTTPException(status_code=403, detail={"code": "facility_mismatch", "message": "Access outside user facility"})
+    await require_patient_access(db, patient_id, current_user)
 
     tpl = service.get_specialty_template(payload.specialty_type)
     if tpl is None:
@@ -117,6 +121,7 @@ async def record_encounter_specialty_assessment(
 @clinical_router.get(
     "/encounters/{encounter_id}/specialty",
     response_model=list[SpecialtyEncounterOut],
+    dependencies=[Depends(require_roles("doctor", "nurse", "admin"))],
 )
 async def get_encounter_specialty_assessments(
     encounter_id: uuid.UUID,
@@ -125,22 +130,23 @@ async def get_encounter_specialty_assessments(
 ) -> list[SpecialtyEncounterOut]:
     """Retrieve recorded specialty clinical findings for an encounter."""
     stmt = (
-        select(Encounter, Visit.facility_id)
+        select(Encounter, Visit.facility_id, Visit.patient_id)
         .join(Visit, Visit.id == Encounter.visit_id)
-        .where(Encounter.id == encounter_id)
+        .where(Encounter.id == encounter_id, Encounter.facility_id == current_user.facility_id,
+               Visit.facility_id == current_user.facility_id)
     )
     row = (await db.execute(stmt)).first()
     if row is None:
         raise HTTPException(status_code=404, detail={"code": "encounter_not_found", "message": "Encounter not found"})
 
-    encounter, facility_id = row
+    encounter, facility_id, patient_id = row
     if current_user.facility_id != facility_id:
         raise HTTPException(status_code=403, detail={"code": "facility_mismatch", "message": "Access outside user facility"})
+    await require_patient_access(db, patient_id, current_user)
 
-    records = await service.get_specialty_encounters(db, encounter_id=encounter_id)
+    records = await service.get_specialty_encounters(db, encounter_id=encounter_id, patient_id=patient_id)
     return [SpecialtyEncounterOut.model_validate(r) for r in records]
 
 
 router.include_router(terminology_router)
 router.include_router(clinical_router)
-

@@ -9,9 +9,9 @@ export function idleTimeoutMs(rawMinutes) {
   return minutes * 60_000;
 }
 
-export function sessionExpiredPath(pathname, search = "") {
-  const current = `${pathname || "/"}${search || ""}`;
+export function sessionExpiredPath(pathname, search = "", hash = "") {
+  const current = `${pathname || "/"}${search || ""}${hash || ""}`;
   const params = new URLSearchParams({ reason: "session-expired" });
-  if (current !== "/login") params.set("redirect", current);
+  if (pathname !== "/login") params.set("redirect", current);
   return `/login?${params.toString()}`;
 }

@@ -21,6 +21,7 @@ class VaccineOut(BaseModel):
 
 
 class ImmunizationRecordCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     patient_id: uuid.UUID
     vaccine_code: str
     dose_number: int = Field(default=1, ge=1)

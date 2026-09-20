@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BookOpen, RefreshCw, Search, Syringe } from "lucide-react";
 import { fetchVaccineCatalogue, fetchImmunizationCertificate } from "./api";
 import { ImmunizationCertificateModal } from "./components/ImmunizationCertificateModal";
@@ -30,6 +30,9 @@ export function ImmunizationPage() {
     uhid: string;
     full_name: string;
   } | null>(null);
+
+  const patientRef = useRef(activePatient);
+  patientRef.current = activePatient;
 
   // Modals state
   const [isRecordModalOpen, setIsRecordModalOpen] = useState(false);
@@ -67,7 +70,8 @@ export function ImmunizationPage() {
         method: "POST",
         body: JSON.stringify(body),
       });
-      if (res?.items && res.items.length > 0) {
+      if (res?.items && res.items.length === 1) {
+        setCertificateData(null); setIsCertModalOpen(false); setIsRecordModalOpen(false);
         const p = res.items[0];
         setActivePatient({
           id: p.id,
@@ -84,6 +88,7 @@ export function ImmunizationPage() {
     if (!activePatient) return;
     try {
       const cert = await fetchImmunizationCertificate(activePatient.id);
+      if (patientRef.current !== activePatient) return;
       setCertificateData(cert);
       setIsCertModalOpen(true);
     } catch (err: unknown) {
@@ -166,7 +171,7 @@ export function ImmunizationPage() {
           </div>
 
           {activePatient ? (
-            <ImmunizationScheduleView
+            <ImmunizationScheduleView key={activePatient.id}
               patientId={activePatient.id}
               patientName={activePatient.full_name}
               uhid={activePatient.uhid}
@@ -210,13 +215,13 @@ export function ImmunizationPage() {
                     <td className="p-3 font-mono font-medium text-primary">{v.code}</td>
                     <td className="p-3 text-muted-foreground">{v.target_disease}</td>
                     <td className="p-3 font-medium">
-                      {v.schedule_age_months === 0
+                      {v.min_age_days === 0
                         ? "At Birth"
-                        : `${v.schedule_age_months} months`}
+                        : `${v.min_age_days} days`}
                     </td>
                     <td className="p-3">
                       <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
-                        Dose {v.dose_number}
+                        Dose {v.standard_doses}
                       </span>
                     </td>
                     <td className="p-3 text-muted-foreground">{v.route}</td>
@@ -231,7 +236,7 @@ export function ImmunizationPage() {
 
       {/* Record Immunization Modal */}
       {activePatient && (
-        <RecordImmunizationModal
+        <RecordImmunizationModal key={`${activePatient.id}:${isRecordModalOpen}`}
           isOpen={isRecordModalOpen}
           onClose={() => setIsRecordModalOpen(false)}
           patientId={activePatient.id}

@@ -4,7 +4,88 @@ Hospital management system for Indian facilities. FastAPI + PostgreSQL backend,
 Next.js 16 + Electron frontend, Keycloak OIDC, all behind nginx in Docker
 Compose. Targeting ABDM certification and a CERT-In WASA audit.
 
-## Current project status — reviewed 18 September 2026
+## Current project status — safety fixes, 20 September 2026
+
+**This section supersedes the dated 18 September review below. Implementation
+has advanced substantially; acceptance and ABDM certification have not been
+established by counting commits or test cases.**
+
+- Reviewed base: `35d8cc4` on `feat/suite-9-portal-terminology-a11y-m1`.
+  Work is isolated on **`fix/clinical-safety-keycloak-return`** in a separate
+  worktree; the implementing agent's original branch and untracked files are
+  preserved. No push, merge, deployment or participant operation in this pass.
+- Suite 7 (HD-25–28), Suite 8 (HD-29–32) and Suite 9 (HD-33–36) implementation
+  commits are now present. The older statement that only HD-01/02 have been
+  implemented is no longer current. HD-01–36 are **not 36 accepted packages**:
+  there are incomplete features, negative-case defects and policy decisions
+  within those packages. Do not label the product “90% complete” on that basis.
+- Full review, verified results, deployment order and remaining work:
+  [clinical safety review](docs/clinical-safety-review-2026-09-20.md).
+
+### Safety changes on this branch
+
+| Area | Current implementation / boundary |
+|---|---|
+| Patient isolation | Forms and immunization reads/writes check facility and verified, non-revoked self binding for patient-role accounts. OT/program/return creation checks the patient; visit/admission, dispense and radiology attachment references are checked against their owning resources. |
+| Suite 9 specialty assessments | Added missing clinical role gates. Encounter and visit must both belong to the caller's facility; patient-role credentials cannot acquire staff access by carrying an additional role. Inconsistent historical assessment ownership is not silently reassigned. |
+| Blood issue | Rechecks current screening, available status, facility-day expiry, recipient scope and compatible crossmatch while locking the issue rows. Pending/failed screening, expired, quarantined, discarded and reserved units are refused. Legacy facility scope derives from the donor creator; unowned rows fail closed. |
+| UI contracts | Blood and immunization payloads match backend field names. Compatibility must be selected explicitly and is reset on recipient change. Vaccine submission sends a code and timestamp, with batch expiry. No invented digital-signature or issue-slip claims. |
+| False success | Order sets are **preview-only**, with API 409 until catalogue mappings and an actual transactional order writer exist. CSV imports are restricted to implemented vaccine writes; unsupported entity imports fail. This is safe restriction, not feature completion. |
+| KPI truthfulness | OPD wait uses visit/first-encounter timestamps, lab TAT uses collection/first verify audit event, ED acuity uses recorded triage. Missing measurements stay unavailable. **Migration 0081** adds timing calculation provenance; legacy values remain stored but are hidden until recalculated. |
+| Consent context | List, detail and access-history hooks reject stale callbacks/responses, including A → B → A. Late creation cannot select A's record in B; changing patient/record remounts mutation UI and suppresses stale success notifications. |
+| Keycloak | Native themed authorization-code + S256 PKCE login via this deployment's origin, with safe original-route/query/fragment return. Password grant/manual token restoration removed; legacy `hd_rt` storage cleared. Realm template disables direct grants. Existing deployed realms still need the explicit configuration change. |
+
+### Validation and release boundary
+
+- Focused backend suite: **63 passed** (security regressions, Suites 6–9 and
+  realm lockout/PKCE policy). Frontend suite: **130 passed**. TypeScript and
+  ESLint on changed source pass. Route contract check: **311 valid calls**;
+  this checker does not validate payload shape or prove live authorization.
+- Migration chain: **88 migrations, linear, head 0081**; PostgreSQL offline
+  upgrade SQL generated successfully. The new migration has **not** been
+  applied to a running database in this pass.
+- Final non-ABDM/backend sweep: **939 passed, 346 skipped** with infrastructure
+  test files explicitly excluded; exact command and earlier failures are in the
+  review. Schema drift: zero blockers/warnings. No full PostgreSQL or browser acceptance claim:
+  Docker daemon is unavailable; host Java runtime is missing; socket-dependent
+  Redis/SSE tests and backup configuration need their real test environment.
+- Convention checks have **zero blockers but remaining warnings** about
+  idempotency and date presentation. Do not describe them as warning-free.
+  Row-lock behavior must still be exercised with concurrent PostgreSQL sessions.
+- Before deployment: migrate to 0081; rebuild backend/frontend together; apply
+  the existing realm's native-flow settings without overwriting users; test
+  deep-link login, logout/expiry, required actions/MFA, and all changed clinical
+  actions. Do not promote directly to main; retain staging/review gates.
+
+### ABDM M1 / M2 / M3 — unchanged live acceptance boundary
+
+| Milestone | Built / historical evidence | Still required |
+|---|---|---|
+| M1 | Identity/OTP UI and backend, historical existing-ABHA verification/binding; Suite 9 adds Scan-and-Share reception code. | Full assigned NHA cases with a currently consenting participant, private OTP entry, persisted identity read-back and negative cases. Scan-and-Share code is not live case acceptance; review expiry, duplicate ticket and check-in behavior. |
+| M2 | v3 callbacks, outbound linking, document-scoped care contexts, durable transfer jobs, FHIR export/encryption and callback diagnostics. | Genuine confirmed link, PHR visibility/consent, clinical transfer and recipient receipt, plus rejection/expiry/retry evidence. Owner's latest report was no support response; no inbox or gateway recheck here. Mediated linking still needs an approved SMS/OTP relay. |
+| M3 | Consent/artefact APIs, encrypted receive/decrypt handling, protected viewer and requester-identity fields. | Genuine/NHA-approved clinician metadata, PHR approval/denial, authorized counterparty exchange, view/receipt, revoke/expire/retry evidence and NHA assessment. |
+
+**No new milestone was executed or certified in this pass.** Historical consent
+through 14 September is expired. Never restart outbound jobs or reuse that
+consent without checking current authorization and queued work. HTTP 202,
+synthetic callbacks, local crypto tests and a working dashboard are not
+substitutes for a completed sandbox round trip.
+
+### Remaining completion work, in order
+
+1. Run the deployment/browser/PostgreSQL acceptance checklist in the new review;
+   finish idempotent retry/concurrency handling for the newly added writers.
+2. Obtain clinical approval for blood donor eligibility, immunization schedules,
+   analyte/reference rules, specialty templates and terminology provenance.
+   The presence of seeded defaults is not that approval.
+3. Implement approved order-set catalogue mappings and real atomic writes;
+   other CSV entity importers remain disabled rather than claiming success.
+4. Finish HD-37–40 evidence: ABDM cases, production-derived restore/PITR and
+   non-Postgres recovery, real alert delivery, clinical load/security review,
+   referral/tariff/patient-switch acceptance, accessibility/print and all-role
+   populated workflows. These also revisit incomplete parts of HD-01–36.
+
+## Historical project review — 18 September 2026 (superseded snapshot)
 
 **Read this section before the historical notes below. HealthDoc is not fully
 finished, production-approved or ABDM-certified.** This is an independent source

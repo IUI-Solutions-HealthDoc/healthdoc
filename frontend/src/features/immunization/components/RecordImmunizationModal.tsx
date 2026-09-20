@@ -25,13 +25,13 @@ export function RecordImmunizationModal({
   );
   const [doseNumber, setDoseNumber] = useState<number>(1);
   const [administeredDate, setAdministeredDate] = useState<string>(
-    new Date().toISOString().split("T")[0]
+    () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)
   );
   const [batchNumber, setBatchNumber] = useState<string>("");
   const [expiryDate, setExpiryDate] = useState<string>("");
   const [manufacturer, setManufacturer] = useState<string>("");
-  const [site, setSite] = useState<string>("Left Deltoid");
-  const [route, setRoute] = useState<string>("Intramuscular");
+  const [site, setSite] = useState<string>(catalogue[0]?.site || "");
+  const [route, setRoute] = useState<string>(catalogue[0]?.route || "");
   const [adverseReaction, setAdverseReaction] = useState<string>("");
 
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -43,7 +43,7 @@ export function RecordImmunizationModal({
     setSelectedVaccineId(vaccineId);
     const v = catalogue.find((item) => item.id === vaccineId);
     if (v) {
-      setDoseNumber(v.dose_number || 1);
+      setDoseNumber(1);
       if (v.route) setRoute(v.route);
       if (v.site) setSite(v.site);
     }
@@ -53,8 +53,12 @@ export function RecordImmunizationModal({
     e.preventDefault();
     setError(null);
 
-    if (!selectedVaccineId) {
+    if (!catalogue.some((v) => v.id === selectedVaccineId)) {
       setError("Please select a vaccine.");
+      return;
+    }
+    if (!expiryDate || expiryDate < administeredDate.slice(0, 10)) {
+      setError("Expiry date is required and must not precede administration.");
       return;
     }
     if (!batchNumber.trim()) {
@@ -66,11 +70,11 @@ export function RecordImmunizationModal({
       setIsSubmitting(true);
       await recordImmunization({
         patient_id: patientId,
-        vaccine_id: selectedVaccineId,
+        vaccine_code: catalogue.find((v) => v.id === selectedVaccineId)!.code,
         dose_number: doseNumber,
-        administered_date: administeredDate,
+        administered_at: new Date(administeredDate).toISOString(),
         batch_number: batchNumber.trim(),
-        expiry_date: expiryDate ? expiryDate : null,
+        expiry_date: expiryDate,
         manufacturer: manufacturer.trim() || null,
         site: site.trim() || null,
         route: route.trim() || null,
@@ -120,7 +124,7 @@ export function RecordImmunizationModal({
             >
               {catalogue.map((v) => (
                 <option key={v.id} value={v.id}>
-                  {v.name} ({v.code}) — Dose {v.dose_number}
+                  {v.name} ({v.code}) — {v.standard_doses} dose(s)
                 </option>
               ))}
             </select>
@@ -146,7 +150,7 @@ export function RecordImmunizationModal({
                 Date Administered
               </label>
               <input
-                type="date"
+                type="datetime-local"
                 value={administeredDate}
                 onChange={(e) => setAdministeredDate(e.target.value)}
                 className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
@@ -175,6 +179,7 @@ export function RecordImmunizationModal({
               </label>
               <input
                 type="date"
+                required
                 value={expiryDate}
                 onChange={(e) => setExpiryDate(e.target.value)}
                 className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"

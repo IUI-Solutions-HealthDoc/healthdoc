@@ -17,6 +17,7 @@ from app.immunization.schemas import (
     PatientImmunizationScheduleOut,
 )
 from app.patients.models import Patient
+from app.common.patient_scope import actor_facility, require_patient_scope, facility_timezone
 
 DEFAULT_NATIONAL_VACCINES = [
     {
@@ -207,21 +208,31 @@ async def get_patient_schedule(db: AsyncSession, patient_id: uuid.UUID) -> Patie
 async def record_administration(
     db: AsyncSession, payload: ImmunizationRecordCreate, user_id: uuid.UUID
 ) -> ImmunizationRecordOut:
+    facility_id = await actor_facility(db, user_id)
+    await require_patient_scope(db, payload.patient_id, facility_id)
     await ensure_catalogue_seeded(db)
     vac_res = await db.execute(
         select(VaccineCatalogue).where(VaccineCatalogue.code.ilike(payload.vaccine_code.strip()))
     )
     vaccine = vac_res.scalar_one_or_none()
-    if not vaccine:
+    if not vaccine or not vaccine.is_active:
         raise ValueError(f"Vaccine with code {payload.vaccine_code} not found in catalogue")
 
+    administered = payload.administered_at or datetime.now(timezone.utc)
+    if administered.tzinfo is None:
+        administered = administered.replace(tzinfo=timezone.utc)
+    administration_date = administered.astimezone(await facility_timezone(db, facility_id)).date()
+    if administered > datetime.now(timezone.utc) or payload.expiry_date < administration_date:
+        raise ValueError("Administration cannot be in the future or after batch expiry")
+    if not payload.batch_number.strip():
+        raise ValueError("Batch number is required")
     rec = ImmunizationRecord(
         id=uuid.uuid4(),
         patient_id=payload.patient_id,
         vaccine_id=vaccine.id,
         vaccine_code=vaccine.code,
         dose_number=payload.dose_number,
-        administered_at=payload.administered_at or datetime.now(timezone.utc),
+        administered_at=administered,
         batch_number=payload.batch_number.strip(),
         expiry_date=payload.expiry_date,
         manufacturer=payload.manufacturer,
@@ -240,6 +251,7 @@ async def record_administration(
 async def generate_certificate(
     db: AsyncSession, patient_id: uuid.UUID, facility_id: uuid.UUID | None
 ) -> ImmunizationCertificateOut:
+    await require_patient_scope(db, patient_id, facility_id)
     pat_res = await db.execute(select(Patient).where(Patient.id == patient_id))
     patient = pat_res.scalar_one_or_none()
     if not patient:

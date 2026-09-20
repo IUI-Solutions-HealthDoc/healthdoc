@@ -282,8 +282,8 @@ async def test_radiology_attachment_management(db):
             filename = "chest_xray.dcm"
             content_type = "application/dicom"
 
-            async def read(self):
-                return dicom_data
+            async def read(self, size=-1):
+                return dicom_data if size < 0 else dicom_data[:size]
 
         att_out = await upload_order_attachment(
             current_db_user=doc_curr,

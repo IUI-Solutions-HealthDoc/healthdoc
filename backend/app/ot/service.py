@@ -19,6 +19,8 @@ from app.ot.schemas import (
     WhoSafetyChecklistUpdate,
 )
 from app.patients.models import Patient
+from app.admissions.models import Admission
+from app.common.patient_scope import require_patient_scope, require_visit_scope
 
 
 async def create_ot_schedule(
@@ -27,7 +29,15 @@ async def create_ot_schedule(
     body: OtScheduleCreate,
     actor_user_id: uuid.UUID,
 ) -> OtScheduleOut:
-    """Create an OT schedule after enforcing theatre overlap exclusion."""
+    """Create an OT schedule after enforcing ownership and theatre overlap."""
+    await require_patient_scope(db, body.patient_id, facility_id)
+    await require_visit_scope(db, body.visit_id, body.patient_id, facility_id)
+    if body.admission_id:
+        admission = (await db.execute(select(Admission.id).where(
+            Admission.id == body.admission_id, Admission.visit_id == body.visit_id,
+        ))).scalar_one_or_none()
+        if admission is None:
+            raise HTTPException(404, "Admission not found for this visit")
     if body.scheduled_end <= body.scheduled_start:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

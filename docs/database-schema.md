@@ -199,6 +199,7 @@ do not merge out of order.**
 | 0078 | ot_and_longitudinal_programs | care_programs, program_enrolments, program_visits | Operation Theatre lifecycle enhancements, WHO surgical safety checklist, and longitudinal care program registries. |
 | 0079 | suite_8_immunization_blood_forms | vaccine_catalogue, immunization_records, blood_crossmatches, form_definitions, form_submissions, clinical_order_sets, outbox_dead_letter | Immunization lifecycle, blood bank crossmatch & issue, dynamic clinical forms, order sets, safe outbox dead-letter queue, and direct-service walk-in encounters (HD-29 to HD-32). |
 | 0080 | suite_9_portal_terminology_specialty_scan_share | specialty_encounters, scan_share_tickets | Structured specialty encounter clinical evaluations and ABDM M1 scan-and-share reception tickets (HD-33 to HD-36). |
+| 0081 | kpi_calculation_provenance | kpi_snapshots.calculation_version | Marks evidence-derived timing calculations; legacy OPD-wait/lab-TAT snapshots remain stored but are excluded from MIS until recomputed. |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -1535,6 +1536,7 @@ staff_training_records: user_id → users · training_name text NOT NULL ·
 ```
 facility_id → facilities · kpi_code varchar(50) NOT NULL   -- avg_opd_wait_minutes, sharp_injury_count, ...
 period_start date · period_end date · value numeric(14,4) · numerator numeric · denominator numeric
+calculation_version varchar(50) NULL -- 0081; recorded_events_v1 for measured OPD wait / lab TAT, NULL for legacy/unverified values
 UNIQUE (facility_id, kpi_code, period_start, period_end)
 ```
 

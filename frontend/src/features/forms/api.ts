@@ -1,4 +1,4 @@
-import { api } from "@/lib/api";
+import { api, downloadBlob } from "@/lib/api";
 import type {
   ApplyOrderSetRequest,
   ApplyOrderSetResult,
@@ -61,6 +61,6 @@ export function importCsv(
   });
 }
 
-export function exportCsvUrl(entityType: string = "vaccines"): string {
-  return `/api/admin/csv/export?entity_type=${encodeURIComponent(entityType)}`;
+export function downloadCsv(entityType: string = "vaccines"): Promise<Blob> {
+  return downloadBlob(`/admin/csv/export?entity_type=${encodeURIComponent(entityType)}`);
 }

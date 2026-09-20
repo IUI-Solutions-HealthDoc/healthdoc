@@ -45,7 +45,10 @@ export interface FormSubmission {
 export interface OrderItem {
   type: "lab" | "radiology" | "pharmacy" | "procedure";
   code: string;
-  name: string;
+  name?: string;
+  test_name?: string;
+  scan_name?: string;
+  directive?: string;
   dosage?: string;
   frequency?: string;
   duration?: string;

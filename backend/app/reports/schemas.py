@@ -17,6 +17,7 @@ class KpiOut(BaseModel):
     value: Decimal
     numerator: Decimal | None = None
     denominator: Decimal | None = None
+    calculation_version: str | None = None
 
 
 class KpiListOut(BaseModel):
@@ -60,7 +61,7 @@ class ReceptionistSummaryOut(BaseModel):
     in_consultation: int
     completed: int
     cancelled_or_lwbs: int
-    average_wait_minutes: float
+    average_wait_minutes: float | None
 
 
 class EdCensusOut(BaseModel):

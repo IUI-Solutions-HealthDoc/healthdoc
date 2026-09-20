@@ -10,6 +10,8 @@ from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import HTTPException
+from app.common.patient_scope import actor_facility, require_patient_scope, require_visit_scope
 
 from app.forms.models import ClinicalOrderSet, FormDefinition, FormSubmission
 from app.forms.schemas import (
@@ -154,9 +156,12 @@ async def create_form_definition(
 async def create_submission(
     db: AsyncSession, payload: FormSubmissionCreate, user_id: uuid.UUID
 ) -> FormSubmissionOut:
+    facility_id = await actor_facility(db, user_id)
+    await require_patient_scope(db, payload.patient_id, facility_id)
+    await require_visit_scope(db, payload.visit_id, payload.patient_id, facility_id)
     f_res = await db.execute(select(FormDefinition).where(FormDefinition.id == payload.form_id))
     form = f_res.scalar_one_or_none()
-    if not form:
+    if not form or form.status != "published":
         raise ValueError(f"Form definition {payload.form_id} not found")
 
     # Validate required fields
@@ -204,6 +209,9 @@ async def list_order_sets(
 async def apply_order_set(
     db: AsyncSession, code: str, patient_id: uuid.UUID, visit_id: uuid.UUID, user_id: uuid.UUID
 ) -> ApplyOrderSetResult:
+    facility_id = await actor_facility(db, user_id)
+    await require_patient_scope(db, patient_id, facility_id)
+    await require_visit_scope(db, visit_id, patient_id, facility_id)
     p_res = await db.execute(select(Patient).where(Patient.id == patient_id))
     if not p_res.scalar_one_or_none():
         raise ValueError(f"Patient {patient_id} not found")
@@ -217,15 +225,10 @@ async def apply_order_set(
     if not order_set:
         raise ValueError(f"Order set {code} not found")
 
-    # In production, orders list atomically cascades to orders/procedures tables.
-    # Here we atomically confirm and return the verified applied set.
-    return ApplyOrderSetResult(
-        order_set_code=order_set.code,
-        patient_id=patient_id,
-        visit_id=visit_id,
-        orders_applied=order_set.orders,
-        message=f"Successfully applied {len(order_set.orders)} orders from protocol '{order_set.title}'",
-    )
+    # Free-text protocols have no validated order catalogue mapping. Never
+    # claim orders were placed until the real transactional writer exists.
+    raise HTTPException(409, {"code": "order_set_execution_unavailable",
+        "message": "Order sets are preview-only. Place individual orders through the clinical order workflow."})
 
 
 def sanitize_csv_cell(value: str) -> str:
@@ -239,6 +242,8 @@ def sanitize_csv_cell(value: str) -> str:
 def validate_csv(csv_content: str, entity_type: str) -> CsvValidationResult:
     errors: list[str] = []
     warnings: list[str] = []
+    if entity_type != "vaccines":
+        errors.append("CSV import is only implemented for vaccines")
     if not csv_content.strip():
         return CsvValidationResult(
             valid=False,
@@ -271,10 +276,34 @@ def validate_csv(csv_content: str, entity_type: str) -> CsvValidationResult:
         )
 
     rows = list(reader)
+    required = {"code", "name", "target_disease", "standard_doses", "min_age_days", "route", "site", "dose_quantity"}
+    if entity_type == "vaccines" and not required.issubset(headers):
+        errors.append("Missing columns: " + ", ".join(sorted(required - set(headers))))
+    if len(headers) != len(set(headers)):
+        errors.append("Duplicate column names are not allowed")
+    if not rows:
+        errors.append("CSV contains no data rows")
+    codes: set[str] = set()
     # Check for formula injection attempts
     for r_idx, row in enumerate(rows, start=2):
+        if len(row) != len(headers):
+            errors.append(f"Row {r_idx}: column count does not match header")
+        if entity_type == "vaccines" and required.issubset(headers):
+            values = dict(zip(headers, row))
+            if any(not values.get(key, "").strip() for key in required):
+                errors.append(f"Row {r_idx}: required vaccine value is blank")
+            code = values.get("code", "").strip()
+            if code in codes:
+                errors.append(f"Row {r_idx}: duplicate vaccine code")
+            codes.add(code)
+            try:
+                if int(values.get("standard_doses", "")) < 1 or int(values.get("min_age_days", "")) < 0:
+                    raise ValueError
+            except ValueError:
+                errors.append(f"Row {r_idx}: invalid dose count or minimum age")
         for c_idx, cell in enumerate(row):
-            if cell.startswith(FORMULA_INJECTION_PREFIXES):
+            if cell.lstrip().startswith(FORMULA_INJECTION_PREFIXES):
+                errors.append(f"Row {r_idx} Column {c_idx+1}: formula-like values are not accepted")
                 warnings.append(
                     f"Row {r_idx} Column {c_idx+1} ({headers[c_idx] if c_idx < len(headers) else ''}) "
                     f"contains formula injection prefix: '{cell[:5]}...'"
@@ -326,8 +355,7 @@ async def import_csv(
                 imported += 1
         await db.commit()
     else:
-        # Generic record count
-        imported = val.row_count
+        raise ValueError("CSV import is not implemented for this entity")
 
     return CsvImportResult(
         entity_type=entity_type,
@@ -365,7 +393,6 @@ async def export_csv(entity_type: str, db: AsyncSession) -> str:
                 len(o.orders),
             ])
     else:
-        writer.writerow(["id", "entity_type", "exported_at"])
-        writer.writerow([str(uuid.uuid4()), entity_type, datetime.now(timezone.utc).isoformat()])
+        raise ValueError("CSV export is not implemented for this entity")
 
     return out.getvalue()

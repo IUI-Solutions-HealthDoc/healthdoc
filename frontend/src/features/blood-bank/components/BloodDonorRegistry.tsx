@@ -23,7 +23,9 @@ export function BloodDonorRegistry({ donors, onRefresh }: BloodDonorRegistryProp
   const [bloodGroup, setBloodGroup] = useState("O");
   const [rhFactor, setRhFactor] = useState("+");
   const [contactPhone, setContactPhone] = useState("");
-  const [isEligible, setIsEligible] = useState(true);
+  const [weight, setWeight] = useState("");
+  const [hemoglobin, setHemoglobin] = useState("");
+  const [lastDonation, setLastDonation] = useState("");
   const [ineligibilityReason, setIneligibilityReason] = useState("");
 
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -63,20 +65,21 @@ export function BloodDonorRegistry({ donors, onRefresh }: BloodDonorRegistryProp
       setIsSubmitting(true);
       await registerBloodDonor({
         full_name: fullName.trim(),
-        age,
-        gender,
-        blood_group: bloodGroup,
-        rh_factor: rhFactor,
-        contact_phone: contactPhone.trim() || null,
-        is_eligible: isEligible,
-        ineligibility_reason: !isEligible ? ineligibilityReason.trim() : null,
+        age_years: age,
+        sex: gender,
+        blood_group: bloodGroup + rhFactor,
+        mobile: contactPhone.trim() || null,
+        weight_kg: Number(weight),
+        hemoglobin_g_dl: Number(hemoglobin),
+        last_donation_date: lastDonation || null,
+        remarks: ineligibilityReason.trim() || null,
       });
       setIsRegisterModalOpen(false);
       // Reset
       setFullName("");
       setContactPhone("");
       setIneligibilityReason("");
-      setIsEligible(true);
+      setWeight(""); setHemoglobin(""); setLastDonation("");
       onRefresh();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to register donor.");
@@ -175,7 +178,7 @@ export function BloodDonorRegistry({ donors, onRefresh }: BloodDonorRegistryProp
                       </span>
                     </td>
                     <td className="p-3 text-muted-foreground capitalize">
-                      {d.age_years || d.age || 25} yrs • {d.sex || d.gender || "male"}
+                      {d.age_years ?? "Not recorded"} yrs • {d.sex || "Not recorded"}
                     </td>
                     <td className="p-3 font-mono text-muted-foreground">{d.contact_phone || d.mobile || "—"}</td>
                     <td className="p-3">
@@ -318,30 +321,19 @@ export function BloodDonorRegistry({ donors, onRefresh }: BloodDonorRegistryProp
               </div>
 
               <div className="rounded-xl border border-border p-3 space-y-2 bg-muted/20">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-foreground">Screening Eligibility</span>
-                  <label className="flex items-center gap-2 text-xs cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={isEligible}
-                      onChange={(e) => setIsEligible(e.target.checked)}
-                      className="rounded border-input text-primary focus:ring-primary"
-                    />
-                    <span>Passed Screening (Weight ≥45kg, Hb ≥12.5g/dL)</span>
-                  </label>
-                </div>
-                {!isEligible && (
-                  <div>
-                    <input
-                      type="text"
-                      placeholder="Reason for deferral (e.g. Low Hb 11.2, recent antibiotic course)"
-                      value={ineligibilityReason}
-                      onChange={(e) => setIneligibilityReason(e.target.value)}
-                      className="w-full rounded-lg border border-input bg-background px-3 py-1.5 text-xs text-destructive focus:outline-none focus:ring-2 focus:ring-destructive"
-                      required
-                    />
-                  </div>
-                )}
+                <p className="text-xs">Eligibility is calculated on the server from recorded measurements; clinical clearance is still required.</p>
+                <label className="block text-xs">Weight (kg)
+                  <input aria-label="Weight (kg)" type="number" min="30" max="200" step="0.1" required value={weight} onChange={(e) => setWeight(e.target.value)} />
+                </label>
+                <label className="block text-xs">Haemoglobin (g/dL)
+                  <input aria-label="Haemoglobin (g/dL)" type="number" min="5" max="25" step="0.1" required value={hemoglobin} onChange={(e) => setHemoglobin(e.target.value)} />
+                </label>
+                <label className="block text-xs">Last donation (leave blank only if none)
+                  <input type="date" value={lastDonation} onChange={(e) => setLastDonation(e.target.value)} />
+                </label>
+                <label className="block text-xs">Screening notes
+                  <input value={ineligibilityReason} onChange={(e) => setIneligibilityReason(e.target.value)} />
+                </label>
               </div>
 
               <div className="flex items-center justify-end gap-3 pt-4 border-t border-border">

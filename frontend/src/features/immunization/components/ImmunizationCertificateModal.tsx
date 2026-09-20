@@ -26,7 +26,7 @@ export function ImmunizationCertificateModal({
         <div className="flex items-center justify-between pb-4 border-b border-border print:hidden">
           <div className="flex items-center gap-2">
             <ShieldCheck className="h-5 w-5 text-primary" />
-            <h3 className="text-lg font-bold text-card-foreground">Official Immunization Certificate</h3>
+            <h3 className="text-lg font-bold text-card-foreground">Immunization Record</h3>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -51,10 +51,10 @@ export function ImmunizationCertificateModal({
           <div className="text-center border-b border-border pb-4">
             <div className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary mb-2">
               <CheckCircle2 className="h-3.5 w-3.5" />
-              Verified Clinical Record
+              Recorded Administrations
             </div>
             <h2 className="text-xl font-bold tracking-tight text-foreground">{certificate.facility_name}</h2>
-            <p className="text-xs text-muted-foreground">National Healthcare Digital Immunization Registry</p>
+            <p className="text-xs text-muted-foreground">Facility immunization record</p>
             <p className="text-[11px] text-muted-foreground/80 mt-1 font-mono">
               Certificate No: {certificate.certificate_id} • Issued: {new Date(certificate.generated_at).toLocaleString()}
             </p>
@@ -64,19 +64,19 @@ export function ImmunizationCertificateModal({
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-4 rounded-lg bg-muted/40 text-xs">
             <div>
               <span className="text-muted-foreground font-medium block">Patient Name</span>
-              <span className="font-semibold text-foreground">{certificate.patient.full_name}</span>
+              <span className="font-semibold text-foreground">{certificate.patient_name}</span>
             </div>
             <div>
-              <span className="text-muted-foreground font-medium block">UHID</span>
-              <span className="font-mono font-semibold text-foreground">{certificate.patient.uhid}</span>
+              <span className="text-muted-foreground font-medium block">Patient record ID</span>
+              <span className="font-mono font-semibold text-foreground">{certificate.patient_id}</span>
             </div>
             <div>
               <span className="text-muted-foreground font-medium block">Date of Birth</span>
-              <span className="font-semibold text-foreground">{certificate.patient.birth_date}</span>
+              <span className="font-semibold text-foreground">{certificate.dob || "Not recorded"}</span>
             </div>
             <div>
               <span className="text-muted-foreground font-medium block">Gender</span>
-              <span className="font-semibold capitalize text-foreground">{certificate.patient.gender}</span>
+              <span className="font-semibold capitalize text-foreground">{certificate.gender || "Not recorded"}</span>
             </div>
           </div>
 
@@ -97,22 +97,22 @@ export function ImmunizationCertificateModal({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {certificate.vaccinations.length === 0 ? (
+                  {certificate.records.length === 0 ? (
                     <tr>
                       <td colSpan={5} className="p-4 text-center text-muted-foreground">
                         No immunization records found for this patient.
                       </td>
                     </tr>
                   ) : (
-                    certificate.vaccinations.map((v, idx) => (
+                    certificate.records.map((v, idx) => (
                       <tr key={idx} className="hover:bg-muted/30">
                         <td className="p-2.5 font-medium text-foreground">
-                          {v.vaccine_name} <span className="text-muted-foreground text-[10px]">({v.vaccine_code})</span>
+                          <span className="text-muted-foreground text-[10px]">({v.vaccine_code})</span>
                         </td>
                         <td className="p-2.5">Dose {v.dose_number}</td>
-                        <td className="p-2.5 font-mono">{v.administered_date}</td>
+                        <td className="p-2.5 font-mono">{new Date(v.administered_at).toLocaleString()}</td>
                         <td className="p-2.5 font-mono">{v.batch_number}</td>
-                        <td className="p-2.5 text-muted-foreground">{v.manufacturer || "Standard"}</td>
+                        <td className="p-2.5 text-muted-foreground">{v.manufacturer || "Not recorded"}</td>
                       </tr>
                     ))
                   )}
@@ -121,18 +121,7 @@ export function ImmunizationCertificateModal({
             </div>
           </div>
 
-          {/* Digital Signature & Verification Footer */}
-          <div className="pt-4 border-t border-border flex flex-col sm:flex-row items-center justify-between gap-4 text-[11px] text-muted-foreground">
-            <div className="space-y-0.5">
-              <p className="font-semibold text-foreground">Cryptographic Verification Stamp</p>
-              <p className="font-mono text-[10px] break-all max-w-md">{certificate.digital_signature_hash}</p>
-            </div>
-            <div className="text-center sm:text-right shrink-0">
-              <div className="inline-block px-3 py-1.5 border border-primary/30 rounded bg-primary/5 text-primary font-mono font-bold text-xs">
-                VALIDATED ✓
-              </div>
-            </div>
-          </div>
+          <p className="text-xs text-muted-foreground">Generated from facility records. This document is not digitally signed.</p>
         </div>
       </div>
     </div>
