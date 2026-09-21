@@ -66,8 +66,18 @@ established by counting commits or test cases.**
   other endpoints; **new browser gate `test:clinical-write-ui` passed 4/4 with
   zero page errors, twice**, with real Keycloak sign-in and intercepted
   clinical transport. Docker **is** available on this Mac now; the older
-  “Docker unavailable” notes below are historical. Check #586's own CI on its
-  latest SHA before relying on any of this; local results are not CI.
+  “Docker unavailable” notes below are historical. A full local backend run
+  against real PostgreSQL/Redis/MinIO gave **1978 passed** with all 94
+  non-passes being the Java-backed ECDH helper this host cannot run.
+- **PR #586 CI at application revision `0d196bb`**, run
+  [35578191782](https://github.com/IUI-Solutions-HealthDoc/healthdoc/actions/runs/35578191782):
+  backend **2092 passed, zero skipped, 7 warnings** plus 36 script tests
+  (includes both real PostgreSQL clinical-write contention cases and the Java
+  crypto suite); frontend passed; release-policy passed; **nurse-auth-e2e
+  passed including the new “Clinical write and two-step issue retry safety”
+  step**; weekly Electron job skipped. Four required checks green. This is CI
+  on synthetic/intercepted clinical transport, not populated clinical
+  acceptance or NHA evidence. Re-check the PR's latest SHA before any merge.
 - Still open from this tranche's scope: `pr_check.py` idempotency warnings on
   `check_in_scan_share_ticket`, `record_encounter_specialty_assessment`,
   `apply_order_set` (currently always 409), `validate_admin_csv` (read-only)
