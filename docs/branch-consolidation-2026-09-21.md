@@ -3,6 +3,15 @@
 Scope: publish remaining work from the HealthDoc branches used in this thread,
 without resurrecting superseded implementation or claiming clinical acceptance.
 
+**Promotion follow-up:** #588 was approved and all four checks passed on `2fac6ff`
+(run 35600175817), then it was squash-merged as `f96321d`. The source tree is
+unchanged from that tested head, but the main-parent repair was lost. #589 is
+the approved, conflicting staging-to-main PR. `fix/promotion-589-history`
+restores the same proven main ancestry, without an application change, and adds
+the [next-agent prompt](next-agent-completion-prompt-2026-09-21.md). Merge this
+repair and #589 with merge commits. Verify final PR states before claiming a
+completed promotion; the notes below describe their preparation-time baseline.
+
 ## Verified baseline
 
 - Remote staging: `5771931` (#587 squash).
