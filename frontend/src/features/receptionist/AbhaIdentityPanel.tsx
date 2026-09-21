@@ -7,16 +7,31 @@ import { ApiError, newIdempotencyKey } from "@/lib/api";
 import {
   requestAbhaEnrolmentOtp,
   requestAbhaLoginOtp,
+  resendAbhaOtp,
   verifyAbhaEnrolmentOtp,
   verifyAbhaLoginOtp,
 } from "./api";
 import { digitsOnly, isValidAbhaInput, normaliseIndianMobileInput } from "./patientValidation";
-import type { AbhaIdentityLinked } from "./types";
+import type { AbhaIdentityLinked, AbhaLoginIdentifier } from "./types";
 
 type Flow = "existing" | "new";
+/** How an existing ABHA is proven: OTP to its linked mobile, or through Aadhaar. */
+type Method = "abha-number" | "aadhaar";
+
+/** Mirrors the server cooldown; the server is authoritative and answers 429
+ *  with retry_after_seconds if the desk is early. */
+const RESEND_COOLDOWN_SECONDS = 30;
 
 interface Props {
   patient: { id: string; full_name: string; abha_number?: string | null };
+}
+
+function refusalCode(reason: unknown): string | null {
+  if (!(reason instanceof ApiError)) return null;
+  const payload = (reason as { payload?: unknown }).payload;
+  return payload && typeof payload === "object" && typeof (payload as { code?: unknown }).code === "string"
+    ? (payload as { code: string }).code
+    : null;
 }
 
 export function AbhaIdentityPanel({ patient }: Props) {
@@ -27,6 +42,7 @@ export function AbhaIdentityPanel({ patient }: Props) {
 
 function PatientAbhaIdentity({ patient }: Props) {
   const [flow, setFlow] = useState<Flow>("existing");
+  const [method, setMethod] = useState<Method>("abha-number");
   const [identifier, setIdentifier] = useState(patient.abha_number ?? "");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [maskedMobile, setMaskedMobile] = useState<string | null>(null);
@@ -35,7 +51,14 @@ function PatientAbhaIdentity({ patient }: Props) {
   const [linked, setLinked] = useState<AbhaIdentityLinked | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [resendsRemaining, setResendsRemaining] = useState<number | null>(null);
+  const [resendAvailableAt, setResendAvailableAt] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const lifecycle = useRef({ active: false, generation: 0, pending: false });
+  // The identifier the OTP was requested for, kept in memory only so a resend
+  // can re-supply it (the server never stores it). Cleared with the session and
+  // never rendered after the request leaves the screen.
+  const requestedIdentifier = useRef<AbhaLoginIdentifier | null>(null);
 
   useEffect(() => {
     const current = lifecycle.current;
@@ -44,8 +67,15 @@ function PatientAbhaIdentity({ patient }: Props) {
       current.active = false;
       current.generation += 1;
       current.pending = false;
+      requestedIdentifier.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    if (resendAvailableAt === null) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [resendAvailableAt]);
 
   function beginRequest(): number | null {
     if (!lifecycle.current.active || lifecycle.current.pending) return null;
@@ -60,6 +90,7 @@ function PatientAbhaIdentity({ patient }: Props) {
   function resetSession() {
     lifecycle.current.generation += 1;
     lifecycle.current.pending = false;
+    requestedIdentifier.current = null;
     setBusy(false);
     setSessionId(null);
     setMaskedMobile(null);
@@ -67,39 +98,94 @@ function PatientAbhaIdentity({ patient }: Props) {
     setMobile("");
     setLinked(null);
     setError(null);
+    setResendsRemaining(null);
+    setResendAvailableAt(null);
   }
 
+  const usesAadhaar = flow === "new" || method === "aadhaar";
   const digits = digitsOnly(identifier);
-  const identifierValid = flow === "existing" ? isValidAbhaInput(identifier) : digits.length === 12;
+  const identifierValid = usesAadhaar ? digits.length === 12 : isValidAbhaInput(identifier);
   const otpValid = /^\d{4,8}$/.test(otp);
   const mobileNormalised = mobile.trim() ? normaliseIndianMobileInput(mobile) : null;
   const mobileValid = !mobile.trim() || mobileNormalised !== null;
+  const resendWaitSeconds = resendAvailableAt === null ? 0 : Math.max(0, Math.ceil((resendAvailableAt - now) / 1000));
+  const canResend = sessionId !== null && (resendsRemaining ?? 0) > 0 && resendWaitSeconds === 0 && !busy;
 
   function changeFlow(next: Flow) {
     resetSession();
     setFlow(next);
+    setMethod("abha-number");
     setIdentifier(next === "existing" ? (patient.abha_number ?? "") : "");
+  }
+
+  function changeMethod(next: Method) {
+    resetSession();
+    setMethod(next);
+    setIdentifier(next === "abha-number" ? (patient.abha_number ?? "") : "");
+  }
+
+  function applyRequested(result: { session_id: string; masked_mobile: string | null; resends_remaining?: number }) {
+    setSessionId(result.session_id);
+    setMaskedMobile(result.masked_mobile);
+    setOtp("");
+    setResendsRemaining(result.resends_remaining ?? 0);
+    setResendAvailableAt(Date.now() + RESEND_COOLDOWN_SECONDS * 1000);
+    setNow(Date.now());
   }
 
   async function requestOtp() {
     if (!identifierValid) {
-      setError(flow === "existing" ? "Enter a valid 14-digit ABHA number." : "Enter a valid 12-digit Aadhaar number.");
+      setError(usesAadhaar ? "Enter a valid 12-digit Aadhaar number." : "Enter a valid 14-digit ABHA number.");
       return;
     }
     const generation = beginRequest();
     if (generation === null) return;
     setBusy(true);
     setError(null);
+    const loginIdentifier: AbhaLoginIdentifier = usesAadhaar ? { aadhaar: digits } : { abha_number: identifier };
     try {
       const result = flow === "existing"
-        ? await requestAbhaLoginOtp(patient.id, identifier, newIdempotencyKey())
+        ? await requestAbhaLoginOtp(patient.id, loginIdentifier, newIdempotencyKey())
         : await requestAbhaEnrolmentOtp(patient.id, identifier, newIdempotencyKey());
       if (!isCurrent(generation)) return;
-      setSessionId(result.session_id);
-      setMaskedMobile(result.masked_mobile);
-      if (flow === "new") setIdentifier("");
+      requestedIdentifier.current = loginIdentifier;
+      applyRequested(result);
+      // An Aadhaar number does not stay on screen while the OTP is entered.
+      if (usesAadhaar) setIdentifier("");
     } catch (reason) {
       if (isCurrent(generation)) setError(reason instanceof ApiError ? reason.message : "ABDM could not send the OTP. Try again.");
+    } finally {
+      if (isCurrent(generation)) {
+        lifecycle.current.pending = false;
+        setBusy(false);
+      }
+    }
+  }
+
+  async function resendOtp() {
+    const current = requestedIdentifier.current;
+    if (!sessionId || !current || !canResend) return;
+    const generation = beginRequest();
+    if (generation === null) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await resendAbhaOtp(flow, patient.id, sessionId, current, newIdempotencyKey());
+      if (!isCurrent(generation)) return;
+      // The previous session is spent server-side; only the new one is valid.
+      applyRequested(result);
+    } catch (reason) {
+      if (!isCurrent(generation)) return;
+      const code = refusalCode(reason);
+      if (code === "otp_resend_too_soon") {
+        const payload = (reason as { payload?: { retry_after_seconds?: unknown } }).payload;
+        const wait = typeof payload?.retry_after_seconds === "number" ? payload.retry_after_seconds : RESEND_COOLDOWN_SECONDS;
+        setResendAvailableAt(Date.now() + wait * 1000);
+        setNow(Date.now());
+      } else if (code === "otp_resend_exhausted") {
+        setResendsRemaining(0);
+      }
+      setError(reason instanceof ApiError ? reason.message : "ABDM could not resend the OTP. Try again.");
     } finally {
       if (isCurrent(generation)) {
         lifecycle.current.pending = false;
@@ -126,12 +212,20 @@ function PatientAbhaIdentity({ patient }: Props) {
         setError("ABDM did not confirm identity binding for this patient. Restart verification.");
         return;
       }
+      requestedIdentifier.current = null;
       setLinked(result);
       setOtp("");
       setMobile("");
       setSessionId(null);
+      setResendsRemaining(null);
+      setResendAvailableAt(null);
     } catch (reason) {
-      if (isCurrent(generation)) setError(reason instanceof ApiError ? reason.message : "ABDM could not verify the OTP. Try again.");
+      if (!isCurrent(generation)) return;
+      // A refused OTP (wrong, expired, over the attempt limit) keeps the
+      // session: the desk retypes it or asks for a fresh one. Only clear the
+      // typed code so the retry starts from an empty field.
+      if (refusalCode(reason) === "otp_rejected") setOtp("");
+      setError(reason instanceof ApiError ? reason.message : "ABDM could not verify the OTP. Try again.");
     } finally {
       if (isCurrent(generation)) {
         lifecycle.current.pending = false;
@@ -161,16 +255,23 @@ function PatientAbhaIdentity({ patient }: Props) {
         <button type="button" onClick={() => changeFlow("new")} aria-pressed={flow === "new"} className={`rounded-md border px-3 py-2 text-sm ${flow === "new" ? "border-primary bg-primary/10" : "border-border"}`}>Create ABHA</button>
       </div>
 
+      {flow === "existing" && !sessionId ? (
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Verification method">
+          <button type="button" onClick={() => changeMethod("abha-number")} aria-pressed={method === "abha-number"} className={`rounded-md border px-3 py-1.5 text-xs ${method === "abha-number" ? "border-primary bg-primary/10" : "border-border"}`}>OTP to ABHA-linked mobile</button>
+          <button type="button" onClick={() => changeMethod("aadhaar")} aria-pressed={method === "aadhaar"} className={`rounded-md border px-3 py-1.5 text-xs ${method === "aadhaar" ? "border-primary bg-primary/10" : "border-border"}`}>OTP through Aadhaar</button>
+        </div>
+      ) : null}
+
       {!sessionId ? (
         <div className="space-y-3">
           <label className="block space-y-1 text-sm">
-            <span className="text-muted-foreground">{flow === "existing" ? "ABHA number" : "Aadhaar number"}</span>
+            <span className="text-muted-foreground">{usesAadhaar ? "Aadhaar number" : "ABHA number"}</span>
             <input
               value={identifier}
               onChange={(event) => setIdentifier(event.target.value)}
               inputMode="numeric"
               autoComplete="off"
-              maxLength={flow === "existing" ? 20 : 12}
+              maxLength={usesAadhaar ? 12 : 20}
               aria-invalid={Boolean(identifier) && !identifierValid}
               className={`w-full rounded-md border px-3 py-2 ${identifier && !identifierValid ? "border-danger" : "border-border"}`}
             />
@@ -184,6 +285,15 @@ function PatientAbhaIdentity({ patient }: Props) {
             <span className="text-muted-foreground">OTP</span>
             <input value={otp} onChange={(event) => setOtp(digitsOnly(event.target.value))} inputMode="numeric" autoComplete="one-time-code" maxLength={8} className="w-full rounded-md border border-border px-3 py-2" />
           </label>
+          <p className="text-xs text-muted-foreground">
+            {(resendsRemaining ?? 0) > 0 ? (
+              <button type="button" disabled={!canResend} onClick={() => void resendOtp()} className="underline disabled:no-underline disabled:opacity-60">
+                {resendWaitSeconds > 0 ? `Resend OTP in ${resendWaitSeconds}s` : `Resend OTP (${resendsRemaining} left)`}
+              </button>
+            ) : (
+              <span>No more OTP resends for this attempt. Use “Start again” to begin a new verification.</span>
+            )}
+          </p>
           {flow === "new" ? (
             <label className="block space-y-1 text-sm">
               <span className="text-muted-foreground">Mobile override (only if ABDM asks for it)</span>
