@@ -4,18 +4,88 @@ Hospital management system for Indian facilities. FastAPI + PostgreSQL backend,
 Next.js 16 + Electron frontend, Keycloak OIDC, all behind nginx in Docker
 Compose. Targeting ABDM certification and a CERT-In WASA audit.
 
-## Current project status — ten-suite acceptance and safety fixes, 20 September 2026
+## Current project status — ten-suite acceptance and safety fixes, 20–21 September 2026
 
 **This section supersedes the dated 18 September review below. Implementation
 has advanced substantially; acceptance and ABDM certification have not been
 established by counting commits or test cases.**
 
+### 21 September continuation — clinical write retries, PR #586
+
+- **PR #584 was squash-merged into staging** on 21 September at 06:26 UTC as
+  `dcd7d15`, and [PR #585](https://github.com/IUI-Solutions-HealthDoc/healthdoc/pull/585)
+  promoted staging → main (`9222f07`) at 06:52 UTC. Both happened before the
+  handoff's final tranche was verified, so that tranche is **not** in staging
+  or main. It is delivered as
+  **[PR #586 → staging](https://github.com/IUI-Solutions-HealthDoc/healthdoc/pull/586)**,
+  branch `fix/clinical-write-retry-safety`, cut from `dcd7d15` with two commits
+  (`1d6a1ee` atomic retries, `7475fb3` page states). Repository promotion of
+  #584/#585 is not evidence of a production deployment. The old branch
+  `fix/clinical-safety-keycloak-return` carries one now-superseded extra commit
+  (`fe564cc`, same content as `1d6a1ee`) pushed before the merge was noticed;
+  it can be deleted after #586 merges — do not open a PR from it.
+- **Atomic idempotent clinical writes** (`backend/app/common/clinical_write.py`)
+  now front eight endpoints: forms definitions/submissions, admin CSV import,
+  immunization records, blood donors/units/crossmatch/issue. A bounded
+  `Idempotency-Key` is required (422 without it); the reservation row is taken
+  with `INSERT … ON CONFLICT DO NOTHING RETURNING` so a concurrent duplicate
+  waits instead of racing; write and receipt commit together; an identical
+  retry replays the original response; changed payload/facility → 409
+  `idempotency_key_reuse`; unconfirmed original → 409 `idempotency_key_in_progress`;
+  patient-role sessions are refused; resource authorization runs before any
+  replay; receipt failure rolls the write back; integrity errors → 409
+  `clinical_write_rejected`. Services flush, the router owns the transaction.
+  No new migration; head stays **0082**.
+- **Frontend `useClinicalWrite`**: one immutable body/key per mounted action,
+  double-submit blocked, key kept after network/5xx/ambiguous outcomes, freed
+  only on explicit pre-write refusal, late completions dropped after unmount,
+  `isPending()` readable synchronously. Editors lock and show “Retry unchanged
+  save”. Crossmatch-success/issue-failure retries only the issue. Nothing is
+  stored in the browser: **the retry key survives only while the editor stays
+  mounted**; after navigation or reload the user must reconcile saved records.
+- **Page states**: forms/immunization patient search selects only an exact
+  single match (zero/multiple reported, never first-match), search failures
+  are shown, placeholders say UHID/mobile (no name search exists on that
+  request); failed history/definitions/inventory/catalogue reads render as
+  failures with retry, not “0 records”, “(0)” or empty tables; a forms refresh
+  after CSV import no longer unmounts an in-progress draft; CSV FileReader
+  results and validation verdicts that outlive the draft they describe are
+  discarded through render-independent guards.
+- **Verified on the PR tree, 21 September, local isolated environment:**
+  retry suite 36 passed (SQLite); **both real PostgreSQL contention cases
+  passed** (two connections: duplicate same-key waits → one record/receipt;
+  first rollback → retry completes once) against `healthdoc_test` migrated to
+  0082 in an isolated compose project (`COMPOSE_PROJECT_NAME=healthdoc-cw`,
+  fresh volumes, the dev `healthdoc` project and its data untouched); receipt
+  rollback test proven sensitive by a flush→commit mutation; focused
+  retries/safety/Suite 8 backend 73 passed; broad non-infra backend sweep
+  1010 passed / 350 skipped in the sandbox with one sandbox-only `git init`
+  failure that passes unsandboxed; frontend **162 passed** (152 + 10 new
+  page-state regressions, exact-match rule mutation-checked); `tsc`, ESLint,
+  `pr_check.py` and `fe_check.mjs` clean with only pre-existing warnings on
+  other endpoints; **new browser gate `test:clinical-write-ui` passed 4/4 with
+  zero page errors, twice**, with real Keycloak sign-in and intercepted
+  clinical transport. Docker **is** available on this Mac now; the older
+  “Docker unavailable” notes below are historical. Check #586's own CI on its
+  latest SHA before relying on any of this; local results are not CI.
+- Still open from this tranche's scope: `pr_check.py` idempotency warnings on
+  `check_in_scan_share_ticket`, `record_encounter_specialty_assessment`,
+  `apply_order_set` (currently always 409), `validate_admin_csv` (read-only)
+  and `produce_kpis`; `fe_check.mjs` UTC-display warnings in the immunization
+  certificate/schedule views. None of the HD package verdicts below change:
+  HD-30's “idempotent uncertain write outcomes” item is now implemented and
+  verified for the eight writers, its governance/order-set/CSV-entity items
+  are not.
+
+### 20 September review
+
 - Reviewed base: `35d8cc4` on `feat/suite-9-portal-terminology-a11y-m1`.
-  Work is isolated on **`fix/clinical-safety-keycloak-return`** in a separate
+  Work was isolated on **`fix/clinical-safety-keycloak-return`** in a separate
   worktree; the implementing agent's original branch and untracked files are
   preserved. Staging 6505e63 (Suite 9 squash PR #583) was integrated on this
-  safety branch. Work is pushed in **[PR #584 → staging](https://github.com/IUI-Solutions-HealthDoc/healthdoc/pull/584)**.
-  No PR merge, production deployment or participant operation has been performed.
+  safety branch and delivered through **[PR #584 → staging](https://github.com/IUI-Solutions-HealthDoc/healthdoc/pull/584)**
+  (merged 21 September, see above). No production deployment or participant
+  operation has been performed.
 - Suite 7 (HD-25–28), Suite 8 (HD-29–32) and Suite 9 (HD-33–36) implementation
   commits are now present. The older statement that only HD-01/02 have been
   implemented is no longer current. HD-01–36 are **not 36 accepted packages**:
@@ -109,8 +179,11 @@ substitutes for a completed sandbox round trip.
 
 ### Remaining completion work, in order
 
-1. Run the deployment/browser/PostgreSQL acceptance checklist in the new review;
-   finish idempotent retry/concurrency handling for the newly added writers.
+1. Run the deployment/browser/PostgreSQL acceptance checklist in the new review.
+   Idempotent retry/concurrency handling for the eight new Suite 8 writers is
+   implemented and verified in PR #586; the remaining write endpoints flagged
+   by `pr_check.py` (Scan-and-Share check-in, specialty assessment, KPI
+   produce) still need the same treatment or a documented read-only exemption.
 2. Obtain clinical approval for blood donor eligibility, immunization schedules,
    analyte/reference rules, specialty templates and terminology provenance.
    The presence of seeded defaults is not that approval.
