@@ -101,7 +101,7 @@ async def create_donor(
         created_by=user_id,
     )
     db.add(donor)
-    await db.commit()
+    await db.flush()
     await db.refresh(donor)
     return BloodDonorOut.model_validate(donor)
 
@@ -153,7 +153,7 @@ async def create_unit(
         status="available" if payload.screening_status == "passed" else "quarantined",
     )
     db.add(unit)
-    await db.commit()
+    await db.flush()
     await db.refresh(unit)
     return BloodUnitOut.model_validate(unit)
 
@@ -183,7 +183,7 @@ async def create_crossmatch(
         notes=payload.notes,
     )
     db.add(xm)
-    await db.commit()
+    await db.flush()
     await db.refresh(xm)
     return BloodCrossmatchOut.model_validate(xm)
 
@@ -221,6 +221,6 @@ async def issue_blood(
     if payload.notes:
         xm.notes = (xm.notes or "") + ("\n" + payload.notes if xm.notes else payload.notes)
 
-    await db.commit()
+    await db.flush()
     await db.refresh(xm)
     return BloodCrossmatchOut.model_validate(xm)

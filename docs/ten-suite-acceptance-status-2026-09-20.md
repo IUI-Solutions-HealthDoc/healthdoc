@@ -18,16 +18,20 @@ production acceptance merely from these fixes.
 
 ## Branch and PR
 
-- Existing working branch: **fix/clinical-safety-keycloak-return**.
+- Safety work branch: **fix/clinical-safety-keycloak-return**, delivered through
+  [#584](https://github.com/IUI-Solutions-HealthDoc/healthdoc/pull/584),
+  **squash-merged into staging on 21 September (`dcd7d15`)**; staging was then
+  promoted to main by [#585](https://github.com/IUI-Solutions-HealthDoc/healthdoc/pull/585)
+  (`9222f07`). Repository promotion, not a production deployment.
+- The handoff's final tranche (atomic clinical write retries, HD-29/HD-30) was
+  verified after that merge and is delivered separately as
+  [#586](https://github.com/IUI-Solutions-HealthDoc/healthdoc/pull/586),
+  branch **fix/clinical-write-retry-safety** cut from `dcd7d15`. See the
+  “21 September continuation” section below for its scope and evidence.
 - Original Suite 9 workspace: **feat/suite-9-portal-terminology-a11y-m1**, base
   35d8cc4, preserved together with untracked PDFs, Updates.md and backend/uv.lock.
 - Suite 9 was already squash-merged to staging as 6505e63 through PR #583.
-  The safety branch merges that staging revision without dropping either set
-  of changes. No duplicate Suite 9 PR is needed.
-- Current integration PR: [#584](https://github.com/IUI-Solutions-HealthDoc/healthdoc/pull/584),
-  **feature branch → staging**. No merge has been performed.
-- Main promotion must be **staging → main**, after approval and integration.
-  Opening that promotion now would not include the unmerged safety changes.
+- Main promotion must remain **staging → main**, after approval and integration.
 
 ## Suite-by-suite acceptance ledger
 
@@ -43,7 +47,7 @@ has been independently exercised against a live deployment.
 | 5 | HD-17–20 | eMAR write/correction, ED triage, structured analytes, urgency. This pass serializes scheduled-dose writes on the prescription item. | Approved dose schedule identity/version and PRN/STAT/correction policy; ED protocols; lab rule approval/effective versions/age-sex rules. The analyte service still contains a legacy haemoglobin fallback; code availability is not clinical approval. |
 | 6 | HD-21–24 | Durable alert records/ack, specimen handling, radiology attachments, pharmacy returns; ownership fixes in #584. | Cross-process rollback/restart/replay evidence; chosen LIS scope, analyzer/QC reconciliation; real synthetic DICOM/PACS round trip; return/refund/stock and expiry-exception governance. |
 | 7 | HD-25–28 | Billing care setting and scheme-unavailable behavior, KPI producer/readers, OT lifecycle/checklists, program enrolment/follow-up. Timing KPI placeholders and patient scopes repaired. | Approved accrual/proration/source identities; real sanctioned payer integration remains unavailable; KPI definitions/revisions/historical occupancy; OT team contention and clinical checks. Program enrolment currently schedules a hardcoded 30-day review: replace with approved configurable policy rather than assuming it is universal. |
-| 8 | HD-29–32 | Immunization, blood crossmatch/issue, forms, CSV, dead-letter and walk-in surfaces. Unsafe issue and payload mismatches repaired; typed form validation added. | Blood release independence, recall/transfusion traceability and adverse-event workflows; approved vaccine schedule; idempotent uncertain write outcomes; form governance/applicability/versioning. Order-set execution remains disabled pending mappings/writer; CSV supports vaccines only, not every advertised entity. |
+| 8 | HD-29–32 | Immunization, blood crossmatch/issue, forms, CSV, dead-letter and walk-in surfaces. Unsafe issue and payload mismatches repaired; typed form validation added. **#586:** atomic idempotent retries with stored receipts on the eight new writers, crossmatch-preserving issue retry, and honest failed/empty states on the forms, CSV, blood-bank and immunization pages. | Blood release independence, recall/transfusion traceability and adverse-event workflows; approved vaccine schedule; form governance/applicability/versioning. Order-set execution remains disabled pending mappings/writer; CSV supports vaccines only, not every advertised entity. Retry keys are not durable across navigation/reload. |
 | 9 | HD-33–36 | Bound portal, terminology/specialty and print surfaces, M1 identity/Scan-and-Share. Ticket contract/lifecycle and unfinished-prescription exposure repaired here. | Privacy approval/withholding/proxy and revocation; terminology licensing/versioning/governance (current catalogue is curated, not a complete terminology service); patient-specific PDF/keyboard/zoom acceptance; genuine M1 assigned cases. Scan-and-Share profile retention/encryption and receipt provenance also need review. |
 | 10 | HD-37–40 | HIP/HIU/FHIR/crypto/jobs/callback diagnostics, restore/security tooling, referral/financial/patient-switch harnesses and role manifests exist. | Genuine M2/M3 counterparty exchange and case evidence; sanitized production-derived restore/PITR and all-service recovery; real alert delivery, measured load/security closure and clinical/privacy/finance sign-offs; latest-SHA all-role action evidence and review. |
 
@@ -84,8 +88,8 @@ that no code change will be needed when exercised.
 | HD-27 | Theatre/team contention, accountable surgical notes, module-off enforcement and approved safety checklist. |
 | HD-28 | Replace universal 30-day review with approved program scheduling; sensitive-program permissions and audited exit. |
 | HD-29A | Approved immunization catalogue, repeat/correction/recall rules and truthful certificate. |
-| HD-29B | Independent screening release, unit/crossmatch/issue/transfusion traceability and recalls; current issue checks are not a complete blood bank. |
-| HD-30 | Govern/version forms, transactional idempotent submissions and approved code-mapped order-set writer; complete intended CSV entities. |
+| HD-29B | Independent screening release, unit/crossmatch/issue/transfusion traceability and recalls; current issue checks are not a complete blood bank. Donor/unit/crossmatch/issue writes are now idempotent with receipts and an issue retry cannot create a second crossmatch (#586). |
+| HD-30 | Govern/version forms and approved code-mapped order-set writer; complete intended CSV entities. Transactional idempotent submissions/definitions/CSV import are implemented and verified with real PostgreSQL contention (#586); governance and the writer are not. |
 | HD-31 | Prove durable jobs/receipts survive restart; replay cannot bypass consent/quota; review protected historical payload retention. |
 | HD-32 | Walk-in diagnostic/pharmacy completion, accountable author, no duplicate fee or prescription bypass. |
 | HD-33 | Unreleased prescriptions now refused; finish withholding/proxy/version/revocation and release-policy acceptance for every document type. |
@@ -132,10 +136,75 @@ that no code change will be needed when exercised.
    that override, all 2054 tests collect and both affected files pass (30 tests).
    The CI configuration and test gates were not relaxed.
 
-## Evidence and limits
+## 21 September continuation — atomic clinical write retries (PR #586)
+
+Scope: the handoff's last tranche for HD-29/HD-30 ("idempotent uncertain write
+outcomes") plus the page-state defects it listed as identified-not-fixed.
+
+1. `backend/app/common/clinical_write.py` fronts `POST /forms/definitions`,
+   `/forms/submissions`, `/admin/csv/import`, `/immunization/records`,
+   `/blood-bank/donors`, `/units`, `/crossmatch` and `/issue`. Bounded
+   `Idempotency-Key` required; `INSERT … ON CONFLICT DO NOTHING RETURNING`
+   reservation on `idempotency_keys`; write and receipt commit together;
+   identical retry replays; changed payload/facility → 409 `idempotency_key_reuse`;
+   unconfirmed original → 409 `idempotency_key_in_progress`; patient-role
+   sessions refused; resource authorization before replay; receipt failure
+   rolls the write back; integrity errors → 409 `clinical_write_rejected`.
+   Services flush; the immunization catalogue seed no longer commits or
+   swallows failures inside a clinical transaction. No migration.
+2. `frontend/src/lib/useClinicalWrite.ts` keeps one immutable body/key per
+   mounted editor, blocks double submission, keeps the key after uncertain
+   outcomes, frees it only on explicit pre-write refusal, drops late
+   completions after unmount and exposes `isPending()` synchronously. Editors
+   lock and offer “Retry unchanged save”. A confirmed crossmatch survives an
+   uncertain issue and only the issue is retried. No browser storage: the key
+   lives only while the editor is mounted.
+3. Forms/immunization search selects only an exact single match and reports
+   zero/multiple/failed searches; placeholders no longer advertise name search.
+   Failed history, definitions, inventory and catalogue reads are shown as
+   failures with retry, never as empty data. A forms refresh after CSV import
+   no longer unmounts an in-progress draft. CSV FileReader results and
+   validation verdicts that outlive their draft are discarded.
+4. New CI browser gate `npm run test:clinical-write-ui`: real Keycloak
+   sign-in, rendered forms and blood-bank pages, intercepted synthetic
+   clinical transport (lost form response; crossmatch-success/issue-failure).
+
+Evidence, 21 September, isolated local environment (not CI, not live clinical
+acceptance):
+
+- `tests/test_clinical_write_retries.py`: **36 passed** (SQLite).
+- `tests/test_clinical_write_postgres.py`: **2 passed with two real PostgreSQL
+  connections** — duplicate same-key request waits and returns one
+  record/receipt; first-request rollback lets the retry complete once —
+  against `healthdoc_test` migrated to 0082 inside an isolated compose project
+  (`COMPOSE_PROJECT_NAME=healthdoc-cw`, fresh volumes; the dev `healthdoc`
+  project, its containers and data were not started or touched).
+- Receipt-failure regression proven sensitive: `create_submission` mutated
+  flush→commit fails it with one surviving row; restored and re-run.
+- Focused retries + clinical safety + Suite 8 backend: **73 passed**. Broad
+  non-infra backend sweep: **1010 passed, 350 skipped**; the one failure
+  (`git init` inside pytest's temp dir) is a sandbox restriction and passes
+  unsandboxed.
+- Frontend `npm test`: **162 passed** (152 + 10 new page-state regressions in
+  `tests/clinical-page-states.test.mjs`); exact-match rule mutation-checked.
+  `tsc --noEmit`, changed-source ESLint, `pr_check.py` (0 blockers; remaining
+  idempotency warnings on Scan-and-Share check-in, specialty assessment,
+  order-set apply, CSV validate, KPI produce) and `fe_check.mjs` (0 blockers;
+  UTC-display warnings remain in immunization certificate/schedule views).
+- `npm run test:clinical-write-ui`: **passed 4/4, zero page errors, twice**.
+  Evidence JSON/screenshots kept outside the repository.
+- Docker is available on this Mac; earlier “Docker unavailable” statements in
+  this file are historical.
+
+Limits: no full `make test-pg`-equivalent run on this host; no all-role
+browser acceptance; no live ABDM operation; retry keys are not durable across
+navigation or reload; #586's own CI on its latest SHA is the gate that counts.
+
+## Evidence and limits (20 September)
 
 Commands run from the isolated branch worktree; no production records changed.
-Fresh outcome counts and final CI state are maintained in CLAUDE.md / PR #584.
+Fresh outcome counts and final CI state are maintained in CLAUDE.md / PR #584
+(now merged) and PR #586.
 
 - Frontend unit/component suite: 136 passing, zero skipped; TypeScript and
   changed-source ESLint pass.

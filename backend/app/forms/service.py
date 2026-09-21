@@ -150,7 +150,7 @@ async def create_form_definition(
         created_by=user_id,
     )
     db.add(form)
-    await db.commit()
+    await db.flush()
     await db.refresh(form)
     return FormDefinitionOut.model_validate(form)
 
@@ -189,7 +189,7 @@ async def create_submission(
         submitted_by=user_id,
     )
     db.add(sub)
-    await db.commit()
+    await db.flush()
     await db.refresh(sub)
     return FormSubmissionOut.model_validate(sub)
 
@@ -362,7 +362,7 @@ async def import_csv(
                 )
                 db.add(vc)
                 imported += 1
-        await db.commit()
+        await db.flush()
     else:
         raise ValueError("CSV import is not implemented for this entity")
 

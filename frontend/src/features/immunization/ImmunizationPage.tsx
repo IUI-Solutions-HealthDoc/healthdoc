@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { BookOpen, RefreshCw, Search, Syringe } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AlertCircle, BookOpen, RefreshCw, Search, Syringe } from "lucide-react";
 import { fetchVaccineCatalogue, fetchImmunizationCertificate } from "./api";
 import { ImmunizationCertificateModal } from "./components/ImmunizationCertificateModal";
 import { ImmunizationScheduleView } from "./components/ImmunizationScheduleView";
@@ -19,12 +19,20 @@ interface PatientSearchResult {
   }>;
 }
 
+const describe = (err: unknown, fallback: string) =>
+  err instanceof Error && err.message ? err.message : fallback;
+
 export function ImmunizationPage() {
   const [catalogue, setCatalogue] = useState<Vaccine[]>([]);
   const [loadingCatalogue, setLoadingCatalogue] = useState(true);
+  const [catalogueError, setCatalogueError] = useState<string | null>(null);
+  const catalogueSequence = useRef(0);
 
   // Selected patient state
   const [patientSearch, setPatientSearch] = useState("");
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const searchSequence = useRef(0);
   const [activePatient, setActivePatient] = useState<{
     id: string;
     uhid: string;
@@ -38,61 +46,87 @@ export function ImmunizationPage() {
   const [isRecordModalOpen, setIsRecordModalOpen] = useState(false);
   const [isCertModalOpen, setIsCertModalOpen] = useState(false);
   const [certificateData, setCertificateData] = useState<ImmunizationCertificate | null>(null);
+  const [certificateError, setCertificateError] = useState<string | null>(null);
   const [refreshScheduleTrigger, setRefreshScheduleTrigger] = useState(0);
 
   // View tabs
   const [topTab, setTopTab] = useState<"patient" | "catalogue">("patient");
 
-  useEffect(() => {
-    async function loadData() {
-      try {
-        setLoadingCatalogue(true);
-        const cat = await fetchVaccineCatalogue();
-        setCatalogue(cat);
-      } catch (err: unknown) {
-        console.error("Failed to load vaccine catalogue:", err);
-      } finally {
-        setLoadingCatalogue(false);
-      }
+  // A failed catalogue read used to render an empty catalogue and a dose
+  // modal with no vaccines, which reads as "nothing is configured" rather
+  // than "the read failed". It is shown as a failure with a retry.
+  const loadCatalogue = useCallback(async () => {
+    const request = ++catalogueSequence.current;
+    setCatalogueError(null);
+    try {
+      const cat = await fetchVaccineCatalogue();
+      if (request !== catalogueSequence.current) return;
+      setCatalogue(cat);
+    } catch (err: unknown) {
+      if (request === catalogueSequence.current)
+        setCatalogueError(describe(err, "The vaccine catalogue could not be loaded."));
+    } finally {
+      if (request === catalogueSequence.current) setLoadingCatalogue(false);
     }
-    loadData();
   }, []);
+
+  useEffect(() => {
+    void loadCatalogue();
+  }, [loadCatalogue]);
 
   const handlePatientSearch = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!patientSearch.trim()) return;
+    const term = patientSearch.trim();
+    if (!term || isSearching) return;
+    const request = ++searchSequence.current;
+    setIsSearching(true);
+    setSearchError(null);
     try {
-      const isDigits = /^\d+$/.test(patientSearch.trim());
-      const body = isDigits
-        ? { mobile: patientSearch.trim(), page: 1, page_size: 5 }
-        : { uhid: patientSearch.trim(), page: 1, page_size: 5 };
+      // Digits search by mobile number, anything else by UHID; there is no
+      // name search on this request, so the placeholder must not offer one.
+      const body = /^\d+$/.test(term)
+        ? { mobile: term, page: 1, page_size: 5 }
+        : { uhid: term, page: 1, page_size: 5 };
       const res = await api<PatientSearchResult>("/patients/search", {
         method: "POST",
+        idempotencyKey: null,
         body: JSON.stringify(body),
       });
-      if (res?.items && res.items.length === 1) {
-        setCertificateData(null); setIsCertModalOpen(false); setIsRecordModalOpen(false);
-        const p = res.items[0];
+      if (request !== searchSequence.current) return;
+      const items = res?.items ?? [];
+      if (items.length === 1) {
+        setCertificateData(null); setCertificateError(null); setIsCertModalOpen(false); setIsRecordModalOpen(false);
+        const p = items[0];
         setActivePatient({
           id: p.id,
           uhid: p.uhid,
           full_name: p.full_name || `${p.first_name || ""} ${p.last_name || ""}`.trim() || "Patient",
         });
+      } else if (items.length === 0) {
+        setSearchError("No patient matched that exact UHID or mobile number.");
+      } else {
+        // Family members often share a mobile number; a silent no-op or the
+        // first match would both be wrong for a vaccination record.
+        setSearchError(`${items.length} patients share that identifier. Enter the exact UHID to select one.`);
       }
     } catch (err: unknown) {
-      console.error("Search failed:", err);
+      if (request === searchSequence.current) setSearchError(describe(err, "Patient search failed."));
+    } finally {
+      if (request === searchSequence.current) setIsSearching(false);
     }
   };
 
   const handleOpenCertificate = async () => {
     if (!activePatient) return;
+    setCertificateError(null);
     try {
       const cert = await fetchImmunizationCertificate(activePatient.id);
       if (patientRef.current !== activePatient) return;
       setCertificateData(cert);
       setIsCertModalOpen(true);
     } catch (err: unknown) {
-      console.error("Failed to load certificate:", err);
+      if (patientRef.current === activePatient)
+        setCertificateError(describe(err, "The immunization certificate could not be loaded."));
     }
   };
 
@@ -101,6 +135,23 @@ export function ImmunizationPage() {
       <div className="flex items-center justify-center p-16 text-muted-foreground">
         <RefreshCw className="h-6 w-6 animate-spin mr-2" />
         <span>Loading immunization catalogue...</span>
+      </div>
+    );
+  }
+
+  if (catalogueError && catalogue.length === 0) {
+    return (
+      <div role="alert" className="rounded-2xl border border-destructive/30 bg-destructive/10 p-8 text-center text-sm text-destructive space-y-3">
+        <AlertCircle className="h-8 w-8 mx-auto" />
+        <p>The vaccine catalogue could not be loaded: {catalogueError}</p>
+        <p className="text-xs text-muted-foreground">Doses cannot be recorded until the catalogue is available. This is a failed read, not an empty catalogue.</p>
+        <button
+          type="button"
+          onClick={() => void loadCatalogue()}
+          className="rounded-xl border border-destructive/40 px-4 py-2 text-xs font-semibold hover:bg-destructive/10 transition-colors"
+        >
+          Retry loading catalogue
+        </button>
       </div>
     );
   }
@@ -149,13 +200,13 @@ export function ImmunizationPage() {
       {topTab === "patient" ? (
         <div className="space-y-6">
           {/* Patient Search Bar */}
-          <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+          <div className="rounded-2xl border border-border bg-card p-4 shadow-sm space-y-2">
             <form onSubmit={handlePatientSearch} className="flex gap-2">
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
                 <input
                   type="text"
-                  placeholder="Search patient by UHID, Name, or Mobile number..."
+                  placeholder="Search patient by exact UHID or mobile number..."
                   value={patientSearch}
                   onChange={(e) => setPatientSearch(e.target.value)}
                   className="w-full rounded-xl border border-input bg-background pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
@@ -163,11 +214,24 @@ export function ImmunizationPage() {
               </div>
               <button
                 type="submit"
-                className="rounded-xl bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
+                disabled={isSearching}
+                className="rounded-xl bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
               >
-                Find Patient
+                {isSearching ? "Searching…" : "Find Patient"}
               </button>
             </form>
+            {searchError && (
+              <p role="alert" className="flex items-center gap-2 text-xs text-destructive">
+                <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                {searchError}
+              </p>
+            )}
+            {certificateError && (
+              <p role="alert" className="flex items-center gap-2 text-xs text-destructive">
+                <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                {certificateError}
+              </p>
+            )}
           </div>
 
           {activePatient ? (
