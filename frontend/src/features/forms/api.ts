@@ -14,10 +14,11 @@ export function fetchFormDefinitions(status: string = "published"): Promise<Form
   return api<FormDefinition[]>(`/forms/definitions?status=${encodeURIComponent(status)}`);
 }
 
-export function submitForm(payload: FormSubmissionCreate): Promise<FormSubmission> {
+export function submitForm(payload: FormSubmissionCreate, idempotencyKey: string): Promise<FormSubmission> {
   return api<FormSubmission>("/forms/submissions", {
     method: "POST",
     body: JSON.stringify(payload),
+    idempotencyKey,
   });
 }
 
@@ -47,16 +48,19 @@ export function validateCsv(
 ): Promise<CsvValidationResult> {
   return api<CsvValidationResult>("/admin/csv/validate", {
     method: "POST",
+    idempotencyKey: null,
     body: JSON.stringify({ csv_content: csvContent, entity_type: entityType }),
   });
 }
 
 export function importCsv(
   csvContent: string,
-  entityType: string
+  entityType: string,
+  idempotencyKey: string,
 ): Promise<CsvImportResult> {
   return api<CsvImportResult>("/admin/csv/import", {
     method: "POST",
+    idempotencyKey,
     body: JSON.stringify({ csv_content: csvContent, entity_type: entityType }),
   });
 }

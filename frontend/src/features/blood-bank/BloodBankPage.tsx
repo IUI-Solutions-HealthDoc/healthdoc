@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Droplets, Heart, Package, RefreshCw } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AlertCircle, Droplets, Heart, Package, RefreshCw } from "lucide-react";
 import { fetchBloodDonors, fetchBloodUnits } from "./api";
 import { BloodCrossmatchModal } from "./components/BloodCrossmatchModal";
 import { BloodDonorRegistry } from "./components/BloodDonorRegistry";
@@ -13,25 +13,35 @@ export function BloodBankPage() {
   const [units, setUnits] = useState<BloodUnit[]>([]);
   const [donors, setDonors] = useState<BloodDonor[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const loadSequence = useRef(0);
 
   const [selectedUnitForXm, setSelectedUnitForXm] = useState<BloodUnit | null>(null);
 
-  const loadData = async () => {
+  // A refused or failed inventory read is not an empty blood bank. The tab
+  // counts and grids only describe data that actually arrived, and a refresh
+  // after a save no longer replaces the page with a spinner.
+  const loadData = useCallback(async () => {
+    const request = ++loadSequence.current;
+    setLoadError(null);
     try {
-      setLoading(true);
       const [u, d] = await Promise.all([fetchBloodUnits(), fetchBloodDonors()]);
+      if (request !== loadSequence.current) return;
       setUnits(u);
       setDonors(d);
-    } catch (err) {
-      console.error("Failed to load blood bank data:", err);
+      setLoaded(true);
+    } catch (err: unknown) {
+      if (request === loadSequence.current)
+        setLoadError(err instanceof Error && err.message ? err.message : "Blood bank data could not be loaded.");
     } finally {
-      setLoading(false);
+      if (request === loadSequence.current) setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    loadData();
-  }, []);
+    void loadData();
+  }, [loadData]);
 
   return (
     <div className="space-y-6">
@@ -58,7 +68,7 @@ export function BloodBankPage() {
             }`}
           >
             <Package className="h-3.5 w-3.5 text-rose-500" />
-            Unit Inventory ({units.length})
+            Unit Inventory ({loaded ? units.length : "—"})
           </button>
           <button
             onClick={() => setActiveTab("donors")}
@@ -69,7 +79,7 @@ export function BloodBankPage() {
             }`}
           >
             <Heart className="h-3.5 w-3.5 text-rose-500" />
-            Donor Registry ({donors.length})
+            Donor Registry ({loaded ? donors.length : "—"})
           </button>
         </div>
       </div>
@@ -79,15 +89,38 @@ export function BloodBankPage() {
           <RefreshCw className="h-6 w-6 animate-spin mr-2" />
           <span>Loading blood bank data...</span>
         </div>
-      ) : activeTab === "inventory" ? (
-        <BloodInventoryGrid
-          units={units}
-          donors={donors}
-          onRefresh={loadData}
-          onOpenCrossmatch={(u) => setSelectedUnitForXm(u)}
-        />
+      ) : loadError && !loaded ? (
+        <div role="alert" className="rounded-2xl border border-destructive/30 bg-destructive/10 p-8 text-center text-sm text-destructive space-y-3">
+          <AlertCircle className="h-8 w-8 mx-auto" />
+          <p>Blood bank data could not be loaded: {loadError}</p>
+          <p className="text-xs text-muted-foreground">This is not an empty inventory. Units and donors are unknown until the load succeeds.</p>
+          <button
+            type="button"
+            onClick={() => void loadData()}
+            className="rounded-xl border border-destructive/40 px-4 py-2 text-xs font-semibold hover:bg-destructive/10 transition-colors"
+          >
+            Retry loading blood bank data
+          </button>
+        </div>
       ) : (
-        <BloodDonorRegistry donors={donors} onRefresh={loadData} />
+        <>
+          {loadError && (
+            <p role="alert" className="flex items-center gap-2 rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+              The latest refresh failed: {loadError}. Units and donors shown may be out of date.
+            </p>
+          )}
+          {activeTab === "inventory" ? (
+            <BloodInventoryGrid
+              units={units}
+              donors={donors}
+              onRefresh={loadData}
+              onOpenCrossmatch={(u) => setSelectedUnitForXm(u)}
+            />
+          ) : (
+            <BloodDonorRegistry donors={donors} onRefresh={loadData} />
+          )}
+        </>
       )}
 
       {/* Crossmatch Modal */}

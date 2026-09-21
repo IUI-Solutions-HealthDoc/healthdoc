@@ -56,7 +56,8 @@ async def client_for(db, caller):
     app.dependency_overrides[get_db] = session
     app.dependency_overrides[get_current_user] = lambda: AuthUser(sub=caller.keycloak_sub, roles=caller.roles)
     app.dependency_overrides[get_current_db_user] = lambda: caller
-    return httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test")
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test",
+        headers={"Idempotency-Key": str(uuid.uuid4())})
 
 
 @pytest.mark.parametrize("path", ["/forms/patients/{id}", "/immunization/patients/{id}", "/immunization/patients/{id}/certificate"])
