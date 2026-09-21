@@ -8,6 +8,46 @@ No package below has been newly implemented or accepted by creating this documen
 
 ## Baseline to preserve
 
+### Independent continuation — 20 September 2026
+
+Current review: [ten-suite acceptance ledger](../docs/ten-suite-acceptance-status-2026-09-20.md).
+The older per-package rows below remain dated implementer claims, not new
+full-suite acceptance. All ten suites are **not** fully accepted.
+
+- Branch `fix/clinical-safety-keycloak-return`; preserves the implementing
+  agent's Suite 9 checkout. Staging 6505e63 integrated; [PR #584](https://github.com/IUI-Solutions-HealthDoc/healthdoc/pull/584)
+  targets staging, not main. No PR merged by this review.
+- Fixed patient isolation, blood issue safety, immunization/blood contracts,
+  truthful order/CSV/KPI behavior, consent stale responses and native Keycloak.
+- Further fixed reception ticket array/body mismatch, expiry/ambiguity/retry,
+  exact patient read-back and truthful opaque-ID printing; added 0082 timestamp.
+- Added form-definition/value validation, repaired boolean/decimal inputs and
+  stale submission callbacks; unfinished prescriptions are hidden from the
+  portal; eMAR duplicate-dose checking is serialized on the prescription item.
+- Fresh local gate: 975 backend passes / 348 skips with explicit infrastructure
+  exclusions; frontend 136 passes / zero skips. TypeScript, changed-source lint,
+  migration/spec/schema checks pass. The new PostgreSQL contention tests
+  require explicit TEST_DATABASE_URL and are not claimed as local passes.
+- Isolated CI at **ab83a25**, run 35505210441: **2054 backend tests passed,
+  zero skipped, 7 warnings; 36 script tests passed**. The eMAR and reception
+  concurrency tests executed against PostgreSQL. Redis/MinIO/Java-backed
+  gates and migrations through 0082 passed there; frontend/release-policy
+  also passed. The full browser job then passed: auth/bearer, print/PDF,
+  dashboards, invoice-switch, external-results, ABDM PDF/consent-refresh,
+  tariff maintenance and superadmin isolation. All four required gates passed;
+  the weekly Electron job was skipped. These are synthetic CI results, not
+  live ABDM certification or full clinical acceptance.
+- Initial PR CI browser/frontend passed; backend spec-map failure corrected.
+  The next backend run passed those checks but failed test collection: two
+  sibling imports depended on the local `PYTHONPATH=.:tests` override. Fixed
+  package imports; 2054 tests collect and 30 affected tests pass with the
+  override removed. The earlier failed runs remain failures; the backend
+  success above is specifically the corrected ab83a25 run.
+  Latest-SHA CI and review are required. M1/M2/M3 certification, clinical policy,
+  full recovery and all-package live acceptance remain open.
+
+The earlier baseline below is historical and must not be used as current HEAD.
+
 - Branch: `fix/abdm-live-operations`; HEAD `d8c1ca7fdda24ed14277a391512d162915dc2161`.
 - The PDFs in `Issues/` were already untracked. Do not modify them.
 - Pre-existing modified tracked files observed before this handoff:

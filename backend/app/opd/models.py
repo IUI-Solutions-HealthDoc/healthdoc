@@ -98,7 +98,7 @@ class Visit(Base, UUIDPk, Timestamps, Blame):
             # builds schema from THIS metadata, not from migrations, so a model
             # that disagrees with the migration passes in Postgres and fails in
             # the tests with a constraint name that exists in neither place.
-            "visit_type IN ('opd', 'ipd', 'day_care', 'emergency', 'teleconsult')",
+            "visit_type IN ('opd', 'ipd', 'day_care', 'emergency', 'teleconsult', 'direct_service')",
             name="visit_type",
         ),
         CheckConstraint(

@@ -284,4 +284,64 @@ export function reconcileStaleVisits(
   });
 }
 
+/** HD-36: matches the reception-ticket API, not the original PHR callback DTO. */
+export interface ScanShareTicketItem {
+  id: string;
+  token_number: string;
+  abha_address: string;
+  status: "active" | "checked_in" | "expired";
+  counter: string | null;
+  patient_id: string | null;
+  patient_uhid: string | null;
+  patient_name: string | null;
+  mobile: string | null;
+  abha_number: string | null;
+  profile_data: Record<string, unknown>;
+  expires_at: string;
+  created_at: string;
+  checked_in_at: string | null;
+}
+
+export interface ScanShareCheckInResponse {
+  ticket_id: string;
+  token_number: string;
+  counter: string;
+  patient_id: string | null;
+  patient_uhid: string | null;
+  patient_name: string | null;
+  abha_address: string;
+  check_in_time: string | null;
+  slip_barcode_data: string;
+}
+
+export async function listScanShareTickets(
+  status = "active",
+  limit = 100,
+): Promise<ScanShareTicketItem[]> {
+  const tickets = await api<ScanShareTicketItem[]>(
+    `/abdm/scan-share/tickets?status=${encodeURIComponent(status)}&limit=${limit}`,
+  );
+  if (!Array.isArray(tickets)) throw new Error("Unexpected reception-ticket response");
+  return tickets;
+}
+
+/** Prefer the immutable ticket UUID; short human tokens can be ambiguous. */
+export function getScanShareTicket(reference: string): Promise<ScanShareTicketItem> {
+  return api<ScanShareTicketItem>(`/abdm/scan-share/tickets/${encodeURIComponent(reference)}`);
+}
+
+export function checkInScanShareTicket(
+  ticketId: string,
+  counter: string,
+): Promise<ScanShareCheckInResponse> {
+  return api<ScanShareCheckInResponse>(
+    `/abdm/scan-share/tickets/${encodeURIComponent(ticketId)}/check-in`,
+    {
+      method: "POST",
+      // Server locks the ticket; identical retries preserve the original check-in.
+      body: JSON.stringify({ counter: counter.trim() }),
+    },
+  );
+}
+
 

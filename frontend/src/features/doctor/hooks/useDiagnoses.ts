@@ -3,12 +3,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { toast } from "@/components/ui/toast";
-import { listDiagnoses, saveDiagnosis, searchIcd } from "../api";
+import {
+  listDiagnoses,
+  saveDiagnosis,
+  searchIcd,
+  searchTerminology,
+  type TerminologyConcept,
+} from "../api";
 import type {
   ActiveEncounter,
   CreateDiagnosisInput,
   DraftDiagnosis,
   IcdConcept,
+  IcdVersion,
 } from "../types";
 
 export function useDiagnoses(encounter: ActiveEncounter) {
@@ -52,11 +59,29 @@ export function useDiagnoses(encounter: ActiveEncounter) {
     };
   }, [encounter.id]);
 
-  const search = useCallback(async (query: string) => {
-    const sequence = ++searchSequence.current;
-    const results = await searchIcd(query);
-    if (sequence === searchSequence.current) setOptions(results);
-  }, []);
+  const search = useCallback(
+    async (query: string, system: "all" | "icd10" | "icd11" | "snomed" = "all") => {
+      const sequence = ++searchSequence.current;
+      try {
+        const termResults = await searchTerminology(query, system);
+        if (termResults.length > 0) {
+          const mapped: IcdConcept[] = termResults.map((t: TerminologyConcept) => ({
+            code: t.code,
+            version: t.system as IcdVersion,
+            title: t.display,
+            icd_uri: t.system_uri,
+          }));
+          if (sequence === searchSequence.current) setOptions(mapped);
+          return;
+        }
+      } catch {
+        // Fallback to legacy icd search if terminology search endpoint errors
+      }
+      const results = await searchIcd(query);
+      if (sequence === searchSequence.current) setOptions(results);
+    },
+    [],
+  );
 
   const addConcept = useCallback((concept: IcdConcept) => {
     setRows((prev) => {

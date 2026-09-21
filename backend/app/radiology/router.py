@@ -599,7 +599,11 @@ async def upload_order_attachment(
     if order is None or order.facility_id != current_db_user.facility_id:
         raise HTTPException(status_code=404, detail="Order not found in current facility")
 
-    data = await file.read()
+    if radiology_order_item_id is not None:
+        item = await db.get(RadiologyOrderItem, radiology_order_item_id)
+        if item is None or item.order_id != order.id:
+            raise HTTPException(404, "Radiology item not found for this order")
+    data = await file.read(MAX_FILE_SIZE_BYTES + 1)
     if not data:
         raise HTTPException(status_code=422, detail="Empty file")
     if len(data) > MAX_FILE_SIZE_BYTES:

@@ -44,7 +44,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     setAccessToken(null);
     clearAuthToken();
-    const destination = sessionExpiredPath(window.location.pathname, window.location.search);
+    const destination = sessionExpiredPath(window.location.pathname, window.location.search, window.location.hash);
     window.location.replace(destination);
   }, []);
 
@@ -116,7 +116,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let expiryTimer = 0;
 
     const expire = () => {
-      const destination = sessionExpiredPath(window.location.pathname, window.location.search);
+      const destination = sessionExpiredPath(window.location.pathname, window.location.search, window.location.hash);
       setUser(null);
       setAccessToken(null);
       clearAuthToken();

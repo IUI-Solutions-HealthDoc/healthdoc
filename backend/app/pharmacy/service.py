@@ -16,7 +16,10 @@ from app.allergies.service import AllergyConflict, check_prescription_item
 from app.audit.service import write_audit_log
 from app.common.enums import DispenseStatus, NotificationStatus
 from app.common.redis import publish_event, stock_alert_channel
-from app.inventory.models import InventoryBatch, InventoryItem, StockLedger
+from app.inventory.models import InventoryBatch, InventoryItem, StockLedger, StockLocation
+from app.common.patient_scope import require_patient_scope
+from app.orders.models import Prescription
+from app.pharmacy.models import PharmacyDispense
 from app.patients.models import Patient
 from app.pharmacy.interactions import DrugInteractionConflict, check_against_existing
 from app.pharmacy.models import PharmacyReturn
@@ -2356,6 +2359,15 @@ async def create_pharmacy_return(
     payload: PharmacyReturnCreate,
 ) -> PharmacyReturnOut:
     """Process a patient/ward medicine return with resalable vs quarantine/damaged disposition."""
+    await require_patient_scope(db, payload.patient_id, facility_id)
+    if payload.dispense_id:
+        dispense = (await db.execute(select(PharmacyDispense.id)
+            .join(Prescription, Prescription.id == PharmacyDispense.prescription_id)
+            .where(PharmacyDispense.id == payload.dispense_id,
+                   Prescription.patient_id == payload.patient_id,
+                   Prescription.facility_id == facility_id))).scalar_one_or_none()
+        if dispense is None:
+            raise HTTPException(404, "Dispense not found for this patient")
     # 1. Validate patient
     patient_res = await db.execute(
         select(Patient.id).where(Patient.id == payload.patient_id)
@@ -2378,8 +2390,10 @@ async def create_pharmacy_return(
     if payload.batch_id:
         batch_res = (
             await db.execute(
-                select(InventoryBatch.id, InventoryBatch.batch_number, InventoryBatch.quantity).where(
-                    InventoryBatch.id == payload.batch_id
+                select(InventoryBatch.id, InventoryBatch.batch_number, InventoryBatch.quantity)
+                .join(StockLocation, StockLocation.id == InventoryBatch.stock_location_id).where(
+                    InventoryBatch.id == payload.batch_id, InventoryBatch.item_id == payload.item_id,
+                    StockLocation.facility_id == facility_id,
                 )
             )
         ).first()

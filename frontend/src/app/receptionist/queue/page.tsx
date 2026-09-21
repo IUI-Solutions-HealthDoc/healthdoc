@@ -24,6 +24,7 @@ import type {
   TokenPriorityUpdate,
   VisitWithoutToken,
 } from "@/features/receptionist/types";
+import { ScanShareDeskModal } from "@/features/receptionist/ScanShareDeskModal";
 
 
 /**
@@ -59,6 +60,9 @@ export default function Page() {
   const [staleReport, setStaleReport] = useState<StaleVisitsReport | null>(null);
   const [showStaleVisits, setShowStaleVisits] = useState(false);
   const [reconciling, setReconciling] = useState(false);
+
+  // HD-36: ABDM Scan & Share modal state
+  const [showScanShareModal, setShowScanShareModal] = useState(false);
   const [reconcileResult, setReconcileResult] = useState<StaleVisitsReconcileResult | null>(null);
 
   const load = useCallback(async () => {
@@ -267,6 +271,13 @@ export default function Page() {
                 {unassignedVisits.length}
               </span>
             ) : null}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowScanShareModal(true)}
+            className="rounded-md border border-primary/40 bg-primary/10 px-3.5 py-2 text-sm font-semibold text-primary hover:bg-primary/20"
+          >
+            ABDM Scan &amp; Share
           </button>
           <button
             type="button"
@@ -760,6 +771,11 @@ export default function Page() {
           </div>
         </section>
       ) : null}
+      {/* HD-36: ABDM Scan & Share Reception Desk Modal */}
+      <ScanShareDeskModal
+        isOpen={showScanShareModal}
+        onClose={() => setShowScanShareModal(false)}
+      />
     </div>
   );
 }

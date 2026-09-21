@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Dialog from "@mui/material/Dialog";
@@ -34,38 +34,47 @@ export function ConsentRecordDetail({
   const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [withdrawReason, setWithdrawReason] = useState("");
   const [busy, setBusy] = useState(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   const handleWithdraw = useCallback(async () => {
-    if (!record) return;
+    if (!record || !mounted.current) return;
     setBusy(true);
     try {
       const next = await withdrawConsent(record.id, {
         withdrawn_by_type: "patient",
         reason: withdrawReason || null,
       });
+      if (!mounted.current) return;
       toast.success("Consent withdrawn");
       setWithdrawOpen(false);
       setWithdrawReason("");
       onRecordUpdated?.(next);
     } catch (e) {
+      if (!mounted.current) return;
       toast.error(e instanceof Error ? e.message : "Withdrawal failed");
     } finally {
-      setBusy(false);
+      if (mounted.current) setBusy(false);
     }
   }, [record, withdrawReason, onRecordUpdated]);
 
   const handleTransition = useCallback(
     async (status: "granted" | "denied") => {
-      if (!record) return;
+      if (!record || !mounted.current) return;
       setBusy(true);
       try {
         const next = await transitionConsentStatus(record.id, { status });
+        if (!mounted.current) return;
         toast.success(`Consent ${status}`);
         onRecordUpdated?.(next);
       } catch (e) {
+        if (!mounted.current) return;
         toast.error(e instanceof Error ? e.message : "Transition failed");
       } finally {
-        setBusy(false);
+        if (mounted.current) setBusy(false);
       }
     },
     [record, onRecordUpdated],

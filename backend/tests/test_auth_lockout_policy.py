@@ -74,13 +74,15 @@ def test_failure_counter_resets_within_a_shift(realm):
     assert realm.get("maxDeltaTimeSeconds") == 43200
 
 
-def test_direct_access_grants_are_enabled_for_in_place_login_on_the_public_client(realm):
-    """Direct access grants (password grant) are enabled on the frontend client
-    to support the modern in-place login flow, while brute-force protection
-    and lockout policies protect against credential attacks.
+def test_public_client_uses_native_authorization_code_pkce_not_password_grants(realm):
+    """The Keycloak form owns passwords, MFA and required actions.
+
+    Lockout is not a replacement for the browser authorization-code flow.
+    Do not re-enable password grants to implement an application login form.
     """
     frontend = next(c for c in realm["clients"] if c["clientId"] == "healthdoc-frontend")
-    assert frontend.get("directAccessGrantsEnabled") is True
+    assert frontend.get("directAccessGrantsEnabled") is False
+    assert frontend.get("standardFlowEnabled") is True
     assert frontend.get("publicClient") is True
     assert frontend["attributes"]["pkce.code.challenge.method"] == "S256"
 

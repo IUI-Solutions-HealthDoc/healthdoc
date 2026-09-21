@@ -6,6 +6,7 @@ import {
   getPortalDashboard,
   type PortalDashboard,
 } from "@/features/patientPortal/api";
+import { ReleasedDocumentsTab } from "@/features/patientPortal/components/ReleasedDocumentsTab";
 import { ApiError, formatDateTime } from "@/lib/api";
 
 type ViewState =
@@ -41,6 +42,7 @@ function UnboundPortal() {
 
 export default function Page() {
   const [view, setView] = useState<ViewState>({ status: "loading" });
+  const [activeTab, setActiveTab] = useState<"documents" | "permissions" | "identity">("documents");
   const [historyPage, setHistoryPage] = useState(1);
   const [consentPage, setConsentPage] = useState(1);
   const HISTORY_PAGE_SIZE = 6;
@@ -81,19 +83,19 @@ export default function Page() {
   const paginatedHistory = historyItems.slice((historyPage - 1) * HISTORY_PAGE_SIZE, historyPage * HISTORY_PAGE_SIZE);
 
   return (
-    <main className="mx-auto max-w-6xl space-y-6 p-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
+    <main id="main-content" className="mx-auto max-w-6xl space-y-6 p-6">
+      <header role="banner" className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-sm font-medium uppercase tracking-wide text-primary">Patient portal</p>
           <h1 className="mt-2 text-3xl font-semibold">My health-data permissions</h1>
           <p className="mt-2 text-muted-foreground">
-            Your ABHA status, consent decisions, and a record of who accessed your data.
+            Access released clinical documents, download printable reports, manage ABHA identity, and review data access history.
           </p>
         </div>
         <button type="button" className="rounded-md border border-border px-4 py-2 text-sm" onClick={() => void load()}>
           Refresh
         </button>
-      </div>
+      </header>
 
       {view.status === "loading" ? (
         <p role="status" className="surface-card p-5 text-sm text-muted-foreground">Loading your verified record…</p>
@@ -108,6 +110,91 @@ export default function Page() {
 
       {view.status === "ready" ? (
         <>
+          {/* Navigation Tab Bar (ARIA compliant) */}
+          <div role="tablist" aria-label="Portal section tabs" className="flex border-b border-border">
+            <button
+              id="portal-tab-documents"
+              role="tab"
+              aria-selected={activeTab === "documents"}
+              aria-controls="portal-panel-documents"
+              type="button"
+              onClick={() => setActiveTab("documents")}
+              className={`border-b-2 px-5 py-3 text-sm font-semibold transition-colors ${
+                activeTab === "documents"
+                  ? "border-primary text-primary"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              My Clinical Documents
+            </button>
+            <button
+              id="portal-tab-permissions"
+              role="tab"
+              aria-selected={activeTab === "permissions"}
+              aria-controls="portal-panel-permissions"
+              type="button"
+              onClick={() => setActiveTab("permissions")}
+              className={`border-b-2 px-5 py-3 text-sm font-semibold transition-colors ${
+                activeTab === "permissions"
+                  ? "border-primary text-primary"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Consent & Access History
+            </button>
+            <button
+              id="portal-tab-identity"
+              role="tab"
+              aria-selected={activeTab === "identity"}
+              aria-controls="portal-panel-identity"
+              type="button"
+              onClick={() => setActiveTab("identity")}
+              className={`border-b-2 px-5 py-3 text-sm font-semibold transition-colors ${
+                activeTab === "identity"
+                  ? "border-primary text-primary"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              ABHA & Identity
+            </button>
+          </div>
+
+          {/* Tab 1: Clinical Documents */}
+          {activeTab === "documents" && (
+            <div id="portal-panel-documents" role="tabpanel" aria-labelledby="portal-tab-documents">
+              <ReleasedDocumentsTab />
+            </div>
+          )}
+
+          {/* Tab 3: ABHA & Identity */}
+          {activeTab === "identity" && (
+            <div id="portal-panel-identity" role="tabpanel" aria-labelledby="portal-tab-identity">
+              <section className="grid gap-4 md:grid-cols-2">
+                <article className="surface-card p-5">
+                  <p className="text-sm text-muted-foreground">ABHA identity</p>
+                  <p className="mt-2 text-xl font-semibold">{view.data.abha.abha_number ?? "Not linked"}</p>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    {view.data.abha.linked_at
+                      ? `Linked ${formatDateTime(view.data.abha.linked_at)}`
+                      : "Registration can link ABHA only after verified OTP; this portal never accepts an unverified number."}
+                  </p>
+                </article>
+                <article className="surface-card p-5">
+                  <p className="text-sm text-muted-foreground">Portal identity verified by</p>
+                  <p className="mt-2 text-xl font-semibold">
+                    {verificationLabels[view.data.binding.verification_method]}
+                  </p>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Verified {formatDateTime(view.data.binding.verified_at)}
+                  </p>
+                </article>
+              </section>
+            </div>
+          )}
+
+          {/* Tab 2: Consents & Data Access History */}
+          {activeTab === "permissions" && (
+            <div id="portal-panel-permissions" role="tabpanel" aria-labelledby="portal-tab-permissions" className="space-y-8">
           <section className="grid gap-4 md:grid-cols-2">
             <article className="surface-card p-5">
               <p className="text-sm text-muted-foreground">ABHA identity</p>
@@ -212,8 +299,10 @@ export default function Page() {
               </div>
             )}
           </section>
-        </>
-      ) : null}
+        </div>
+      )}
+    </>
+  ) : null}
     </main>
   );
 }

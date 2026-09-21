@@ -82,7 +82,7 @@
       "name": "HealthDoc Frontend (Next.js/Electron)",
       "publicClient": true,
       "standardFlowEnabled": true,
-      "directAccessGrantsEnabled": true,
+      "directAccessGrantsEnabled": false,
       "protocol": "openid-connect",
       "redirectUris": [
         "https://localhost/*",

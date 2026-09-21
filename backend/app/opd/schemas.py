@@ -25,7 +25,7 @@ class VisitCreate(BaseModel):
 
     department_id: UUID | None = None
     visit_type: str = Field(
-        ..., description="opd | ipd | day_care | emergency | teleconsult"
+        ..., description="opd | ipd | day_care | emergency | teleconsult | direct_service"
     )
     visit_date: datetime
 
@@ -39,7 +39,7 @@ class VisitTypeUpdate(BaseModel):
     when a ward census does not reconcile.
     """
 
-    visit_type: str = Field(..., description="opd | ipd | day_care | emergency | teleconsult")
+    visit_type: str = Field(..., description="opd | ipd | day_care | emergency | teleconsult | direct_service")
     reason: str = Field(..., min_length=3, max_length=500)
 
 

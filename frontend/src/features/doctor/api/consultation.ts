@@ -154,3 +154,87 @@ export async function listDiagnoses(
     `/encounters/${encounterId}/diagnoses`,
   );
 }
+
+export interface TerminologyConcept {
+  code: string;
+  display: string;
+  system: "icd10" | "icd11" | "snomed";
+  system_name: string;
+  system_uri: string;
+  category?: string | null;
+}
+
+export interface TerminologySearchResponse {
+  items: TerminologyConcept[];
+  system: string;
+  total: number;
+}
+
+export async function searchTerminology(
+  query: string,
+  system: "all" | "icd10" | "icd11" | "snomed" = "all",
+): Promise<TerminologyConcept[]> {
+  const q = query.trim();
+  if (!q) return [];
+  const response = await api<TerminologySearchResponse>(
+    `/terminology/search?q=${encodeURIComponent(q)}&system=${encodeURIComponent(system)}`,
+  );
+  return response.items;
+}
+
+export interface SpecialtyTemplateField {
+  name: string;
+  label: string;
+  type: "text" | "number" | "select" | "multiselect" | "textarea" | "date";
+  required?: boolean;
+  options?: Array<{ label: string; value: string }>;
+  unit?: string;
+  help_text?: string;
+}
+
+export interface SpecialtyTemplate {
+  specialty_type: "pediatric" | "cardiology" | "obstetrics";
+  title: string;
+  description: string;
+  fields: SpecialtyTemplateField[];
+}
+
+export interface SpecialtyAssessmentRecord {
+  id: string;
+  encounter_id: string;
+  patient_id: string;
+  specialty_type: string;
+  clinical_data: Record<string, unknown>;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function getSpecialtyTemplates(): Promise<SpecialtyTemplate[]> {
+  return api<SpecialtyTemplate[]>("/clinical/specialty-templates");
+}
+
+export async function getEncounterSpecialty(
+  encounterId: string,
+): Promise<SpecialtyAssessmentRecord | null> {
+  try {
+    return await api<SpecialtyAssessmentRecord>(`/clinical/encounters/${encounterId}/specialty`);
+  } catch {
+    return null;
+  }
+}
+
+export async function saveEncounterSpecialty(
+  encounterId: string,
+  specialtyType: string,
+  clinicalData: Record<string, unknown>,
+): Promise<SpecialtyAssessmentRecord> {
+  return api<SpecialtyAssessmentRecord>(`/clinical/encounters/${encounterId}/specialty`, {
+    method: "POST",
+    body: JSON.stringify({
+      specialty_type: specialtyType,
+      clinical_data: clinicalData,
+    }),
+  });
+}
+

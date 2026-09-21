@@ -3,7 +3,7 @@ import uuid
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import Date, ForeignKey, Numeric, String, UniqueConstraint
+from sqlalchemy import Date, ForeignKey, Numeric, String, UniqueConstraint, or_
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -32,3 +32,14 @@ class KpiSnapshot(Base, UUIDPk, Timestamps):
     value: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
     numerator: Mapped[Decimal | None] = mapped_column(Numeric)
     denominator: Mapped[Decimal | None] = mapped_column(Numeric)
+    calculation_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
+
+TIMING_KPI_CODES = {"OPD_AVG_WAIT_MINS", "LAB_TURNAROUND_HOURS"}
+TIMING_KPI_VERSION = "recorded_events_v1"
+
+
+def verified_snapshot_filter():
+    """Legacy timing values are untrusted until recomputed; other KPIs unchanged."""
+    return or_(KpiSnapshot.kpi_code.not_in(TIMING_KPI_CODES),
+               KpiSnapshot.calculation_version == TIMING_KPI_VERSION)

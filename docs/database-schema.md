@@ -197,6 +197,10 @@ do not merge out of order.**
 | 0076 | emar_triage_analytes_urgency | emergency_triages, emergency_triage_logs, lab_analytes | eMAR dose identity & corrections, ED triage tracking and re-triage logs, structured lab analyte bounds, and prescription priority. |
 | 0077 | critical_alerts_lis_pacs_returns | critical_alerts, lab_specimen_events, radiology_attachments, pharmacy_returns | Critical alerts outbox & acknowledgement, LIS specimen tracking & rejection, radiology imaging attachments, and pharmacy returns with quarantine disposition. |
 | 0078 | ot_and_longitudinal_programs | care_programs, program_enrolments, program_visits | Operation Theatre lifecycle enhancements, WHO surgical safety checklist, and longitudinal care program registries. |
+| 0079 | suite_8_immunization_blood_forms | vaccine_catalogue, immunization_records, blood_crossmatches, form_definitions, form_submissions, clinical_order_sets, outbox_dead_letter | Immunization lifecycle, blood bank crossmatch & issue, dynamic clinical forms, order sets, safe outbox dead-letter queue, and direct-service walk-in encounters (HD-29 to HD-32). |
+| 0080 | suite_9_portal_terminology_specialty_scan_share | specialty_encounters, scan_share_tickets | Structured specialty encounter clinical evaluations and ABDM M1 scan-and-share reception tickets (HD-33 to HD-36). |
+| 0081 | kpi_calculation_provenance | kpi_snapshots | Adds calculation_version; legacy OPD-wait/lab-TAT snapshots remain stored but are excluded from MIS until recomputed. |
+| 0082 | scan_share_checkin_timestamp | scan_share_tickets | Adds checked_in_at; historical unknown times remain null. |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -1533,6 +1537,7 @@ staff_training_records: user_id → users · training_name text NOT NULL ·
 ```
 facility_id → facilities · kpi_code varchar(50) NOT NULL   -- avg_opd_wait_minutes, sharp_injury_count, ...
 period_start date · period_end date · value numeric(14,4) · numerator numeric · denominator numeric
+calculation_version varchar(50) NULL -- 0081; recorded_events_v1 for measured OPD wait / lab TAT, NULL for legacy/unverified values
 UNIQUE (facility_id, kpi_code, period_start, period_end)
 ```
 
@@ -1958,6 +1963,114 @@ status varchar(50) NOT NULL
 metrics jsonb NULL
 clinical_summary text NULL
 conducted_by UUID NULL REFERENCES users(id)
+```
+
+**vaccine_catalogue** (0079) — standardized facility and national immunization vaccine schedule catalog
+```
+code varchar(50) NOT NULL
+name varchar(100) NOT NULL
+target_disease varchar(200) NOT NULL
+standard_doses integer NOT NULL
+min_age_days integer NOT NULL
+max_age_days integer NULL
+route varchar(50) NOT NULL
+site varchar(50) NOT NULL
+dose_quantity varchar(50) NOT NULL
+is_active boolean NOT NULL
+```
+
+**immunization_records** (0079) — patient vaccine administration records with batch and cold-chain traceability
+```
+patient_id UUID NOT NULL REFERENCES patients(id)
+vaccine_id UUID NOT NULL REFERENCES vaccine_catalogue(id)
+vaccine_code varchar(50) NOT NULL
+dose_number integer NOT NULL
+administered_at timestamptz NOT NULL
+batch_number varchar(50) NOT NULL
+expiry_date date NOT NULL
+manufacturer varchar(100) NULL
+site varchar(50) NULL
+route varchar(50) NULL
+administered_by UUID NOT NULL REFERENCES users(id)
+adverse_reaction text NULL
+notes text NULL
+```
+
+**blood_crossmatches** (0079) — pre-transfusion crossmatch compatibility testing and unit issue governance
+```
+request_id varchar(50) NULL
+patient_id UUID NOT NULL REFERENCES patients(id)
+unit_id UUID NOT NULL REFERENCES blood_units(id)
+compatibility_result varchar(50) NOT NULL
+crossmatched_by UUID NOT NULL REFERENCES users(id)
+crossmatched_at timestamptz NOT NULL
+issued_at timestamptz NULL
+adverse_reactions text NULL
+notes text NULL
+```
+
+**form_definitions** (0079) — dynamic schema-driven clinical forms and assessment templates
+```
+code varchar(50) NOT NULL
+title varchar(150) NOT NULL
+version integer NOT NULL
+status varchar(50) NOT NULL
+fields_schema jsonb NOT NULL
+created_by UUID NOT NULL REFERENCES users(id)
+```
+
+**form_submissions** (0079) — structured clinical form responses bound to patient and visit
+```
+patient_id UUID NOT NULL REFERENCES patients(id)
+visit_id UUID NULL REFERENCES visits(id)
+form_id UUID NOT NULL REFERENCES form_definitions(id)
+form_version integer NOT NULL
+form_data jsonb NOT NULL
+submitted_by UUID NOT NULL REFERENCES users(id)
+submitted_at timestamptz NOT NULL
+```
+
+**clinical_order_sets** (0079) — standardized clinical order protocols for labs, radiology and nursing orders
+```
+code varchar(50) NOT NULL
+title varchar(150) NOT NULL
+category varchar(50) NOT NULL
+orders jsonb NOT NULL
+is_active boolean NOT NULL
+```
+
+**outbox_dead_letter** (0079) — dead-letter queue for exhausted transactional outbox events with redacted payloads
+```
+original_event_id UUID NULL
+aggregate_type varchar(50) NOT NULL
+aggregate_id UUID NOT NULL
+event_type varchar(50) NOT NULL
+payload_redacted jsonb NOT NULL
+error_message text NOT NULL
+failed_at timestamptz NOT NULL
+replay_count integer NOT NULL
+```
+
+**specialty_encounters** (0080) — structured clinical specialty assessments and milestones
+```
+encounter_id UUID NOT NULL REFERENCES encounters(id)
+patient_id UUID NOT NULL REFERENCES patients(id)
+specialty_type varchar(50) NOT NULL
+clinical_data jsonb NOT NULL
+created_by UUID NOT NULL REFERENCES users(id)
+```
+
+**scan_share_tickets** (0080) — ABDM M1 scan-and-share reception desk check-in tickets
+```
+facility_id UUID NOT NULL REFERENCES facilities(id)
+token_number varchar(30) NOT NULL
+abha_address varchar(100) NOT NULL
+profile_data jsonb NOT NULL
+status varchar(50) NOT NULL
+counter varchar(50) NULL
+patient_id UUID NULL REFERENCES patients(id)
+expires_at timestamptz NOT NULL
+checked_in_at timestamptz NULL                    -- 0082: original successful check-in; no invented legacy backfill
 ```
 
 **abdm_callback_replies** (0067) — committed reply intent, not a clinical inbox

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Text, Integer, Numeric, Date, DateTime, Boolean, ForeignKey
+from sqlalchemy import Column, String, Text, Integer, Numeric, Date, DateTime, Boolean, ForeignKey, func
 from sqlalchemy.dialects.postgresql import UUID
 from app.common.models import UUIDPk, Timestamps, Blame
 from app.common.db import Base
@@ -40,3 +40,17 @@ class BloodUnit(Base, UUIDPk, Timestamps):
 
     issued_to_patient_id = Column(UUID(as_uuid=True), ForeignKey("patients.id", ondelete="RESTRICT"),
                                    nullable=True, index=True)
+
+
+class BloodCrossmatch(Base, UUIDPk, Timestamps):
+    __tablename__ = "blood_crossmatches"
+
+    request_id = Column(String(50), nullable=True, index=True)
+    patient_id = Column(UUID(as_uuid=True), ForeignKey("patients.id", ondelete="RESTRICT"), nullable=False, index=True)
+    unit_id = Column(UUID(as_uuid=True), ForeignKey("blood_units.id", ondelete="RESTRICT"), nullable=False, index=True)
+    compatibility_result = Column(String(50), nullable=False, server_default="compatible")
+    crossmatched_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
+    crossmatched_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    issued_at = Column(DateTime(timezone=True), nullable=True)
+    adverse_reactions = Column(Text, nullable=True)
+    notes = Column(Text, nullable=True)

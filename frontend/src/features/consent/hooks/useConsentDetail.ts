@@ -17,8 +17,10 @@ export function useConsentDetail(patientId: string | null, id: string | null) {
   const [record, setRecord] = useState<ConsentRecord | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const idRef = useRef(id);
-  idRef.current = id;
+  const contextRef = useRef({ patientId, id });
+  if (contextRef.current.patientId !== patientId || contextRef.current.id !== id) contextRef.current = { patientId, id };
+  const context = contextRef.current;
+  const requestRef = useRef(0);
 
   const [prevId, setPrevId] = useState(id);
   const [prevPatientId, setPrevPatientId] = useState(patientId);
@@ -33,30 +35,33 @@ export function useConsentDetail(patientId: string | null, id: string | null) {
   }
 
   const load = useCallback(async () => {
-    const current = idRef.current;
+    if (contextRef.current !== context) return;
+    const request = ++requestRef.current;
+    const current = context.id;
     if (!current || !patientId) {
       setRecord(null);
       setError(null);
+      setLoading(false);
       return;
     }
     setLoading(true);
     setError(null);
     try {
       const row = await getConsent(patientId, current);
-      if (idRef.current === current) setRecord(row);
+      if (contextRef.current === context && requestRef.current === request) setRecord(row);
     } catch (reason) {
-      if (idRef.current === current) {
+      if (contextRef.current === context && requestRef.current === request) {
         setRecord(null);
         setError(reason instanceof Error ? reason.message : "Failed to load consent details");
       }
     } finally {
-      if (idRef.current === current) setLoading(false);
+      if (contextRef.current === context && requestRef.current === request) setLoading(false);
     }
-  }, [patientId]);
+  }, [patientId, context]);
 
   useEffect(() => {
     void load();
   }, [id, patientId, load]);
 
-  return { record, loading, error, refresh: load };
+  return { record: id === prevId && patientId === prevPatientId ? record : null, loading, error, refresh: load };
 }

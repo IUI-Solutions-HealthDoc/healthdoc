@@ -10,6 +10,7 @@ export type KpiSnapshot = {
   value: number;
   numerator: number | null;
   denominator: number | null;
+  calculation_version?: string | null;
 };
 
 /** Point series for ChartWrapper children (value over period_start). */
