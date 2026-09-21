@@ -235,6 +235,28 @@ Live execution of any row still needs a consenting participant entering
 their own OTPs privately, the sandbox credentials configured on the running
 stack, and case-by-case evidence recorded here with the revision.
 
+### Live preflight — 21 September 2026, ~14:20 IST (read-only; no NHA call)
+
+- **Callback ingress:** `abdm.healthdoc.world` resolves through Cloudflare; the
+  local connector LaunchAgent `com.healthdoc.abdm-tunnel` is running. `/`
+  returns 404 from the connector's ingress rule as designed, but the callback
+  route returned **502**: the dev stack's nginx/backend containers had been
+  stopped for ~28 hours, so any NHA (re)delivery in that period was refused at
+  the edge. Between roughly 13:00 and 14:00 IST the isolated verification
+  stack `healthdoc-cw` held port 443, so a callback in that hour would have
+  reached a fresh database with no bridge state and its receipt was discarded
+  with that stack. Neither window shows evidence of an actual NHA attempt.
+- **Dev database:** alembic head **0079**; migrations 0080–0082 are not
+  applied locally. Back up, then migrate before running the current code.
+- **Receipts:** `abdm_callback_receipts` holds 5 rows on 14 September and 32
+  on 18 September at 21:35:46 UTC — all 16 routes within 0.3 s answering
+  400/422, i.e. a synthetic refusal sweep, not NHA traffic. **No genuine
+  callback has arrived since the missing token callback was first reported.**
+- **Jobs:** `context_notify` pending 22 (grew from 18 as documents were
+  finalized), `link_context` pending 1 (3 attempts, 11 September — the
+  expired link), `link_token` done 2 (12 September). Nothing was started,
+  drained, regenerated or reset.
+
 ## Evidence needed for a live result
 
 Record the source row, application commit, test time with timezone, local operator role, redacted request/correlation IDs, expected result, observed result, and any private evidence location. A queued operation or HTTP 202 is not completion: verify the callback, persisted state, correct patient's document and consumer-side rendering. Denial, revocation and expiry require a fresh refusal to fetch/display, not only a status-label change.
