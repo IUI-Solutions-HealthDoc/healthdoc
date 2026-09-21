@@ -19,6 +19,7 @@ test("uncertain clinical write keeps exact body/key and refuses changed data", a
   let write = render();
   const send = async (body, key) => { calls.push({ body, key }); throw new TypeError("Network failed after server commit"); };
   await assert.rejects(write.run({ patient: "A", value: 1 }, send), /not confirmed/);
+  assert.equal(write.isPending(), true, "pending state is readable synchronously, before any re-render");
   write = render();
   assert.equal(write.retryPending, true);
   await assert.rejects(write.run({ patient: "A", value: 2 }, send), /unchanged/);
@@ -28,6 +29,7 @@ test("uncertain clinical write keeps exact body/key and refuses changed data", a
   });
   assert.equal(result, "original-row");
   assert.deepEqual(calls[1], calls[0]);
+  assert.equal(write.isPending(), false);
   assert.equal(render().retryPending, false);
 });
 

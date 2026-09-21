@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   AlertCircle,
   CheckCircle2,
@@ -35,40 +35,82 @@ export function CsvAdministrationModal({
   const [isImporting, setIsImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const write = useClinicalWrite();
+  // While an import's outcome is unknown the draft is the retry body and must
+  // not change, including through a file read that started earlier.
+  const locked = isImporting || write.retryPending;
+  // Bumped synchronously on every draft change so asynchronous completions can
+  // tell whether the text they describe is still the text on screen, without
+  // depending on a render having happened in between.
+  const draftVersion = useRef(0);
+  const readSequence = useRef(0);
+  const validateSequence = useRef(0);
 
   if (!isOpen) return null;
 
+  const touchDraft = () => {
+    draftVersion.current += 1;
+    setValidationResult(null);
+    setImportResult(null);
+  };
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file || locked) return;
+    const request = ++readSequence.current;
     const reader = new FileReader();
     reader.onload = (event) => {
-      const content = event.target?.result as string;
-      setCsvText(content || "");
-      setValidationResult(null);
-      setImportResult(null);
+      // A read that finishes after another file was chosen, or after the draft
+      // became the body of an unconfirmed import, must not replace the draft.
+      if (request !== readSequence.current || write.isPending()) return;
+      const content = event.target?.result;
+      setCsvText(typeof content === "string" ? content : "");
+      touchDraft();
+      setError(null);
+    };
+    reader.onerror = () => {
+      if (request === readSequence.current && !write.isPending()) setError("The selected file could not be read.");
     };
     reader.readAsText(file);
   };
 
   const handleValidate = async () => {
-    if (!csvText.trim()) {
+    const snapshot = { csvText, entityType };
+    if (!snapshot.csvText.trim()) {
       setError("Please upload a CSV file or paste raw CSV content.");
       return;
     }
+    const request = ++validateSequence.current;
+    const version = draftVersion.current;
     setError(null);
     setValidationResult(null);
     setImportResult(null);
 
     try {
       setIsValidating(true);
-      const res = await validateCsv(csvText, entityType);
+      const res = await validateCsv(snapshot.csvText, snapshot.entityType);
+      // The verdict belongs to the content that was sent. If the draft or the
+      // entity changed meanwhile, showing "Safe to Ingest" would describe text
+      // the user no longer has.
+      if (request !== validateSequence.current || version !== draftVersion.current) return;
       setValidationResult(res);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Validation failed.");
+      if (request === validateSequence.current) setError(err instanceof Error ? err.message : "Validation failed.");
     } finally {
-      setIsValidating(false);
+      if (request === validateSequence.current) setIsValidating(false);
     }
+  };
+
+  const handleClose = () => {
+    if (locked) return;
+    // Discard in-flight reads/validations and stale verdicts so a reopened
+    // modal cannot show a previous import as the current one.
+    readSequence.current += 1;
+    validateSequence.current += 1;
+    setIsValidating(false);
+    setValidationResult(null);
+    setImportResult(null);
+    setError(null);
+    onClose();
   };
 
   const handleImport = async () => {
@@ -112,8 +154,8 @@ export function CsvAdministrationModal({
             </div>
           </div>
           <button
-            onClick={onClose}
-            disabled={isImporting || write.retryPending}
+            onClick={handleClose}
+            disabled={locked}
             className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
           >
             <X className="h-5 w-5" />
@@ -134,12 +176,11 @@ export function CsvAdministrationModal({
                 Target Entity
               </label>
               <select
-                disabled={isImporting || write.retryPending}
+                disabled={locked}
                 value={entityType}
                 onChange={(e) => {
                   setEntityType(e.target.value);
-                  setValidationResult(null);
-                  setImportResult(null);
+                  touchDraft();
                 }}
                 className="w-full rounded-xl border border-input bg-background px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary"
               >
@@ -169,7 +210,7 @@ export function CsvAdministrationModal({
             </label>
             <input
               type="file"
-              disabled={isImporting || write.retryPending}
+              disabled={locked}
               accept=".csv,text/csv"
               onChange={handleFileUpload}
               className="w-full rounded-xl border border-input bg-background px-3 py-1.5 text-xs file:mr-3 file:py-1 file:px-2.5 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer"
@@ -181,14 +222,13 @@ export function CsvAdministrationModal({
               Or Paste Raw CSV Content
             </label>
             <textarea
-              disabled={isImporting || write.retryPending}
+              disabled={locked}
               rows={4}
               placeholder="code,name,target_disease,standard_doses,min_age_days,route,site,dose_quantity"
               value={csvText}
               onChange={(e) => {
                 setCsvText(e.target.value);
-                setValidationResult(null);
-                setImportResult(null);
+                touchDraft();
               }}
               className="w-full rounded-xl border border-input bg-background p-3 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-primary"
             />
@@ -261,8 +301,8 @@ export function CsvAdministrationModal({
           <div className="pt-4 border-t border-border flex items-center justify-end gap-2">
             <button
               type="button"
-              onClick={onClose}
-              disabled={isImporting || write.retryPending}
+              onClick={handleClose}
+              disabled={locked}
               className="rounded-xl border border-border px-4 py-2 text-xs font-semibold text-muted-foreground hover:bg-muted transition-colors"
             >
               Close
@@ -270,7 +310,7 @@ export function CsvAdministrationModal({
 
             <button
               type="button"
-              disabled={isValidating || isImporting || write.retryPending || !csvText.trim()}
+              disabled={isValidating || locked || !csvText.trim()}
               onClick={handleValidate}
               className="rounded-xl bg-secondary px-4 py-2 text-xs font-semibold text-secondary-foreground hover:bg-secondary/80 transition-colors disabled:opacity-50"
             >

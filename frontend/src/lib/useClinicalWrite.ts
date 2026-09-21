@@ -44,5 +44,12 @@ export function useClinicalWrite() {
       busy.current = false;
     }
   }
-  return { run, retryPending, isCurrent: () => mounted.current };
+  return {
+    run,
+    retryPending,
+    isCurrent: () => mounted.current,
+    /** True while a write is in flight or awaiting an unchanged retry; safe to read
+     *  from asynchronous callbacks because it does not wait for a render. */
+    isPending: () => attempt.current !== null,
+  };
 }
