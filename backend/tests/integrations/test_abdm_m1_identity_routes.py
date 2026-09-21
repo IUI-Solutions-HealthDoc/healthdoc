@@ -24,6 +24,12 @@ from tests.test_suite_8_immunization_blood_forms import _setup_suite_8_fixture
 pytestmark = pytest.mark.asyncio
 
 AADHAAR = "999988887777"
+CONSENT = {
+    "granted": True,
+    "code": "abha-enrollment",
+    "version": "1.4",
+    "language": "en",
+}
 
 
 class _Redis:
@@ -66,6 +72,11 @@ async def desk(db, monkeypatch):
         abdm_abha_base_url = "https://abha.test/abha/api"
         abdm_path_enrol_request_otp = "/v3/enrollment/request/otp"
         abdm_path_enrol_by_aadhaar = "/v3/enrollment/enrol/byAadhaar"
+        abdm_path_enrol_auth_by_abdm = "/v3/enrollment/auth/byAbdm"
+        abdm_path_enrol_suggestion = "/v3/enrollment/enrol/suggestion"
+        abdm_path_enrol_abha_address = "/v3/enrollment/enrol/abha-address"
+        abdm_path_profile_account = "/v3/profile/account"
+        abdm_path_profile_abha_card = "/v3/profile/account/abha-card"
         abdm_path_login_request_otp = "/v3/profile/login/request/otp"
         abdm_path_login_verify = "/v3/profile/login/verify"
 
@@ -126,7 +137,7 @@ async def test_login_request_refuses_zero_or_two_identifiers(desk):
 async def test_early_resend_is_429_with_retry_after_and_wrong_patient_is_404(desk):
     desk["gateway"].responses = [{"txnId": "abdm-txn-1"}, {"txnId": "abdm-txn-2"}]
     requested = await desk["client"].post("/abdm/abha/enrol/aadhaar/request-otp", json={
-        "patient_id": str(desk["patient"].id), "aadhaar": AADHAAR})
+        "patient_id": str(desk["patient"].id), "aadhaar": AADHAAR, "consent": CONSENT})
     assert requested.status_code == 200, requested.text
     session_id = requested.json()["session_id"]
     body = {"session_id": session_id, "patient_id": str(desk["patient"].id), "aadhaar": AADHAAR}
@@ -151,3 +162,15 @@ async def test_early_resend_is_429_with_retry_after_and_wrong_patient_is_404(des
     assert resent.json()["resends_remaining"] == otp_session.MAX_RESENDS - 1
     assert f"abdm:otp:{session_id}" not in desk["redis"].store
     assert len(desk["gateway"].calls) == 2 and desk["gateway"].calls[1][1]["txnId"] == ""
+
+
+async def test_declined_enrolment_consent_is_400_and_does_not_call_abdm(desk):
+    response = await desk["client"].post("/abdm/abha/enrol/aadhaar/request-otp", json={
+        "patient_id": str(desk["patient"].id),
+        "aadhaar": AADHAAR,
+        "consent": {**CONSENT, "granted": False},
+    })
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"]["code"] == "enrolment_consent_refused"
+    assert desk["gateway"].calls == []
+    assert AADHAAR not in response.text

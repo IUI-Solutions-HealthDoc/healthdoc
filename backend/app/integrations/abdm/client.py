@@ -390,6 +390,7 @@ class AbdmClient:
         json: Any = None,
         extra_headers: Mapping[str, str] | None = None,
         request_id: str | None = None,
+        parse_json: bool = True,
     ) -> AbdmResponse:
         """Make an authenticated gateway call.
 
@@ -437,7 +438,8 @@ class AbdmClient:
         if not 200 <= resp.status_code < 300:
             raise AbdmProtocolError(resp.status_code)
 
-        return AbdmResponse(resp.status_code, _safe_body(resp), rid)
+        body: Any = resp.content if not parse_json else _safe_body(resp)
+        return AbdmResponse(resp.status_code, body, rid)
 
     async def _send(
         self,

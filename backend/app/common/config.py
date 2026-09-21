@@ -119,6 +119,11 @@ class Settings(BaseSettings):
     #: life of the file. A wrong path here is an env change, not a release.
     abdm_path_enrol_request_otp: str = "/v3/enrollment/request/otp"
     abdm_path_enrol_by_aadhaar: str = "/v3/enrollment/enrol/byAadhaar"
+    abdm_path_enrol_auth_by_abdm: str = "/v3/enrollment/auth/byAbdm"
+    abdm_path_enrol_suggestion: str = "/v3/enrollment/enrol/suggestion"
+    abdm_path_enrol_abha_address: str = "/v3/enrollment/enrol/abha-address"
+    abdm_path_profile_account: str = "/v3/profile/account"
+    abdm_path_profile_abha_card: str = "/v3/profile/account/abha-card"
     abdm_path_login_request_otp: str = "/v3/profile/login/request/otp"
     abdm_path_login_verify: str = "/v3/profile/login/verify"
 

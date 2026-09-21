@@ -28,6 +28,12 @@ export function userFacingApiError(code, payload) {
     user_deactivated: "Your HealthDoc staff account is deactivated. Contact your facility administrator.",
     abdm_rejected: "ABDM declined this request. Check the details before retrying; contact support if it continues.",
     duplicate_abha: "This ABHA number is already linked to another patient. Open that record instead of linking it here.",
+    enrolment_consent_required: "Confirm the patient's enrolment consent before creating an ABHA.",
+    enrolment_consent_refused: "ABHA enrolment stops when the patient does not consent.",
+    enrolment_consent_language_unavailable: "Hindi enrolment consent is not available until an approved translation is loaded.",
+    abha_address_refused: "ABDM did not accept this ABHA address. Choose another suggestion.",
+    abha_profile_unavailable: "The NHA ABHA card is not available until enrolment or login stores a profile credential.",
+    abdm_account_selection_required: "ABDM returned more than one account. Do not continue until the patient chooses one.",
     abdm_requester_required: "Ask your facility administrator to verify your name, registration number, identifier type and issuing registry URI before requesting ABDM records.",
     invalid_abdm_requester_profile: "Enter the real registration number, identifier type and issuing registry URI together, or clear all three registration fields.",
   };

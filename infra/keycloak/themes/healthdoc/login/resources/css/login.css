@@ -102,52 +102,99 @@ body#keycloak-bg,
   background: transparent !important;
   min-height: auto !important;
   padding-top: 0 !important;
+  display: flex !important;
+  justify-content: center !important;
+  align-items: flex-start !important;
 }
 
+/* PatternFly's login grid is a 544px main column plus a sidebar.
+   That column ignores the card width and shoves the form off center. */
 .pf-v5-c-login__container,
 .login-pf-page .card-pf {
-  max-width: 440px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  grid-template-columns: none !important;
+  grid-template-areas: none !important;
+  width: min(420px, calc(100vw - 2rem)) !important;
+  max-width: 420px !important;
+  min-width: 0 !important;
   margin: 0 auto !important;
-  padding: 0 1rem 3rem 1rem !important;
+  padding: 0 0 2.5rem !important;
 }
 
-.pf-v5-c-login__main,
-.login-pf-page .card-pf {
+.pf-v5-c-login__main {
+  display: flex !important;
+  flex-direction: column !important;
+  width: 100% !important;
+  max-width: 420px !important;
+  min-width: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  filter: drop-shadow(0 22px 40px rgba(0, 12, 36, 0.42));
+}
+
+.pf-v5-c-login__main-header,
+.pf-v5-c-login__main-body {
+  width: 100% !important;
+  max-width: none !important;
+  min-width: 0 !important;
   background: #ffffff !important;
-  border-radius: 20px !important;
-  box-shadow:
-    0 24px 48px -12px rgba(0, 15, 45, 0.5),
-    0 0 0 1px rgba(255, 255, 255, 0.2),
-    0 4px 6px -2px rgba(0, 0, 0, 0.05) !important;
-  border: 1px solid rgba(226, 232, 240, 0.8) !important;
-  padding: 2.25rem 2.25rem 2rem 2.25rem !important;
+  border: none !important;
+}
+
+.pf-v5-c-login__main-header {
+  display: block !important;
+  grid-template-columns: none !important;
+  border-radius: 22px 22px 0 0 !important;
+  padding: 2rem 1.75rem 0.25rem !important;
+  text-align: center !important;
+}
+
+.pf-v5-c-login__main-body {
+  border-radius: 0 0 22px 22px !important;
+  padding: 0.35rem 1.75rem 1.75rem !important;
+}
+
+#kc-form,
+#kc-form-login,
+#kc-form-login .pf-v5-c-form,
+.pf-v5-c-login__main-body .pf-v5-c-form {
+  width: 100% !important;
+  max-width: none !important;
+  min-width: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 0 !important;
+  row-gap: 0 !important;
+  grid-template-rows: none !important;
+}
+
+/* Empty remember-me / forgot-password row still occupies a grid track. */
+.login-pf-settings {
+  display: none !important;
 }
 
 .pf-v5-c-title,
-#kc-page-title {
+#kc-page-title,
+.pf-v5-c-login__main-header h1 {
   color: #001f54 !important;
   font-family: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
   font-size: 1.35rem !important;
   font-weight: 700 !important;
   letter-spacing: -0.025em !important;
-  margin-bottom: 0.35rem !important;
+  margin: 0 0 1.35rem !important;
+  width: 100% !important;
   text-align: center !important;
-}
-
-#kc-page-title::after {
-  content: "Authenticate using your authorized hospital credentials";
-  display: block;
-  font-size: 0.8125rem;
-  font-weight: 400;
-  letter-spacing: 0;
-  color: #64748b;
-  margin-top: 0.35rem;
-  margin-bottom: 1.5rem;
 }
 
 /* ── Form Controls & Labels ──────────────────────────────── */
 .pf-v5-c-form__group {
-  margin-bottom: 1.25rem !important;
+  margin-bottom: 1.05rem !important;
+  width: 100% !important;
+  max-width: none !important;
 }
 
 .pf-v5-c-form__label,
@@ -354,27 +401,29 @@ body#keycloak-bg,
 
 /* ── Card Footer & Trust Badges ──────────────────────────── */
 .pf-v5-c-login__main-footer {
-  border-top: 1px solid #e2e8f0 !important;
-  padding-top: 1.25rem !important;
-  margin-top: 1.5rem !important;
-  margin-bottom: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 1.15rem 0 0 !important;
+  margin: 0 !important;
+  width: 100% !important;
   text-align: center !important;
   font-family: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
 }
 
 .pf-v5-c-login__main-footer::before {
-  content: "🔒 End-to-End Encrypted  •  🛡️ Role-Based Access";
+  content: "End-to-End Encrypted   ·   Role-Based Access";
   display: block;
   font-size: 0.75rem;
   font-weight: 500;
-  color: #64748b;
-  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.82);
+  letter-spacing: 0.01em;
 }
 
 .pf-v5-c-login__main-footer::after {
   content: "Authorized hospital personnel only. All access is audited.";
   display: block;
   font-size: 0.6875rem;
-  color: #94a3b8;
-  margin-top: 0.35rem;
+  color: rgba(255, 255, 255, 0.58);
+  margin-top: 0.4rem;
 }

@@ -57,6 +57,10 @@ class Patient(Base, UUIDPk, Timestamps, Blame, Versioned):
             + GuardianVerificationMethod.sql_check("guardian_verification_method"),
             name="guardian_verification_method",
         ),
+        CheckConstraint(
+            "(abha_profile_token_encrypted IS NULL) = (abha_profile_token_key_version IS NULL)",
+            name="abha_profile_token_key_version",
+        ),
     )
 
     uhid: Mapped[str | None] = mapped_column(String(30), nullable=True)  # unique via partial index
@@ -88,6 +92,9 @@ class Patient(Base, UUIDPk, Timestamps, Blame, Versioned):
     abha_linking_token_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     abha_linking_key_version: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
     abha_linked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # 0083 — enrolment/login profile X-token, distinct from the HIP linking token.
+    abha_profile_token_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    abha_profile_token_key_version: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
 
     # 0042 — guardian verification (B2). The comment here said 0022 for months;
     # no migration created these columns until 0042, so every ORM INSERT into
