@@ -12,6 +12,7 @@ import {
   X,
 } from "lucide-react";
 import { downloadCsv, importCsv, validateCsv } from "../api";
+import { useClinicalWrite } from "@/lib/useClinicalWrite";
 import type { CsvImportResult, CsvValidationResult } from "../types";
 
 interface CsvAdministrationModalProps {
@@ -33,6 +34,7 @@ export function CsvAdministrationModal({
   const [isValidating, setIsValidating] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const write = useClinicalWrite();
 
   if (!isOpen) return null;
 
@@ -70,18 +72,19 @@ export function CsvAdministrationModal({
   };
 
   const handleImport = async () => {
-    if (!csvText.trim()) return;
+    if (!csvText.trim() || isImporting || !write.isCurrent()) return;
     setError(null);
 
     try {
       setIsImporting(true);
-      const res = await importCsv(csvText, entityType);
+      const res = await write.run({ csvText, entityType }, (payload, key) => importCsv(payload.csvText, payload.entityType, key));
+      if (!write.isCurrent()) return;
       setImportResult(res);
       onSuccess();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Import failed.");
+      if (write.isCurrent()) setError(err instanceof Error ? err.message : "Import failed.");
     } finally {
-      setIsImporting(false);
+      if (write.isCurrent()) setIsImporting(false);
     }
   };
 
@@ -110,6 +113,7 @@ export function CsvAdministrationModal({
           </div>
           <button
             onClick={onClose}
+            disabled={isImporting || write.retryPending}
             className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
           >
             <X className="h-5 w-5" />
@@ -130,6 +134,7 @@ export function CsvAdministrationModal({
                 Target Entity
               </label>
               <select
+                disabled={isImporting || write.retryPending}
                 value={entityType}
                 onChange={(e) => {
                   setEntityType(e.target.value);
@@ -164,6 +169,7 @@ export function CsvAdministrationModal({
             </label>
             <input
               type="file"
+              disabled={isImporting || write.retryPending}
               accept=".csv,text/csv"
               onChange={handleFileUpload}
               className="w-full rounded-xl border border-input bg-background px-3 py-1.5 text-xs file:mr-3 file:py-1 file:px-2.5 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer"
@@ -175,6 +181,7 @@ export function CsvAdministrationModal({
               Or Paste Raw CSV Content
             </label>
             <textarea
+              disabled={isImporting || write.retryPending}
               rows={4}
               placeholder="code,name,target_disease,standard_doses,min_age_days,route,site,dose_quantity"
               value={csvText}
@@ -255,6 +262,7 @@ export function CsvAdministrationModal({
             <button
               type="button"
               onClick={onClose}
+              disabled={isImporting || write.retryPending}
               className="rounded-xl border border-border px-4 py-2 text-xs font-semibold text-muted-foreground hover:bg-muted transition-colors"
             >
               Close
@@ -262,7 +270,7 @@ export function CsvAdministrationModal({
 
             <button
               type="button"
-              disabled={isValidating || !csvText.trim()}
+              disabled={isValidating || isImporting || write.retryPending || !csvText.trim()}
               onClick={handleValidate}
               className="rounded-xl bg-secondary px-4 py-2 text-xs font-semibold text-secondary-foreground hover:bg-secondary/80 transition-colors disabled:opacity-50"
             >
@@ -272,12 +280,12 @@ export function CsvAdministrationModal({
             {validationResult?.valid && (
               <button
                 type="button"
-                disabled={isImporting}
+                disabled={isImporting || !!importResult}
                 onClick={handleImport}
                 className="flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors shadow-sm disabled:opacity-50"
               >
                 <Upload className="h-3.5 w-3.5" />
-                {isImporting ? "Importing..." : "Execute Import"}
+                {isImporting ? "Importing..." : write.retryPending ? "Retry unchanged import" : "Execute Import"}
               </button>
             )}
           </div>

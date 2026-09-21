@@ -11,8 +11,9 @@ import {
   X,
 } from "lucide-react";
 import { crossmatchBlood, issueBloodUnit } from "../api";
-import { formatBloodGroup, type BloodUnit } from "../types";
+import { formatBloodGroup, type BloodCrossmatch, type BloodUnit } from "../types";
 import { api } from "@/lib/api";
+import { useClinicalWrite } from "@/lib/useClinicalWrite";
 
 interface BloodCrossmatchModalProps {
   isOpen: boolean;
@@ -44,12 +45,18 @@ export function BloodCrossmatchModal({
   const [completedSlip, setCompletedSlip] = useState<string | null>(null);
   const searchSequence = useRef(0);
   const mounted = useRef(true);
+  const matchWrite = useClinicalWrite();
+  const issueWrite = useClinicalWrite();
+  const savedMatch = useRef<BloodCrossmatch | null>(null);
+  const [matchSaved, setMatchSaved] = useState(false);
+  const uncertain = matchWrite.retryPending || issueWrite.retryPending;
   useEffect(() => {
     mounted.current = true;
     return () => { mounted.current = false; searchSequence.current += 1; };
   }, []);
 
   const clearRecipient = () => {
+    if (isSubmitting || uncertain || savedMatch.current) return;
     searchSequence.current += 1;
     setSelectedPatient(null);
     setCompatibility("");
@@ -80,6 +87,7 @@ export function BloodCrossmatchModal({
         }>;
       }>("/patients/search", {
         method: "POST",
+        idempotencyKey: null,
         body: JSON.stringify(body),
       });
       if (!mounted.current || request !== searchSequence.current) return;
@@ -111,29 +119,43 @@ export function BloodCrossmatchModal({
 
     try {
       setIsSubmitting(true);
-      const xm = await crossmatchBlood({
+      const xm = savedMatch.current ?? await matchWrite.run({
         patient_id: selectedPatient.id,
         unit_id: unit.id,
         compatibility_result: compatibility,
         notes: notes.trim() || null,
+      }, async (payload, key) => {
+        const result = await crossmatchBlood(payload, key);
+        if (result.patient_id !== payload.patient_id || result.unit_id !== payload.unit_id)
+          throw new Error("Crossmatch did not match the selected patient and unit.");
+        return result;
       });
       if (!mounted.current) return;
+      if (xm.patient_id !== selectedPatient.id || xm.unit_id !== unit.id)
+        throw new Error("The saved crossmatch belongs to a different patient or unit.");
+      savedMatch.current = xm;
+      setMatchSaved(true);
 
       if (compatibility === "compatible" && issueDirectly) {
-        const issued = await issueBloodUnit({
+        const issued = await issueWrite.run({
           crossmatch_id: xm.id,
           notes: [issuedToWard.trim() && `Destination: ${issuedToWard.trim()}`, notes.trim()].filter(Boolean).join("\n") || null,
+        }, async (payload, key) => {
+          const result = await issueBloodUnit(payload, key);
+          if (!result.issued_at || result.id !== xm.id)
+            throw new Error("Issue was not confirmed by the server.");
+          return result;
         });
-        if (!issued.issued_at) throw new Error("Issue was not confirmed by the server.");
+        if (!mounted.current) return;
         setCompletedSlip(issued.id);
       } else {
         onSuccess();
         onClose();
       }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Crossmatch / Issue failed.");
+      if (mounted.current) setError(err instanceof Error ? err.message : "Crossmatch / Issue failed.");
     } finally {
-      setIsSubmitting(false);
+      if (mounted.current) setIsSubmitting(false);
     }
   };
 
@@ -150,7 +172,7 @@ export function BloodCrossmatchModal({
           </div>
           <button
             onClick={onClose}
-            disabled={isSubmitting}
+            disabled={isSubmitting || uncertain}
             aria-label="Close crossmatch"
             className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
           >
@@ -207,7 +229,7 @@ export function BloodCrossmatchModal({
             )}
 
             <form onSubmit={handleSubmit} className="mt-4">
-              <fieldset disabled={isSubmitting} className="space-y-4">
+              <fieldset disabled={isSubmitting || uncertain || matchSaved} className="space-y-4">
               {/* Patient Selection */}
               <div>
                 <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
@@ -339,10 +361,13 @@ export function BloodCrossmatchModal({
                 />
               </div>
 
+              </fieldset>
+              {matchSaved && !completedSlip && <p role="status" className="mt-3 text-xs">Crossmatch recorded. Any further retry applies only to issuing this same crossmatch.</p>}
               <div className="flex items-center justify-end gap-3 pt-4 border-t border-border">
                 <button
                   type="button"
                   onClick={onClose}
+                  disabled={isSubmitting || uncertain}
                   className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-muted transition-colors"
                 >
                   Cancel
@@ -355,12 +380,13 @@ export function BloodCrossmatchModal({
                   <FileCheck className="h-4 w-4" />
                   {isSubmitting
                     ? "Saving..."
+                    : uncertain ? "Retry unchanged save"
+                    : matchSaved ? "Retry issue"
                     : issueDirectly
                     ? "Crossmatch & Issue"
                     : "Save Crossmatch Result"}
                 </button>
               </div>
-              </fieldset>
             </form>
           </>
         )}

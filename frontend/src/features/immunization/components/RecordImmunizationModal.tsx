@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { AlertCircle, CheckCircle, X } from "lucide-react";
 import { recordImmunization } from "../api";
+import { useClinicalWrite } from "@/lib/useClinicalWrite";
 import type { Vaccine } from "../types";
 
 interface RecordImmunizationModalProps {
@@ -36,6 +37,7 @@ export function RecordImmunizationModal({
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const write = useClinicalWrite();
 
   if (!isOpen) return null;
 
@@ -51,6 +53,7 @@ export function RecordImmunizationModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting || !write.isCurrent()) return;
     setError(null);
 
     if (!catalogue.some((v) => v.id === selectedVaccineId)) {
@@ -68,7 +71,7 @@ export function RecordImmunizationModal({
 
     try {
       setIsSubmitting(true);
-      await recordImmunization({
+      await write.run({
         patient_id: patientId,
         vaccine_code: catalogue.find((v) => v.id === selectedVaccineId)!.code,
         dose_number: doseNumber,
@@ -79,13 +82,14 @@ export function RecordImmunizationModal({
         site: site.trim() || null,
         route: route.trim() || null,
         adverse_reaction: adverseReaction.trim() || null,
-      });
+      }, recordImmunization);
+      if (!write.isCurrent()) return;
       onSuccess();
       onClose();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to record immunization dose.");
+      if (write.isCurrent()) setError(err instanceof Error ? err.message : "Failed to record immunization dose.");
     } finally {
-      setIsSubmitting(false);
+      if (write.isCurrent()) setIsSubmitting(false);
     }
   };
 
@@ -99,6 +103,7 @@ export function RecordImmunizationModal({
           </div>
           <button
             onClick={onClose}
+            disabled={isSubmitting || write.retryPending}
             className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
           >
             <X className="h-5 w-5" />
@@ -113,6 +118,7 @@ export function RecordImmunizationModal({
         )}
 
         <form onSubmit={handleSubmit} className="mt-4 space-y-4">
+          <fieldset disabled={isSubmitting || write.retryPending} className="space-y-4">
           <div>
             <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
               Vaccine
@@ -240,10 +246,12 @@ export function RecordImmunizationModal({
             />
           </div>
 
+          </fieldset>
           <div className="flex items-center justify-end gap-3 pt-4 border-t border-border">
             <button
               type="button"
               onClick={onClose}
+              disabled={isSubmitting || write.retryPending}
               className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-muted transition-colors"
             >
               Cancel
@@ -254,7 +262,7 @@ export function RecordImmunizationModal({
               className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
             >
               <CheckCircle className="h-4 w-4" />
-              {isSubmitting ? "Recording..." : "Save Record"}
+              {isSubmitting ? "Recording..." : write.retryPending ? "Retry unchanged save" : "Save Record"}
             </button>
           </div>
         </form>

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import CurrentDbUser, DbSession, require_roles
 from app.forms import service
+from app.common.clinical_write import ClinicalWriteKey, clinical_write
 from app.common.patient_scope import require_patient_access, require_visit_scope
 from app.forms.schemas import (
     ApplyOrderSetRequest,
@@ -56,9 +57,12 @@ async def create_form_definition(
     payload: FormDefinitionCreate,
     current_user: CurrentDbUser,
     db: DbSession,
+    idempotency_key: ClinicalWriteKey,
 ) -> FormDefinitionOut:
     """Create or publish a new dynamic form definition."""
-    return await service.create_form_definition(db, payload, current_user.id)
+    return await clinical_write(db, idempotency_key, "POST /forms/definitions", payload,
+        current_user, FormDefinitionOut,
+        lambda: service.create_form_definition(db, payload, current_user.id))
 
 
 @router.post(
@@ -71,12 +75,15 @@ async def submit_form(
     payload: FormSubmissionCreate,
     current_user: CurrentDbUser,
     db: DbSession,
+    idempotency_key: ClinicalWriteKey,
 ) -> FormSubmissionOut:
     """Submit responses to a configurable form definition."""
     await require_patient_access(db, payload.patient_id, current_user)
     await require_visit_scope(db, payload.visit_id, payload.patient_id, current_user.facility_id)
     try:
-        return await service.create_submission(db, payload, current_user.id)
+        return await clinical_write(db, idempotency_key, "POST /forms/submissions", payload,
+            current_user, FormSubmissionOut,
+            lambda: service.create_submission(db, payload, current_user.id))
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
@@ -156,10 +163,13 @@ async def import_admin_csv(
     payload: CsvImportRequest,
     current_user: CurrentDbUser,
     db: DbSession,
+    idempotency_key: ClinicalWriteKey,
 ) -> CsvImportResult:
     """Safely import sanitized CSV records for platform entities."""
     try:
-        return await service.import_csv(payload.csv_content, payload.entity_type, db, current_user.id)
+        return await clinical_write(db, idempotency_key, "POST /admin/csv/import", payload,
+            current_user, CsvImportResult,
+            lambda: service.import_csv(payload.csv_content, payload.entity_type, db, current_user.id), status=200)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 

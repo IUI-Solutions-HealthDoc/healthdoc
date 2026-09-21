@@ -15,9 +15,10 @@ export function fetchPatientSchedule(patientId: string): Promise<PatientImmuniza
   return api<PatientImmunizationSchedule>(`/immunization/patients/${patientId}`);
 }
 
-export function recordImmunization(payload: ImmunizationRecordCreate): Promise<ImmunizationRecord> {
+export function recordImmunization(payload: ImmunizationRecordCreate, idempotencyKey: string): Promise<ImmunizationRecord> {
   return api<ImmunizationRecord>("/immunization/records", {
     method: "POST",
+    idempotencyKey,
     body: JSON.stringify(payload),
   });
 }
