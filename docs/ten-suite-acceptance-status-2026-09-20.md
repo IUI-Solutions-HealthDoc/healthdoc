@@ -18,6 +18,14 @@ production acceptance merely from these fixes.
 
 ## Branch and PR
 
+**Latest 21 September reconciliation:** #586 is merged at `c0113dc` and #587
+(M1 resend/Aadhaar verification) at `5771931`, both into staging. Main is still
+`9222f07` from #585. Remaining local error-message/evidence changes and the
+historical review are consolidated on **release/staging-consolidation**; see
+[branch reconciliation](branch-consolidation-2026-09-21.md). No suite verdict is
+upgraded by publication. A code-owner approval and green latest-SHA checks are
+required before integrating this follow-up, then opening staging -> main.
+
 - Safety work branch: **fix/clinical-safety-keycloak-return**, delivered through
   [#584](https://github.com/IUI-Solutions-HealthDoc/healthdoc/pull/584),
   **squash-merged into staging on 21 September (`dcd7d15`)**; staging was then

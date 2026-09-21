@@ -10,7 +10,40 @@ Compose. Targeting ABDM certification and a CERT-In WASA audit.
 has advanced substantially; acceptance and ABDM certification have not been
 established by counting commits or test cases.**
 
-### 21 September continuation — clinical write retries, PR #586
+### Latest integration snapshot — 21 September, branch consolidation
+
+This subsection supersedes pending-PR/runtime statements in the dated sections
+below. PR **#586** is merged into staging as `c0113dc`; PR **#587** (M1 OTP
+resend, existing-ABHA Aadhaar verification and correctable OTP refusal) is merged
+as `5771931`. Main is `9222f07` from #585 and has not yet received those tranches.
+The current follow-up branch is **release/staging-consolidation**. It preserves
+the remaining duplicate-ABHA error-message fix/test, redacted live case ledger,
+support draft and the previously unpublished 19 September review. See
+[branch reconciliation](docs/branch-consolidation-2026-09-21.md).
+
+PR #587's verified CI run [35584677794](https://github.com/IUI-Solutions-HealthDoc/healthdoc/actions/runs/35584677794)
+has **2104 backend passes / 7 warnings, 36 script passes, 165 frontend passes**,
+and green release-policy and nurse-auth/browser jobs, including the clinical
+retry gate. Weekly Electron was skipped. Local follow-up review had 89 focused
+backend passes, 166 frontend passes and clean TypeScript/diff checks. The extra
+frontend test covers the unpublished duplicate-ABHA message. These historical
+results do not replace the consolidation PR's own latest-SHA gates.
+
+ABDM: later operator evidence records origin restoration, dev migration to 0082,
+mobile/Aadhaar OTP activity and new-ABHA enrolment; see the redacted case ledger
+for partial cases and actual product gaps. Public callback GET was rechecked
+as **405**, not the earlier 502; this does not prove NHA delivery. The owner
+reports another ticket submitted; number/response remain unverified. No M2/M3
+round trip is newly established, and all ten suites are still not accepted.
+No deployment, participant operation or outbound worker start is part of this
+branch-consolidation task. Code-owner review is required before staging merge;
+promotion remains staging -> main only. The branch reconciliation records a
+history-only merge of the already-integrated main tree to avoid repeat squash
+promotion conflicts. **Use a merge commit, not squash/rebase, for this
+consolidation PR and the later staging-to-main promotion**; see the verified
+tree/ancestry proof in the branch reconciliation document.
+
+### Earlier 21 September continuation — clinical write retries, PR #586
 
 - **PR #584 was squash-merged into staging** on 21 September at 06:26 UTC as
   `dcd7d15`, and [PR #585](https://github.com/IUI-Solutions-HealthDoc/healthdoc/pull/585)

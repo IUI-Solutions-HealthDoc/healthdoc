@@ -8,6 +8,20 @@ No package below has been newly implemented or accepted by creating this documen
 
 ## Baseline to preserve
 
+### Branch consolidation — 21 September 2026
+
+- Verified #584/#585/#586/#587 merge history. Current staging `5771931`, main
+  `9222f07`; recent retry/M1 work is already in staging, not yet main.
+- Preserved the duplicate-ABHA message regression and redacted operator-recorded
+  M1 case updates; support status reflects the owner's report of a new ticket,
+  without inventing its number or a reply.
+- Recovered the unique `docs/project-review-2026-09-19.md` from `c8dc862` as a
+  clearly historical archive, without overwriting current CLAUDE/acceptance notes.
+- [Branch reconciliation](../docs/branch-consolidation-2026-09-21.md) records
+  included, already integrated and superseded branches. Original Suite 9 checkout
+  and untracked source PDFs/Updates.md/uv.lock remain untouched. No production or
+  ABDM participant operation is authorized by publishing this follow-up.
+
 ### Independent continuation — 20 September 2026
 
 Current review: [ten-suite acceptance ledger](../docs/ten-suite-acceptance-status-2026-09-20.md).
