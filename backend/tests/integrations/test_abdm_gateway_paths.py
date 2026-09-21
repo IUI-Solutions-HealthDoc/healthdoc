@@ -40,6 +40,7 @@ GATEWAY_PATH_FIELDS = sorted(
         "abdm_path_enrol_abha_address", "abdm_path_profile_account",
         "abdm_path_profile_abha_card",
         "abdm_path_login_request_otp", "abdm_path_login_verify",
+        "abdm_path_login_verify_user",
     }
 )
 

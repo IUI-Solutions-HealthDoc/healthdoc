@@ -144,7 +144,12 @@ class OtpSession:
     consent_granted_at: str | None = None
     #: Enrolment continuation inside the same ABDM transaction.
     #: enrol_otp → mobile_pending → mobile_otp → address_pending.
+    #: Login account selection uses stage "account_select".
     stage: str | None = None
+    #: Short-lived ABDM selection credential. Never returned to the browser.
+    selection_token: str | None = None
+    #: ABHA numbers ABDM returned for this OTP. The desk must choose one.
+    account_choices: list[str] | None = None
 
     def to_json(self) -> str:
         return json.dumps(asdict(self) | {"purpose": self.purpose.value})
@@ -183,6 +188,8 @@ async def start(
     consent_language: str | None = None,
     consent_granted_at: str | None = None,
     stage: str | None = None,
+    selection_token: str | None = None,
+    account_choices: list[str] | None = None,
 ) -> OtpSession:
     """Record the first leg and return the session the client will quote back.
 
@@ -205,6 +212,8 @@ async def start(
         consent_language=consent_language,
         consent_granted_at=consent_granted_at,
         stage=stage,
+        selection_token=selection_token,
+        account_choices=account_choices,
     )
     await save(session)
     return session

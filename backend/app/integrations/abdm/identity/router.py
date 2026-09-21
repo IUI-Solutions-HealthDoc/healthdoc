@@ -287,18 +287,20 @@ class AadhaarOtpRequest(BaseModel):
 
 
 class AbhaLoginOtpRequest(BaseModel):
-    """Exactly one identifier: the ABHA number (OTP to the ABHA-linked mobile)
-    or the Aadhaar number (OTP through Aadhaar, workbook VRFY_ABHA_101/401)."""
+    """Exactly one identifier. Address and mobile may return several accounts."""
 
     abha_number: str | None = None
     #: Twelve digits. Encrypted before transmission and never stored.
     aadhaar: str | None = Field(default=None, min_length=12, max_length=12, pattern=r"^\d{12}$")
+    abha_address: str | None = Field(default=None, min_length=3, max_length=120)
+    mobile: str | None = Field(default=None, pattern=r"^\d{10}$")
     patient_id: uuid.UUID
 
     @model_validator(mode="after")
     def _exactly_one_identifier(self) -> "AbhaLoginOtpRequest":
-        if (self.abha_number is None) == (self.aadhaar is None):
-            raise ValueError("provide exactly one of abha_number or aadhaar")
+        present = [value for value in (self.abha_number, self.aadhaar, self.abha_address, self.mobile) if value is not None]
+        if len(present) != 1:
+            raise ValueError("provide exactly one of abha_number, aadhaar, abha_address or mobile")
         return self
 
 
@@ -310,11 +312,14 @@ class OtpResendRequest(BaseModel):
     patient_id: uuid.UUID
     abha_number: str | None = None
     aadhaar: str | None = Field(default=None, min_length=12, max_length=12, pattern=r"^\d{12}$")
+    abha_address: str | None = Field(default=None, min_length=3, max_length=120)
+    mobile: str | None = Field(default=None, pattern=r"^\d{10}$")
 
     @model_validator(mode="after")
     def _exactly_one_identifier(self) -> "OtpResendRequest":
-        if (self.abha_number is None) == (self.aadhaar is None):
-            raise ValueError("provide exactly one of abha_number or aadhaar")
+        present = [value for value in (self.abha_number, self.aadhaar, self.abha_address, self.mobile) if value is not None]
+        if len(present) != 1:
+            raise ValueError("provide exactly one of abha_number, aadhaar, abha_address or mobile")
         return self
 
 
@@ -356,6 +361,7 @@ class AbhaIssuedOut(BaseModel):
     next_step: str = "complete"
     suggested_addresses: list[str] = []
     has_nha_card: bool = False
+    accounts: list[dict[str, str | None]] = []
     #: Deliberately absent: the linking/profile token. It is a credential, it is
     #: stored encrypted server-side, and a browser has no use for it.
 
@@ -370,6 +376,7 @@ _CLIENT_IDENTITY_CODES = {
     "abha_address_invalid",
     "abdm_account_selection_required",
     "abdm_no_address_suggestions",
+    "abha_account_not_in_selection",
 }
 
 
@@ -416,6 +423,8 @@ async def _resend(
             started_by=str(current_db_user.id),
             abha_number=_normalise_abha(payload.abha_number) if payload.abha_number else None,
             aadhaar=payload.aadhaar,
+            abha_address=payload.abha_address,
+            mobile=payload.mobile,
         )
     except (OtpSessionNotFound, OtpSessionMismatch):
         raise HTTPException(
@@ -1122,6 +1131,8 @@ async def login_request_otp(
         result = await identity_service.request_login_otp(
             abha_number=_normalise_abha(payload.abha_number) if payload.abha_number else None,
             aadhaar=payload.aadhaar,
+            abha_address=payload.abha_address,
+            mobile=payload.mobile,
             facility_id=str(current_db_user.facility_id),
             started_by=str(current_db_user.id),
             patient_id=str(payload.patient_id),
@@ -1204,6 +1215,19 @@ async def login_verify_otp(
     except identity_service.AbdmIdentityError as exc:
         raise _identity_error(exc) from exc
 
+    if issued.next_step == "account_select":
+        session = await _bound_otp_session(
+            db, current_db_user, payload.session_id, OtpPurpose.LOGIN_BY_ABHA
+        )
+        return AbhaIssuedOut(
+            abha_number="",
+            linked=False,
+            linked_patient_id=uuid.UUID(session.patient_id),
+            session_id=payload.session_id,
+            next_step="account_select",
+            accounts=[{"abha_number": number, "name": name} for number, name in issued.account_choices],
+        )
+
     linked_patient_id = await _persist_verified_identity(
         db=db,
         current_db_user=current_db_user,
@@ -1218,4 +1242,59 @@ async def login_verify_otp(
         gender=issued.gender,
         date_of_birth=issued.date_of_birth,
         linked_patient_id=linked_patient_id,
+        has_nha_card=bool(issued.linking_token),
+    )
+
+
+class LoginAccountSelect(BaseModel):
+    session_id: str
+    patient_id: uuid.UUID
+    abha_number: str
+
+
+@router.post(
+    "/login/select-account",
+    response_model=AbhaIssuedOut,
+    dependencies=[Depends(require_roles("receptionist", "doctor"))],
+)
+async def login_select_account(
+    payload: LoginAccountSelect,
+    current_db_user: CurrentDbUser,
+    db: DbSession,
+) -> AbhaIssuedOut:
+    """Bind the account the desk selected. A number ABDM did not return is refused."""
+    await _bound_otp_session(db, current_db_user, payload.session_id, OtpPurpose.LOGIN_BY_ABHA)
+    try:
+        issued = await identity_service.select_login_account(
+            session_id=payload.session_id,
+            abha_number=_normalise_abha(payload.abha_number),
+            facility_id=str(current_db_user.facility_id),
+        )
+    except (OtpSessionNotFound, OtpSessionMismatch):
+        raise HTTPException(
+            404,
+            {"code": "otp_session_not_found", "message": "This OTP session has expired or does not exist"},
+        ) from None
+    except AbdmNotConfigured:
+        raise _unavailable("ABDM credentials are not configured on this server") from None
+    except AbdmUnavailable:
+        raise _unavailable("ABDM did not respond") from None
+    except AbdmRejected as exc:
+        log.warning("ABDM declined an account selection (%s)", exc.status_code)
+        raise HTTPException(400, {"code": "abha_account_not_in_selection", "message": "ABDM did not accept this account. Choose another one."}) from exc
+    except identity_service.AbdmIdentityError as exc:
+        raise _identity_error(exc) from exc
+    linked_patient_id = await _persist_verified_identity(
+        db=db,
+        current_db_user=current_db_user,
+        session_id=payload.session_id,
+        purpose=OtpPurpose.LOGIN_BY_ABHA,
+        issued=issued,
+    )
+    return AbhaIssuedOut(
+        abha_number=issued.abha_number,
+        abha_address=issued.abha_address,
+        name=issued.name,
+        linked_patient_id=linked_patient_id,
+        has_nha_card=bool(issued.linking_token),
     )

@@ -12,6 +12,7 @@ import {
   resendAbhaOtp,
   submitEnrolmentAbhaAddress,
   verifyAbhaEnrolmentOtp,
+  selectAbhaLoginAccount,
   verifyAbhaLoginOtp,
   verifyEnrolmentMobileOtp,
 } from "./api";
@@ -30,7 +31,7 @@ const ENROLMENT_CONSENT_TEXT =
 
 type Flow = "existing" | "new";
 /** How an existing ABHA is proven: OTP to its linked mobile, or through Aadhaar. */
-type Method = "abha-number" | "aadhaar";
+type Method = "abha-number" | "aadhaar" | "abha-address" | "mobile";
 
 /** Mirrors the server cooldown; the server is authoritative and answers 429
  *  with retry_after_seconds if the desk is early. */
@@ -123,12 +124,24 @@ function PatientAbhaIdentity({ patient }: Props) {
     setSuggestions([]);
     setSelectedAddress("");
     setConsentGranted(false);
+    setAccounts([]);
+    setSelectedAccount("");
     communicationMobile.current = null;
   }
 
+  const [accounts, setAccounts] = useState<{ abha_number: string; name?: string | null }[]>([]);
+  const [selectedAccount, setSelectedAccount] = useState("");
   const usesAadhaar = flow === "new" || method === "aadhaar";
+  const usesMobile = flow === "existing" && method === "mobile";
+  const usesAddress = flow === "existing" && method === "abha-address";
   const digits = digitsOnly(identifier);
-  const identifierValid = usesAadhaar ? digits.length === 12 : isValidAbhaInput(identifier);
+  const identifierValid = usesAadhaar
+    ? digits.length === 12
+    : usesMobile
+      ? digits.length === 10
+      : usesAddress
+        ? identifier.includes("@") && !identifier.includes(" ")
+        : isValidAbhaInput(identifier);
   const otpValid = /^\d{4,8}$/.test(otp);
   const mobileNormalised = mobile.trim() ? normaliseIndianMobileInput(mobile) : null;
   const mobileValid = !mobile.trim() || mobileNormalised !== null;
@@ -163,14 +176,20 @@ function PatientAbhaIdentity({ patient }: Props) {
       return;
     }
     if (!identifierValid) {
-      setError(usesAadhaar ? "Enter a valid 12-digit Aadhaar number." : "Enter a valid 14-digit ABHA number.");
+      setError(usesAadhaar ? "Enter a valid 12-digit Aadhaar number." : usesMobile ? "Enter a 10-digit communication mobile." : usesAddress ? "Enter the ABHA address." : "Enter a valid 14-digit ABHA number.");
       return;
     }
     const generation = beginRequest();
     if (generation === null) return;
     setBusy(true);
     setError(null);
-    const loginIdentifier: AbhaLoginIdentifier = usesAadhaar ? { aadhaar: digits } : { abha_number: identifier };
+    const loginIdentifier: AbhaLoginIdentifier = usesAadhaar
+      ? { aadhaar: digits }
+      : usesMobile
+        ? { mobile: digits }
+        : usesAddress
+          ? { abha_address: identifier.trim() }
+          : { abha_number: identifier };
     try {
       const result = flow === "existing"
         ? await requestAbhaLoginOtp(patient.id, loginIdentifier, newIdempotencyKey())
@@ -240,6 +259,13 @@ function PatientAbhaIdentity({ patient }: Props) {
         setError("ABDM did not confirm identity binding for this patient. Restart verification.");
         return;
       }
+      if (flow === "existing" && result.next_step === "account_select" && result.accounts && result.accounts.length > 1) {
+        setAccounts(result.accounts);
+        setSelectedAccount("");
+        setSessionId(result.session_id ?? sessionId);
+        setOtp("");
+        return;
+      }
       if (flow === "new" && result.next_step === "mobile_verify" && result.session_id) {
         setSessionId(result.session_id);
         setEnrolPhase("mobile");
@@ -261,6 +287,35 @@ function PatientAbhaIdentity({ patient }: Props) {
       // typed code so the retry starts from an empty field.
       if (refusalCode(reason) === "otp_rejected") setOtp("");
       setError(reason instanceof ApiError ? reason.message : "ABDM could not verify the OTP. Try again.");
+    } finally {
+      if (isCurrent(generation)) {
+        lifecycle.current.pending = false;
+        setBusy(false);
+      }
+    }
+  }
+
+  async function chooseAccount() {
+    if (!sessionId || !selectedAccount) {
+      setError("Choose the ABHA account the patient confirmed.");
+      return;
+    }
+    const generation = beginRequest();
+    if (generation === null) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await selectAbhaLoginAccount(patient.id, sessionId, selectedAccount, newIdempotencyKey());
+      if (!isCurrent(generation)) return;
+      if (!result.linked || result.linked_patient_id !== patient.id) {
+        setError("ABDM did not confirm identity binding for this patient. Restart verification.");
+        return;
+      }
+      setLinked(result);
+      setAccounts([]);
+      setSessionId(null);
+    } catch (reason) {
+      if (isCurrent(generation)) setError(reason instanceof ApiError ? reason.message : "ABDM could not confirm that account.");
     } finally {
       if (isCurrent(generation)) {
         lifecycle.current.pending = false;
@@ -403,19 +458,32 @@ function PatientAbhaIdentity({ patient }: Props) {
         <div className="flex flex-wrap gap-2" role="group" aria-label="Verification method">
           <button type="button" onClick={() => changeMethod("abha-number")} aria-pressed={method === "abha-number"} className={`rounded-md border px-3 py-1.5 text-xs ${method === "abha-number" ? "border-primary bg-primary/10" : "border-border"}`}>OTP to ABHA-linked mobile</button>
           <button type="button" onClick={() => changeMethod("aadhaar")} aria-pressed={method === "aadhaar"} className={`rounded-md border px-3 py-1.5 text-xs ${method === "aadhaar" ? "border-primary bg-primary/10" : "border-border"}`}>OTP through Aadhaar</button>
+          <button type="button" onClick={() => changeMethod("abha-address")} aria-pressed={method === "abha-address"} className={`rounded-md border px-3 py-1.5 text-xs ${method === "abha-address" ? "border-primary bg-primary/10" : "border-border"}`}>ABHA address</button>
+          <button type="button" onClick={() => changeMethod("mobile")} aria-pressed={method === "mobile"} className={`rounded-md border px-3 py-1.5 text-xs ${method === "mobile" ? "border-primary bg-primary/10" : "border-border"}`}>Communication mobile</button>
         </div>
       ) : null}
 
-      {!sessionId ? (
+      {accounts.length > 0 ? (
+        <fieldset className="space-y-3">
+          <legend className="text-sm text-muted-foreground">ABDM returned more than one account. Choose the one that belongs to this patient.</legend>
+          {accounts.map((account) => (
+            <label key={account.abha_number} className="flex items-center gap-2 text-sm">
+              <input type="radio" name="abha-account" value={account.abha_number} checked={selectedAccount === account.abha_number} onChange={() => setSelectedAccount(account.abha_number)} />
+              <span>{account.abha_number}{account.name ? ` · ${account.name}` : ""}</span>
+            </label>
+          ))}
+          <button type="button" disabled={busy || !selectedAccount} onClick={() => void chooseAccount()} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50">Link selected account</button>
+        </fieldset>
+      ) : !sessionId ? (
         <div className="space-y-3">
           <label className="block space-y-1 text-sm">
-            <span className="text-muted-foreground">{usesAadhaar ? "Aadhaar number" : "ABHA number"}</span>
+            <span className="text-muted-foreground">{usesAadhaar ? "Aadhaar number" : usesMobile ? "Communication mobile" : usesAddress ? "ABHA address" : "ABHA number"}</span>
             <input
               value={identifier}
               onChange={(event) => setIdentifier(event.target.value)}
               inputMode="numeric"
               autoComplete="off"
-              maxLength={usesAadhaar ? 12 : 20}
+              maxLength={usesAadhaar ? 12 : usesMobile ? 10 : 50}
               aria-invalid={Boolean(identifier) && !identifierValid}
               className={`w-full rounded-md border px-3 py-2 ${identifier && !identifierValid ? "border-danger" : "border-border"}`}
             />

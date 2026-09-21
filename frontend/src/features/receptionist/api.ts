@@ -51,9 +51,10 @@ export function registerPatient(
 }
 
 function loginIdentifierBody(identifier: AbhaLoginIdentifier): Record<string, string> {
-  return "aadhaar" in identifier
-    ? { aadhaar: digitsOnly(identifier.aadhaar) }
-    : { abha_number: digitsOnly(identifier.abha_number) };
+  if ("aadhaar" in identifier) return { aadhaar: digitsOnly(identifier.aadhaar) };
+  if ("mobile" in identifier) return { mobile: digitsOnly(identifier.mobile) };
+  if ("abha_address" in identifier) return { abha_address: identifier.abha_address.trim() };
+  return { abha_number: digitsOnly(identifier.abha_number) };
 }
 
 export function requestAbhaLoginOtp(
@@ -81,6 +82,19 @@ export function resendAbhaOtp(
   return api<AbhaOtpRequested>(path, {
     method: "POST",
     body: JSON.stringify({ patient_id: patientId, session_id: sessionId, ...loginIdentifierBody(identifier) }),
+    idempotencyKey,
+  });
+}
+
+export function selectAbhaLoginAccount(
+  patientId: string,
+  sessionId: string,
+  abhaNumber: string,
+  idempotencyKey: string,
+): Promise<AbhaIdentityLinked> {
+  return api<AbhaIdentityLinked>("/abdm/abha/login/select-account", {
+    method: "POST",
+    body: JSON.stringify({ patient_id: patientId, session_id: sessionId, abha_number: digitsOnly(abhaNumber) }),
     idempotencyKey,
   });
 }
