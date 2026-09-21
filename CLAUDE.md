@@ -10,15 +10,28 @@ Compose. Targeting ABDM certification and a CERT-In WASA audit.
 has advanced substantially; acceptance and ABDM certification have not been
 established by counting commits or test cases.**
 
-### Latest integration snapshot — 21 September, branch consolidation
+### Latest integration snapshot — 21 September, after #589/#590
 
-**Promotion follow-up:** #588 passed all four CI jobs and was approved, but was
-squash-merged as `f96321d`. Its source changes are in staging; the main-parent
-ancestry was dropped. #589 (staging -> main) is approved but was conflicting at
-this snapshot. `fix/promotion-589-history` restores the verified already-integrated
-main ancestry without changing application files. Merge the repair and #589
-with **merge commits**, not squash/rebase. Verify their final GitHub state before
-using these preparation-time notes as a release claim. Updated next-agent task:
+**Verified post-merge baseline.** Main `308660a` (parent only `9222f07`; #589
+was squash-merged). Staging `741a474` (merge commit for #590). File trees are
+identical (`43d9d839`). Main push CI 35607530916 passed: 2104 backend tests /
+7 warnings, 36 script regressions, 166 frontend tests. Weekly Electron was
+skipped. This is tested integration, not a production deployment or ABDM
+certification. Migration head in that baseline is 0082.
+
+**History housekeeping, not an application defect.** Before the next promotion,
+reconcile main's parent back into staging with an approved merge commit. Do
+not squash, rebase, or force-push either branch. Re-prove tree equality first.
+
+**This branch** `feat/abdm-m1-enrol-consent-mobile-address` is cut from
+`741a474`. It adds patient-facing enrolment consent, communication-mobile
+continuation, suggested ABHA-address selection, and an authorized NHA card
+proxy. Profile X-tokens are stored separately from HIP linking tokens
+(migration 0083). Hindi consent copy is withheld until an approved translation
+exists. No live ABDM call is part of this change.
+
+The notes below that still say #589 is conflicting or that main is `9222f07`
+are historical. Updated next-agent task:
 [completion prompt](docs/next-agent-completion-prompt-2026-09-21.md).
 
 This subsection supersedes pending-PR/runtime statements in the dated sections

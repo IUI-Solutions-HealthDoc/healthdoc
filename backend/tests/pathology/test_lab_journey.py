@@ -82,4 +82,6 @@ def test_lab_order_to_critical_alert_and_dual_verification(client_as):
     response = client.get("/api/v1/pathology/order-items?status=released")
     assert response.status_code == 200, response.text
     assert any(row["id"] == item_id for row in response.json()["data"]["items"])
-    assert asyncio.run(_critical_notification_count(item_id)) == 1
+    # No approved haemoglobin rule is configured, so the result is stored
+    # without a critical alert. The retired 7–20 placeholder must not fire.
+    assert asyncio.run(_critical_notification_count(item_id)) == 0

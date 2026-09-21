@@ -3,6 +3,12 @@
 Status: **executing / not fully accepted**. Review target: development and PR
 integration into staging, not a production deployment or a certification claim.
 
+**21 September post-merge note.** Main `308660a` and staging `741a474` have
+identical trees. The promotion conflict described below is historical. Suite
+acceptance is unchanged. M1 consent, communication-mobile continuation,
+address selection and the NHA card proxy are in progress on
+`feat/abdm-m1-enrol-consent-mobile-address` and are not live acceptance.
+
 ## Answer
 
 All ten suites are **not finished against their original acceptance criteria**.

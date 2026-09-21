@@ -9,10 +9,9 @@ Pydantic models; the envelope middleware wraps them.
 
 NOTE: project uses async SQLAlchemy (AsyncSession) - every DB call is awaited.
 
-STILL OPEN:
-- CRITICAL_THRESHOLDS only has a placeholder hemoglobin range. Needs real
-  values from the pathologist/lab director before this ships. This is the
-  one item here that no amount of merging fixes — it needs a clinician.
+Critical flags come only from approved analyte rows. The placeholder
+haemoglobin 7–20 range has been removed and is not replaced with another
+guess. A test with no catalogue row is stored without a critical alert.
 
 RESOLVED since this module was written (all three were "blocked on someone
 else's work" and that work has landed):
@@ -492,29 +491,20 @@ async def _write_audit_log(db: AsyncSession, *, table_name: str, row_id: uuid.UU
 
 # --- #184: result entry + dual verification by a different lab professional ---
 
-CRITICAL_THRESHOLDS = {
-    "hemoglobin_g_dl": {"low": 7.0, "high": 20.0},
-}
-
-
 def _check_critical(result_data: dict) -> list[str]:
-    flagged = []
-    for field, limits in CRITICAL_THRESHOLDS.items():
-        value = result_data.get(field)
-        if value is None:
-            continue
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise HTTPException(
-                status_code=422,
-                detail={
-                    "code": "invalid_result_value",
-                    "field": field,
-                    "message": "Critical-threshold fields must contain a number",
-                },
-            )
-        if value < limits["low"] or value > limits["high"]:
-            flagged.append(field)
-    return flagged
+    """Critical flags already stored from an approved analyte rule.
+
+    A result with no `_analytes` evaluation is not critical. The old
+    haemoglobin 7–20 placeholder is not an approved limit.
+    """
+    analytes = result_data.get("_analytes")
+    if not isinstance(analytes, dict):
+        return []
+    return [
+        code
+        for code, info in analytes.items()
+        if isinstance(info, dict) and str(info.get("flag", "")).startswith("critical")
+    ]
 
 
 @router.get(
