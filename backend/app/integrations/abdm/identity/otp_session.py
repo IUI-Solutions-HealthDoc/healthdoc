@@ -87,6 +87,27 @@ class OtpSessionMismatch(Exception):
     """The session exists but does not belong to this caller or this purpose."""
 
 
+#: ABDM's own OTP validity is a few minutes; asking again inside this window
+#: only races the SMS that is already in flight.
+RESEND_COOLDOWN_SECONDS = 30
+#: Fresh gateway transactions per desk attempt. Each resend spends an SMS on the
+#: patient's phone and a request against the sandbox quota; three is enough to
+#: survive a dropped message and not enough to become a delivery-flood tool.
+MAX_RESENDS = 3
+
+
+class OtpResendTooSoon(Exception):
+    """Cooldown has not elapsed since the last OTP for this exchange was sent."""
+
+    def __init__(self, retry_after_seconds: int) -> None:
+        super().__init__(retry_after_seconds)
+        self.retry_after_seconds = retry_after_seconds
+
+
+class OtpResendExhausted(Exception):
+    """This exchange has already been resent MAX_RESENDS times; start over."""
+
+
 @dataclass(frozen=True)
 class OtpSession:
     """Our half of an in-flight OTP exchange.
@@ -109,6 +130,13 @@ class OtpSession:
     #: enrolling someone who has no record yet.
     patient_id: str | None
     created_at: str
+    #: Which identifier the first leg was keyed on ("abha-number", "aadhaar",
+    #: "mobile"). The second leg must quote the same scope back to ABDM, so it
+    #: is remembered here rather than re-derived from client input. None for
+    #: sessions written before this field existed, which behave as before.
+    login_hint: str | None = None
+    #: How many fresh gateway transactions this desk attempt has already used.
+    resends: int = 0
 
     def to_json(self) -> str:
         return json.dumps(asdict(self) | {"purpose": self.purpose.value})
@@ -117,6 +145,14 @@ class OtpSession:
     def from_json(cls, raw: str) -> OtpSession:
         data = json.loads(raw)
         return cls(**(data | {"purpose": OtpPurpose(data["purpose"])}))
+
+    def resend_allowed(self, *, now: datetime | None = None) -> None:
+        """Refuse a resend that is too soon or one too many; return otherwise."""
+        if self.resends >= MAX_RESENDS:
+            raise OtpResendExhausted
+        elapsed = ((now or datetime.now(UTC)) - datetime.fromisoformat(self.created_at)).total_seconds()
+        if elapsed < RESEND_COOLDOWN_SECONDS:
+            raise OtpResendTooSoon(int(RESEND_COOLDOWN_SECONDS - elapsed) or 1)
 
 
 def _key(session_id: str) -> str:
@@ -130,6 +166,8 @@ async def start(
     facility_id: str,
     started_by: str,
     patient_id: str | None = None,
+    login_hint: str | None = None,
+    resends: int = 0,
 ) -> OtpSession:
     """Record the first leg and return the session the client will quote back.
 
@@ -145,6 +183,8 @@ async def start(
         started_by=str(started_by),
         patient_id=str(patient_id) if patient_id else None,
         created_at=datetime.now(UTC).isoformat(),
+        login_hint=login_hint,
+        resends=resends,
     )
     await get_redis().set(_key(session.session_id), session.to_json(), ex=OTP_SESSION_TTL_SECONDS)
     return session

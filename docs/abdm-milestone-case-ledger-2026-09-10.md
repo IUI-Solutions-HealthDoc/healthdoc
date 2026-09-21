@@ -204,6 +204,37 @@ Source: [M3_BUILDING_HIU_WITH_APIS_UPDATED_22_August_de6a02460a.xlsx](../ABDM%20
 | 23 | HIU_FLOW_202 | Revoke Consent | Mandatory | NOT RUN | — |
 | 25 | HIU_FLOW_301 | Consent Expiry | Not specified on this row; see source section | NOT RUN | — |
 
+## M1 product-path wiring — 21 September 2026
+
+This section records which workbook rows have a HealthDoc product path, so a
+live session with a consenting participant can be planned case by case. **It
+changes no Live result above**; a product path is a prerequisite for a case,
+not evidence of it. Contracts below are taken from the official
+`Milestone_1_Postman_Collection_18_08_2025` (paths relative to the ABHA host
+`/abha/api`).
+
+| Rows | Product path | Added / status |
+|---|---|---|
+| CRT_ABHA_101/102/104/105/107 | Reception → Create ABHA → Aadhaar OTP (`/v3/enrollment/request/otp`, `/v3/enrollment/enrol/byAadhaar`) | Existing |
+| CRT_ABHA_106, VRFY_ABHA_305/405 (Resend OTP) | “Resend OTP” in the OTP step: `POST /abdm/abha/enrol/aadhaar/resend-otp`, `POST /abdm/abha/login/resend-otp`. Server-enforced 30 s cooldown and 3 resends per desk attempt; the identifier is re-supplied by the desk and never stored; the previous session is consumed only after ABDM accepted the new request | **Added 21 Sep** (`feat/abdm-m1-desk-otp-resend-aadhaar-verify`) |
+| VRFY_ABHA_304/402 (Incorrect OTP) | A gateway 4xx on the verify leg is now HTTP 400 `otp_rejected` (was 502 `abdm_rejected`); the session stays alive for a retry or resend; the desk shows the refusal and clears the code field | **Added 21 Sep** |
+| VRFY_ABHA_101, VRFY_ABHA_401/403/404 (existing ABHA via Aadhaar OTP) | “OTP through Aadhaar” method on Use existing ABHA: `/v3/profile/login/request/otp` with scope `["abha-login","aadhaar-verify"]`, `loginHint` `aadhaar`, `otpSystem` `aadhaar`; verify leg quotes the same scope from the session | **Added 21 Sep** |
+| VRFY_ABHA_201 | Use existing ABHA → OTP to ABHA-linked mobile | Existing (PARTIAL live) |
+| TAGGING_UNIQUEPATIENTID_UNIQUEABHANUMBER | Binding on verification; `GET/DELETE /abdm/abha/patients/{id}/abha` | Existing (PARTIAL live) |
+| SHARE_PATIENT_PROFILE_701 | Scan-and-Share desk (`scan_share_router.py`) | Existing |
+| CRT_ABHA_108/109 (communication mobile) | **No product path.** `POST /v3/enrollment/request/otp` `{txnId, scope:["abha-enrol","mobile-verify"], loginHint:"mobile", loginId:enc(mobile), otpSystem:"abdm"}` then `POST /v3/enrollment/auth/byAbdm` `{scope:["abha-enrol","mobile-verify"], authData:{authMethods:["otp"], otp:{timeStamp, txnId, otpValue:enc(otp)}}}` — needs `OtpPurpose.VERIFY_MOBILE` continuation within the enrolment txn | Missing |
+| CRT_ABHA_112 (suggested ABHA address) | **No product path.** `GET /v3/enrollment/enrol/suggestion` (transaction header) and `POST /v3/enrollment/enrol/abha-address` `{txnId, abhaAddress, preferred:1}` | Missing |
+| CRT_ABHA_113 (display ABHA number) | Shown on the verified panel | Existing |
+| CRT_ABHA_114/115, CRT_ABHA_209/210/308/309 (view/download ABHA card) | **No product path.** `GET /v3/profile/account` and `GET /v3/profile/account/abha-card` with `X-Token: Bearer <token from enrol/verify>`; the token is currently stored encrypted server-side and never returned, so a server-side proxy download is the right shape | Missing |
+| VRFY_ABHA_202 (ABHA address via mobile OTP) | **No product path** (`loginHint` `abha-address`) | Missing |
+| VRFY_ABHA_301–303 (fetch by communication mobile, account selection) | **No product path.** `/v3/profile/login/request/otp` `{scope:["abha-login","mobile-verify"], loginHint:"mobile", …}` → `/v3/profile/login/verify` (may return several `accounts` and a `T-token`) → `POST /v3/profile/login/verify/user` header `T-token: Bearer …` body `{ABHANumber, txnId}`. The current verify leg deliberately refuses a multi-account result (`abdm_account_selection_required`) rather than guessing | Missing |
+| CRT_ABHA_301–309 (demographic authentication) | **No product path**; not in the inspected collection folders used above — confirm the v3 route with NHA before building | Missing |
+| CRT_ABHA_2xx (biometric), 4xx (document), PROF_ABHA_6xx, biometric/QR verification | Optional rows; no product path | Not planned |
+
+Live execution of any row still needs a consenting participant entering
+their own OTPs privately, the sandbox credentials configured on the running
+stack, and case-by-case evidence recorded here with the revision.
+
 ## Evidence needed for a live result
 
 Record the source row, application commit, test time with timezone, local operator role, redacted request/correlation IDs, expected result, observed result, and any private evidence location. A queued operation or HTTP 202 is not completion: verify the callback, persisted state, correct patient's document and consumer-side rendering. Denial, revocation and expiry require a fresh refusal to fetch/display, not only a status-label change.

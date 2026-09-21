@@ -83,6 +83,10 @@ async def test_the_aadhaar_number_is_never_stored(redis):
     assert set(stored) == {
         "session_id", "abdm_txn_id", "purpose", "facility_id",
         "started_by", "patient_id", "created_at",
+        # login_hint is the identifier CATEGORY quoted back as the verify
+        # scope ("aadhaar"/"abha-number"), never the identifier; resends is a
+        # counter bounding fresh gateway transactions per desk attempt.
+        "login_hint", "resends",
     }, "a new field here is a new thing kept about a patient — justify it"
 
     # And the property the substring check was reaching for, stated so it can

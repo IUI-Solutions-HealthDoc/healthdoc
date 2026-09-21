@@ -199,6 +199,10 @@ _ALLOWED_SESSION_FIELDS = {
     "started_by",
     "patient_id",
     "created_at",
+    # Admitted 21 September for resend/Aadhaar-verify: a category label
+    # ("abha-number"/"aadhaar", never the identifier) and a resend counter.
+    "login_hint",
+    "resends",
 }
 
 
@@ -486,3 +490,137 @@ async def test_enrolment_address_list_becomes_a_scalar(monkeypatch):
     )
     assert result.abha_address == "test@sbx"
     assert result.name == "Synthetic Patient"
+
+
+# --- Aadhaar-OTP verification of an existing ABHA and resend (21 September) ---
+
+
+async def test_login_by_aadhaar_uses_the_aadhaar_verify_scope_on_both_legs(monkeypatch, rsa_key):
+    """Workbook VRFY_ABHA_101/401: the request leg encrypts the Aadhaar and asks
+    for the aadhaar-verify scope; the verify leg must quote that same scope
+    back from the session, not re-derive it from anything the client sends."""
+    gw = _gateway(monkeypatch, [
+        {"txnId": "abdm-txn-a"},
+        {"authResult": "success", "token": "t", "accounts": [
+            {"ABHANumber": "91-1111-2222-3333", "status": "ACTIVE", "name": "Test"}]},
+    ])
+    requested = await service.request_login_otp(
+        aadhaar=AADHAAR, facility_id=FACILITY_A, started_by=STAFF, patient_id="p1"
+    )
+    first = gw.calls[0][1]
+    assert first["scope"] == ["abha-login", "aadhaar-verify"]
+    assert first["loginHint"] == "aadhaar" and first["otpSystem"] == "aadhaar"
+    assert _decrypt(rsa_key, first["loginId"]) == AADHAAR
+    assert AADHAAR not in gw.calls[0][0]
+
+    issued = await service.verify_login_otp(
+        session_id=requested.session_id, otp="123456", facility_id=FACILITY_A
+    )
+    assert gw.calls[1][1]["scope"] == ["abha-login", "aadhaar-verify"]
+    assert issued.abha_number == "91-1111-2222-3333"
+
+
+async def test_login_by_abha_number_still_uses_the_mobile_verify_scope(monkeypatch):
+    gw = _gateway(monkeypatch, [{"txnId": "abdm-txn-b"}])
+    await service.request_login_otp(
+        abha_number="91111122223333", facility_id=FACILITY_A, started_by=STAFF
+    )
+    assert gw.last_body["scope"] == ["abha-login", "mobile-verify"]
+    assert gw.last_body["loginHint"] == "abha-number" and gw.last_body["otpSystem"] == "abdm"
+
+
+@pytest.mark.parametrize("kwargs", [{}, {"abha_number": "91111122223333", "aadhaar": AADHAAR}])
+async def test_login_requires_exactly_one_identifier(monkeypatch, kwargs):
+    gw = _gateway(monkeypatch, [{"txnId": "never"}])
+    with pytest.raises(service.AbdmIdentityError) as exc:
+        await service.request_login_otp(facility_id=FACILITY_A, started_by=STAFF, **kwargs)
+    assert exc.value.code == "abdm_identifier_required"
+    assert gw.calls == [], "nothing may reach the gateway without a single identifier"
+
+
+async def test_a_session_from_before_login_hint_existed_verifies_as_an_abha_number_login(monkeypatch, fake_redis):
+    """Sessions written by the previous release carry no login_hint; they were
+    necessarily ABHA-number logins and must keep working across the deploy."""
+    gw = _gateway(monkeypatch, [{"authResult": "success", "token": "t", "accounts": [
+        {"ABHANumber": "91-1111-2222-3333", "status": "ACTIVE"}]}])
+    legacy = {"session_id": "legacy", "abdm_txn_id": "abdm-txn-old", "purpose": "login_by_abha",
+              "facility_id": FACILITY_A, "started_by": STAFF, "patient_id": "p1",
+              "created_at": "2026-09-20T00:00:00+00:00"}
+    fake_redis.store["abdm:otp:legacy"] = json.dumps(legacy)
+    await service.verify_login_otp(session_id="legacy", otp="123456", facility_id=FACILITY_A)
+    assert gw.last_body["scope"] == ["abha-login", "mobile-verify"]
+
+
+async def test_resend_issues_a_fresh_transaction_bound_to_the_same_patient_and_consumes_the_old_session(monkeypatch, fake_redis):
+    """Workbook CRT_ABHA_106 / VRFY_ABHA_305/405. A resend is a new gateway
+    request with txnId "" and a new session; the old session is spent only after
+    the gateway accepted the new request, and the counter advances."""
+    gw = _gateway(monkeypatch, [{"txnId": "abdm-txn-1"}, {"txnId": "abdm-txn-2"}])
+    first = await service.request_aadhaar_otp(
+        aadhaar=AADHAAR, facility_id=FACILITY_A, started_by=STAFF, patient_id="p1"
+    )
+    old = await otp_session.load(first.session_id, facility_id=FACILITY_A, purpose=OtpPurpose.ENROL_BY_AADHAAR)
+    aged = json.loads(fake_redis.store[f"abdm:otp:{first.session_id}"])
+    aged["created_at"] = "2026-09-20T00:00:00+00:00"  # cooldown elapsed
+    fake_redis.store[f"abdm:otp:{first.session_id}"] = json.dumps(aged)
+
+    second = await service.resend_otp(
+        session_id=first.session_id, purpose=OtpPurpose.ENROL_BY_AADHAAR,
+        facility_id=FACILITY_A, started_by=STAFF, aadhaar=AADHAAR,
+    )
+    assert second.session_id != first.session_id
+    assert second.resends_remaining == otp_session.MAX_RESENDS - 1
+    assert gw.calls[1][1]["txnId"] == "" and gw.calls[1][1]["scope"] == ["abha-enrol"]
+    with pytest.raises(OtpSessionNotFound):
+        await otp_session.load(first.session_id, facility_id=FACILITY_A, purpose=OtpPurpose.ENROL_BY_AADHAAR)
+    fresh = await otp_session.load(second.session_id, facility_id=FACILITY_A, purpose=OtpPurpose.ENROL_BY_AADHAAR)
+    assert fresh.patient_id == old.patient_id == "p1"
+    assert fresh.abdm_txn_id == "abdm-txn-2" and fresh.resends == 1
+    for raw in fake_redis.store.values():
+        assert AADHAAR not in raw, "a resend must not start storing the identifier"
+
+
+async def test_resend_inside_the_cooldown_is_refused_without_touching_the_gateway(monkeypatch):
+    gw = _gateway(monkeypatch, [{"txnId": "abdm-txn-1"}, {"txnId": "never"}])
+    first = await service.request_aadhaar_otp(aadhaar=AADHAAR, facility_id=FACILITY_A, started_by=STAFF)
+    with pytest.raises(otp_session.OtpResendTooSoon) as exc:
+        await service.resend_otp(
+            session_id=first.session_id, purpose=OtpPurpose.ENROL_BY_AADHAAR,
+            facility_id=FACILITY_A, started_by=STAFF, aadhaar=AADHAAR,
+        )
+    assert 0 < exc.value.retry_after_seconds <= otp_session.RESEND_COOLDOWN_SECONDS
+    assert len(gw.calls) == 1
+    # The original OTP stays usable.
+    await otp_session.load(first.session_id, facility_id=FACILITY_A, purpose=OtpPurpose.ENROL_BY_AADHAAR)
+
+
+async def test_resends_are_capped_per_desk_attempt(monkeypatch, fake_redis):
+    gw = _gateway(monkeypatch, [{"txnId": "abdm-txn-1"}, {"txnId": "never"}])
+    first = await service.request_aadhaar_otp(aadhaar=AADHAAR, facility_id=FACILITY_A, started_by=STAFF)
+    stored = json.loads(fake_redis.store[f"abdm:otp:{first.session_id}"])
+    stored |= {"created_at": "2026-09-20T00:00:00+00:00", "resends": otp_session.MAX_RESENDS}
+    fake_redis.store[f"abdm:otp:{first.session_id}"] = json.dumps(stored)
+    with pytest.raises(otp_session.OtpResendExhausted):
+        await service.resend_otp(
+            session_id=first.session_id, purpose=OtpPurpose.ENROL_BY_AADHAAR,
+            facility_id=FACILITY_A, started_by=STAFF, aadhaar=AADHAAR,
+        )
+    assert len(gw.calls) == 1
+
+
+async def test_resend_refuses_another_staff_member_another_facility_and_a_swapped_identifier(monkeypatch, fake_redis):
+    gw = _gateway(monkeypatch, [{"txnId": "abdm-txn-1"}, {"txnId": "never"}])
+    first = await service.request_login_otp(aadhaar=AADHAAR, facility_id=FACILITY_A, started_by=STAFF)
+    stored = json.loads(fake_redis.store[f"abdm:otp:{first.session_id}"])
+    stored["created_at"] = "2026-09-20T00:00:00+00:00"
+    fake_redis.store[f"abdm:otp:{first.session_id}"] = json.dumps(stored)
+    common = {"session_id": first.session_id, "purpose": OtpPurpose.LOGIN_BY_ABHA}
+    with pytest.raises(OtpSessionMismatch):
+        await service.resend_otp(facility_id=FACILITY_A, started_by="someone-else", aadhaar=AADHAAR, **common)
+    with pytest.raises(OtpSessionMismatch):
+        await service.resend_otp(facility_id=FACILITY_B, started_by=STAFF, aadhaar=AADHAAR, **common)
+    # Started with Aadhaar: an ABHA number cannot be substituted mid-exchange.
+    with pytest.raises(service.AbdmIdentityError) as exc:
+        await service.resend_otp(facility_id=FACILITY_A, started_by=STAFF, abha_number="91111122223333", **common)
+    assert exc.value.code == "abdm_identifier_required"
+    assert len(gw.calls) == 1

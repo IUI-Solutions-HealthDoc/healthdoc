@@ -6,6 +6,7 @@ import type {
   PatientSearchRequest,
   PatientSearchResponse,
   AbhaIdentityLinked,
+  AbhaLoginIdentifier,
   AbhaOtpRequested,
   QueueSummary,
   QueueCreate,
@@ -48,14 +49,37 @@ export function registerPatient(
   });
 }
 
+function loginIdentifierBody(identifier: AbhaLoginIdentifier): Record<string, string> {
+  return "aadhaar" in identifier
+    ? { aadhaar: digitsOnly(identifier.aadhaar) }
+    : { abha_number: digitsOnly(identifier.abha_number) };
+}
+
 export function requestAbhaLoginOtp(
   patientId: string,
-  abhaNumber: string,
+  identifier: AbhaLoginIdentifier,
   idempotencyKey: string,
 ): Promise<AbhaOtpRequested> {
   return api<AbhaOtpRequested>("/abdm/abha/login/request-otp", {
     method: "POST",
-    body: JSON.stringify({ patient_id: patientId, abha_number: digitsOnly(abhaNumber) }),
+    body: JSON.stringify({ patient_id: patientId, ...loginIdentifierBody(identifier) }),
+    idempotencyKey,
+  });
+}
+
+/** Fresh OTP for the same desk attempt. The server enforces the cooldown and
+ *  resend limit and consumes the previous session only once ABDM accepted. */
+export function resendAbhaOtp(
+  flow: "existing" | "new",
+  patientId: string,
+  sessionId: string,
+  identifier: AbhaLoginIdentifier,
+  idempotencyKey: string,
+): Promise<AbhaOtpRequested> {
+  const path = flow === "existing" ? "/abdm/abha/login/resend-otp" : "/abdm/abha/enrol/aadhaar/resend-otp";
+  return api<AbhaOtpRequested>(path, {
+    method: "POST",
+    body: JSON.stringify({ patient_id: patientId, session_id: sessionId, ...loginIdentifierBody(identifier) }),
     idempotencyKey,
   });
 }
