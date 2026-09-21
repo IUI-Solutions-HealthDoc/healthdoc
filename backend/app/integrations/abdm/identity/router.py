@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -273,8 +273,35 @@ class AadhaarOtpRequest(BaseModel):
 
 
 class AbhaLoginOtpRequest(BaseModel):
-    abha_number: str
+    """Exactly one identifier: the ABHA number (OTP to the ABHA-linked mobile)
+    or the Aadhaar number (OTP through Aadhaar, workbook VRFY_ABHA_101/401)."""
+
+    abha_number: str | None = None
+    #: Twelve digits. Encrypted before transmission and never stored.
+    aadhaar: str | None = Field(default=None, min_length=12, max_length=12, pattern=r"^\d{12}$")
     patient_id: uuid.UUID
+
+    @model_validator(mode="after")
+    def _exactly_one_identifier(self) -> "AbhaLoginOtpRequest":
+        if (self.abha_number is None) == (self.aadhaar is None):
+            raise ValueError("provide exactly one of abha_number or aadhaar")
+        return self
+
+
+class OtpResendRequest(BaseModel):
+    """Ask for a fresh OTP within the same desk attempt. The identifier is
+    re-supplied because the session never stored it."""
+
+    session_id: str
+    patient_id: uuid.UUID
+    abha_number: str | None = None
+    aadhaar: str | None = Field(default=None, min_length=12, max_length=12, pattern=r"^\d{12}$")
+
+    @model_validator(mode="after")
+    def _exactly_one_identifier(self) -> "OtpResendRequest":
+        if (self.abha_number is None) == (self.aadhaar is None):
+            raise ValueError("provide exactly one of abha_number or aadhaar")
+        return self
 
 
 class OtpVerifyRequest(BaseModel):
@@ -287,6 +314,8 @@ class OtpVerifyRequest(BaseModel):
 class OtpRequestedOut(BaseModel):
     session_id: str
     masked_mobile: str | None = None
+    #: Fresh OTP requests still available for this desk attempt.
+    resends_remaining: int = otp_session.MAX_RESENDS
 
 
 class AbhaIssuedOut(BaseModel):
@@ -304,7 +333,88 @@ class AbhaIssuedOut(BaseModel):
 
 
 def _identity_error(exc: identity_service.AbdmIdentityError) -> HTTPException:
-    return HTTPException(502, {"code": exc.code, "message": exc.message})
+    # Identifier-shape refusals are the caller's to correct; everything else is
+    # the gateway conversation going wrong.
+    status = 400 if exc.code == "abdm_identifier_required" else 502
+    return HTTPException(status, {"code": exc.code, "message": exc.message})
+
+
+def _otp_rejected(exc: AbdmRejected, leg: str) -> HTTPException:
+    """A gateway 4xx on the verify leg is a correctable refusal (wrong, expired
+    or over-tried OTP; workbook VRFY_ABHA_304/402), not a gateway outage. The
+    session stays alive so the desk can retry or request a fresh OTP. Status
+    only is logged: the body can echo the OTP or identifier just sent."""
+    log.warning("ABDM declined a %s verification (%s)", leg, exc.status_code)
+    return HTTPException(
+        400,
+        {
+            "code": "otp_rejected",
+            "message": "ABDM did not accept this OTP. It may be wrong, expired or "
+            "over the attempt limit. Check the code and try again, or request a new OTP.",
+        },
+    )
+
+
+async def _resend(
+    payload: OtpResendRequest,
+    current_db_user: CurrentDbUser,
+    db: AsyncSession,
+    purpose: OtpPurpose,
+) -> OtpRequestedOut:
+    session = await _bound_otp_session(db, current_db_user, payload.session_id, purpose)
+    if session.patient_id != str(payload.patient_id):
+        raise HTTPException(
+            404,
+            {"code": "otp_session_not_found", "message": "This OTP session has expired or does not exist"},
+        )
+    try:
+        result = await identity_service.resend_otp(
+            session_id=payload.session_id,
+            purpose=purpose,
+            facility_id=str(current_db_user.facility_id),
+            started_by=str(current_db_user.id),
+            abha_number=_normalise_abha(payload.abha_number) if payload.abha_number else None,
+            aadhaar=payload.aadhaar,
+        )
+    except (OtpSessionNotFound, OtpSessionMismatch):
+        raise HTTPException(
+            404,
+            {"code": "otp_session_not_found", "message": "This OTP session has expired or does not exist"},
+        ) from None
+    except otp_session.OtpResendTooSoon as exc:
+        raise HTTPException(
+            429,
+            {
+                "code": "otp_resend_too_soon",
+                "message": f"Wait {exc.retry_after_seconds} seconds before requesting another OTP",
+                "retry_after_seconds": exc.retry_after_seconds,
+            },
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        ) from exc
+    except otp_session.OtpResendExhausted:
+        raise HTTPException(
+            429,
+            {
+                "code": "otp_resend_exhausted",
+                "message": "No more OTP resends for this attempt. Start the verification again.",
+            },
+        ) from None
+    except AbdmNotConfigured:
+        raise _unavailable("ABDM credentials are not configured on this server") from None
+    except AbdmPublicKeyMissing:
+        raise _unavailable("ABDM public certificate is not configured on this server") from None
+    except AbdmUnavailable:
+        raise _unavailable("ABDM did not respond") from None
+    except AbdmRejected as exc:
+        log.warning("ABDM declined an OTP resend (%s)", exc.status_code)
+        raise HTTPException(502, {"code": "abdm_rejected", "message": "ABDM declined the request"}) from exc
+    except identity_service.AbdmIdentityError as exc:
+        raise _identity_error(exc) from exc
+    return OtpRequestedOut(
+        session_id=result.session_id,
+        masked_mobile=result.masked_mobile,
+        resends_remaining=result.resends_remaining,
+    )
 
 
 def _unavailable(reason: str) -> HTTPException:
@@ -462,7 +572,32 @@ async def enrol_request_otp(
     except identity_service.AbdmIdentityError as exc:
         raise _identity_error(exc) from exc
 
-    return OtpRequestedOut(session_id=result.session_id, masked_mobile=result.masked_mobile)
+    return OtpRequestedOut(
+        session_id=result.session_id,
+        masked_mobile=result.masked_mobile,
+        resends_remaining=result.resends_remaining,
+    )
+
+
+@router.post(
+    "/enrol/aadhaar/resend-otp",
+    response_model=OtpRequestedOut,
+    dependencies=[Depends(require_roles("receptionist", "doctor"))],
+)
+async def enrol_resend_otp(
+    payload: OtpResendRequest,
+    current_db_user: CurrentDbUser,
+    db: DbSession,
+) -> OtpRequestedOut:
+    """Fresh enrolment OTP for the same patient and desk attempt (CRT_ABHA_106).
+
+    Cooldown and a resend limit are enforced server-side; the previous session
+    is consumed only once ABDM accepted the new request.
+    """
+    if payload.aadhaar is None:
+        raise HTTPException(400, {"code": "abdm_identifier_required", "message": "Enrolment resend requires the Aadhaar number"})
+    await _get_patient_or_404(db, payload.patient_id, current_db_user.facility_id)
+    return await _resend(payload, current_db_user, db, OtpPurpose.ENROL_BY_AADHAAR)
 
 
 @router.post(
@@ -508,14 +643,7 @@ async def enrol_verify_otp(
     except AbdmUnavailable:
         raise _unavailable("ABDM did not respond") from None
     except AbdmRejected as exc:
-        log.warning("ABDM declined an enrolment verification (%s)", exc.status_code)
-        raise HTTPException(
-            502,
-            {
-                "code": "abdm_rejected",
-                "message": "ABDM declined the OTP",
-            },
-        ) from exc
+        raise _otp_rejected(exc, "enrolment") from exc
     except identity_service.AbdmIdentityError as exc:
         raise _identity_error(exc) from exc
 
@@ -546,11 +674,13 @@ async def login_request_otp(
     current_db_user: CurrentDbUser,
     db: DbSession,
 ) -> OtpRequestedOut:
-    """Send an OTP to the mobile behind an ABHA the patient says they hold."""
+    """Send an OTP for an ABHA the patient says they hold — to its linked
+    mobile (ABHA number) or through Aadhaar (Aadhaar number)."""
     await _get_patient_or_404(db, payload.patient_id, current_db_user.facility_id)
     try:
         result = await identity_service.request_login_otp(
-            abha_number=_normalise_abha(payload.abha_number),
+            abha_number=_normalise_abha(payload.abha_number) if payload.abha_number else None,
+            aadhaar=payload.aadhaar,
             facility_id=str(current_db_user.facility_id),
             started_by=str(current_db_user.id),
             patient_id=str(payload.patient_id),
@@ -573,7 +703,26 @@ async def login_request_otp(
     except identity_service.AbdmIdentityError as exc:
         raise _identity_error(exc) from exc
 
-    return OtpRequestedOut(session_id=result.session_id, masked_mobile=result.masked_mobile)
+    return OtpRequestedOut(
+        session_id=result.session_id,
+        masked_mobile=result.masked_mobile,
+        resends_remaining=result.resends_remaining,
+    )
+
+
+@router.post(
+    "/login/resend-otp",
+    response_model=OtpRequestedOut,
+    dependencies=[Depends(require_roles("receptionist", "doctor"))],
+)
+async def login_resend_otp(
+    payload: OtpResendRequest,
+    current_db_user: CurrentDbUser,
+    db: DbSession,
+) -> OtpRequestedOut:
+    """Fresh login OTP for the same patient and desk attempt (VRFY_ABHA_305/405)."""
+    await _get_patient_or_404(db, payload.patient_id, current_db_user.facility_id)
+    return await _resend(payload, current_db_user, db, OtpPurpose.LOGIN_BY_ABHA)
 
 
 @router.post(
@@ -610,14 +759,7 @@ async def login_verify_otp(
     except AbdmUnavailable:
         raise _unavailable("ABDM did not respond") from None
     except AbdmRejected as exc:
-        log.warning("ABDM declined a login verification (%s)", exc.status_code)
-        raise HTTPException(
-            502,
-            {
-                "code": "abdm_rejected",
-                "message": "ABDM declined the OTP",
-            },
-        ) from exc
+        raise _otp_rejected(exc, "login") from exc
     except identity_service.AbdmIdentityError as exc:
         raise _identity_error(exc) from exc
 

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import CurrentDbUser, CurrentUser, DbSession, require_roles
 from app.immunization import service
+from app.common.clinical_write import ClinicalWriteKey, clinical_write
 from app.common.patient_scope import require_patient_access
 from app.immunization.schemas import (
     ImmunizationCertificateOut,
@@ -60,11 +61,14 @@ async def record_immunization(
     payload: ImmunizationRecordCreate,
     current_user: CurrentDbUser,
     db: DbSession,
+    idempotency_key: ClinicalWriteKey,
 ) -> ImmunizationRecordOut:
     """Record a vaccine administration event with batch number and expiry traceability."""
     await require_patient_access(db, payload.patient_id, current_user)
     try:
-        return await service.record_administration(db, payload, current_user.id)
+        return await clinical_write(db, idempotency_key, "POST /immunization/records", payload,
+            current_user, ImmunizationRecordOut,
+            lambda: service.record_administration(db, payload, current_user.id))
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 

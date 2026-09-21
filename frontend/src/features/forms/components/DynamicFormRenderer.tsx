@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AlertCircle, CheckCircle2, FileText, Send } from "lucide-react";
 import { submitForm } from "../api";
+import { useClinicalWrite } from "@/lib/useClinicalWrite";
 import type { FormDefinition, FormSubmission } from "../types";
 
 interface DynamicFormRendererProps {
@@ -27,6 +28,7 @@ function FormEditor({
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const mounted = useRef(false);
+  const write = useClinicalWrite();
   useEffect(() => {
     mounted.current = true;
     return () => { mounted.current = false; };
@@ -38,6 +40,7 @@ function FormEditor({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting || !mounted.current) return;
     setError(null);
     setSuccessMsg(null);
 
@@ -51,11 +54,16 @@ function FormEditor({
 
     try {
       setIsSubmitting(true);
-      const sub = await submitForm({
+      const sub = await write.run({
         patient_id: patientId,
         visit_id: visitId || null,
         form_id: formDef.id,
         form_data: formData,
+      }, async (payload, key) => {
+        const result = await submitForm(payload, key);
+        if (result.patient_id !== patientId || result.form_id !== formDef.id)
+          throw new Error("Saved form did not match the selected patient and form.");
+        return result;
       });
       if (!mounted.current) return;
       if (sub.patient_id !== patientId || sub.form_id !== formDef.id)
@@ -102,6 +110,7 @@ function FormEditor({
       )}
 
       <form onSubmit={handleSubmit} className="space-y-4">
+        <fieldset disabled={isSubmitting || write.retryPending} className="space-y-4">
         {formDef.fields_schema.map((field) => {
           const rawVal = formData[field.id];
           const value = typeof rawVal === "string" || typeof rawVal === "number" ? rawVal : "";
@@ -186,6 +195,7 @@ function FormEditor({
           );
         })}
 
+        </fieldset>
         <div className="pt-4 border-t border-border flex justify-end">
           <button
             type="submit"
@@ -193,7 +203,7 @@ function FormEditor({
             className="flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors shadow-sm disabled:opacity-50"
           >
             <Send className="h-4 w-4" />
-            {isSubmitting ? "Submitting..." : "Submit Clinical Form"}
+            {isSubmitting ? "Submitting..." : write.retryPending ? "Retry unchanged save" : "Submit Clinical Form"}
           </button>
         </div>
       </form>

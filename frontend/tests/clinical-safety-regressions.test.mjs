@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import { compile, componentHarness, content, flush, nodes } from "./helpers/component-harness.mjs";
+import { clinicalWrite } from "./helpers/clinical-write.mjs";
 
 const source = (path) => new URL(`../src/${path}`, import.meta.url);
 const returnUrls = compile(source("lib/auth/return-url.ts"), {});
@@ -82,6 +83,7 @@ test("record immunization submits backend code, timestamp and required expiry", 
   const catalogue = [{ id: "vac-id", code: "BCG", name: "BCG", standard_doses: 1, route: "intradermal", site: "arm" }];
   const h = componentHarness((runtime) => compile(source("features/immunization/components/RecordImmunizationModal.tsx"), {
     ...runtime, "lucide-react": { AlertCircle: "icon", CheckCircle: "icon", X: "icon" },
+    "@/lib/useClinicalWrite": clinicalWrite(runtime),
     "../api": { recordImmunization: async (payload) => calls.push(payload) },
   }).RecordImmunizationModal);
   const props = { isOpen: true, patientId: "patient-A", catalogue, onClose() {}, onSuccess() {} };
@@ -182,9 +184,10 @@ test("late consent transition cannot show success in a different patient's works
 test("blood crossmatch uses the backend unit_id and clears compatibility when the recipient changes", async () => {
   const writes = [];
   const h = componentHarness((runtime) => compile(source("features/blood-bank/components/BloodCrossmatchModal.tsx"), {
+    "@/lib/useClinicalWrite": clinicalWrite(runtime),
     ...runtime,
     "lucide-react": Object.fromEntries(["AlertTriangle", "CheckCircle2", "Droplet", "FileCheck", "Search", "TestTube", "X"].map((key) => [key, "icon"])),
-    "../api": { crossmatchBlood: async (payload) => { writes.push(payload); return { id: "xm-A" }; } },
+    "../api": { crossmatchBlood: async (payload) => { writes.push(payload); return { id: "xm-A", ...payload }; } },
     "../types": { formatBloodGroup: () => "O+" },
     "@/lib/api": { api: async () => ({ items: [{ id: "A", uhid: "UHID-A", full_name: "Test A" }] }) },
   }).BloodCrossmatchModal);
@@ -197,11 +200,52 @@ test("blood crossmatch uses the backend unit_id and clears compatibility when th
   assert.equal(nodes(tree).find((n) => n.type === "button" && n.props.type === "submit").props.disabled, true);
   nodes(tree).find((n) => n.type === "input" && n.props.value === "compatible").props.onChange();
   tree = h.render(props);
-  await nodes(tree).find((n) => n.type === "form").props.onSubmit({ preventDefault() {} });
-  assert.equal(writes.length, 1);
-  assert.deepEqual(writes[0], { patient_id: "A", unit_id: "unit-A", compatibility_result: "compatible", notes: null });
-  tree = h.render(props);
   nodes(tree).find((n) => n.type === "button" && content(n) === "Change").props.onClick();
   tree = h.render(props);
   assert.equal(nodes(tree).find((n) => n.type === "input" && n.props.value === "compatible").props.checked, false);
+  await nodes(tree).find((n) => n.props["aria-label"] === "Search patient").props.onClick();
+  tree = h.render(props);
+  nodes(tree).find((n) => n.type === "input" && n.props.value === "compatible").props.onChange();
+  tree = h.render(props);
+  await nodes(tree).find((n) => n.type === "form").props.onSubmit({ preventDefault() {} });
+  assert.equal(writes.length, 1);
+  assert.deepEqual(writes[0], { patient_id: "A", unit_id: "unit-A", compatibility_result: "compatible", notes: null });
+});
+
+test("lost blood issue response retries the same issue, without another crossmatch", async () => {
+  const matches = [], issues = [];
+  const h = componentHarness((runtime) => compile(source("features/blood-bank/components/BloodCrossmatchModal.tsx"), {
+    ...runtime, "@/lib/useClinicalWrite": clinicalWrite(runtime),
+    "lucide-react": Object.fromEntries(["AlertTriangle", "CheckCircle2", "Droplet", "FileCheck", "Search", "TestTube", "X"].map((key) => [key, "icon"])),
+    "../types": { formatBloodGroup: () => "O+" },
+    "@/lib/api": { api: async () => ({ items: [{ id: "A", uhid: "UHID-A", full_name: "Test A" }] }) },
+    "../api": {
+      crossmatchBlood: async (payload, key) => { matches.push({ payload, key }); return { id: "xm-A", ...payload }; },
+      issueBloodUnit: async (payload, key) => {
+        issues.push({ payload, key });
+        if (issues.length === 1) throw new TypeError("Lost issue response");
+        return { id: "xm-A", issued_at: "2026-09-21T00:00:00Z" };
+      },
+    },
+  }).BloodCrossmatchModal);
+  const props = { isOpen: true, unit: { id: "unit-A", blood_group: "O+" }, onClose() {}, onSuccess() {} };
+  let tree = h.render(props); h.effects();
+  nodes(tree).find((n) => n.type === "input" && n.props.placeholder?.startsWith("Enter exact")).props.onChange({ target: { value: "UHID-A" } });
+  tree = h.render(props);
+  await nodes(tree).find((n) => n.props["aria-label"] === "Search patient").props.onClick();
+  tree = h.render(props);
+  nodes(tree).find((n) => n.props.value === "compatible").props.onChange();
+  tree = h.render(props);
+  nodes(tree).find((n) => n.props.type === "checkbox").props.onChange({ target: { checked: true } });
+  tree = h.render(props);
+  await nodes(tree).find((n) => n.type === "form").props.onSubmit({ preventDefault() {} });
+  tree = h.render(props);
+  assert.match(content(tree), /Retry unchanged save/);
+  assert.equal(nodes(tree).find((n) => n.type === "fieldset").props.disabled, true);
+  assert.equal(nodes(tree).find((n) => n.props["aria-label"] === "Close crossmatch").props.disabled, true);
+  await nodes(tree).find((n) => n.type === "form").props.onSubmit({ preventDefault() {} });
+  assert.equal(matches.length, 1);
+  assert.equal(issues.length, 2);
+  assert.deepEqual(issues[0], issues[1]);
+  assert.match(content(h.render(props)), /Blood Unit Issued Successfully/);
 });

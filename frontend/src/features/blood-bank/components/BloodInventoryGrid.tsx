@@ -12,6 +12,7 @@ import {
   X,
 } from "lucide-react";
 import { createBloodUnit } from "../api";
+import { useClinicalWrite } from "@/lib/useClinicalWrite";
 import { formatBloodGroup, type BloodDonor, type BloodUnit } from "../types";
 
 interface BloodInventoryGridProps {
@@ -46,6 +47,7 @@ export function BloodInventoryGrid({
 
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const write = useClinicalWrite();
 
   const filteredUnits = units.filter((u) => {
     const fullGroup = formatBloodGroup(u.blood_group, u.rh_factor);
@@ -64,24 +66,26 @@ export function BloodInventoryGrid({
 
   const handleCollect = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting || !write.isCurrent()) return;
     setError(null);
     try {
       setIsSubmitting(true);
-      await createBloodUnit({
+      await write.run({
         bag_number: unitNumber.trim(),
         donor_id: donorId,
         blood_group: bloodGroup + rhFactor,
         volume_ml: volumeMl,
         expiry_date: expiryDate,
         screening_status: screening,
-      });
+      }, createBloodUnit);
+      if (!write.isCurrent()) return;
       setIsCollectModalOpen(false);
       setUnitNumber(""); setDonorId(""); setExpiryDate(""); setScreening("pending");
       onRefresh();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to add blood unit to inventory.");
+      if (write.isCurrent()) setError(err instanceof Error ? err.message : "Failed to add blood unit to inventory.");
     } finally {
-      setIsSubmitting(false);
+      if (write.isCurrent()) setIsSubmitting(false);
     }
   };
 
@@ -268,6 +272,7 @@ export function BloodInventoryGrid({
               </div>
               <button
                 onClick={() => setIsCollectModalOpen(false)}
+                disabled={isSubmitting || write.retryPending}
                 className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
               >
                 <X className="h-5 w-5" />
@@ -282,6 +287,7 @@ export function BloodInventoryGrid({
             )}
 
             <form onSubmit={handleCollect} className="mt-4 space-y-4">
+              <fieldset disabled={isSubmitting || write.retryPending} className="space-y-4">
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
@@ -393,10 +399,12 @@ export function BloodInventoryGrid({
                 </div>
               </div>
 
+              </fieldset>
               <div className="flex items-center justify-end gap-3 pt-4 border-t border-border">
                 <button
                   type="button"
                   onClick={() => setIsCollectModalOpen(false)}
+                  disabled={isSubmitting || write.retryPending}
                   className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-muted transition-colors"
                 >
                   Cancel
@@ -407,7 +415,7 @@ export function BloodInventoryGrid({
                   className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
                 >
                   <CheckCircle2 className="h-4 w-4" />
-                  {isSubmitting ? "Storing..." : "Add to Stock"}
+                  {isSubmitting ? "Storing..." : write.retryPending ? "Retry unchanged save" : "Add to Stock"}
                 </button>
               </div>
             </form>

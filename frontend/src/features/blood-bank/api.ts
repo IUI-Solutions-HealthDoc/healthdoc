@@ -19,9 +19,10 @@ export function fetchBloodDonors(params: {
   return api<BloodDonor[]>(`/blood-bank/donors?${q.toString()}`);
 }
 
-export function registerBloodDonor(payload: BloodDonorCreate): Promise<BloodDonor> {
+export function registerBloodDonor(payload: BloodDonorCreate, idempotencyKey: string): Promise<BloodDonor> {
   return api<BloodDonor>("/blood-bank/donors", {
     method: "POST",
+    idempotencyKey,
     body: JSON.stringify(payload),
   });
 }
@@ -38,23 +39,26 @@ export function fetchBloodUnits(params: {
   return api<BloodUnit[]>(`/blood-bank/units?${q.toString()}`);
 }
 
-export function createBloodUnit(payload: BloodUnitCreate): Promise<BloodUnit> {
+export function createBloodUnit(payload: BloodUnitCreate, idempotencyKey: string): Promise<BloodUnit> {
   return api<BloodUnit>("/blood-bank/units", {
     method: "POST",
+    idempotencyKey,
     body: JSON.stringify(payload),
   });
 }
 
-export function crossmatchBlood(payload: BloodCrossmatchCreate): Promise<BloodCrossmatch> {
+export function crossmatchBlood(payload: BloodCrossmatchCreate, idempotencyKey: string): Promise<BloodCrossmatch> {
   return api<BloodCrossmatch>("/blood-bank/crossmatch", {
     method: "POST",
+    idempotencyKey,
     body: JSON.stringify(payload),
   });
 }
 
-export function issueBloodUnit(payload: BloodIssueRequest): Promise<BloodCrossmatch> {
+export function issueBloodUnit(payload: BloodIssueRequest, idempotencyKey: string): Promise<BloodCrossmatch> {
   return api<BloodCrossmatch>("/blood-bank/issue", {
     method: "POST",
+    idempotencyKey,
     body: JSON.stringify(payload),
   });
 }

@@ -299,6 +299,15 @@ jobs:
           E2E_EVIDENCE_DIR: ${{ runner.temp }}/healthdoc-e2e/external-results
         run: npm run test:external-results-ui
 
+      # Rendered forms and crossmatch -> issue retry, with explicit synthetic
+      # clinical transport. Actual DB atomicity/contention is a backend PG gate.
+      - name: Clinical write and two-step issue retry safety
+        working-directory: frontend
+        env:
+          E2E_RUN_ID: clinical-write-${{ github.run_id }}-${{ github.run_attempt }}
+          E2E_EVIDENCE_DIR: ${{ runner.temp }}/healthdoc-e2e/clinical-write
+        run: npm run test:clinical-write-ui
+
       # Real login and PDF rendering; synthetic intercepted clinical transport.
       # This proves preview isolation and access-refresh refusal, not NHA exchange.
       - name: ABDM PDF preview and consent-refresh safety

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { AlertCircle, CheckCircle2, Heart, Plus, Search, UserCheck, UserX, X } from "lucide-react";
 import { registerBloodDonor } from "../api";
+import { useClinicalWrite } from "@/lib/useClinicalWrite";
 import { formatBloodGroup, type BloodDonor } from "../types";
 
 interface BloodDonorRegistryProps {
@@ -30,6 +31,7 @@ export function BloodDonorRegistry({ donors, onRefresh }: BloodDonorRegistryProp
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const write = useClinicalWrite();
 
   const filteredDonors = donors.filter((d) => {
     const formatted = formatBloodGroup(d.blood_group, d.rh_factor);
@@ -51,6 +53,7 @@ export function BloodDonorRegistry({ donors, onRefresh }: BloodDonorRegistryProp
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting || !write.isCurrent()) return;
     setError(null);
     if (!fullName.trim()) {
       setError("Donor full name is required.");
@@ -63,7 +66,7 @@ export function BloodDonorRegistry({ donors, onRefresh }: BloodDonorRegistryProp
 
     try {
       setIsSubmitting(true);
-      await registerBloodDonor({
+      await write.run({
         full_name: fullName.trim(),
         age_years: age,
         sex: gender,
@@ -73,7 +76,8 @@ export function BloodDonorRegistry({ donors, onRefresh }: BloodDonorRegistryProp
         hemoglobin_g_dl: Number(hemoglobin),
         last_donation_date: lastDonation || null,
         remarks: ineligibilityReason.trim() || null,
-      });
+      }, registerBloodDonor);
+      if (!write.isCurrent()) return;
       setIsRegisterModalOpen(false);
       // Reset
       setFullName("");
@@ -82,9 +86,9 @@ export function BloodDonorRegistry({ donors, onRefresh }: BloodDonorRegistryProp
       setWeight(""); setHemoglobin(""); setLastDonation("");
       onRefresh();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to register donor.");
+      if (write.isCurrent()) setError(err instanceof Error ? err.message : "Failed to register donor.");
     } finally {
-      setIsSubmitting(false);
+      if (write.isCurrent()) setIsSubmitting(false);
     }
   };
 
@@ -217,6 +221,7 @@ export function BloodDonorRegistry({ donors, onRefresh }: BloodDonorRegistryProp
               </div>
               <button
                 onClick={() => setIsRegisterModalOpen(false)}
+                disabled={isSubmitting || write.retryPending}
                 className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
               >
                 <X className="h-5 w-5" />
@@ -231,6 +236,7 @@ export function BloodDonorRegistry({ donors, onRefresh }: BloodDonorRegistryProp
             )}
 
             <form onSubmit={handleRegister} className="mt-4 space-y-4">
+              <fieldset disabled={isSubmitting || write.retryPending} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
                   Full Name *
@@ -336,10 +342,12 @@ export function BloodDonorRegistry({ donors, onRefresh }: BloodDonorRegistryProp
                 </label>
               </div>
 
+              </fieldset>
               <div className="flex items-center justify-end gap-3 pt-4 border-t border-border">
                 <button
                   type="button"
                   onClick={() => setIsRegisterModalOpen(false)}
+                  disabled={isSubmitting || write.retryPending}
                   className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-muted transition-colors"
                 >
                   Cancel
@@ -350,7 +358,7 @@ export function BloodDonorRegistry({ donors, onRefresh }: BloodDonorRegistryProp
                   className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
                 >
                   <CheckCircle2 className="h-4 w-4" />
-                  {isSubmitting ? "Registering..." : "Save Donor"}
+                  {isSubmitting ? "Registering..." : write.retryPending ? "Retry unchanged save" : "Save Donor"}
                 </button>
               </div>
             </form>

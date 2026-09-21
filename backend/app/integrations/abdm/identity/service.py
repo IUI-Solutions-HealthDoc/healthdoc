@@ -70,6 +70,18 @@ class OtpRequested:
     #: Masked, as ABDM returns it: enough for the patient to recognise which
     #: phone to check, not enough to be a new disclosure of their number.
     masked_mobile: str | None
+    #: Fresh OTP requests still available for this desk attempt.
+    resends_remaining: int = otp_session.MAX_RESENDS
+
+
+#: Login scopes per identifier, from the official M1 v3 collection
+#: ("ABHA Verification" → "Verify Via ABHA Number" / "Verify via Aadhaar").
+#: The verify leg must quote the same scope as the request leg.
+_LOGIN_SCOPES: dict[str, list[str]] = {
+    "abha-number": ["abha-login", "mobile-verify"],
+    "aadhaar": ["abha-login", "aadhaar-verify"],
+}
+_LOGIN_OTP_SYSTEMS: dict[str, str] = {"abha-number": "abdm", "aadhaar": "aadhaar"}
 
 
 @dataclass(frozen=True)
@@ -188,6 +200,7 @@ async def request_aadhaar_otp(
     facility_id: str,
     started_by: str,
     patient_id: str | None = None,
+    resends: int = 0,
 ) -> OtpRequested:
     """Leg one of enrolment: ask ABDM to OTP the mobile linked to this Aadhaar.
 
@@ -200,6 +213,9 @@ async def request_aadhaar_otp(
         await _post(
             settings.abdm_path_enrol_request_otp,
             {
+                # Always a fresh transaction, including on resend: the official
+                # collection has no separate resend call, and quoting an old
+                # txnId here is the mobile-verify continuation, not a resend.
                 "txnId": "",
                 "scope": ["abha-enrol"],
                 "loginHint": "aadhaar",
@@ -215,10 +231,13 @@ async def request_aadhaar_otp(
         facility_id=facility_id,
         started_by=started_by,
         patient_id=patient_id,
+        login_hint="aadhaar",
+        resends=resends,
     )
     return OtpRequested(
         session_id=session.session_id,
         masked_mobile=(body.get("message") if isinstance(body, dict) else None),
+        resends_remaining=otp_session.MAX_RESENDS - resends,
     )
 
 
@@ -285,20 +304,35 @@ async def enrol_by_aadhaar_otp(
 
 
 async def request_login_otp(
-    *, abha_number: str, facility_id: str, started_by: str, patient_id: str | None = None
+    *,
+    abha_number: str | None = None,
+    aadhaar: str | None = None,
+    facility_id: str,
+    started_by: str,
+    patient_id: str | None = None,
+    resends: int = 0,
 ) -> OtpRequested:
-    """Leg one of proving an EXISTING ABHA belongs to the person at the desk."""
+    """Leg one of proving an EXISTING ABHA belongs to the person at the desk.
+
+    Exactly one identifier: the ABHA number (OTP to the ABHA-linked mobile,
+    workbook VRFY_ABHA_201) or the Aadhaar number (OTP through Aadhaar,
+    VRFY_ABHA_101/401). Neither identifier survives this call.
+    """
+    if (abha_number is None) == (aadhaar is None):
+        raise AbdmIdentityError("abdm_identifier_required", "exactly one of ABHA number or Aadhaar is required")
+    login_hint = "aadhaar" if aadhaar is not None else "abha-number"
+    # The route normalises for storage; ABDM validates the decrypted loginId in
+    # its hyphenated 2-4-4-4 representation. Aadhaar is sent as its 12 digits.
+    login_id = aadhaar if aadhaar is not None else hyphenate_abha(abha_number or "")
     settings = get_settings()
     body = (
         await _post(
             settings.abdm_path_login_request_otp,
             {
-                "scope": ["abha-login", "mobile-verify"],
-                "loginHint": "abha-number",
-                "otpSystem": "abdm",
-                # The route normalises for storage; ABDM validates the
-                # decrypted loginId in its hyphenated 2-4-4-4 representation.
-                "loginId": encrypt_for_abdm(hyphenate_abha(abha_number)),
+                "scope": _LOGIN_SCOPES[login_hint],
+                "loginHint": login_hint,
+                "otpSystem": _LOGIN_OTP_SYSTEMS[login_hint],
+                "loginId": encrypt_for_abdm(login_id),
             },
         )
     ).body
@@ -309,11 +343,56 @@ async def request_login_otp(
         facility_id=facility_id,
         started_by=started_by,
         patient_id=patient_id,
+        login_hint=login_hint,
+        resends=resends,
     )
     return OtpRequested(
         session_id=session.session_id,
         masked_mobile=(body.get("message") if isinstance(body, dict) else None),
+        resends_remaining=otp_session.MAX_RESENDS - resends,
     )
+
+
+async def resend_otp(
+    *,
+    session_id: str,
+    purpose: OtpPurpose,
+    facility_id: str,
+    started_by: str,
+    abha_number: str | None = None,
+    aadhaar: str | None = None,
+) -> OtpRequested:
+    """Ask ABDM for a fresh OTP for the same desk attempt (workbook CRT_ABHA_106,
+    VRFY_ABHA_305/405).
+
+    The identifier is re-supplied by the desk because the session deliberately
+    never stored it. The old session is consumed only after the gateway accepted
+    the new request, so a failed resend leaves the previous OTP usable.
+    """
+    session = await otp_session.load(session_id, facility_id=facility_id, purpose=purpose)
+    if session.started_by != str(started_by):
+        raise otp_session.OtpSessionMismatch
+    session.resend_allowed()
+    if session.login_hint == "aadhaar" and aadhaar is None:
+        raise AbdmIdentityError("abdm_identifier_required", "this exchange was started with an Aadhaar number")
+    if session.login_hint == "abha-number" and abha_number is None:
+        raise AbdmIdentityError("abdm_identifier_required", "this exchange was started with an ABHA number")
+    common = {
+        "facility_id": facility_id,
+        "started_by": started_by,
+        "patient_id": session.patient_id,
+        "resends": session.resends + 1,
+    }
+    if purpose is OtpPurpose.ENROL_BY_AADHAAR:
+        if aadhaar is None:
+            raise AbdmIdentityError("abdm_identifier_required", "enrolment resend requires the Aadhaar number")
+        requested = await request_aadhaar_otp(aadhaar=aadhaar, **common)
+    elif purpose is OtpPurpose.LOGIN_BY_ABHA:
+        requested = await request_login_otp(abha_number=abha_number, aadhaar=aadhaar, **common)
+    else:
+        raise AbdmIdentityError("abdm_resend_unsupported", "this exchange cannot be resent")
+    await otp_session.finish(session_id)
+    return requested
 
 
 async def verify_login_otp(
@@ -328,7 +407,9 @@ async def verify_login_otp(
         await _post(
             get_settings().abdm_path_login_verify,
             {
-                "scope": ["abha-login", "mobile-verify"],
+                # Same scope as the request leg; a session from before
+                # login_hint existed was necessarily an ABHA-number login.
+                "scope": _LOGIN_SCOPES.get(session.login_hint or "abha-number", _LOGIN_SCOPES["abha-number"]),
                 "authData": {
                     "authMethods": ["otp"],
                     "otp": {

@@ -123,15 +123,13 @@ DEFAULT_NATIONAL_VACCINES = [
 
 
 async def ensure_catalogue_seeded(db: AsyncSession) -> None:
-    try:
-        res = await db.execute(select(VaccineCatalogue).limit(1))
-        if res.scalars().first() is None:
-            for item in DEFAULT_NATIONAL_VACCINES:
-                vc = VaccineCatalogue(id=uuid.uuid4(), **item)
-                db.add(vc)
-            await db.commit()
-    except Exception:
-        await db.rollback()
+    # Caller owns the transaction: a seed must not commit a clinical write's
+    # retry reservation early, nor swallow a failure and discard that reservation.
+    res = await db.execute(select(VaccineCatalogue).limit(1))
+    if res.scalars().first() is None:
+        for item in DEFAULT_NATIONAL_VACCINES:
+            db.add(VaccineCatalogue(id=uuid.uuid4(), **item))
+        await db.flush()
 
 
 async def get_catalogue(db: AsyncSession) -> list[VaccineCatalogue]:
@@ -243,7 +241,7 @@ async def record_administration(
         notes=payload.notes,
     )
     db.add(rec)
-    await db.commit()
+    await db.flush()
     await db.refresh(rec)
     return ImmunizationRecordOut.model_validate(rec)
 

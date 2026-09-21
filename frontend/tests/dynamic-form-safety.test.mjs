@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { compile, componentHarness, content, flush, nodes } from "./helpers/component-harness.mjs";
+import { clinicalWrite } from "./helpers/clinical-write.mjs";
 
 const definition = { id: "form", version: 1, code: "TEST", title: "Synthetic form", status: "published",
   fields_schema: [{ id: "checked", type: "checkbox", label: "Recorded answer" },
@@ -11,6 +12,7 @@ test("dynamic form preserves boolean input and decimals, and refuses stale patie
   const pending = [], completed = [];
   const h = componentHarness((runtime) => compile(source, {
     ...runtime, "lucide-react": Object.fromEntries(["AlertCircle", "CheckCircle2", "FileText", "Send"].map((name) => [name, "icon"])),
+    "@/lib/useClinicalWrite": clinicalWrite(runtime),
     "../api": { submitForm: (payload) => new Promise((resolve) => pending.push({ payload, resolve })) },
   }).DynamicFormRenderer);
   const props = { formDef: definition, patientId: "A", onSuccess: (result) => completed.push(result) };

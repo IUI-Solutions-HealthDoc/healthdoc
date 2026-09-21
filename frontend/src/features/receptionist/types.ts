@@ -100,7 +100,13 @@ export interface PatientSearchResponse {
 export interface AbhaOtpRequested {
   session_id: string;
   masked_mobile: string | null;
+  /** Fresh OTP requests still available for this desk attempt (server-enforced). */
+  resends_remaining?: number;
 }
+
+/** Exactly one identifier: the ABHA number (OTP to its linked mobile) or the
+ *  Aadhaar number (OTP through Aadhaar). Neither is stored server-side. */
+export type AbhaLoginIdentifier = { abha_number: string } | { aadhaar: string };
 
 export interface AbhaIdentityLinked {
   abha_number: string;

@@ -26,6 +26,15 @@ test("safe domain conflicts remain actionable", () => {
   );
 });
 
+test("a duplicate ABHA bind is not presented as a stale record to reload", () => {
+  const message = userFacingApiError(409, {
+    code: "duplicate_abha",
+    message: "This ABHA number is already linked to another patient",
+  });
+  assert.match(message, /already linked to another patient/);
+  assert.doesNotMatch(message, /Reload|conflicts with the record/);
+});
+
 test("an ABDM rejection is not presented as a temporary outage or raw gateway text", () => {
   const message = userFacingApiError(502, {
     code: "abdm_rejected",
