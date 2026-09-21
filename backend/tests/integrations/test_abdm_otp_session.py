@@ -91,6 +91,7 @@ async def test_the_aadhaar_number_is_never_stored(redis):
         # Aadhaar number, mobile number, OTP, or profile credential.
         "consent_code", "consent_version", "consent_language",
         "consent_granted_at", "stage",
+        "selection_token", "account_choices",
     }, "a new field here is a new thing kept about a patient — justify it"
 
     # And the property the substring check was reaching for, stated so it can

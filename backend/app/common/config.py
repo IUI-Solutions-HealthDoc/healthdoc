@@ -126,6 +126,7 @@ class Settings(BaseSettings):
     abdm_path_profile_abha_card: str = "/v3/profile/account/abha-card"
     abdm_path_login_request_otp: str = "/v3/profile/login/request/otp"
     abdm_path_login_verify: str = "/v3/profile/login/verify"
+    abdm_path_login_verify_user: str = "/v3/profile/login/verify/user"
 
     # ------------------------------------------------------------------
     # M2 (HIP) and M3 (HIU) gateway paths, relative to abdm_gateway_base_url.

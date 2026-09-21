@@ -94,8 +94,16 @@ class OtpRequested:
 _LOGIN_SCOPES: dict[str, list[str]] = {
     "abha-number": ["abha-login", "mobile-verify"],
     "aadhaar": ["abha-login", "aadhaar-verify"],
+    # Official collection: address and communication-mobile both OTP through ABDM.
+    "abha-address": ["abha-login", "mobile-verify"],
+    "mobile": ["abha-login", "mobile-verify"],
 }
-_LOGIN_OTP_SYSTEMS: dict[str, str] = {"abha-number": "abdm", "aadhaar": "aadhaar"}
+_LOGIN_OTP_SYSTEMS: dict[str, str] = {
+    "abha-number": "abdm",
+    "aadhaar": "aadhaar",
+    "abha-address": "abdm",
+    "mobile": "abdm",
+}
 
 
 @dataclass(frozen=True)
@@ -112,6 +120,8 @@ class AbhaIssued:
     date_of_birth: str | None
     next_step: str = "complete"
     suggested_addresses: tuple[str, ...] = ()
+    #: (ABHA number, display name) when the desk must choose. Never a guess.
+    account_choices: tuple[tuple[str, str | None], ...] = ()
 
 
 def _txn_id(body: object) -> str:
@@ -429,10 +439,28 @@ async def enrol_by_aadhaar_otp(
 # ---------------------------------------------------------- login by ABHA
 
 
+def _login_id_for(hint: str, value: str) -> str:
+    if hint == "abha-number":
+        return hyphenate_abha(value)
+    if hint == "aadhaar":
+        return value
+    if hint == "mobile":
+        digits = "".join(ch for ch in value if ch.isdigit())
+        if len(digits) != 10:
+            raise AbdmIdentityError("abdm_identifier_required", "communication mobile must be 10 digits")
+        return digits
+    address = value.strip()
+    if "@" not in address or " " in address:
+        raise AbdmIdentityError("abha_address_invalid", "Enter the ABHA address to verify")
+    return address
+
+
 async def request_login_otp(
     *,
     abha_number: str | None = None,
     aadhaar: str | None = None,
+    abha_address: str | None = None,
+    mobile: str | None = None,
     facility_id: str,
     started_by: str,
     patient_id: str | None = None,
@@ -440,16 +468,24 @@ async def request_login_otp(
 ) -> OtpRequested:
     """Leg one of proving an EXISTING ABHA belongs to the person at the desk.
 
-    Exactly one identifier: the ABHA number (OTP to the ABHA-linked mobile,
-    workbook VRFY_ABHA_201) or the Aadhaar number (OTP through Aadhaar,
-    VRFY_ABHA_101/401). Neither identifier survives this call.
+    Exactly one identifier. ABHA number and Aadhaar are the existing paths.
+    ABHA address and communication mobile can return several accounts; the
+    desk chooses one later. The identifier is not stored.
     """
-    if (abha_number is None) == (aadhaar is None):
-        raise AbdmIdentityError("abdm_identifier_required", "exactly one of ABHA number or Aadhaar is required")
-    login_hint = "aadhaar" if aadhaar is not None else "abha-number"
-    # The route normalises for storage; ABDM validates the decrypted loginId in
-    # its hyphenated 2-4-4-4 representation. Aadhaar is sent as its 12 digits.
-    login_id = aadhaar if aadhaar is not None else hyphenate_abha(abha_number or "")
+    supplied = {
+        "abha-number": abha_number,
+        "aadhaar": aadhaar,
+        "abha-address": abha_address,
+        "mobile": mobile,
+    }
+    present = [hint for hint, value in supplied.items() if value is not None]
+    if len(present) != 1:
+        raise AbdmIdentityError(
+            "abdm_identifier_required",
+            "exactly one of ABHA number, Aadhaar, ABHA address or mobile is required",
+        )
+    login_hint = present[0]
+    login_id = _login_id_for(login_hint, supplied[login_hint] or "")
     settings = get_settings()
     body = (
         await _post(
@@ -487,6 +523,8 @@ async def resend_otp(
     started_by: str,
     abha_number: str | None = None,
     aadhaar: str | None = None,
+    abha_address: str | None = None,
+    mobile: str | None = None,
 ) -> OtpRequested:
     """Ask ABDM for a fresh OTP for the same desk attempt (workbook CRT_ABHA_106,
     VRFY_ABHA_305/405).
@@ -503,6 +541,10 @@ async def resend_otp(
         raise AbdmIdentityError("abdm_identifier_required", "this exchange was started with an Aadhaar number")
     if session.login_hint == "abha-number" and abha_number is None:
         raise AbdmIdentityError("abdm_identifier_required", "this exchange was started with an ABHA number")
+    if session.login_hint == "abha-address" and abha_address is None:
+        raise AbdmIdentityError("abdm_identifier_required", "this exchange was started with an ABHA address")
+    if session.login_hint == "mobile" and mobile is None:
+        raise AbdmIdentityError("abdm_identifier_required", "this exchange was started with a communication mobile")
     common = {
         "facility_id": facility_id,
         "started_by": started_by,
@@ -529,7 +571,13 @@ async def resend_otp(
             **common,
         )
     elif purpose is OtpPurpose.LOGIN_BY_ABHA:
-        requested = await request_login_otp(abha_number=abha_number, aadhaar=aadhaar, **common)
+        requested = await request_login_otp(
+            abha_number=abha_number,
+            aadhaar=aadhaar,
+            abha_address=abha_address,
+            mobile=mobile,
+            **common,
+        )
     else:
         raise AbdmIdentityError("abdm_resend_unsupported", "this exchange cannot be resent")
     await otp_session.finish(session_id)
@@ -570,15 +618,51 @@ async def verify_login_otp(
     if body.get("authResult") != "success":
         raise AbdmIdentityError("abdm_auth_failed", "ABDM did not verify this OTP")
     accounts = body.get("accounts")
-    if not isinstance(accounts, list) or len(accounts) != 1 or not isinstance(accounts[0], dict):
+    if not isinstance(accounts, list) or not accounts:
+        raise AbdmIdentityError("abdm_account_selection_required", "ABDM did not return a verified account")
+    choices: list[tuple[str, str | None]] = []
+    for account in accounts:
+        if not isinstance(account, dict):
+            continue
+        number = account.get("ABHANumber") or account.get("abhaNumber")
+        if not isinstance(number, str) or not number.strip():
+            continue
+        choices.append((number.replace("-", "").strip(), _name(account)))
+    if len(choices) > 1:
+        token = _profile_token(body)
+        if not token:
+            raise AbdmIdentityError(
+                "abdm_bad_response",
+                "ABDM returned several accounts without a selection credential",
+            )
+        next_txn = body.get("txnId")
+        await otp_session.save(otp_session.with_updates(
+            session,
+            abdm_txn_id=next_txn if isinstance(next_txn, str) and next_txn else session.abdm_txn_id,
+            stage="account_select",
+            selection_token=token,
+            account_choices=[number for number, _display in choices],
+        ))
+        return AbhaIssued(
+            abha_number="",
+            abha_address=None,
+            linking_token=None,
+            name=None,
+            gender=None,
+            date_of_birth=None,
+            next_step="account_select",
+            account_choices=tuple(choices),
+        )
+    if len(choices) != 1:
         raise AbdmIdentityError("abdm_account_selection_required", "ABDM did not return one verified account")
-    profile = accounts[0]
-    if profile.get("status") != "ACTIVE":
+    profile = next(
+        account for account in accounts
+        if isinstance(account, dict)
+        and str(account.get("ABHANumber") or account.get("abhaNumber") or "").replace("-", "").strip() == choices[0][0]
+    )
+    if profile.get("status") not in (None, "ACTIVE"):
         raise AbdmIdentityError("abdm_account_inactive", "This ABHA account is not active")
     abha_number = profile.get("ABHANumber") or profile.get("abhaNumber")
-    if not abha_number:
-        raise AbdmIdentityError("abdm_no_abha_returned", "login completed without an ABHA number")
-
     if consume_session:
         await otp_session.finish(session_id)
     return AbhaIssued(
@@ -588,6 +672,51 @@ async def verify_login_otp(
         name=_name(profile),
         gender=profile.get("gender"),
         date_of_birth=profile.get("dob") or profile.get("dateOfBirth"),
+    )
+
+
+async def select_login_account(
+    *, session_id: str, abha_number: str, facility_id: str
+) -> AbhaIssued:
+    """Bind the account the desk chose. A number outside the OTP result is refused."""
+    session = await otp_session.load(
+        session_id, facility_id=facility_id, purpose=OtpPurpose.LOGIN_BY_ABHA
+    )
+    if session.stage != "account_select" or not session.selection_token:
+        raise AbdmIdentityError(
+            "enrolment_stage_invalid",
+            "Choose an account only after ABDM returns more than one",
+        )
+    chosen = abha_number.replace("-", "").strip()
+    if chosen not in (session.account_choices or []):
+        raise AbdmIdentityError(
+            "abha_account_not_in_selection",
+            "That ABHA number was not one of the accounts ABDM returned",
+        )
+    settings = get_settings()
+    body = (
+        await _call(
+            "POST",
+            settings.abdm_path_login_verify_user,
+            {"ABHANumber": hyphenate_abha(chosen), "txnId": session.abdm_txn_id},
+            extra_headers={"T-token": _bearer(session.selection_token)},
+        )
+    ).body
+    if not isinstance(body, dict):
+        raise AbdmIdentityError("abdm_bad_response", "gateway returned a non-object body")
+    if body.get("authResult") not in (None, "success"):
+        raise AbdmIdentityError("abdm_auth_failed", "ABDM did not accept this account")
+    returned = body.get("ABHANumber") or body.get("abhaNumber")
+    if isinstance(returned, str) and returned.replace("-", "").strip() not in ("", chosen):
+        raise AbdmIdentityError("abdm_bad_response", "ABDM confirmed a different ABHA number")
+    profile = body.get("ABHAProfile") if isinstance(body.get("ABHAProfile"), dict) else body
+    return AbhaIssued(
+        abha_number=hyphenate_abha(chosen),
+        abha_address=_address(profile) if isinstance(profile, dict) else None,
+        linking_token=_profile_token(body) or session.selection_token,
+        name=_name(profile) if isinstance(profile, dict) else None,
+        gender=profile.get("gender") if isinstance(profile, dict) else None,
+        date_of_birth=(profile.get("dob") or profile.get("dateOfBirth")) if isinstance(profile, dict) else None,
     )
 
 

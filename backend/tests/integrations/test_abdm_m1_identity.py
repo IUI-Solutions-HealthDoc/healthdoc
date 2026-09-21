@@ -78,6 +78,7 @@ def _abdm_public_key(monkeypatch, rsa_key):
         abdm_path_profile_abha_card = "/v3/profile/account/abha-card"
         abdm_path_login_request_otp = "/v3/profile/login/request/otp"
         abdm_path_login_verify = "/v3/profile/login/verify"
+        abdm_path_login_verify_user = "/v3/profile/login/verify/user"
 
     monkeypatch.setattr(crypto, "get_settings", lambda: _S())
     monkeypatch.setattr(service, "get_settings", lambda: _S())
@@ -230,6 +231,8 @@ _ALLOWED_SESSION_FIELDS = {
     "consent_language",
     "consent_granted_at",
     "stage",
+    "selection_token",
+    "account_choices",
 }
 
 
@@ -492,7 +495,7 @@ async def test_v3_login_uses_the_verified_account_not_enrolment_profile(monkeypa
     (None, [{"ABHANumber": "91-1111-2222-3333", "status": "ACTIVE"}]),
     ("success", []),
     ("success", [{"ABHANumber": "91-1111-2222-3333", "status": "DEACTIVATED"}]),
-    ("success", [{"ABHANumber": "91-1111-2222-3333", "status": "ACTIVE"}] * 2),
+    ("success", []),
 ])
 async def test_login_never_guesses_an_account_or_accepts_failed_auth(monkeypatch, auth_result, accounts):
     _gateway(monkeypatch, [{"txnId": "login-test"},
@@ -824,3 +827,39 @@ async def test_profile_and_card_use_the_x_token_header(monkeypatch):
     assert gw.headers[1]["X-Token"] == "Bearer synthetic-profile"
     assert gw.calls[0][0].endswith("/v3/profile/account")
     assert gw.calls[1][0].endswith("/v3/profile/account/abha-card")
+
+
+async def test_several_login_accounts_are_not_reduced_to_the_first(monkeypatch, rsa_key):
+    gw = _gateway(monkeypatch, [
+        {"txnId": "login-txn"},
+        {"authResult": "success", "txnId": "login-txn", "token": "selection-token", "accounts": [
+            {"ABHANumber": "91-1111-2222-3333", "name": "First", "status": "ACTIVE"},
+            {"ABHANumber": "91-4444-5555-6666", "name": "Second", "status": "ACTIVE"},
+        ]},
+        {"authResult": "success", "ABHANumber": "91-4444-5555-6666", "preferredAbhaAddress": "second@sbx", "tokens": {"token": "profile-token"}},
+    ])
+    requested = await service.request_login_otp(
+        mobile="9876543210", facility_id=FACILITY_A, started_by=STAFF,
+    )
+    assert gw.last_body["loginHint"] == "mobile"
+    assert gw.last_body["scope"] == ["abha-login", "mobile-verify"]
+    assert _decrypt(rsa_key, gw.last_body["loginId"]) == "9876543210"
+    issued = await service.verify_login_otp(
+        session_id=requested.session_id, otp="123456", facility_id=FACILITY_A,
+    )
+    assert issued.next_step == "account_select"
+    assert [number for number, _name in issued.account_choices] == ["91111122223333", "91444455556666"]
+    assert issued.linking_token is None
+    with pytest.raises(service.AbdmIdentityError) as exc:
+        await service.select_login_account(
+            session_id=requested.session_id, abha_number="91000000000000", facility_id=FACILITY_A,
+        )
+    assert exc.value.code == "abha_account_not_in_selection"
+    chosen = await service.select_login_account(
+        session_id=requested.session_id, abha_number="91-4444-5555-6666", facility_id=FACILITY_A,
+    )
+    assert chosen.abha_number == "91-4444-5555-6666"
+    assert chosen.abha_address == "second@sbx"
+    assert gw.calls[2][1]["ABHANumber"] == "91-4444-5555-6666"
+    assert gw.headers[2]["T-token"] == "Bearer selection-token"
+    assert "selection-token" not in json.dumps(issued.account_choices)
