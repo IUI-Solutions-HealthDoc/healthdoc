@@ -87,6 +87,10 @@ async def test_the_aadhaar_number_is_never_stored(redis):
         # scope ("aadhaar"/"abha-number"), never the identifier; resends is a
         # counter bounding fresh gateway transactions per desk attempt.
         "login_hint", "resends",
+        # Enrolment grant identifiers and continuation stage. Never an
+        # Aadhaar number, mobile number, OTP, or profile credential.
+        "consent_code", "consent_version", "consent_language",
+        "consent_granted_at", "stage",
     }, "a new field here is a new thing kept about a patient — justify it"
 
     # And the property the substring check was reaching for, stated so it can

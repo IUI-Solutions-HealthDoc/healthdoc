@@ -5,14 +5,28 @@ import { useEffect, useRef, useState } from "react";
 import { ApiError, newIdempotencyKey } from "@/lib/api";
 
 import {
+  downloadNhaAbhaCard,
   requestAbhaEnrolmentOtp,
   requestAbhaLoginOtp,
+  requestEnrolmentMobileOtp,
   resendAbhaOtp,
+  submitEnrolmentAbhaAddress,
   verifyAbhaEnrolmentOtp,
   verifyAbhaLoginOtp,
+  verifyEnrolmentMobileOtp,
 } from "./api";
 import { digitsOnly, isValidAbhaInput, normaliseIndianMobileInput } from "./patientValidation";
 import type { AbhaIdentityLinked, AbhaLoginIdentifier } from "./types";
+
+/** Official M1 collection grant. Hindi legal text is not shipped until NHA-approved copy exists. */
+const ENROLMENT_CONSENT = {
+  granted: true,
+  code: "abha-enrollment",
+  version: "1.4",
+  language: "en" as const,
+};
+const ENROLMENT_CONSENT_TEXT =
+  "I confirm the patient agrees to share Aadhaar demographic information with the National Health Authority for the sole purpose of creating an ABHA. Consent code abha-enrollment, version 1.4.";
 
 type Flow = "existing" | "new";
 /** How an existing ABHA is proven: OTP to its linked mobile, or through Aadhaar. */
@@ -49,6 +63,11 @@ function PatientAbhaIdentity({ patient }: Props) {
   const [otp, setOtp] = useState("");
   const [mobile, setMobile] = useState("");
   const [linked, setLinked] = useState<AbhaIdentityLinked | null>(null);
+  const [consentGranted, setConsentGranted] = useState(false);
+  const [enrolPhase, setEnrolPhase] = useState<"aadhaar" | "mobile" | "address">("aadhaar");
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [selectedAddress, setSelectedAddress] = useState("");
+  const communicationMobile = useRef<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resendsRemaining, setResendsRemaining] = useState<number | null>(null);
@@ -100,6 +119,11 @@ function PatientAbhaIdentity({ patient }: Props) {
     setError(null);
     setResendsRemaining(null);
     setResendAvailableAt(null);
+    setEnrolPhase("aadhaar");
+    setSuggestions([]);
+    setSelectedAddress("");
+    setConsentGranted(false);
+    communicationMobile.current = null;
   }
 
   const usesAadhaar = flow === "new" || method === "aadhaar";
@@ -134,6 +158,10 @@ function PatientAbhaIdentity({ patient }: Props) {
   }
 
   async function requestOtp() {
+    if (flow === "new" && !consentGranted) {
+      setError("Confirm the patient's enrolment consent before creating an ABHA.");
+      return;
+    }
     if (!identifierValid) {
       setError(usesAadhaar ? "Enter a valid 12-digit Aadhaar number." : "Enter a valid 14-digit ABHA number.");
       return;
@@ -146,7 +174,7 @@ function PatientAbhaIdentity({ patient }: Props) {
     try {
       const result = flow === "existing"
         ? await requestAbhaLoginOtp(patient.id, loginIdentifier, newIdempotencyKey())
-        : await requestAbhaEnrolmentOtp(patient.id, identifier, newIdempotencyKey());
+        : await requestAbhaEnrolmentOtp(patient.id, identifier, ENROLMENT_CONSENT, newIdempotencyKey());
       if (!isCurrent(generation)) return;
       requestedIdentifier.current = loginIdentifier;
       applyRequested(result);
@@ -212,6 +240,13 @@ function PatientAbhaIdentity({ patient }: Props) {
         setError("ABDM did not confirm identity binding for this patient. Restart verification.");
         return;
       }
+      if (flow === "new" && result.next_step === "mobile_verify" && result.session_id) {
+        setSessionId(result.session_id);
+        setEnrolPhase("mobile");
+        setOtp("");
+        setLinked(null);
+        return;
+      }
       requestedIdentifier.current = null;
       setLinked(result);
       setOtp("");
@@ -234,12 +269,121 @@ function PatientAbhaIdentity({ patient }: Props) {
     }
   }
 
+  async function sendCommunicationOtp() {
+    if (!sessionId || mobileNormalised === null) {
+      setError("Enter the communication mobile number to verify.");
+      return;
+    }
+    const generation = beginRequest();
+    if (generation === null) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await requestEnrolmentMobileOtp(patient.id, sessionId, mobile, newIdempotencyKey());
+      if (!isCurrent(generation)) return;
+      communicationMobile.current = mobile;
+      applyRequested(result);
+    } catch (reason) {
+      if (isCurrent(generation)) setError(reason instanceof ApiError ? reason.message : "ABDM could not send the mobile OTP. Try again.");
+    } finally {
+      if (isCurrent(generation)) {
+        lifecycle.current.pending = false;
+        setBusy(false);
+      }
+    }
+  }
+
+  async function verifyCommunicationOtp() {
+    if (!sessionId || !otpValid) {
+      setError("Enter the OTP sent to the communication mobile.");
+      return;
+    }
+    const generation = beginRequest();
+    if (generation === null) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await verifyEnrolmentMobileOtp(sessionId, otp, newIdempotencyKey());
+      if (!isCurrent(generation)) return;
+      const options = result.suggested_addresses ?? [];
+      setSuggestions(options);
+      setSelectedAddress(options.length === 1 ? options[0] : "");
+      setEnrolPhase("address");
+      setOtp("");
+      setSessionId(result.session_id ?? sessionId);
+    } catch (reason) {
+      if (!isCurrent(generation)) return;
+      if (refusalCode(reason) === "otp_rejected") setOtp("");
+      setError(reason instanceof ApiError ? reason.message : "ABDM could not verify the mobile OTP. Try again.");
+    } finally {
+      if (isCurrent(generation)) {
+        lifecycle.current.pending = false;
+        setBusy(false);
+      }
+    }
+  }
+
+  async function chooseAddress() {
+    if (!sessionId || !selectedAddress) {
+      setError("Choose an ABHA address before continuing.");
+      return;
+    }
+    const generation = beginRequest();
+    if (generation === null) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await submitEnrolmentAbhaAddress(patient.id, sessionId, selectedAddress, newIdempotencyKey());
+      if (!isCurrent(generation)) return;
+      setLinked(result);
+      setSessionId(null);
+    } catch (reason) {
+      if (isCurrent(generation)) setError(reason instanceof ApiError ? reason.message : "ABDM could not save this ABHA address. Try again.");
+    } finally {
+      if (isCurrent(generation)) {
+        lifecycle.current.pending = false;
+        setBusy(false);
+      }
+    }
+  }
+
+  async function downloadCard() {
+    const generation = beginRequest();
+    if (generation === null) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const blob = await downloadNhaAbhaCard(patient.id);
+      if (!isCurrent(generation)) return;
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = "nha-abha-card";
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (reason) {
+      if (isCurrent(generation)) setError(reason instanceof ApiError ? reason.message : "The NHA ABHA card could not be downloaded.");
+    } finally {
+      if (isCurrent(generation)) {
+        lifecycle.current.pending = false;
+        setBusy(false);
+      }
+    }
+  }
+
   if (linked) {
     return (
       <section className="surface-card space-y-2 border border-success/30 bg-success-muted p-5" aria-live="polite">
         <p className="font-medium">ABHA verified and linked</p>
         <p className="font-mono text-lg">{linked.abha_number}</p>
         {linked.abha_address ? <p className="text-sm text-muted-foreground">{linked.abha_address}</p> : null}
+        <p className="text-sm text-muted-foreground">The hospital UHID card is printed from registration. The control below fetches the National Health Authority ABHA card.</p>
+        {linked.has_nha_card ? (
+          <button type="button" disabled={busy} onClick={() => void downloadCard()} className="rounded-md border border-border px-3 py-2 text-sm">Download NHA ABHA card</button>
+        ) : (
+          <p className="text-sm text-muted-foreground">NHA ABHA card is unavailable until a profile credential is stored.</p>
+        )}
+        {error ? <p role="alert" className="text-sm text-danger">{error}</p> : null}
       </section>
     );
   }
@@ -276,8 +420,42 @@ function PatientAbhaIdentity({ patient }: Props) {
               className={`w-full rounded-md border px-3 py-2 ${identifier && !identifierValid ? "border-danger" : "border-border"}`}
             />
           </label>
-          <button type="button" disabled={busy || !identifierValid} onClick={() => void requestOtp()} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{busy ? "Requesting…" : "Send OTP"}</button>
+          {flow === "new" ? (
+            <label className="flex items-start gap-2 text-sm">
+              <input type="checkbox" checked={consentGranted} onChange={(event) => setConsentGranted(event.target.checked)} />
+              <span>{ENROLMENT_CONSENT_TEXT}</span>
+            </label>
+          ) : null}
+          <button type="button" disabled={busy || !identifierValid || (flow === "new" && !consentGranted)} onClick={() => void requestOtp()} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{busy ? "Requesting…" : "Send OTP"}</button>
         </div>
+      ) : enrolPhase === "mobile" ? (
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">Verify the communication mobile in this same enrolment. This is separate from a mobile number typed on the Aadhaar OTP.</p>
+          <label className="block space-y-1 text-sm">
+            <span className="text-muted-foreground">Communication mobile</span>
+            <input value={mobile} onChange={(event) => setMobile(event.target.value)} inputMode="tel" autoComplete="tel" aria-invalid={!mobileValid} className={`w-full rounded-md border px-3 py-2 ${mobileValid ? "border-border" : "border-danger"}`} />
+          </label>
+          <label className="block space-y-1 text-sm">
+            <span className="text-muted-foreground">Mobile OTP</span>
+            <input value={otp} onChange={(event) => setOtp(digitsOnly(event.target.value))} inputMode="numeric" autoComplete="one-time-code" maxLength={8} className="w-full rounded-md border border-border px-3 py-2" />
+          </label>
+          <div className="flex gap-3">
+            <button type="button" disabled={busy || mobileNormalised === null} onClick={() => void sendCommunicationOtp()} className="rounded-md border border-border px-3 py-2 text-sm">Send mobile OTP</button>
+            <button type="button" disabled={busy || !otpValid} onClick={() => void verifyCommunicationOtp()} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50">Verify mobile</button>
+          </div>
+        </div>
+      ) : enrolPhase === "address" ? (
+        <fieldset className="space-y-3">
+          <legend className="text-sm text-muted-foreground">Choose an ABHA address</legend>
+          {suggestions.length === 0 ? <p className="text-sm">ABDM returned no address suggestions. Start again if this continues.</p> : null}
+          {suggestions.map((address) => (
+            <label key={address} className="flex items-center gap-2 text-sm">
+              <input type="radio" name="abha-address" value={address} checked={selectedAddress === address} onChange={() => setSelectedAddress(address)} />
+              <span>{address}</span>
+            </label>
+          ))}
+          <button type="button" disabled={busy || !selectedAddress} onClick={() => void chooseAddress()} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50">Save ABHA address</button>
+        </fieldset>
       ) : (
         <div className="space-y-3">
           {maskedMobile ? <p className="text-sm text-muted-foreground">ABDM response: {maskedMobile}</p> : null}

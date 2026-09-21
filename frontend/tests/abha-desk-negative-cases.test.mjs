@@ -163,3 +163,62 @@ test("switching patient discards the remembered identifier and open session", as
   assert.ok(button(other, "Send OTP"), "a new patient starts from the identifier step");
   assert.doesNotMatch(content(other), /999988887777/);
 });
+
+test("creating an ABHA requires consent and does not preselect one of several addresses", async () => {
+  const d = desk({
+    requestAbhaLoginOtp: async () => { throw new Error("not this flow"); },
+    requestAbhaEnrolmentOtp: async () => ({ session_id: "s1", masked_mobile: null, resends_remaining: 3 }),
+    verifyAbhaEnrolmentOtp: async () => ({
+      linked: true, linked_patient_id: "patient-A", abha_number: "91-1111-2222-3333",
+      session_id: "s1", next_step: "mobile_verify", has_nha_card: true,
+    }),
+    requestEnrolmentMobileOtp: async () => ({ session_id: "s1", masked_mobile: null, resends_remaining: 3 }),
+    verifyEnrolmentMobileOtp: async () => ({
+      linked: true, linked_patient_id: "patient-A", abha_number: "91-1111-2222-3333",
+      session_id: "s1", next_step: "address_select", suggested_addresses: ["alpha@sbx", "beta@sbx"],
+    }),
+    submitEnrolmentAbhaAddress: async () => ({
+      linked: true, linked_patient_id: "patient-A", abha_number: "91-1111-2222-3333",
+      abha_address: "beta@sbx", next_step: "complete", has_nha_card: true,
+    }),
+    resendAbhaOtp: async () => { throw new Error("unused"); },
+    verifyAbhaLoginOtp: async () => { throw new Error("unused"); },
+    downloadNhaAbhaCard: async () => { throw new Error("unused"); },
+  });
+  let tree = d.render();
+  button(tree, "Create ABHA").props.onClick();
+  tree = d.render();
+  input(tree).props.onChange({ target: { value: "999988887777" } });
+  tree = d.render();
+  assert.equal(button(tree, "Send OTP").props.disabled, true);
+  const consent = find(tree, (n) => n.type === "input" && n.props.type === "checkbox");
+  consent.props.onChange({ target: { checked: true } });
+  tree = d.render();
+  assert.equal(button(tree, "Send OTP").props.disabled, false);
+  await button(tree, "Send OTP").props.onClick(); await flush();
+  tree = d.render();
+  assert.equal(d.calls[0].args[2].code, "abha-enrollment");
+  assert.equal(d.calls[0].args[2].granted, true);
+  nodes(tree).find((n) => n.props?.autoComplete === "one-time-code").props.onChange({ target: { value: "123456" } });
+  tree = d.render();
+  await button(tree, "Verify and link").props.onClick(); await flush();
+  tree = d.render();
+  const mobile = nodes(tree).find((n) => n.type === "input" && n.props.inputMode === "tel");
+  mobile.props.onChange({ target: { value: "9876543210" } });
+  tree = d.render();
+  await button(tree, "Send mobile OTP").props.onClick(); await flush();
+  nodes(tree).filter((n) => n.type === "input").at(-1).props.onChange({ target: { value: "654321" } });
+  tree = d.render();
+  await button(tree, "Verify mobile").props.onClick(); await flush();
+  tree = d.render();
+  const chosen = nodes(tree).filter((n) => n.type === "input" && n.props.type === "radio" && n.props.checked);
+  assert.equal(chosen.length, 0, "several suggestions must not preselect the first");
+  const beta = nodes(tree).find((n) => n.type === "input" && n.props.value === "beta@sbx");
+  beta.props.onChange();
+  tree = d.render();
+  await button(tree, "Save ABHA address").props.onClick(); await flush();
+  tree = d.render();
+  assert.match(content(tree), /beta@sbx/);
+  assert.match(content(tree), /National Health Authority/);
+  assert.equal(d.calls.find((c) => c.name === "submitEnrolmentAbhaAddress").args[2], "beta@sbx");
+});

@@ -142,16 +142,16 @@ async def enrol_patient(
     db.add(enrolment)
     await db.flush()
 
-    # Schedule initial longitudinal review visit (30 days ahead)
-    initial_visit = ProgramVisit(
-        id=uuid.uuid4(),
-        enrolment_id=enrolment.id,
-        scheduled_date=enrolment_date + timedelta(days=30),
-        status="scheduled",
-        clinical_summary="Initial 30-day program follow-up and clinical trajectory review.",
-    )
-    db.add(initial_visit)
-    await db.flush()
+    interval = prog.review_interval_days if prog is not None else None
+    if interval is not None and interval > 0:
+        db.add(ProgramVisit(
+            id=uuid.uuid4(),
+            enrolment_id=enrolment.id,
+            scheduled_date=enrolment_date + timedelta(days=interval),
+            status="scheduled",
+            clinical_summary="Scheduled program review.",
+        ))
+        await db.flush()
 
     return ProgramEnrolmentOut(
         id=enrolment.id,

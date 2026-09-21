@@ -12,7 +12,9 @@ THE THREE FLOWS
 
     enrol_by_aadhaar    Aadhaar + OTP -> a NEW ABHA number
     login_by_abha       existing ABHA + OTP -> proof the patient holds it
-    (verify_mobile)     reserved; the OtpPurpose exists, the flow does not yet
+    enrol continuation  same txn: communication-mobile OTP, suggested address
+    (verify_mobile)     OtpPurpose still exists; continuation stays on the
+                        enrolment session so the ABDM txn id is not split
 
 WHAT NEVER TOUCHES THE DATABASE
 
@@ -41,14 +43,26 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from app.common.config import get_settings
 from app.integrations.abdm.client import AbdmRejected, AbdmResponse, get_abdm_client
 
 from . import otp_session
 from .crypto import encrypt_for_abdm
+from .enrolment_consent import (
+    APPROVED_CONSENT_LANGUAGES,
+    ENROLMENT_CONSENT_CODE,
+    ENROLMENT_CONSENT_VERSION,
+    EnrolmentConsent,
+)
 from .formatting import hyphenate_abha
 from .otp_session import OtpPurpose, OtpSession
+
+STAGE_ENROL_OTP = "enrol_otp"
+STAGE_MOBILE_PENDING = "mobile_pending"
+STAGE_MOBILE_OTP = "mobile_otp"
+STAGE_ADDRESS_PENDING = "address_pending"
 
 log = logging.getLogger("healthdoc.abdm")
 
@@ -89,12 +103,15 @@ class AbhaIssued:
     abha_number: str
     #: The ABHA address (PHR), e.g. "name@abdm". Distinct from the number.
     abha_address: str | None
-    #: Short-lived token proving this enrolment. Stored ENCRYPTED by the caller;
-    #: never logged and never returned to a browser.
+    #: Profile/X-token from enrolment or login. This is NOT a HIP linking token.
+    #: Stored ENCRYPTED by the caller as a profile credential; never logged and
+    #: never returned to a browser; never written to abha_linking_token_*.
     linking_token: str | None
     name: str | None
     gender: str | None
     date_of_birth: str | None
+    next_step: str = "complete"
+    suggested_addresses: tuple[str, ...] = ()
 
 
 def _txn_id(body: object) -> str:
@@ -115,8 +132,15 @@ def _txn_id(body: object) -> str:
     raise AbdmIdentityError("abdm_bad_response", "gateway response carried no transaction id")
 
 
-async def _post(path: str, payload: dict) -> AbdmResponse:
-    """POST to the ABHA host, which is NOT the HIECM gateway host.
+async def _call(
+    method: str,
+    path: str,
+    payload: dict | None = None,
+    *,
+    extra_headers: dict[str, str] | None = None,
+    parse_json: bool = True,
+) -> AbdmResponse:
+    """Call the ABHA host, which is NOT the HIECM gateway host.
 
     Enrolment and login live on abdm_abha_base_url; sessions live on
     abdm_gateway_base_url. Sending an enrolment to the gateway origin produces
@@ -126,7 +150,11 @@ async def _post(path: str, payload: dict) -> AbdmResponse:
     client = get_abdm_client()
     try:
         return await client.request(
-            "POST", f"{settings.abdm_abha_base_url.rstrip('/')}{path}", json=payload
+            method,
+            f"{settings.abdm_abha_base_url.rstrip('/')}{path}",
+            json=payload,
+            extra_headers=extra_headers,
+            parse_json=parse_json,
         )
     except AbdmRejected as exc:
         # Error bodies can echo the identifier or OTP. Retain only contracted
@@ -139,10 +167,17 @@ async def _post(path: str, payload: dict) -> AbdmResponse:
         raise
 
 
+async def _post(path: str, payload: dict) -> AbdmResponse:
+    return await _call("POST", path, payload)
+
+
 def _rejection_metadata(detail: object) -> tuple[list[str], list[str]]:
     codes: set[str] = set()
     fields: set[str] = set()
-    allowed_fields = {"loginId", "loginHint", "scope", "otpSystem", "otpValue", "txnId"}
+    allowed_fields = {
+        "loginId", "loginHint", "scope", "otpSystem", "otpValue", "txnId",
+        "abhaAddress", "preferred",
+    }
 
     def visit(value: object, depth: int = 0) -> None:
         if depth > 5:
@@ -191,6 +226,79 @@ def _name(profile: dict) -> str | None:
     ) or None
 
 
+def _require_enrolment_consent(consent: EnrolmentConsent | None) -> EnrolmentConsent:
+    if consent is None:
+        raise AbdmIdentityError(
+            "enrolment_consent_required",
+            "Enrolment requires an explicit patient consent grant",
+        )
+    if not consent.granted:
+        raise AbdmIdentityError(
+            "enrolment_consent_refused",
+            "Enrolment cannot continue without the patient's consent",
+        )
+    if consent.code != ENROLMENT_CONSENT_CODE or consent.version != ENROLMENT_CONSENT_VERSION:
+        raise AbdmIdentityError(
+            "enrolment_consent_mismatch",
+            "Enrolment consent code or version does not match the approved grant",
+        )
+    language = consent.language.strip().lower()
+    if language not in APPROVED_CONSENT_LANGUAGES:
+        raise AbdmIdentityError(
+            "enrolment_consent_language_unavailable",
+            "No approved translation of this consent is available in that language",
+        )
+    return EnrolmentConsent(
+        granted=True,
+        code=ENROLMENT_CONSENT_CODE,
+        version=ENROLMENT_CONSENT_VERSION,
+        language=language,
+    )
+
+
+def _consent_from_session(session: OtpSession) -> dict[str, str]:
+    """Wire consent comes from the captured grant, never a hardcoded fallback."""
+    if (
+        session.consent_code != ENROLMENT_CONSENT_CODE
+        or session.consent_version != ENROLMENT_CONSENT_VERSION
+        or not session.consent_granted_at
+    ):
+        raise AbdmIdentityError(
+            "enrolment_consent_required",
+            "Enrolment requires an explicit patient consent grant",
+        )
+    return {"code": session.consent_code, "version": session.consent_version}
+
+
+def _profile_token(body: dict) -> str | None:
+    """Enrolment/login X-token. Never treat a refresh token as the profile credential."""
+    nested = body.get("tokens")
+    if isinstance(nested, dict):
+        token = nested.get("token")
+        if isinstance(token, str) and token:
+            return token
+    token = body.get("token")
+    return token if isinstance(token, str) and token else None
+
+
+def _abdm_timestamp() -> str:
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+
+
+def _require_stage(session: OtpSession, *allowed: str) -> None:
+    if session.stage not in allowed:
+        raise AbdmIdentityError(
+            "enrolment_stage_invalid",
+            "This enrolment step is not available for the current session",
+        )
+
+
+def _string_list(value: object) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        return ()
+    return tuple(item.strip() for item in value if isinstance(item, str) and item.strip())
+
+
 # ------------------------------------------------------- enrol by Aadhaar
 
 
@@ -201,13 +309,17 @@ async def request_aadhaar_otp(
     started_by: str,
     patient_id: str | None = None,
     resends: int = 0,
+    consent: EnrolmentConsent | None = None,
+    consent_granted_at: str | None = None,
 ) -> OtpRequested:
     """Leg one of enrolment: ask ABDM to OTP the mobile linked to this Aadhaar.
 
     `aadhaar` is encrypted here and referenced nowhere afterwards — not in the
     session, not in a log, not in an audit row. The transaction id ABDM returns
-    is what stands for this identity from now on.
+    is what stands for this identity from now on. Consent must already have been
+    granted at the desk; this call does not invent it.
     """
+    granted = _require_enrolment_consent(consent)
     settings = get_settings()
     body = (
         await _post(
@@ -233,6 +345,11 @@ async def request_aadhaar_otp(
         patient_id=patient_id,
         login_hint="aadhaar",
         resends=resends,
+        consent_code=granted.code,
+        consent_version=granted.version,
+        consent_language=granted.language,
+        consent_granted_at=consent_granted_at or datetime.now(UTC).isoformat(),
+        stage=STAGE_ENROL_OTP,
     )
     return OtpRequested(
         session_id=session.session_id,
@@ -258,6 +375,7 @@ async def enrol_by_aadhaar_otp(
     session: OtpSession = await otp_session.load(
         session_id, facility_id=facility_id, purpose=OtpPurpose.ENROL_BY_AADHAAR
     )
+    _require_stage(session, STAGE_ENROL_OTP, None)
 
     payload: dict = {
         "authData": {
@@ -267,7 +385,7 @@ async def enrol_by_aadhaar_otp(
                 "otpValue": encrypt_for_abdm(otp),
             },
         },
-        "consent": {"code": "abha-enrollment", "version": "1.4"},
+        "consent": _consent_from_session(session),
     }
     if mobile:
         # Unlike loginId/otpValue, byAadhaar's mobile is ten national digits
@@ -290,13 +408,21 @@ async def enrol_by_aadhaar_otp(
 
     if consume_session:
         await otp_session.finish(session_id)
+    else:
+        next_txn = body.get("txnId")
+        await otp_session.save(otp_session.with_updates(
+            session,
+            abdm_txn_id=next_txn if isinstance(next_txn, str) and next_txn else session.abdm_txn_id,
+            stage=STAGE_MOBILE_PENDING,
+        ))
     return AbhaIssued(
         abha_number=abha_number,
         abha_address=_address(profile),
-        linking_token=body.get("token") or body.get("tokens", {}).get("token"),
+        linking_token=_profile_token(body),
         name=_name(profile),
         gender=profile.get("gender"),
         date_of_birth=profile.get("dob") or profile.get("dateOfBirth"),
+        next_step="complete" if consume_session else "mobile_verify",
     )
 
 
@@ -386,7 +512,22 @@ async def resend_otp(
     if purpose is OtpPurpose.ENROL_BY_AADHAAR:
         if aadhaar is None:
             raise AbdmIdentityError("abdm_identifier_required", "enrolment resend requires the Aadhaar number")
-        requested = await request_aadhaar_otp(aadhaar=aadhaar, **common)
+        if not session.consent_code:
+            raise AbdmIdentityError(
+                "enrolment_consent_required",
+                "Enrolment requires an explicit patient consent grant",
+            )
+        requested = await request_aadhaar_otp(
+            aadhaar=aadhaar,
+            consent=EnrolmentConsent(
+                granted=True,
+                code=session.consent_code,
+                version=session.consent_version or "",
+                language=session.consent_language or "en",
+            ),
+            consent_granted_at=session.consent_granted_at,
+            **common,
+        )
     elif purpose is OtpPurpose.LOGIN_BY_ABHA:
         requested = await request_login_otp(abha_number=abha_number, aadhaar=aadhaar, **common)
     else:
@@ -443,8 +584,228 @@ async def verify_login_otp(
     return AbhaIssued(
         abha_number=abha_number,
         abha_address=_address(profile),
-        linking_token=body.get("token") or body.get("tokens", {}).get("token"),
+        linking_token=_profile_token(body),
         name=_name(profile),
         gender=profile.get("gender"),
         date_of_birth=profile.get("dob") or profile.get("dateOfBirth"),
     )
+
+
+@dataclass(frozen=True)
+class AbhaCard:
+    content: bytes
+    media_type: str
+
+
+@dataclass(frozen=True)
+class AbhaProfileView:
+    abha_number: str | None
+    abha_address: str | None
+    name: str | None
+    gender: str | None
+    status: str | None
+    kyc_verified: bool | None
+
+
+# -------------------------------- enrolment continuation (same ABDM txn)
+
+
+def _bearer(token: str) -> str:
+    value = token.strip()
+    return value if value.lower().startswith("bearer ") else f"Bearer {value}"
+
+
+async def request_enrolment_mobile_otp(
+    *,
+    session_id: str,
+    mobile: str,
+    facility_id: str,
+    started_by: str,
+    resend: bool = False,
+) -> OtpRequested:
+    """CRT_ABHA_108/109: communication-mobile OTP inside the enrolment txn.
+
+    The mobile number is encrypted for the gateway and is not stored. A failed
+    gateway call leaves the previous stage in place.
+    """
+    session = await otp_session.load(
+        session_id, facility_id=facility_id, purpose=OtpPurpose.ENROL_BY_AADHAAR
+    )
+    if session.started_by != str(started_by):
+        raise otp_session.OtpSessionMismatch
+    if resend:
+        _require_stage(session, STAGE_MOBILE_OTP)
+        session.resend_allowed()
+        resends = session.resends + 1
+    else:
+        _require_stage(session, STAGE_MOBILE_PENDING, STAGE_MOBILE_OTP)
+        resends = 0 if session.stage == STAGE_MOBILE_PENDING else session.resends
+    settings = get_settings()
+    body = (
+        await _post(
+            settings.abdm_path_enrol_request_otp,
+            {
+                "txnId": session.abdm_txn_id,
+                "scope": ["abha-enrol", "mobile-verify"],
+                "loginHint": "mobile",
+                "otpSystem": "abdm",
+                "loginId": encrypt_for_abdm(mobile),
+            },
+        )
+    ).body
+    next_txn = session.abdm_txn_id
+    if isinstance(body, dict):
+        for key in ("txnId", "transactionId", "txnID"):
+            value = body.get(key)
+            if isinstance(value, str) and value:
+                next_txn = value
+                break
+    await otp_session.save(otp_session.with_updates(
+        session,
+        abdm_txn_id=next_txn,
+        stage=STAGE_MOBILE_OTP,
+        resends=resends,
+        created_at=datetime.now(UTC).isoformat(),
+    ))
+    return OtpRequested(
+        session_id=session.session_id,
+        masked_mobile=(body.get("message") if isinstance(body, dict) else None),
+        resends_remaining=otp_session.MAX_RESENDS - resends,
+    )
+
+
+async def verify_enrolment_mobile_otp(
+    *, session_id: str, otp: str, facility_id: str
+) -> None:
+    """Verify the communication-mobile OTP, then leave the session for address selection."""
+    session = await otp_session.load(
+        session_id, facility_id=facility_id, purpose=OtpPurpose.ENROL_BY_AADHAAR
+    )
+    _require_stage(session, STAGE_MOBILE_OTP)
+    settings = get_settings()
+    body = (
+        await _post(
+            settings.abdm_path_enrol_auth_by_abdm,
+            {
+                "scope": ["abha-enrol", "mobile-verify"],
+                "authData": {
+                    "authMethods": ["otp"],
+                    "otp": {
+                        "timeStamp": _abdm_timestamp(),
+                        "txnId": session.abdm_txn_id,
+                        "otpValue": encrypt_for_abdm(otp),
+                    },
+                },
+            },
+        )
+    ).body
+    if not isinstance(body, dict):
+        raise AbdmIdentityError("abdm_bad_response", "gateway returned a non-object body")
+    if body.get("authResult") not in (None, "success"):
+        raise AbdmIdentityError("abdm_auth_failed", "ABDM did not verify this OTP")
+    accounts = body.get("accounts")
+    if isinstance(accounts, list) and len(accounts) > 1:
+        raise AbdmIdentityError(
+            "abdm_account_selection_required",
+            "ABDM returned more than one account; the desk must not pick the first",
+        )
+    next_txn = body.get("txnId")
+    await otp_session.save(otp_session.with_updates(
+        session,
+        abdm_txn_id=next_txn if isinstance(next_txn, str) and next_txn else session.abdm_txn_id,
+        stage=STAGE_ADDRESS_PENDING,
+    ))
+
+
+async def list_enrolment_address_suggestions(
+    *, session_id: str, facility_id: str
+) -> tuple[str, ...]:
+    session = await otp_session.load(
+        session_id, facility_id=facility_id, purpose=OtpPurpose.ENROL_BY_AADHAAR
+    )
+    _require_stage(session, STAGE_ADDRESS_PENDING)
+    settings = get_settings()
+    body = (
+        await _call(
+            "GET",
+            settings.abdm_path_enrol_suggestion,
+            extra_headers={"Transaction_Id": session.abdm_txn_id},
+        )
+    ).body
+    if not isinstance(body, dict):
+        raise AbdmIdentityError("abdm_bad_response", "gateway returned a non-object body")
+    suggestions = _string_list(body.get("abhaAddressList"))
+    if not suggestions:
+        raise AbdmIdentityError(
+            "abdm_no_address_suggestions",
+            "ABDM returned no ABHA address suggestions",
+        )
+    return suggestions
+
+
+async def submit_enrolment_abha_address(
+    *,
+    session_id: str,
+    abha_address: str,
+    facility_id: str,
+) -> str:
+    """Bind the chosen ABHA address in the same enrolment transaction."""
+    session = await otp_session.load(
+        session_id, facility_id=facility_id, purpose=OtpPurpose.ENROL_BY_AADHAAR
+    )
+    _require_stage(session, STAGE_ADDRESS_PENDING)
+    chosen = abha_address.strip()
+    if not chosen or "@" not in chosen:
+        raise AbdmIdentityError("abha_address_invalid", "Choose a valid ABHA address")
+    settings = get_settings()
+    body = (
+        await _post(
+            settings.abdm_path_enrol_abha_address,
+            {"txnId": session.abdm_txn_id, "abhaAddress": chosen, "preferred": 1},
+        )
+    ).body
+    if not isinstance(body, dict):
+        raise AbdmIdentityError("abdm_bad_response", "gateway returned a non-object body")
+    preferred = body.get("preferredAbhaAddress")
+    bound = preferred.strip() if isinstance(preferred, str) and preferred.strip() else chosen
+    return bound
+
+
+async def fetch_abha_profile(*, profile_token: str) -> AbhaProfileView:
+    settings = get_settings()
+    body = (
+        await _call(
+            "GET",
+            settings.abdm_path_profile_account,
+            extra_headers={"X-token": _bearer(profile_token)},
+        )
+    ).body
+    if not isinstance(body, dict):
+        raise AbdmIdentityError("abdm_bad_response", "gateway returned a non-object body")
+    kyc = body.get("kycVerified")
+    return AbhaProfileView(
+        abha_number=body.get("ABHANumber") if isinstance(body.get("ABHANumber"), str) else None,
+        abha_address=(
+            body["preferredAbhaAddress"].strip()
+            if isinstance(body.get("preferredAbhaAddress"), str) and body["preferredAbhaAddress"].strip()
+            else None
+        ),
+        name=_name(body),
+        gender=body.get("gender") if isinstance(body.get("gender"), str) else None,
+        status=body.get("status") if isinstance(body.get("status"), str) else None,
+        kyc_verified=kyc if isinstance(kyc, bool) else None,
+    )
+
+
+async def fetch_abha_card(*, profile_token: str) -> AbhaCard:
+    settings = get_settings()
+    response = await _call(
+        "GET",
+        settings.abdm_path_profile_abha_card,
+        extra_headers={"X-Token": _bearer(profile_token)},
+        parse_json=False,
+    )
+    content = response.body if isinstance(response.body, bytes | bytearray) else b""
+    if not content:
+        raise AbdmIdentityError("abdm_no_abha_card", "ABDM returned an empty ABHA card")
+    return AbhaCard(content=bytes(content), media_type="image/png")

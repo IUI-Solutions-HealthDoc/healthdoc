@@ -36,6 +36,9 @@ GATEWAY_PATH_FIELDS = sorted(
     if name.startswith("abdm_path_") and name not in {
         # M1 lives on abhasbx.abdm.gov.in, not the gateway — different base.
         "abdm_path_enrol_request_otp", "abdm_path_enrol_by_aadhaar",
+        "abdm_path_enrol_auth_by_abdm", "abdm_path_enrol_suggestion",
+        "abdm_path_enrol_abha_address", "abdm_path_profile_account",
+        "abdm_path_profile_abha_card",
         "abdm_path_login_request_otp", "abdm_path_login_verify",
     }
 )

@@ -20,6 +20,9 @@ class CareProgram(Base, UUIDPk, Timestamps):
     category: Mapped[str] = mapped_column(String(50), nullable=False, default="chronic")
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Days until the first review. Null means no review is scheduled: a
+    # universal 30-day interval was not an approved program policy.
+    review_interval_days: Mapped[int | None] = mapped_column(nullable=True)
 
 
 class ProgramEnrolment(Base, UUIDPk, Timestamps):
