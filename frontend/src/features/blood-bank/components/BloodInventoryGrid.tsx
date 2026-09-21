@@ -23,9 +23,7 @@ interface BloodInventoryGridProps {
 
 const BLOOD_GROUPS = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
 
-function generateUnitId(): string {
-  return `UNIT-${Math.floor(100000 + Math.random() * 900000)}`;
-}
+
 
 export function BloodInventoryGrid({
   units,
@@ -38,19 +36,13 @@ export function BloodInventoryGrid({
   const [isCollectModalOpen, setIsCollectModalOpen] = useState<boolean>(false);
 
   // Collect form state
-  const [unitNumber, setUnitNumber] = useState<string>(generateUnitId);
-  const [donorId, setDonorId] = useState<string>(donors[0]?.id || "");
+  const [unitNumber, setUnitNumber] = useState<string>("");
+  const [donorId, setDonorId] = useState<string>("");
   const [bloodGroup, setBloodGroup] = useState<string>("O");
   const [rhFactor, setRhFactor] = useState<string>("+");
-  const [componentType, setComponentType] = useState<string>("packed_rbc");
+  const [screening, setScreening] = useState<"pending" | "passed" | "failed">("pending");
   const [volumeMl, setVolumeMl] = useState<number>(350);
-  const [collectionDate, setCollectionDate] = useState<string>(
-    new Date().toISOString().split("T")[0]
-  );
-  // Default expiry: 35 days for packed RBC
-  const defaultExp = new Date();
-  defaultExp.setDate(defaultExp.getDate() + 35);
-  const [expiryDate, setExpiryDate] = useState<string>(defaultExp.toISOString().split("T")[0]);
+  const [expiryDate, setExpiryDate] = useState<string>("");
 
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,7 +58,7 @@ export function BloodInventoryGrid({
   const stockByGroup: Record<string, number> = {};
   BLOOD_GROUPS.forEach((bg) => {
     stockByGroup[bg] = units.filter(
-      (u) => formatBloodGroup(u.blood_group, u.rh_factor) === bg && u.status === "available"
+      (u) => formatBloodGroup(u.blood_group, u.rh_factor) === bg && u.status === "available" && u.screening_status === "passed" && u.expiry_date >= new Date().toISOString().slice(0, 10)
     ).length;
   });
 
@@ -76,18 +68,15 @@ export function BloodInventoryGrid({
     try {
       setIsSubmitting(true);
       await createBloodUnit({
-        unit_number: unitNumber.trim(),
-        donor_id: donorId || null,
-        blood_group: bloodGroup,
-        rh_factor: rhFactor,
-        component_type: componentType,
+        bag_number: unitNumber.trim(),
+        donor_id: donorId,
+        blood_group: bloodGroup + rhFactor,
         volume_ml: volumeMl,
-        collection_date: collectionDate,
         expiry_date: expiryDate,
-        screening_status: "passed",
+        screening_status: screening,
       });
       setIsCollectModalOpen(false);
-      setUnitNumber(generateUnitId());
+      setUnitNumber(""); setDonorId(""); setExpiryDate(""); setScreening("pending");
       onRefresh();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to add blood unit to inventory.");
@@ -160,7 +149,7 @@ export function BloodInventoryGrid({
               <option value="available">Available</option>
               <option value="reserved">Reserved</option>
               <option value="issued">Issued</option>
-              <option value="quarantine">Quarantine</option>
+              <option value="quarantined">Quarantine</option>
             </select>
           </div>
         </div>
@@ -201,7 +190,7 @@ export function BloodInventoryGrid({
                 </tr>
               ) : (
                 filteredUnits.map((u) => {
-                  const isAvailable = u.status === "available";
+                  const isAvailable = u.status === "available" && u.screening_status === "passed" && u.expiry_date >= new Date().toISOString().slice(0, 10);
                   return (
                     <tr key={u.id} className="hover:bg-muted/30">
                       <td className="p-3 font-mono font-bold text-foreground">
@@ -213,7 +202,7 @@ export function BloodInventoryGrid({
                         </span>
                       </td>
                       <td className="p-3 capitalize text-muted-foreground">
-                        {(u.component_type || "whole_blood").replace(/_/g, " ")}
+                        {(u.component_type || "Not recorded").replace(/_/g, " ")}
                       </td>
                       <td className="p-3 font-mono">{u.volume_ml} mL</td>
                       <td className="p-3 font-mono text-muted-foreground">
@@ -234,7 +223,7 @@ export function BloodInventoryGrid({
                       <td className="p-3">
                         <span
                           className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold capitalize ${
-                            u.status === "available"
+                            u.status === "available" && u.screening_status === "passed" && u.expiry_date >= new Date().toISOString().slice(0, 10)
                               ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
                               : u.status === "reserved"
                               ? "bg-amber-500/10 text-amber-600 dark:text-amber-400"
@@ -308,15 +297,16 @@ export function BloodInventoryGrid({
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
-                    Donor (Optional)
+                    Donor *
                   </label>
                   <select
                     value={donorId}
-                    onChange={(e) => setDonorId(e.target.value)}
+                    required
+                    onChange={(e) => { setDonorId(e.target.value); const group = donors.find((d) => d.id === e.target.value)?.blood_group; if (group) { setBloodGroup(group.slice(0, -1)); setRhFactor(group.slice(-1)); } }}
                     className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                   >
-                    <option value="">Anonymous / Voluntary Walk-in</option>
-                    {donors.map((d) => (
+                    <option value="">Select an eligible donor</option>
+                    {donors.filter((d) => d.is_eligible).map((d) => (
                       <option key={d.id} value={d.id}>
                         {d.donor_number} — {d.full_name} ({d.blood_group}
                         {d.rh_factor})
@@ -360,18 +350,10 @@ export function BloodInventoryGrid({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
-                    Component Type *
+                    Screening Result *
                   </label>
-                  <select
-                    value={componentType}
-                    onChange={(e) => setComponentType(e.target.value)}
-                    className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-                  >
-                    <option value="packed_rbc">Packed RBCs</option>
-                    <option value="whole_blood">Whole Blood</option>
-                    <option value="fresh_frozen_plasma">Fresh Frozen Plasma (FFP)</option>
-                    <option value="platelets">Platelet Concentrate</option>
-                    <option value="cryoprecipitate">Cryoprecipitate</option>
+                  <select aria-label="Screening result" value={screening} onChange={(e) => setScreening(e.target.value as "pending" | "passed" | "failed")}>
+                    <option value="pending">Pending</option><option value="passed">Passed (verified)</option><option value="failed">Failed</option>
                   </select>
                 </div>
                 <div>
@@ -380,8 +362,8 @@ export function BloodInventoryGrid({
                   </label>
                   <input
                     type="number"
-                    min="50"
-                    max="600"
+                    min="100"
+                    max="1000"
                     value={volumeMl}
                     onChange={(e) => setVolumeMl(parseInt(e.target.value) || 350)}
                     className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
@@ -393,15 +375,9 @@ export function BloodInventoryGrid({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
-                    Collection Date *
+                    Collection time
                   </label>
-                  <input
-                    type="date"
-                    value={collectionDate}
-                    onChange={(e) => setCollectionDate(e.target.value)}
-                    className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-                    required
-                  />
+                  <p className="text-xs">Recorded as the current time. Historical collection and component-specific tracking are not supported by this form.</p>
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">

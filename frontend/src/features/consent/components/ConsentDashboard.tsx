@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 
@@ -23,6 +23,8 @@ export function ConsentDashboard() {
    * PatientSearch rather than growing a second patient picker.
    */
   const [patient, setPatient] = useState<{ id: string; full_name: string } | null>(null);
+  const patientRef = useRef(patient);
+  patientRef.current = patient;
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const list = useConsentRecords({ status: "all", patient_id: patient?.id });
   const detail = useConsentDetail(patient?.id ?? null, selectedId);
@@ -102,6 +104,7 @@ export function ConsentDashboard() {
             key={patient.id}
             patientId={patient.id}
             onCreated={(record) => {
+              if (patientRef.current !== patient || record.patient_id !== patient.id) return;
               setSelectedId(record.id);
               void list.refresh();
             }}
@@ -135,6 +138,7 @@ export function ConsentDashboard() {
               onSelect={setSelectedId}
             />
             <ConsentRecordDetail
+              key={`${patient.id}:${selectedId ?? "none"}`}
               record={detail.record}
               loading={detail.loading}
               onRecordUpdated={handleRecordUpdated}

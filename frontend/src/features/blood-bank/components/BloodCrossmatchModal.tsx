@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -34,19 +34,37 @@ export function BloodCrossmatchModal({
     full_name: string;
   } | null>(null);
 
-  const [compatibility, setCompatibility] = useState<"compatible" | "incompatible">("compatible");
+  const [compatibility, setCompatibility] = useState<"compatible" | "incompatible" | "">("");
   const [notes, setNotes] = useState("");
   const [issueDirectly, setIssueDirectly] = useState(false);
-  const [issuedToWard, setIssuedToWard] = useState("ICU Complex");
+  const [issuedToWard, setIssuedToWard] = useState("");
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [completedSlip, setCompletedSlip] = useState<string | null>(null);
+  const searchSequence = useRef(0);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; searchSequence.current += 1; };
+  }, []);
+
+  const clearRecipient = () => {
+    searchSequence.current += 1;
+    setSelectedPatient(null);
+    setCompatibility("");
+    setIssueDirectly(false);
+    setNotes("");
+    setIssuedToWard("");
+    setError(null);
+  };
 
   if (!isOpen || !unit) return null;
 
   const handlePatientSearch = async () => {
     if (!patientSearch.trim()) return;
+    const request = ++searchSequence.current;
+    setError(null);
     try {
       const isDigits = /^\d+$/.test(patientSearch.trim());
       const body = isDigits
@@ -64,7 +82,8 @@ export function BloodCrossmatchModal({
         method: "POST",
         body: JSON.stringify(body),
       });
-      if (res?.items?.length > 0) {
+      if (!mounted.current || request !== searchSequence.current) return;
+      if (res?.items?.length === 1) {
         const p = res.items[0];
         setSelectedPatient({
           id: p.id,
@@ -72,19 +91,21 @@ export function BloodCrossmatchModal({
           full_name: p.full_name || `${p.first_name || ""} ${p.last_name || ""}`.trim() || "Patient",
         });
       } else {
-        setError("No patient found with that UHID or name.");
+        setError("Enter an exact UHID. Search must return exactly one patient.");
       }
     } catch (err: unknown) {
+      if (!mounted.current || request !== searchSequence.current) return;
       setError(err instanceof Error ? err.message : "Search failed.");
     }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting || !mounted.current) return;
     setError(null);
 
-    if (!selectedPatient) {
-      setError("Please search and select a patient for crossmatching.");
+    if (!selectedPatient || !compatibility) {
+      setError("Select the patient and explicitly record the compatibility result.");
       return;
     }
 
@@ -92,18 +113,19 @@ export function BloodCrossmatchModal({
       setIsSubmitting(true);
       const xm = await crossmatchBlood({
         patient_id: selectedPatient.id,
-        blood_unit_id: unit.id,
+        unit_id: unit.id,
         compatibility_result: compatibility,
         notes: notes.trim() || null,
       });
+      if (!mounted.current) return;
 
       if (compatibility === "compatible" && issueDirectly) {
         const issued = await issueBloodUnit({
           crossmatch_id: xm.id,
-          issued_to_ward: issuedToWard.trim(),
-          notes: notes.trim() || null,
+          notes: [issuedToWard.trim() && `Destination: ${issuedToWard.trim()}`, notes.trim()].filter(Boolean).join("\n") || null,
         });
-        setCompletedSlip(issued.issue_slip_number || "ISSUED");
+        if (!issued.issued_at) throw new Error("Issue was not confirmed by the server.");
+        setCompletedSlip(issued.id);
       } else {
         onSuccess();
         onClose();
@@ -128,6 +150,8 @@ export function BloodCrossmatchModal({
           </div>
           <button
             onClick={onClose}
+            disabled={isSubmitting}
+            aria-label="Close crossmatch"
             className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
           >
             <X className="h-5 w-5" />
@@ -141,7 +165,7 @@ export function BloodCrossmatchModal({
               <h4 className="font-bold text-base text-foreground">Blood Unit Issued Successfully</h4>
               <p className="text-xs text-muted-foreground mt-1">Controlled release authorized to {issuedToWard}</p>
               <div className="mt-3 inline-block rounded-lg bg-background px-4 py-2 border border-border">
-                <span className="text-xs text-muted-foreground block font-medium">Issue Slip Number</span>
+                <span className="text-xs text-muted-foreground block font-medium">Crossmatch Record ID</span>
                 <span className="font-mono text-sm font-black text-primary">{completedSlip}</span>
               </div>
             </div>
@@ -166,7 +190,7 @@ export function BloodCrossmatchModal({
                     {unit.bag_number || unit.unit_number || unit.id.slice(0, 8).toUpperCase()}
                   </span>
                   <span className="text-muted-foreground ml-2 capitalize">
-                    {(unit.component_type || "whole_blood").replace(/_/g, " ")} ({unit.volume_ml} mL)
+                    {(unit.component_type || "Component not recorded").replace(/_/g, " ")} ({unit.volume_ml} mL)
                   </span>
                 </div>
               </div>
@@ -182,7 +206,8 @@ export function BloodCrossmatchModal({
               </div>
             )}
 
-            <form onSubmit={handleSubmit} className="mt-4 space-y-4">
+            <form onSubmit={handleSubmit} className="mt-4">
+              <fieldset disabled={isSubmitting} className="space-y-4">
               {/* Patient Selection */}
               <div>
                 <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
@@ -196,7 +221,7 @@ export function BloodCrossmatchModal({
                     </div>
                     <button
                       type="button"
-                      onClick={() => setSelectedPatient(null)}
+                      onClick={clearRecipient}
                       className="text-xs text-primary underline font-medium"
                     >
                       Change
@@ -206,14 +231,15 @@ export function BloodCrossmatchModal({
                   <div className="flex gap-2">
                     <input
                       type="text"
-                      placeholder="Enter Patient UHID or Name..."
+                      placeholder="Enter exact Patient UHID or Mobile..."
                       value={patientSearch}
-                      onChange={(e) => setPatientSearch(e.target.value)}
+                      onChange={(e) => { searchSequence.current += 1; setPatientSearch(e.target.value); }}
                       className="w-full rounded-lg border border-input bg-background px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary"
                     />
                     <button
                       type="button"
                       onClick={handlePatientSearch}
+                      aria-label="Search patient"
                       className="rounded-lg bg-secondary px-3 py-2 text-xs font-semibold text-secondary-foreground hover:bg-secondary/80 transition-colors shrink-0"
                     >
                       <Search className="h-3.5 w-3.5" />
@@ -284,7 +310,7 @@ export function BloodCrossmatchModal({
                   {issueDirectly && (
                     <div className="pt-2">
                       <label className="block text-[11px] text-muted-foreground font-medium mb-1">
-                        Destination Ward / OT Location *
+                        Destination (saved in issue notes) *
                       </label>
                       <input
                         type="text"
@@ -323,17 +349,18 @@ export function BloodCrossmatchModal({
                 </button>
                 <button
                   type="submit"
-                  disabled={isSubmitting || !selectedPatient}
+                  disabled={isSubmitting || !selectedPatient || !compatibility}
                   className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
                 >
                   <FileCheck className="h-4 w-4" />
                   {isSubmitting
                     ? "Saving..."
                     : issueDirectly
-                    ? "Crossmatch & Issue Slip"
+                    ? "Crossmatch & Issue"
                     : "Save Crossmatch Result"}
                 </button>
               </div>
+              </fieldset>
             </form>
           </>
         )}

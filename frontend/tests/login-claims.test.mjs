@@ -36,6 +36,7 @@ test("rendered sign-in keeps the real identity flow without unsupported complian
         loginWithKeycloak: async (url) => calls.push(url),
       },
       "@/lib/auth/routes": { getDefaultRouteForRole: () => "/doctor/dashboard" },
+      "@/lib/auth/return-url": compile(new URL("../src/lib/auth/return-url.ts", import.meta.url), {}),
       "@/providers/auth-provider": { useAuth: () => ({ isAuthenticated: false, isLoading: false, user: null }) },
     },
   ).LoginScreen);

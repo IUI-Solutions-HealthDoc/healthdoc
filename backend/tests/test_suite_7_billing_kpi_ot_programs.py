@@ -12,6 +12,7 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi import HTTPException
@@ -333,7 +334,7 @@ async def test_hd25_care_setting_populated_in_invoice_listing_and_detail(db):
 
 async def test_hd26_kpi_snapshots_calculation_and_idempotency(db):
     facility, cashier_user, _, _, patient = await _setup_suite_7_env(db)
-    today = date.today()
+    today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
 
     # Seed 3 OPD visits (1 closed, 2 registered)
     for i in range(3):
@@ -373,18 +374,19 @@ async def test_hd26_kpi_snapshots_calculation_and_idempotency(db):
 
     # 1. Produce all KPI snapshots
     snaps_1 = await produce_kpi_snapshots(db, facility_id=facility.id, period_start=today, period_end=today)
-    assert len(snaps_1) == 8
+    assert len(snaps_1) == 6
 
     kpis_by_code = {s.kpi_code: s for s in snaps_1}
     assert kpis_by_code["OPD_REGISTRATIONS"].value == Decimal("3")
     assert kpis_by_code["ED_CENSUS"].value == Decimal("2")
     assert kpis_by_code["ED_LWBS_RATE"].value == Decimal("50.00")
     assert kpis_by_code["BED_OCCUPANCY_RATE"].value == Decimal("50.00")
-    assert kpis_by_code["LAB_TURNAROUND_HOURS"].value == Decimal("2.40")
+    assert "LAB_TURNAROUND_HOURS" not in kpis_by_code
+    assert "OPD_AVG_WAIT_MINS" not in kpis_by_code
 
     # 2. Verify Idempotency: Running again replaces/updates rows without duplicating
     snaps_2 = await produce_kpi_snapshots(db, facility_id=facility.id, period_start=today, period_end=today)
-    assert len(snaps_2) == 8
+    assert len(snaps_2) == 6
 
     # Query DB count of snapshots
     db_snaps = (
@@ -396,12 +398,12 @@ async def test_hd26_kpi_snapshots_calculation_and_idempotency(db):
             )
         )
     ).scalars().all()
-    assert len(db_snaps) == 8
+    assert len(db_snaps) == 6
 
 
 async def test_hd26_live_receptionist_summary_and_ed_census(db):
     facility, cashier_user, _, _, patient = await _setup_suite_7_env(db)
-    today = date.today()
+    today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
 
     # Seed 2 OPD visits (1 registered/waiting, 1 in_consultation)
     v1 = Visit(
@@ -445,13 +447,13 @@ async def test_hd26_live_receptionist_summary_and_ed_census(db):
     assert rec_sum.total_registered == 2
     assert rec_sum.waiting == 1
     assert rec_sum.in_consultation == 1
-    assert rec_sum.average_wait_minutes == 14.5
+    assert rec_sum.average_wait_minutes is None
 
     # Query ED Census
     ed_census = await get_ed_census(db, facility_id=facility.id)
     assert ed_census.total_emergency_today == 1
     assert ed_census.active_patients == 1
-    assert "p3_urgent" in ed_census.triage_acuity_distribution
+    assert ed_census.triage_acuity_distribution == {}
 
 
 # ==============================================================================
@@ -808,7 +810,7 @@ async def test_hd28_record_program_encounters_trajectory_and_exit(db):
     )
 
     # 1. Record Follow-up Encounter 1
-    today = date.today()
+    today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
     enc1 = await record_program_visit(
         db,
         enrolment_id=enrolment.id,

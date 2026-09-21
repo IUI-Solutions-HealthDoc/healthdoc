@@ -8,6 +8,9 @@ from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import HTTPException
+from app.common.patient_scope import actor_facility, require_patient_scope
+from app.opd.models import Encounter, Visit
 
 from app.terminology.models import SpecialtyEncounter
 from app.terminology.schemas import SpecialtyTemplateOut, TerminologySearchItem
@@ -175,6 +178,13 @@ async def record_specialty_encounter(
     created_by: uuid.UUID,
 ) -> SpecialtyEncounter:
     """Create or update specialty encounter evaluation."""
+    facility_id = await actor_facility(db, created_by)
+    await require_patient_scope(db, patient_id, facility_id)
+    scoped = (await db.execute(select(Encounter.id).join(Visit, Visit.id == Encounter.visit_id)
+        .where(Encounter.id == encounter_id, Encounter.facility_id == facility_id,
+               Visit.facility_id == facility_id, Visit.patient_id == patient_id))).scalar_one_or_none()
+    if scoped is None:
+        raise HTTPException(404, "Encounter not found for this patient")
     # Check if a record already exists for this encounter and specialty
     stmt = select(SpecialtyEncounter).where(
         SpecialtyEncounter.encounter_id == encounter_id,
@@ -182,8 +192,9 @@ async def record_specialty_encounter(
     )
     existing = (await db.execute(stmt)).scalar_one_or_none()
     if existing is not None:
+        if existing.patient_id != patient_id:
+            raise HTTPException(409, "Specialty assessment has inconsistent patient ownership")
         existing.clinical_data = clinical_data
-        existing.patient_id = patient_id
         await db.flush()
         await db.refresh(existing)
         return existing
@@ -206,11 +217,12 @@ async def get_specialty_encounters(
     db: AsyncSession,
     *,
     encounter_id: uuid.UUID,
+    patient_id: uuid.UUID,
 ) -> list[SpecialtyEncounter]:
     """Retrieve all recorded specialty evaluations for an encounter."""
     stmt = (
         select(SpecialtyEncounter)
-        .where(SpecialtyEncounter.encounter_id == encounter_id)
+        .where(SpecialtyEncounter.encounter_id == encounter_id, SpecialtyEncounter.patient_id == patient_id)
         .order_by(SpecialtyEncounter.created_at.asc())
     )
     return list((await db.execute(stmt)).scalars().all())

@@ -147,6 +147,7 @@ async def test_patient_portal_released_documents_query_and_details(db, suite_9_s
         encounter_type="consultation",
         chief_complaint="Chest pain and palpitations",
         started_at=datetime.now(UTC) - timedelta(days=2),
+        ended_at=datetime.now(UTC) - timedelta(days=1),
         created_by=user_id,
     )
     db.add(encounter)
@@ -627,8 +628,8 @@ async def test_abdm_m1_scan_and_share_reception_ticket_flow(db, suite_9_seed):
     )
     assert check_in_resp.counter == "Counter 4"
     assert check_in_resp.token_number == "009988"
-    assert "009988" in check_in_resp.slip_barcode_data
-    assert "Counter 4" in check_in_resp.slip_barcode_data
+    assert check_in_resp.slip_barcode_data == str(ticket.id)
+    assert check_in_resp.check_in_time is not None
 
     # 5. Verify status updated in database
     refreshed_ticket = await db.get(ScanShareTicket, ticket.id)

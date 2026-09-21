@@ -15,25 +15,18 @@ import type { ReceptionistSummary } from "../types";
 
 export function ReceptionistTrackerPanel() {
   const [summary, setSummary] = useState<ReceptionistSummary | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
   const loadData = async () => {
     setLoading(true);
+    setError(null);
     try {
       const data = await getReceptionistSummary();
       setSummary(data);
     } catch {
-      // Graceful fallback for offline / test mock environments
-      setSummary({
-        facility_id: "00000000-0000-0000-0000-000000000000",
-        report_date: new Date().toISOString().split("T")[0],
-        total_registered: 34,
-        waiting: 6,
-        in_consultation: 4,
-        completed: 23,
-        cancelled_or_lwbs: 1,
-        average_wait_minutes: 14.5,
-      });
+      setSummary(null);
+      setError("Reception data could not be loaded. Retry to see current figures.");
     } finally {
       setLoading(false);
     }
@@ -78,6 +71,7 @@ export function ReceptionistTrackerPanel() {
       </Box>
 
       <CardContent sx={{ p: 2.5 }}>
+        {error && <p role="alert">{error}</p>}
         <Box
           sx={{
             display: "grid",

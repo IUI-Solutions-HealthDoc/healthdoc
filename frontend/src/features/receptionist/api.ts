@@ -284,61 +284,64 @@ export function reconcileStaleVisits(
   });
 }
 
-/** HD-36: ABDM M1 Scan & Share Ticket types and endpoints */
+/** HD-36: matches the reception-ticket API, not the original PHR callback DTO. */
 export interface ScanShareTicketItem {
   id: string;
   token_number: string;
-  facility_id: string;
-  abha_number?: string | null;
-  abha_address?: string | null;
-  name: string;
-  gender: string;
-  year_of_birth?: number | null;
-  day_of_birth?: number | null;
-  month_of_birth?: number | null;
-  mobile?: string | null;
-  address?: Record<string, unknown> | null;
+  abha_address: string;
   status: "active" | "checked_in" | "expired";
-  shared_at: string;
+  counter: string | null;
+  patient_id: string | null;
+  patient_uhid: string | null;
+  patient_name: string | null;
+  mobile: string | null;
+  abha_number: string | null;
+  profile_data: Record<string, unknown>;
   expires_at: string;
-  checked_in_at?: string | null;
-  counter_id?: string | null;
+  created_at: string;
+  checked_in_at: string | null;
 }
 
-export interface ScanShareTicketsListResponse {
-  items: ScanShareTicketItem[];
-  total: number;
+export interface ScanShareCheckInResponse {
+  ticket_id: string;
+  token_number: string;
+  counter: string;
+  patient_id: string | null;
+  patient_uhid: string | null;
+  patient_name: string | null;
+  abha_address: string;
+  check_in_time: string | null;
+  slip_barcode_data: string;
 }
 
-export function listScanShareTickets(
+export async function listScanShareTickets(
   status = "active",
-  limit = 20,
-): Promise<ScanShareTicketsListResponse> {
-  return api<ScanShareTicketsListResponse>(
+  limit = 100,
+): Promise<ScanShareTicketItem[]> {
+  const tickets = await api<ScanShareTicketItem[]>(
     `/abdm/scan-share/tickets?status=${encodeURIComponent(status)}&limit=${limit}`,
   );
+  if (!Array.isArray(tickets)) throw new Error("Unexpected reception-ticket response");
+  return tickets;
 }
 
-export function getScanShareTicket(tokenNumber: string): Promise<ScanShareTicketItem> {
-  return api<ScanShareTicketItem>(`/abdm/scan-share/tickets/${encodeURIComponent(tokenNumber)}`);
+/** Prefer the immutable ticket UUID; short human tokens can be ambiguous. */
+export function getScanShareTicket(reference: string): Promise<ScanShareTicketItem> {
+  return api<ScanShareTicketItem>(`/abdm/scan-share/tickets/${encodeURIComponent(reference)}`);
 }
 
 export function checkInScanShareTicket(
-  tokenNumber: string,
-  counterId = "COUNTER-1",
-  operatorId = "Receptionist",
-): Promise<ScanShareTicketItem> {
-  return api<ScanShareTicketItem>(
-    `/abdm/scan-share/tickets/${encodeURIComponent(tokenNumber)}/check-in`,
+  ticketId: string,
+  counter: string,
+): Promise<ScanShareCheckInResponse> {
+  return api<ScanShareCheckInResponse>(
+    `/abdm/scan-share/tickets/${encodeURIComponent(ticketId)}/check-in`,
     {
       method: "POST",
-      body: JSON.stringify({
-        counter_id: counterId,
-        operator_id: operatorId,
-      }),
+      // Server locks the ticket; identical retries preserve the original check-in.
+      body: JSON.stringify({ counter: counter.trim() }),
     },
   );
 }
-
 
 

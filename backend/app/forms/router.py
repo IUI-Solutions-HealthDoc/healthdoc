@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import CurrentDbUser, DbSession, require_roles
 from app.forms import service
+from app.common.patient_scope import require_patient_access, require_visit_scope
 from app.forms.schemas import (
     ApplyOrderSetRequest,
     ApplyOrderSetResult,
@@ -72,6 +73,8 @@ async def submit_form(
     db: DbSession,
 ) -> FormSubmissionOut:
     """Submit responses to a configurable form definition."""
+    await require_patient_access(db, payload.patient_id, current_user)
+    await require_visit_scope(db, payload.visit_id, payload.patient_id, current_user.facility_id)
     try:
         return await service.create_submission(db, payload, current_user.id)
     except ValueError as exc:
@@ -89,7 +92,7 @@ async def list_patient_form_submissions(
     db: DbSession,
 ) -> list[FormSubmissionOut]:
     """Retrieve historical form submissions for a patient."""
-    _ = current_user.facility_id
+    await require_patient_access(db, patient_id, current_user)
     return await service.list_patient_submissions(db, patient_id)
 
 
@@ -122,6 +125,8 @@ async def apply_order_set(
     db: DbSession,
 ) -> ApplyOrderSetResult:
     """Clinician confirmation to atomically place all orders in an order set."""
+    await require_patient_access(db, payload.patient_id, current_user)
+    await require_visit_scope(db, payload.visit_id, payload.patient_id, current_user.facility_id)
     try:
         return await service.apply_order_set(db, code, payload.patient_id, payload.visit_id, current_user.id)
     except ValueError as exc:
@@ -168,6 +173,8 @@ async def export_admin_csv(
     entity_type: str = Query(default="vaccines"),
 ) -> Response:
     """Export platform entity dataset to CSV with formula escaping."""
+    if entity_type not in {"vaccines", "order_sets"}:
+        raise HTTPException(400, "CSV export is not implemented for this entity")
     csv_text = await service.export_csv(entity_type, db)
     return Response(
         content=csv_text,

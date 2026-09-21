@@ -15,6 +15,7 @@ from app.consent.models import ConsentPurpose, ConsentRecord, DataAccessLog
 from app.patients.models import Patient, PatientPortalBinding
 from app.patients.portal_router import ActivePatientBinding, DbSession
 from app.users.models import Facility, User
+from app.opd.models import Encounter, Visit
 
 router = APIRouter(
     prefix="/patient-portal/me",
@@ -227,9 +228,15 @@ async def get_my_documents(
         rx_rows = (
             await db.execute(
                 select(Prescription, User.full_name, Facility.name)
+                .join(Encounter, Encounter.id == Prescription.encounter_id)
+                .join(Visit, Visit.id == Encounter.visit_id)
                 .outerjoin(User, User.id == Prescription.created_by)
                 .outerjoin(Facility, Facility.id == Prescription.facility_id)
-                .where(Prescription.patient_id == pid)
+                .where(
+                    Prescription.patient_id == pid, Prescription.facility_id == binding.facility_id,
+                    Encounter.ended_at.is_not(None), Encounter.facility_id == binding.facility_id,
+                    Visit.patient_id == pid, Visit.facility_id == binding.facility_id,
+                )
                 .order_by(Prescription.created_at.desc())
             )
         ).all()
@@ -339,7 +346,6 @@ async def get_my_documents(
     # 4. Discharge Summaries
     if not category or category in ("all", "discharge_summary"):
         from app.admissions.models import Admission, Discharge
-        from app.opd.models import Visit
         dc_rows = (
             await db.execute(
                 select(Discharge, Admission, Facility.name, User.full_name)
@@ -444,9 +450,16 @@ async def get_my_document_detail(
         rx_row = (
             await db.execute(
                 select(Prescription, User.full_name, Facility.name)
+                .join(Encounter, Encounter.id == Prescription.encounter_id)
+                .join(Visit, Visit.id == Encounter.visit_id)
                 .outerjoin(User, User.id == Prescription.created_by)
                 .outerjoin(Facility, Facility.id == Prescription.facility_id)
-                .where(Prescription.id == doc_id, Prescription.patient_id == pid)
+                .where(
+                    Prescription.id == doc_id, Prescription.patient_id == pid,
+                    Prescription.facility_id == binding.facility_id,
+                    Encounter.ended_at.is_not(None), Encounter.facility_id == binding.facility_id,
+                    Visit.patient_id == pid, Visit.facility_id == binding.facility_id,
+                )
             )
         ).first()
         if rx_row is None:
@@ -565,7 +578,6 @@ async def get_my_document_detail(
 
     elif doc_type == "discharge_summary":
         from app.admissions.models import Admission, Discharge
-        from app.opd.models import Visit
         row = (
             await db.execute(
                 select(Discharge, Admission, Facility.name, User.full_name)

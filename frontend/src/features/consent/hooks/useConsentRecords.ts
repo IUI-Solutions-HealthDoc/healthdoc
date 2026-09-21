@@ -11,6 +11,9 @@ export function useConsentRecords(initial: ConsentListFilters = { status: "all" 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const activeReqRef = useRef(0);
+  const contextRef = useRef({ patientId: initial.patient_id });
+  if (contextRef.current.patientId !== initial.patient_id) contextRef.current = { patientId: initial.patient_id };
+  const context = contextRef.current;
   const [prevPatientId, setPrevPatientId] = useState(initial.patient_id);
 
   // Synchronously clear rows and increment request counter during render when
@@ -25,33 +28,33 @@ export function useConsentRecords(initial: ConsentListFilters = { status: "all" 
   }
 
   const refresh = useCallback(async () => {
+    if (contextRef.current !== context || filters.patient_id !== context.patientId) return;
     const reqId = ++activeReqRef.current;
-    const targetPatientId = filters.patient_id;
     setLoading(true);
     setError(null);
     try {
       const data = await listConsentRecords(filters);
-      if (reqId === activeReqRef.current && filters.patient_id === targetPatientId) {
+      if (reqId === activeReqRef.current && contextRef.current === context) {
         setRows(data);
       }
     } catch (e) {
-      if (reqId === activeReqRef.current && filters.patient_id === targetPatientId) {
+      if (reqId === activeReqRef.current && contextRef.current === context) {
         setRows([]);
         setError(e instanceof Error ? e.message : "Failed to load consents");
       }
     } finally {
-      if (reqId === activeReqRef.current && filters.patient_id === targetPatientId) {
+      if (reqId === activeReqRef.current && contextRef.current === context) {
         setLoading(false);
       }
     }
-  }, [filters]);
+  }, [filters, context]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
   return {
-    rows,
+    rows: filters.patient_id === initial.patient_id ? rows : [],
     loading,
     error,
     filters,

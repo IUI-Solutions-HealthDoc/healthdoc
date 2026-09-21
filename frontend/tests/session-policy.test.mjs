@@ -17,4 +17,6 @@ test("expired login redirect preserves only an internal path", () => {
     "/login?reason=session-expired&redirect=%2Fdoctor%2Fconsultation%3Fvisit%3D123",
   );
   assert.equal(sessionExpiredPath("/login"), "/login?reason=session-expired");
+  assert.equal(sessionExpiredPath("/login", "?reason=session-expired"), "/login?reason=session-expired");
+  assert.equal(new URLSearchParams(sessionExpiredPath("/doctor", "?visit=1", "#notes").split("?")[1]).get("redirect"), "/doctor?visit=1#notes");
 });

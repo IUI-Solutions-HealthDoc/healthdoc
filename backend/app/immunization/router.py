@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import CurrentDbUser, CurrentUser, DbSession, require_roles
 from app.immunization import service
+from app.common.patient_scope import require_patient_access
 from app.immunization.schemas import (
     ImmunizationCertificateOut,
     ImmunizationRecordCreate,
@@ -42,7 +43,7 @@ async def get_patient_immunization_schedule(
     db: DbSession,
 ) -> PatientImmunizationScheduleOut:
     """Retrieve patient administered records and upcoming/due immunization schedule."""
-    _ = current_user.facility_id
+    await require_patient_access(db, patient_id, current_user)
     try:
         return await service.get_patient_schedule(db, patient_id)
     except ValueError as exc:
@@ -61,6 +62,7 @@ async def record_immunization(
     db: DbSession,
 ) -> ImmunizationRecordOut:
     """Record a vaccine administration event with batch number and expiry traceability."""
+    await require_patient_access(db, payload.patient_id, current_user)
     try:
         return await service.record_administration(db, payload, current_user.id)
     except ValueError as exc:
@@ -78,6 +80,7 @@ async def get_immunization_certificate(
     db: DbSession,
 ) -> ImmunizationCertificateOut:
     """Generate official printable immunization certificate for a patient."""
+    await require_patient_access(db, patient_id, current_user)
     try:
         return await service.generate_certificate(db, patient_id, current_user.facility_id)
     except ValueError as exc:

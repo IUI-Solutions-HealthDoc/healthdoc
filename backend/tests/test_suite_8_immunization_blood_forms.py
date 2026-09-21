@@ -13,6 +13,7 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import select
 
 from app.auth.deps import DbUser
@@ -234,7 +235,7 @@ async def test_blood_donor_screening_and_eligibility(db):
     assert d3.is_eligible is False
 
     # 4. List donors filtering by eligibility
-    eligible_donors = await list_donors(db, is_eligible=True)
+    eligible_donors = await list_donors(db, facility.id, is_eligible=True)
     assert any(d.id == d1.id for d in eligible_donors)
     assert not any(d.id == d2.id for d in eligible_donors)
 
@@ -264,6 +265,7 @@ async def test_blood_unit_crossmatch_and_controlled_issue(db):
             expiry_date=date.today() + timedelta(days=35),
             screening_status="passed",
         ),
+        staff.id,
     )
     assert unit.status == "available"
 
@@ -293,7 +295,7 @@ async def test_blood_unit_crossmatch_and_controlled_issue(db):
     assert issued_xm.issued_at is not None
 
     # 4. Verify unit status transitioned to 'issued'
-    unit_rows = await list_units(db, status="issued")
+    unit_rows = await list_units(db, facility.id, status="issued")
     assert any(u.id == unit.id for u in unit_rows)
 
     # 5. Safety Invariant: Cannot issue the same unit twice
@@ -338,7 +340,7 @@ async def test_dynamic_forms_and_submissions(db):
             form_id=pre_op_form.id,
             form_data={
                 "npo_hours": 8,
-                "airway_mallampati": "Class II",
+                "airway_mallampati": "II",
                 "consent_signed": True,
                 "pac_fitness": "Fit for general anesthesia ASA Grade 1",
             },
@@ -378,11 +380,11 @@ async def test_clinical_order_sets_protocol_application(db):
     db.add(visit)
     await db.flush()
 
-    # 3. Apply Sepsis Care Bundle
-    result = await apply_order_set(db, "SEPSIS_BUNDLE", adult.id, visit.id, staff.id)
-    assert result.order_set_code == "SEPSIS_BUNDLE"
-    assert len(result.orders_applied) >= 4
-    assert any(o.get("test_name") == "Blood Lactate" for o in result.orders_applied)
+    # The old implementation returned success without writing any orders.
+    with pytest.raises(HTTPException) as exc:
+        await apply_order_set(db, "SEPSIS_BUNDLE", adult.id, visit.id, staff.id)
+    assert exc.value.status_code == 409
+    assert exc.value.detail["code"] == "order_set_execution_unavailable"
 
 
 # ==============================================================================
@@ -400,14 +402,19 @@ async def test_csv_validation_formula_injection_defense_and_import(db):
 VAC-SAFE-1,Safe Hepatitis Vaccine,Hepatitis,2,30,intramuscular,left_upper_arm,0.5 ml
 """
     val = validate_csv(malicious_csv, "vaccines")
-    assert val.valid is True
+    assert val.valid is False
     assert val.row_count == 4
     # Warnings flagged for formula prefixes
     assert len(val.warnings) >= 3
 
     # 2. Safe import strips malicious formula command characters
-    res = await import_csv(malicious_csv, "vaccines", db, staff.id)
-    assert res.imported_count >= 1
+    with pytest.raises(ValueError):
+        await import_csv(malicious_csv, "vaccines", db, staff.id)
+    safe_csv = malicious_csv.splitlines()[0] + "\n" + malicious_csv.splitlines()[-1]
+    res = await import_csv(safe_csv, "vaccines", db, staff.id)
+    assert res.imported_count == 1
+    stored = (await db.execute(select(VaccineCatalogue).where(VaccineCatalogue.code == "VAC-SAFE-1"))).scalar_one()
+    assert stored.standard_doses == 2
 
     # 3. Verify sanitize_csv_cell escapes formulas with single quote prefix
     assert sanitize_csv_cell("=1+1") == "'=1+1"

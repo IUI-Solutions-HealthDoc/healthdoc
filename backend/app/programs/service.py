@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.patients.models import Patient
+from app.common.patient_scope import require_patient_scope
 from app.programs.models import CareProgram, ProgramEnrolment, ProgramVisit
 from app.programs.schemas import (
     CareProgramOut,
@@ -87,6 +88,7 @@ async def enrol_patient(
     actor_user_id: uuid.UUID,
 ) -> ProgramEnrolmentOut:
     """Enrol patient into a care program, enforcing single-active-enrolment rule."""
+    await require_patient_scope(db, body.patient_id, facility_id)
     patient = (
         await db.execute(select(Patient).where(Patient.id == body.patient_id))
     ).scalar_one_or_none()

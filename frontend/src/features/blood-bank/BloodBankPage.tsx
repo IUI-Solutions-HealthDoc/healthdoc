@@ -91,7 +91,7 @@ export function BloodBankPage() {
       )}
 
       {/* Crossmatch Modal */}
-      <BloodCrossmatchModal
+      <BloodCrossmatchModal key={selectedUnitForXm?.id || "closed"}
         isOpen={!!selectedUnitForXm}
         onClose={() => setSelectedUnitForXm(null)}
         unit={selectedUnitForXm}

@@ -11,7 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import CurrentDbUser, require_roles
 from app.common.db import get_db
-from app.reports.models import KpiSnapshot
+from app.reports.models import KpiSnapshot, verified_snapshot_filter
+from app.common.patient_scope import facility_today
 from app.reports.schemas import (
     EdCensusOut,
     KpiCatalogItem,
@@ -64,6 +65,7 @@ async def list_kpis(
         KpiSnapshot.facility_id == current_db_user.facility_id,
         KpiSnapshot.period_start <= end,
         KpiSnapshot.period_end >= start,
+        verified_snapshot_filter(),
     )
     if kpi_code:
         query = query.where(KpiSnapshot.kpi_code == kpi_code)
@@ -99,7 +101,7 @@ async def list_kpi_codes(
         (
             await db.execute(
                 select(KpiSnapshot.kpi_code)
-                .where(KpiSnapshot.facility_id == current_db_user.facility_id)
+                .where(KpiSnapshot.facility_id == current_db_user.facility_id, verified_snapshot_filter())
                 .distinct()
                 .order_by(KpiSnapshot.kpi_code)
             )
@@ -160,7 +162,7 @@ async def get_receptionist_tracker(
     db: AsyncSession = Depends(get_db),
 ) -> ReceptionistSummaryOut:
     """Live front desk OPD queue tracker and wait-time metrics for today."""
-    target_date = for_date or date.today()
+    target_date = for_date or await facility_today(db, current_db_user.facility_id)
     return await get_receptionist_summary(
         db=db,
         facility_id=current_db_user.facility_id,

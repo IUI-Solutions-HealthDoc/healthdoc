@@ -80,9 +80,9 @@ export function ImmunizationScheduleView({
     );
   }
 
-  const recordCount = schedule?.records.length || 0;
-  const dueCount = schedule?.due_vaccines.length || 0;
-  const overdueCount = schedule?.overdue_vaccines.length || 0;
+  const recordCount = schedule?.administered.length || 0;
+  const dueCount = schedule?.due.filter((v) => v.status === "due").length || 0;
+  const overdueCount = schedule?.due.filter((v) => v.status === "overdue").length || 0;
 
   return (
     <div className="space-y-6">
@@ -231,10 +231,10 @@ export function ImmunizationScheduleView({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
-                    {schedule?.records.map((rec) => (
+                    {schedule?.administered.map((rec) => (
                       <tr key={rec.id} className="hover:bg-muted/30">
                         <td className="p-3 font-semibold text-foreground">
-                          {rec.vaccine_name || "Vaccine"}
+                          {rec.vaccine_code}
                           {rec.vaccine_code && (
                             <span className="ml-1 text-[10px] text-muted-foreground font-mono">
                               ({rec.vaccine_code})
@@ -246,7 +246,7 @@ export function ImmunizationScheduleView({
                             Dose {rec.dose_number}
                           </span>
                         </td>
-                        <td className="p-3 font-mono">{rec.administered_date}</td>
+                        <td className="p-3 font-mono">{new Date(rec.administered_at).toLocaleString()}</td>
                         <td className="p-3 font-mono font-medium">{rec.batch_number}</td>
                         <td className="p-3 text-muted-foreground">
                           {rec.route || "—"} {rec.site ? `• ${rec.site}` : ""}
@@ -277,13 +277,13 @@ export function ImmunizationScheduleView({
             {dueCount === 0 ? (
               <div className="text-center py-12 text-muted-foreground text-xs">
                 <CheckCircle2 className="h-8 w-8 mx-auto mb-2 text-emerald-500 opacity-60" />
-                All scheduled vaccines for the patient&apos;s current age milestone have been administered.
+                No due entries were returned. Confirm the schedule with the responsible clinician.
               </div>
             ) : (
               <div className="space-y-3">
-                {schedule?.due_vaccines.map((v) => (
+                {schedule?.due.filter((v) => v.status === "due").map((v) => (
                   <div
-                    key={v.vaccine_id}
+                    key={v.vaccine_code}
                     className="flex items-center justify-between p-3.5 rounded-xl border border-border bg-background hover:border-primary/40 transition-colors"
                   >
                     <div>
@@ -297,7 +297,7 @@ export function ImmunizationScheduleView({
                         </span>
                       </div>
                       <p className="text-xs text-muted-foreground mt-1">
-                        Recommended milestone: {v.due_at_months} months • Route: {v.route}
+                        Recommended milestone: {v.min_age_days} days • Due: {v.due_date || "Not calculated"}
                       </p>
                     </div>
                     <button
@@ -319,13 +319,13 @@ export function ImmunizationScheduleView({
             {overdueCount === 0 ? (
               <div className="text-center py-12 text-muted-foreground text-xs">
                 <CheckCircle2 className="h-8 w-8 mx-auto mb-2 text-emerald-500 opacity-60" />
-                No overdue vaccines. All schedule deadlines are up to date!
+                No overdue entries were returned; this is not a completeness assessment.
               </div>
             ) : (
               <div className="space-y-3">
-                {schedule?.overdue_vaccines.map((v) => (
+                {schedule?.due.filter((v) => v.status === "overdue").map((v) => (
                   <div
-                    key={v.vaccine_id}
+                    key={v.vaccine_code}
                     className="flex items-center justify-between p-3.5 rounded-xl border border-destructive/30 bg-destructive/5 hover:border-destructive/60 transition-colors"
                   >
                     <div>
@@ -339,7 +339,7 @@ export function ImmunizationScheduleView({
                         </span>
                       </div>
                       <p className="text-xs text-muted-foreground mt-1">
-                        Required milestone was {v.due_at_months} months • Route: {v.route}
+                        Required milestone was {v.min_age_days} days • Due: {v.due_date || "Not calculated"}
                       </p>
                     </div>
                     <button
