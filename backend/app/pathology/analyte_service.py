@@ -6,7 +6,6 @@ automatically flags abnormal and critical values, and drives laboratory alerting
 from __future__ import annotations
 
 import math
-from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import select
@@ -128,14 +127,6 @@ async def evaluate_result_analytes(
                 result_data["_has_critical"] = True
             return result_data, critical_fields
 
-    # Fallback to legacy check for tests without configured analytes
-    legacy_thresholds = {
-        "hemoglobin_g_dl": {"low": 7.0, "high": 20.0},
-    }
-    for field, limits in legacy_thresholds.items():
-        v = result_data.get(field)
-        if v is not None and isinstance(v, (int, float, Decimal)):
-            if float(v) < limits["low"] or float(v) > limits["high"]:
-                critical_fields.append(field)
-
+    # No approved analyte catalogue for this test. Do not apply a placeholder
+    # haemoglobin range: an unapproved limit must not create a critical alert.
     return result_data, critical_fields

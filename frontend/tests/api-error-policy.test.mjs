@@ -33,6 +33,10 @@ test("a duplicate ABHA bind is not presented as a stale record to reload", () =>
   });
   assert.match(message, /already linked to another patient/);
   assert.doesNotMatch(message, /Reload|conflicts with the record/);
+  assert.match(
+    userFacingApiError(400, { code: "enrolment_consent_refused" }),
+    /does not consent/,
+  );
 });
 
 test("an ABDM rejection is not presented as a temporary outage or raw gateway text", () => {

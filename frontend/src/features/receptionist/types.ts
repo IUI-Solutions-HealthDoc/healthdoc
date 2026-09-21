@@ -106,7 +106,11 @@ export interface AbhaOtpRequested {
 
 /** Exactly one identifier: the ABHA number (OTP to its linked mobile) or the
  *  Aadhaar number (OTP through Aadhaar). Neither is stored server-side. */
-export type AbhaLoginIdentifier = { abha_number: string } | { aadhaar: string };
+export type AbhaLoginIdentifier =
+  | { abha_number: string }
+  | { aadhaar: string }
+  | { abha_address: string }
+  | { mobile: string };
 
 export interface AbhaIdentityLinked {
   abha_number: string;
@@ -116,6 +120,20 @@ export interface AbhaIdentityLinked {
   date_of_birth: string | null;
   linked_patient_id: string;
   linked: boolean;
+  /** Present while enrolment still needs mobile verification or an address. */
+  session_id?: string | null;
+  next_step?: "complete" | "mobile_verify" | "address_select" | string;
+  suggested_addresses?: string[];
+  /** Server has an NHA profile credential. This is not a local UHID card. */
+  has_nha_card?: boolean;
+  accounts?: { abha_number: string; name?: string | null }[];
+}
+
+export interface AbhaEnrolmentConsent {
+  granted: boolean;
+  code: string;
+  version: string;
+  language: "en";
 }
 
 /**

@@ -8,6 +8,18 @@ No package below has been newly implemented or accepted by creating this documen
 
 ## Baseline to preserve
 
+### M1 enrolment continuation — 21 September 2026
+
+- Branch `feat/abdm-m1-enrol-consent-mobile-address` from staging `741a474`.
+- Enrolment OTP now requires an explicit `abha-enrollment` / `1.4` grant.
+  Declined consent and Hindi (no approved translation) never reach ABDM.
+  Accepted grants are audited as code/version/language only.
+- Communication-mobile OTP and suggested ABHA-address selection continue in
+  the same enrolment session. Profile X-tokens are stored apart from HIP
+  linking tokens. NHA card download is a server proxy.
+- Not a live ABDM exchange. Demographic, biometric, ABHA-address login and
+  communication-mobile account selection remain unbuilt.
+
 ### Branch consolidation — 21 September 2026
 
 - Verified #584/#585/#586/#587 merge history. Current staging `5771931`, main

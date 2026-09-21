@@ -29,6 +29,11 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 from app.integrations.abdm.client import AbdmRejected, AbdmResponse
 from app.integrations.abdm.identity import crypto, otp_session, service
+from app.integrations.abdm.identity.enrolment_consent import (
+    ENROLMENT_CONSENT_CODE,
+    ENROLMENT_CONSENT_VERSION,
+    EnrolmentConsent,
+)
 from app.integrations.abdm.identity.otp_session import (
     OtpPurpose,
     OtpSessionMismatch,
@@ -41,6 +46,12 @@ AADHAAR = "999988887777"
 FACILITY_A = "11111111-1111-1111-1111-111111111111"
 FACILITY_B = "22222222-2222-2222-2222-222222222222"
 STAFF = "33333333-3333-3333-3333-333333333333"
+CONSENT = EnrolmentConsent(
+    granted=True,
+    code=ENROLMENT_CONSENT_CODE,
+    version=ENROLMENT_CONSENT_VERSION,
+    language="en",
+)
 
 
 @pytest.fixture(scope="module")
@@ -60,8 +71,14 @@ def _abdm_public_key(monkeypatch, rsa_key):
         abdm_abha_base_url = "https://abha.test/abha/api"
         abdm_path_enrol_request_otp = "/v3/enrollment/request/otp"
         abdm_path_enrol_by_aadhaar = "/v3/enrollment/enrol/byAadhaar"
+        abdm_path_enrol_auth_by_abdm = "/v3/enrollment/auth/byAbdm"
+        abdm_path_enrol_suggestion = "/v3/enrollment/enrol/suggestion"
+        abdm_path_enrol_abha_address = "/v3/enrollment/enrol/abha-address"
+        abdm_path_profile_account = "/v3/profile/account"
+        abdm_path_profile_abha_card = "/v3/profile/account/abha-card"
         abdm_path_login_request_otp = "/v3/profile/login/request/otp"
         abdm_path_login_verify = "/v3/profile/login/verify"
+        abdm_path_login_verify_user = "/v3/profile/login/verify/user"
 
     monkeypatch.setattr(crypto, "get_settings", lambda: _S())
     monkeypatch.setattr(service, "get_settings", lambda: _S())
@@ -98,10 +115,16 @@ class _Gateway:
     def __init__(self, responses: list[dict]):
         self._responses = list(responses)
         self.calls: list[tuple[str, dict]] = []
+        self.methods: list[str] = []
+        self.headers: list[dict | None] = []
 
-    async def request(self, method, path, *, json=None, **kw):
+    async def request(self, method, path, *, json=None, extra_headers=None, parse_json=True, **kw):
         self.calls.append((path, json))
+        self.methods.append(method)
+        self.headers.append(extra_headers)
         body = self._responses.pop(0) if self._responses else {}
+        if isinstance(body, Exception):
+            raise body
         return AbdmResponse(200, body, "req-id")
 
     @property
@@ -170,7 +193,7 @@ async def test_the_aadhaar_number_is_encrypted_on_the_wire(monkeypatch, rsa_key)
 
     await service.request_aadhaar_otp(
         aadhaar=AADHAAR, facility_id=FACILITY_A, started_by=STAFF
-    )
+    , consent=CONSENT)
 
     raw = json.dumps(gw.last_body)
     assert AADHAAR not in raw, "the Aadhaar number was sent in the clear"
@@ -203,6 +226,13 @@ _ALLOWED_SESSION_FIELDS = {
     # ("abha-number"/"aadhaar", never the identifier) and a resend counter.
     "login_hint",
     "resends",
+    "consent_code",
+    "consent_version",
+    "consent_language",
+    "consent_granted_at",
+    "stage",
+    "selection_token",
+    "account_choices",
 }
 
 
@@ -211,7 +241,7 @@ async def test_the_otp_session_stores_no_field_nobody_agreed_to(monkeypatch, fak
 
     await service.request_aadhaar_otp(
         aadhaar=AADHAAR, facility_id=FACILITY_A, started_by=STAFF
-    )
+    , consent=CONSENT)
 
     assert fake_redis.store, "nothing was written — the test is not exercising storage"
     for raw in fake_redis.store.values():
@@ -231,7 +261,7 @@ async def test_the_aadhaar_number_is_never_logged(monkeypatch, caplog):
     with caplog.at_level(logging.DEBUG):
         await service.request_aadhaar_otp(
             aadhaar=AADHAAR, facility_id=FACILITY_A, started_by=STAFF
-        )
+        , consent=CONSENT)
 
     assert AADHAAR not in " ".join(r.getMessage() for r in caplog.records)
 
@@ -243,7 +273,7 @@ async def test_the_otp_is_encrypted_too(monkeypatch, rsa_key):
     ])
     requested = await service.request_aadhaar_otp(
         aadhaar=AADHAAR, facility_id=FACILITY_A, started_by=STAFF
-    )
+    , consent=CONSENT)
     await service.enrol_by_aadhaar_otp(
         session_id=requested.session_id, otp="123456", mobile=None, facility_id=FACILITY_A
     )
@@ -261,7 +291,7 @@ async def test_enrolment_mobile_is_national_digits_while_otp_is_encrypted(monkey
     ])
     requested = await service.request_aadhaar_otp(
         aadhaar=AADHAAR, facility_id=FACILITY_A, started_by=STAFF,
-    )
+     consent=CONSENT)
     await service.enrol_by_aadhaar_otp(
         session_id=requested.session_id, otp="123456", mobile="9876543210",
         facility_id=FACILITY_A,
@@ -278,7 +308,7 @@ async def test_a_transaction_cannot_be_completed_from_another_facility(monkeypat
     _gateway(monkeypatch, [{"txnId": "abdm-txn-1"}])
     requested = await service.request_aadhaar_otp(
         aadhaar=AADHAAR, facility_id=FACILITY_A, started_by=STAFF
-    )
+    , consent=CONSENT)
 
     with pytest.raises(OtpSessionMismatch):
         await service.enrol_by_aadhaar_otp(
@@ -291,7 +321,7 @@ async def test_an_enrolment_session_cannot_be_spent_on_a_login(monkeypatch):
     _gateway(monkeypatch, [{"txnId": "abdm-txn-1"}])
     requested = await service.request_aadhaar_otp(
         aadhaar=AADHAAR, facility_id=FACILITY_A, started_by=STAFF
-    )
+    , consent=CONSENT)
 
     with pytest.raises(OtpSessionMismatch):
         await service.verify_login_otp(
@@ -305,7 +335,7 @@ async def test_abdm_transaction_id_is_not_returned_to_the_caller(monkeypatch):
     _gateway(monkeypatch, [{"txnId": "abdm-txn-SECRET"}])
     requested = await service.request_aadhaar_otp(
         aadhaar=AADHAAR, facility_id=FACILITY_A, started_by=STAFF
-    )
+    , consent=CONSENT)
     assert requested.session_id != "abdm-txn-SECRET"
     assert "abdm-txn-SECRET" not in requested.session_id
 
@@ -319,7 +349,7 @@ async def test_a_response_with_no_transaction_id_is_a_failure(monkeypatch):
     with pytest.raises(service.AbdmIdentityError) as caught:
         await service.request_aadhaar_otp(
             aadhaar=AADHAAR, facility_id=FACILITY_A, started_by=STAFF
-        )
+        , consent=CONSENT)
     assert caught.value.code == "abdm_bad_response"
 
 
@@ -335,7 +365,7 @@ async def test_an_enrolment_with_no_abha_number_is_not_a_success(monkeypatch):
     ])
     requested = await service.request_aadhaar_otp(
         aadhaar=AADHAAR, facility_id=FACILITY_A, started_by=STAFF
-    )
+    , consent=CONSENT)
 
     with pytest.raises(service.AbdmIdentityError) as caught:
         await service.enrol_by_aadhaar_otp(
@@ -351,7 +381,7 @@ async def test_a_failed_verification_leaves_the_session_alive(monkeypatch, fake_
     _gateway(monkeypatch, [{"txnId": "abdm-txn-1"}, {"ABHAProfile": {}}])
     requested = await service.request_aadhaar_otp(
         aadhaar=AADHAAR, facility_id=FACILITY_A, started_by=STAFF
-    )
+    , consent=CONSENT)
 
     with pytest.raises(service.AbdmIdentityError):
         await service.enrol_by_aadhaar_otp(
@@ -372,7 +402,7 @@ async def test_a_successful_enrolment_consumes_the_session(monkeypatch):
     ])
     requested = await service.request_aadhaar_otp(
         aadhaar=AADHAAR, facility_id=FACILITY_A, started_by=STAFF
-    )
+    , consent=CONSENT)
     issued = await service.enrol_by_aadhaar_otp(
         session_id=requested.session_id, otp="123456", mobile=None, facility_id=FACILITY_A
     )
@@ -395,7 +425,7 @@ async def test_transaction_id_is_read_under_any_of_abdms_names(monkeypatch, txn_
     _gateway(monkeypatch, [{txn_field: "abdm-txn-1"}])
     requested = await service.request_aadhaar_otp(
         aadhaar=AADHAAR, facility_id=FACILITY_A, started_by=STAFF
-    )
+    , consent=CONSENT)
     assert requested.session_id
 
 
@@ -408,7 +438,7 @@ async def test_profile_is_read_under_either_casing(monkeypatch, profile_key, num
     ])
     requested = await service.request_aadhaar_otp(
         aadhaar=AADHAAR, facility_id=FACILITY_A, started_by=STAFF
-    )
+    , consent=CONSENT)
     issued = await service.enrol_by_aadhaar_otp(
         session_id=requested.session_id, otp="123456", mobile=None, facility_id=FACILITY_A
     )
@@ -465,7 +495,7 @@ async def test_v3_login_uses_the_verified_account_not_enrolment_profile(monkeypa
     (None, [{"ABHANumber": "91-1111-2222-3333", "status": "ACTIVE"}]),
     ("success", []),
     ("success", [{"ABHANumber": "91-1111-2222-3333", "status": "DEACTIVATED"}]),
-    ("success", [{"ABHANumber": "91-1111-2222-3333", "status": "ACTIVE"}] * 2),
+    ("success", []),
 ])
 async def test_login_never_guesses_an_account_or_accepts_failed_auth(monkeypatch, auth_result, accounts):
     _gateway(monkeypatch, [{"txnId": "login-test"},
@@ -484,7 +514,7 @@ async def test_enrolment_address_list_becomes_a_scalar(monkeypatch):
     _gateway(monkeypatch, [{"txnId": "enrol-test"}, {"tokens": {"token": "synthetic"},
         "ABHAProfile": {"ABHANumber": "91-1111-2222-3333", "phrAddress": ["test@sbx"],
                         "firstName": "Synthetic", "lastName": "Patient"}}])
-    request = await service.request_aadhaar_otp(aadhaar=AADHAAR, facility_id=FACILITY_A, started_by=STAFF)
+    request = await service.request_aadhaar_otp(aadhaar=AADHAAR, facility_id=FACILITY_A, started_by=STAFF, consent=CONSENT)
     result = await service.enrol_by_aadhaar_otp(
         session_id=request.session_id, otp="123456", mobile=None, facility_id=FACILITY_A,
     )
@@ -558,7 +588,7 @@ async def test_resend_issues_a_fresh_transaction_bound_to_the_same_patient_and_c
     gw = _gateway(monkeypatch, [{"txnId": "abdm-txn-1"}, {"txnId": "abdm-txn-2"}])
     first = await service.request_aadhaar_otp(
         aadhaar=AADHAAR, facility_id=FACILITY_A, started_by=STAFF, patient_id="p1"
-    )
+    , consent=CONSENT)
     old = await otp_session.load(first.session_id, facility_id=FACILITY_A, purpose=OtpPurpose.ENROL_BY_AADHAAR)
     aged = json.loads(fake_redis.store[f"abdm:otp:{first.session_id}"])
     aged["created_at"] = "2026-09-20T00:00:00+00:00"  # cooldown elapsed
@@ -582,7 +612,7 @@ async def test_resend_issues_a_fresh_transaction_bound_to_the_same_patient_and_c
 
 async def test_resend_inside_the_cooldown_is_refused_without_touching_the_gateway(monkeypatch):
     gw = _gateway(monkeypatch, [{"txnId": "abdm-txn-1"}, {"txnId": "never"}])
-    first = await service.request_aadhaar_otp(aadhaar=AADHAAR, facility_id=FACILITY_A, started_by=STAFF)
+    first = await service.request_aadhaar_otp(aadhaar=AADHAAR, facility_id=FACILITY_A, started_by=STAFF, consent=CONSENT)
     with pytest.raises(otp_session.OtpResendTooSoon) as exc:
         await service.resend_otp(
             session_id=first.session_id, purpose=OtpPurpose.ENROL_BY_AADHAAR,
@@ -596,7 +626,7 @@ async def test_resend_inside_the_cooldown_is_refused_without_touching_the_gatewa
 
 async def test_resends_are_capped_per_desk_attempt(monkeypatch, fake_redis):
     gw = _gateway(monkeypatch, [{"txnId": "abdm-txn-1"}, {"txnId": "never"}])
-    first = await service.request_aadhaar_otp(aadhaar=AADHAAR, facility_id=FACILITY_A, started_by=STAFF)
+    first = await service.request_aadhaar_otp(aadhaar=AADHAAR, facility_id=FACILITY_A, started_by=STAFF, consent=CONSENT)
     stored = json.loads(fake_redis.store[f"abdm:otp:{first.session_id}"])
     stored |= {"created_at": "2026-09-20T00:00:00+00:00", "resends": otp_session.MAX_RESENDS}
     fake_redis.store[f"abdm:otp:{first.session_id}"] = json.dumps(stored)
@@ -624,3 +654,212 @@ async def test_resend_refuses_another_staff_member_another_facility_and_a_swappe
         await service.resend_otp(facility_id=FACILITY_A, started_by=STAFF, abha_number="91111122223333", **common)
     assert exc.value.code == "abdm_identifier_required"
     assert len(gw.calls) == 1
+
+
+# --- enrolment consent, mobile continuation, address, NHA card (21 September) ---
+
+
+async def test_enrolment_without_a_grant_never_reaches_the_gateway(monkeypatch):
+    gw = _gateway(monkeypatch, [{"txnId": "must-not-be-used"}])
+    with pytest.raises(service.AbdmIdentityError) as exc:
+        await service.request_aadhaar_otp(
+            aadhaar=AADHAAR, facility_id=FACILITY_A, started_by=STAFF, consent=None,
+        )
+    assert exc.value.code == "enrolment_consent_required"
+    assert gw.calls == []
+
+
+async def test_a_declined_or_unapproved_consent_is_refused(monkeypatch):
+    gw = _gateway(monkeypatch, [{"txnId": "must-not-be-used"}])
+    declined = EnrolmentConsent(False, ENROLMENT_CONSENT_CODE, ENROLMENT_CONSENT_VERSION, "en")
+    hindi = EnrolmentConsent(True, ENROLMENT_CONSENT_CODE, ENROLMENT_CONSENT_VERSION, "hi")
+    with pytest.raises(service.AbdmIdentityError) as declined_exc:
+        await service.request_aadhaar_otp(
+            aadhaar=AADHAAR, facility_id=FACILITY_A, started_by=STAFF, consent=declined,
+        )
+    with pytest.raises(service.AbdmIdentityError) as hindi_exc:
+        await service.request_aadhaar_otp(
+            aadhaar=AADHAAR, facility_id=FACILITY_A, started_by=STAFF, consent=hindi,
+        )
+    assert declined_exc.value.code == "enrolment_consent_refused"
+    assert hindi_exc.value.code == "enrolment_consent_language_unavailable"
+    assert gw.calls == []
+
+
+async def test_by_aadhaar_sends_the_captured_consent_not_a_hardcoded_fallback(monkeypatch):
+    gw = _gateway(monkeypatch, [
+        {"txnId": "abdm-txn-1"},
+        {"ABHAProfile": {"ABHANumber": "91-1234-5678-9012"}, "tokens": {"token": "profile-token"}},
+    ])
+    requested = await service.request_aadhaar_otp(
+        aadhaar=AADHAAR, facility_id=FACILITY_A, started_by=STAFF, consent=CONSENT,
+    )
+    issued = await service.enrol_by_aadhaar_otp(
+        session_id=requested.session_id, otp="123456", mobile=None,
+        facility_id=FACILITY_A, consume_session=False,
+    )
+    assert gw.calls[1][1]["consent"] == {"code": "abha-enrollment", "version": "1.4"}
+    assert issued.linking_token == "profile-token"
+    assert issued.next_step == "mobile_verify"
+    alive = await otp_session.load(
+        requested.session_id, facility_id=FACILITY_A, purpose=OtpPurpose.ENROL_BY_AADHAAR,
+    )
+    assert alive.stage == "mobile_pending"
+    assert "profile-token" not in alive.to_json()
+
+
+async def test_mobile_continuation_stays_in_the_enrolment_transaction(monkeypatch, rsa_key, fake_redis):
+    gw = _gateway(monkeypatch, [
+        {"txnId": "enrol-txn"},
+        {"ABHAProfile": {"ABHANumber": "91-1234-5678-9012"}, "tokens": {"token": "profile-token"}},
+        {"txnId": "mobile-txn", "message": "OTP sent"},
+        {"authResult": "success", "txnId": "mobile-txn", "accounts": []},
+        {"txnId": "mobile-txn", "abhaAddressList": ["alpha@sbx", "beta@sbx"]},
+        {"txnId": "mobile-txn", "preferredAbhaAddress": "beta@sbx"},
+    ])
+    requested = await service.request_aadhaar_otp(
+        aadhaar=AADHAAR, facility_id=FACILITY_A, started_by=STAFF, patient_id="p1", consent=CONSENT,
+    )
+    await service.enrol_by_aadhaar_otp(
+        session_id=requested.session_id, otp="123456", mobile=None,
+        facility_id=FACILITY_A, consume_session=False,
+    )
+    mobile = await service.request_enrolment_mobile_otp(
+        session_id=requested.session_id, mobile="9876543210",
+        facility_id=FACILITY_A, started_by=STAFF,
+    )
+    assert mobile.session_id == requested.session_id
+    mobile_body = gw.calls[2][1]
+    assert mobile_body["txnId"] == "enrol-txn"
+    assert mobile_body["scope"] == ["abha-enrol", "mobile-verify"]
+    assert mobile_body["loginHint"] == "mobile" and mobile_body["otpSystem"] == "abdm"
+    assert _decrypt(rsa_key, mobile_body["loginId"]) == "9876543210"
+    assert "9876543210" not in json.dumps(fake_redis.store)
+    await service.verify_enrolment_mobile_otp(
+        session_id=requested.session_id, otp="654321", facility_id=FACILITY_A,
+    )
+    suggestions = await service.list_enrolment_address_suggestions(
+        session_id=requested.session_id, facility_id=FACILITY_A,
+    )
+    assert suggestions == ("alpha@sbx", "beta@sbx")
+    assert gw.methods[4] == "GET"
+    assert gw.headers[4]["Transaction_Id"] == "mobile-txn"
+    bound = await service.submit_enrolment_abha_address(
+        session_id=requested.session_id, abha_address="beta@sbx", facility_id=FACILITY_A,
+    )
+    assert bound == "beta@sbx"
+    assert gw.calls[5][1] == {"txnId": "mobile-txn", "abhaAddress": "beta@sbx", "preferred": 1}
+
+
+async def test_address_refusal_keeps_the_continuation_session(monkeypatch):
+    _gateway(monkeypatch, [
+        {"txnId": "enrol-txn"},
+        {"ABHAProfile": {"ABHANumber": "91-1234-5678-9012"}, "tokens": {"token": "t"}},
+        {"message": "OTP sent"},
+        {"authResult": "success", "accounts": [{"ABHANumber": "91-1"}]},
+        AbdmRejected(400, {"code": "ABDM-9999"}, "rid"),
+    ])
+    requested = await service.request_aadhaar_otp(
+        aadhaar=AADHAAR, facility_id=FACILITY_A, started_by=STAFF, consent=CONSENT,
+    )
+    await service.enrol_by_aadhaar_otp(
+        session_id=requested.session_id, otp="123456", mobile=None,
+        facility_id=FACILITY_A, consume_session=False,
+    )
+    await service.request_enrolment_mobile_otp(
+        session_id=requested.session_id, mobile="9876543210",
+        facility_id=FACILITY_A, started_by=STAFF,
+    )
+    await service.verify_enrolment_mobile_otp(
+        session_id=requested.session_id, otp="654321", facility_id=FACILITY_A,
+    )
+    with pytest.raises(AbdmRejected):
+        await service.submit_enrolment_abha_address(
+            session_id=requested.session_id, abha_address="taken@sbx", facility_id=FACILITY_A,
+        )
+    alive = await otp_session.load(
+        requested.session_id, facility_id=FACILITY_A, purpose=OtpPurpose.ENROL_BY_AADHAAR,
+    )
+    assert alive.stage == "address_pending"
+
+
+async def test_several_mobile_accounts_are_not_reduced_to_the_first(monkeypatch):
+    _gateway(monkeypatch, [
+        {"txnId": "enrol-txn"},
+        {"ABHAProfile": {"ABHANumber": "91-1234-5678-9012"}, "tokens": {"token": "t"}},
+        {"message": "OTP sent"},
+        {"authResult": "success", "accounts": [{"ABHANumber": "1"}, {"ABHANumber": "2"}]},
+    ])
+    requested = await service.request_aadhaar_otp(
+        aadhaar=AADHAAR, facility_id=FACILITY_A, started_by=STAFF, consent=CONSENT,
+    )
+    await service.enrol_by_aadhaar_otp(
+        session_id=requested.session_id, otp="123456", mobile=None,
+        facility_id=FACILITY_A, consume_session=False,
+    )
+    await service.request_enrolment_mobile_otp(
+        session_id=requested.session_id, mobile="9876543210",
+        facility_id=FACILITY_A, started_by=STAFF,
+    )
+    with pytest.raises(service.AbdmIdentityError) as exc:
+        await service.verify_enrolment_mobile_otp(
+            session_id=requested.session_id, otp="654321", facility_id=FACILITY_A,
+        )
+    assert exc.value.code == "abdm_account_selection_required"
+    alive = await otp_session.load(
+        requested.session_id, facility_id=FACILITY_A, purpose=OtpPurpose.ENROL_BY_AADHAAR,
+    )
+    assert alive.stage == "mobile_otp"
+
+
+async def test_profile_and_card_use_the_x_token_header(monkeypatch):
+    png = b"\x89PNG\r\n\x1a\nsynthetic"
+    gw = _gateway(monkeypatch, [
+        {"ABHANumber": "91-1234-5678-9012", "preferredAbhaAddress": "beta@sbx", "name": "Synthetic", "status": "ACTIVE"},
+        png,
+    ])
+    profile = await service.fetch_abha_profile(profile_token="synthetic-profile")
+    card = await service.fetch_abha_card(profile_token="synthetic-profile")
+    assert profile.abha_address == "beta@sbx"
+    assert card.content == png
+    assert gw.methods == ["GET", "GET"]
+    assert gw.headers[0]["X-token"] == "Bearer synthetic-profile"
+    assert gw.headers[1]["X-Token"] == "Bearer synthetic-profile"
+    assert gw.calls[0][0].endswith("/v3/profile/account")
+    assert gw.calls[1][0].endswith("/v3/profile/account/abha-card")
+
+
+async def test_several_login_accounts_are_not_reduced_to_the_first(monkeypatch, rsa_key):
+    gw = _gateway(monkeypatch, [
+        {"txnId": "login-txn"},
+        {"authResult": "success", "txnId": "login-txn", "token": "selection-token", "accounts": [
+            {"ABHANumber": "91-1111-2222-3333", "name": "First", "status": "ACTIVE"},
+            {"ABHANumber": "91-4444-5555-6666", "name": "Second", "status": "ACTIVE"},
+        ]},
+        {"authResult": "success", "ABHANumber": "91-4444-5555-6666", "preferredAbhaAddress": "second@sbx", "tokens": {"token": "profile-token"}},
+    ])
+    requested = await service.request_login_otp(
+        mobile="9876543210", facility_id=FACILITY_A, started_by=STAFF,
+    )
+    assert gw.last_body["loginHint"] == "mobile"
+    assert gw.last_body["scope"] == ["abha-login", "mobile-verify"]
+    assert _decrypt(rsa_key, gw.last_body["loginId"]) == "9876543210"
+    issued = await service.verify_login_otp(
+        session_id=requested.session_id, otp="123456", facility_id=FACILITY_A,
+    )
+    assert issued.next_step == "account_select"
+    assert [number for number, _name in issued.account_choices] == ["91111122223333", "91444455556666"]
+    assert issued.linking_token is None
+    with pytest.raises(service.AbdmIdentityError) as exc:
+        await service.select_login_account(
+            session_id=requested.session_id, abha_number="91000000000000", facility_id=FACILITY_A,
+        )
+    assert exc.value.code == "abha_account_not_in_selection"
+    chosen = await service.select_login_account(
+        session_id=requested.session_id, abha_number="91-4444-5555-6666", facility_id=FACILITY_A,
+    )
+    assert chosen.abha_number == "91-4444-5555-6666"
+    assert chosen.abha_address == "second@sbx"
+    assert gw.calls[2][1]["ABHANumber"] == "91-4444-5555-6666"
+    assert gw.headers[2]["T-token"] == "Bearer selection-token"
+    assert "selection-token" not in json.dumps(issued.account_choices)

@@ -44,7 +44,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields, replace
 from datetime import UTC, datetime
 from enum import Enum
 
@@ -137,6 +137,19 @@ class OtpSession:
     login_hint: str | None = None
     #: How many fresh gateway transactions this desk attempt has already used.
     resends: int = 0
+    #: Official ABHA enrolment grant identifiers only — never Aadhaar or OTP.
+    consent_code: str | None = None
+    consent_version: str | None = None
+    consent_language: str | None = None
+    consent_granted_at: str | None = None
+    #: Enrolment continuation inside the same ABDM transaction.
+    #: enrol_otp → mobile_pending → mobile_otp → address_pending.
+    #: Login account selection uses stage "account_select".
+    stage: str | None = None
+    #: Short-lived ABDM selection credential. Never returned to the browser.
+    selection_token: str | None = None
+    #: ABHA numbers ABDM returned for this OTP. The desk must choose one.
+    account_choices: list[str] | None = None
 
     def to_json(self) -> str:
         return json.dumps(asdict(self) | {"purpose": self.purpose.value})
@@ -144,7 +157,9 @@ class OtpSession:
     @classmethod
     def from_json(cls, raw: str) -> OtpSession:
         data = json.loads(raw)
-        return cls(**(data | {"purpose": OtpPurpose(data["purpose"])}))
+        data["purpose"] = OtpPurpose(data["purpose"])
+        allowed = {field.name for field in fields(cls)}
+        return cls(**{key: value for key, value in data.items() if key in allowed})
 
     def resend_allowed(self, *, now: datetime | None = None) -> None:
         """Refuse a resend that is too soon or one too many; return otherwise."""
@@ -168,6 +183,13 @@ async def start(
     patient_id: str | None = None,
     login_hint: str | None = None,
     resends: int = 0,
+    consent_code: str | None = None,
+    consent_version: str | None = None,
+    consent_language: str | None = None,
+    consent_granted_at: str | None = None,
+    stage: str | None = None,
+    selection_token: str | None = None,
+    account_choices: list[str] | None = None,
 ) -> OtpSession:
     """Record the first leg and return the session the client will quote back.
 
@@ -185,9 +207,26 @@ async def start(
         created_at=datetime.now(UTC).isoformat(),
         login_hint=login_hint,
         resends=resends,
+        consent_code=consent_code,
+        consent_version=consent_version,
+        consent_language=consent_language,
+        consent_granted_at=consent_granted_at,
+        stage=stage,
+        selection_token=selection_token,
+        account_choices=account_choices,
     )
-    await get_redis().set(_key(session.session_id), session.to_json(), ex=OTP_SESSION_TTL_SECONDS)
+    await save(session)
     return session
+
+
+async def save(session: OtpSession) -> None:
+    """Write a mutated frozen session back. Resets the OTP TTL on purpose: a
+    continuation step should not inherit a nearly-expired first-leg clock."""
+    await get_redis().set(_key(session.session_id), session.to_json(), ex=OTP_SESSION_TTL_SECONDS)
+
+
+def with_updates(session: OtpSession, **changes: object) -> OtpSession:
+    return replace(session, **changes)
 
 
 async def load(session_id: str, *, facility_id: str, purpose: OtpPurpose) -> OtpSession:

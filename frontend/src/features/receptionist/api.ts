@@ -1,10 +1,11 @@
-import { api } from "@/lib/api";
+import { api, downloadBlob } from "@/lib/api";
 
 import type {
   Patient,
   PatientCreate,
   PatientSearchRequest,
   PatientSearchResponse,
+  AbhaEnrolmentConsent,
   AbhaIdentityLinked,
   AbhaLoginIdentifier,
   AbhaOtpRequested,
@@ -50,9 +51,10 @@ export function registerPatient(
 }
 
 function loginIdentifierBody(identifier: AbhaLoginIdentifier): Record<string, string> {
-  return "aadhaar" in identifier
-    ? { aadhaar: digitsOnly(identifier.aadhaar) }
-    : { abha_number: digitsOnly(identifier.abha_number) };
+  if ("aadhaar" in identifier) return { aadhaar: digitsOnly(identifier.aadhaar) };
+  if ("mobile" in identifier) return { mobile: digitsOnly(identifier.mobile) };
+  if ("abha_address" in identifier) return { abha_address: identifier.abha_address.trim() };
+  return { abha_number: digitsOnly(identifier.abha_number) };
 }
 
 export function requestAbhaLoginOtp(
@@ -84,6 +86,19 @@ export function resendAbhaOtp(
   });
 }
 
+export function selectAbhaLoginAccount(
+  patientId: string,
+  sessionId: string,
+  abhaNumber: string,
+  idempotencyKey: string,
+): Promise<AbhaIdentityLinked> {
+  return api<AbhaIdentityLinked>("/abdm/abha/login/select-account", {
+    method: "POST",
+    body: JSON.stringify({ patient_id: patientId, session_id: sessionId, abha_number: digitsOnly(abhaNumber) }),
+    idempotencyKey,
+  });
+}
+
 export function verifyAbhaLoginOtp(
   sessionId: string,
   otp: string,
@@ -99,11 +114,12 @@ export function verifyAbhaLoginOtp(
 export function requestAbhaEnrolmentOtp(
   patientId: string,
   aadhaar: string,
+  consent: AbhaEnrolmentConsent,
   idempotencyKey: string,
 ): Promise<AbhaOtpRequested> {
   return api<AbhaOtpRequested>("/abdm/abha/enrol/aadhaar/request-otp", {
     method: "POST",
-    body: JSON.stringify({ patient_id: patientId, aadhaar: digitsOnly(aadhaar) }),
+    body: JSON.stringify({ patient_id: patientId, aadhaar: digitsOnly(aadhaar), consent }),
     idempotencyKey,
   });
 }
@@ -123,6 +139,50 @@ export function verifyAbhaEnrolmentOtp(
   return api<AbhaIdentityLinked>("/abdm/abha/enrol/aadhaar/verify-otp", {
     method: "POST",
     body: JSON.stringify({ session_id: sessionId, otp, mobile: normalisedMobile?.slice(3) ?? null }),
+    idempotencyKey,
+  });
+}
+
+export function requestEnrolmentMobileOtp(
+  patientId: string,
+  sessionId: string,
+  mobile: string,
+  idempotencyKey: string,
+): Promise<AbhaOtpRequested> {
+  const normalised = normaliseIndianMobileInput(mobile);
+  if (!normalised) throw new Error("Enter a valid Indian mobile number.");
+  return api<AbhaOtpRequested>("/abdm/abha/enrol/mobile/request-otp", {
+    method: "POST",
+    body: JSON.stringify({ patient_id: patientId, session_id: sessionId, mobile: normalised.slice(3) }),
+    idempotencyKey,
+  });
+}
+
+export function verifyEnrolmentMobileOtp(
+  sessionId: string,
+  otp: string,
+  idempotencyKey: string,
+): Promise<AbhaIdentityLinked> {
+  return api<AbhaIdentityLinked>("/abdm/abha/enrol/mobile/verify-otp", {
+    method: "POST",
+    body: JSON.stringify({ session_id: sessionId, otp }),
+    idempotencyKey,
+  });
+}
+
+export function downloadNhaAbhaCard(patientId: string): Promise<Blob> {
+  return downloadBlob(`/abdm/abha/patients/${patientId}/abha-card`);
+}
+
+export function submitEnrolmentAbhaAddress(
+  patientId: string,
+  sessionId: string,
+  abhaAddress: string,
+  idempotencyKey: string,
+): Promise<AbhaIdentityLinked> {
+  return api<AbhaIdentityLinked>("/abdm/abha/enrol/abha-address", {
+    method: "POST",
+    body: JSON.stringify({ patient_id: patientId, session_id: sessionId, abha_address: abhaAddress }),
     idempotencyKey,
   });
 }
