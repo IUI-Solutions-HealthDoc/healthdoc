@@ -5,6 +5,67 @@ Live OTP fix: `fix/abdm-otp-live-verification`, based on `658e791`.
 
 Status: live acceptance NOT COMPLETE. See [preflight evidence and blockers](abdm-live-preflight-2026-09-10.md).
 
+**21 September consolidation note:** the live observations below were recorded
+by the preceding operator; this publication does not claim they were repeated.
+The later restoration/0082 entries supersede the earlier 0079/502 preflight,
+which is retained as dated history. A subsequent read-only public callback GET
+again returned 405. The owner reports a new support ticket submitted; its number
+and response remain unverified. Local patient identifiers have been redacted
+from this published ledger. M1 enrolment/profile credentials must not be assumed
+interchangeable with a HIP link token; successful identity binding is not
+clinical-sharing consent or M2/M3 completion.
+
+**21 September, ~11:54 UTC Create ABHA (new Aadhaar):** enrol request-otp **200**.
+First verify-otp **400** (REQUEST-ID `e1839499-a83f-465e-9401-95accb233907`, no
+`ABDM-NNNN`) without the communication-mobile override. Second verify-otp **200**
+after the participant entered a 10-digit mobile override. Desk shows “ABHA
+verified and linked” with a 14-digit hyphenated number and a PHR address.
+On the participant-approved new chart (identifier withheld): `identity_status=verified`, ABHA bound,
+encrypted linking token stored. Identifiers not recorded. **No M2/M3 case is
+marked passed.** Worker remains stopped.
+
+**21 September, ~11:38 UTC Aadhaar login OTP:** `POST /abha/login/request-otp`
+**200** (after a 401 from the earlier session drop), participant-entered OTP,
+`POST /abha/login/verify-otp` **409** `duplicate_abha`. ABDM accepted the OTP;
+HealthDoc refused to bind that ABHA onto the new unlinked chart because it is
+already on the earlier chart. Desk showed the generic 409 toast (reload copy);
+`duplicate_abha` is now mapped to an explicit already-linked message. Identifier
+not recorded. **No M2/M3 case is marked passed.** Worker remains stopped.
+
+**21 September, ~11:25 UTC enrolment OTP refusal:** participant typed Aadhaar
+on Create ABHA and Send OTP. Local API `POST /abha/enrol/aadhaar/request-otp`
+returned 502 `abdm_rejected`. Upstream ABHA host returned **400** on
+`/v3/enrollment/request/otp`; REQUEST-ID `63477bdf-800b-427b-9f02-870dd1258cc6`;
+logged fields `loginId`, no `ABDM-NNNN` code. Desk toast is the generic
+`abdm_rejected` copy. This is the enrol path for a **new** ABHA; retrying
+Create ABHA with the same Aadhaar is expected to keep failing if that Aadhaar
+already has an ABHA. Next runnable row is existing-ABHA via Aadhaar
+(`login/request-otp`, scopes `abha-login` + `aadhaar-verify`). Identifier not
+recorded. **No M2/M3 case is marked passed.** Worker remains stopped.
+
+**21 September, ~11:15 UTC Aadhaar/profile desk pass:** new unlinked
+registration chart opened (Create ABHA selected). No Aadhaar was sent to ABDM
+in this pass. Local 11-digit and letter inputs mark the Aadhaar field invalid
+and keep Send OTP disabled; the performance log shows no enrol/login request.
+Navbar Hindi translates chrome only; ABHA identity copy stays English. Print
+Patient Card is the local UHID card and states it encodes no Aadhaar/ABHA.
+Enrol still hardcodes `consent code abha-enrollment` with no desk checkbox.
+No NHA ABHA card/profile download route exists. Live Aadhaar OTP (enrol and
+existing-ABHA via Aadhaar) is waiting on participant-entered Aadhaar and OTP.
+**No M2/M3 case is marked passed.** Worker remains stopped.
+
+**21 September, 10:51 UTC update:** local origin restored (alembic **0082**);
+public token callback is **405** on GET, not 502. Synthetic public probes
+returned 400 `missing_abdm_headers` and 404 `link_not_found`. Read-only
+bridge-services **200**, HIP/HIU active, callback URL unchanged. Existing-ABHA
+mobile OTP request **200** at 10:46:19 UTC and verify **200** at 10:47:40 UTC
+(participant-entered OTP; identity bound in the existing chart). M2 still has
+no stored link token for REQUEST-ID `d613360a-99e5-5fc4-873c-b804d01dba8a`.
+Outbound worker remains stopped (22 `context_notify` pending, 1 expired
+`link_context` unrepaired). `dev.doctor` requester fields remain empty. Copy-ready
+follow-up ticket: [abdm-support-ticket-ready-2026-09-21.md](abdm-support-ticket-ready-2026-09-21.md).
+**No M2/M3 case is marked passed.**
+
 **12 September, 04:04 UTC update:** the pending token request below still has
 no callback or token. Local consent expired at 23:59 IST on 11 September;
 renewal, a genuine/NHA-approved clinician requester profile and participant
@@ -25,7 +86,7 @@ See the [12 September runbook](abdm-m2-m3-next-day-runbook-2026-09-12.md).
 
 This indexes 118 rows carrying a test-case ID from the supplied M1 v1.2, M2 and M3 workbooks. It is **not 118 mandatory tests**, not a completeness claim for all downloaded APIs, and not a pass percentage. Applicability depends on integrator category and the selected flow. Blank row labels and duplicated source IDs are preserved; identify evidence by workbook + sheet + row as well as case ID. The M1 API-only appendix has entries without case IDs and is not counted here.
 
-All live statuses started as **NOT RUN**. Two now have **PARTIAL** evidence from the successful existing-number mobile-OTP browser flow and saved binding; neither is a complete workbook case. Gateway probes, unit tests and the user's report of PHR registration are not substitutes for end-to-end cases. Do not change a status without case-specific evidence. Never put ABHA/Aadhaar numbers, OTPs, tokens, private keys or identifiable clinical screenshots in this file.
+All live statuses started as **NOT RUN**. Existing-number mobile OTP and tagging remain **PARTIAL**. The 21 Sep Aadhaar desk pass adds **PASS** for the Create ABHA control, **PARTIAL** for local Aadhaar collection/error, and **GAP** where the product has no consent checkbox, no NHA ABHA card/profile download, and no demographic/biometric/find-by-mobile flows. Gateway probes, unit tests and the user's report of PHR registration are not substitutes for end-to-end cases. Do not change a status without case-specific evidence. Never put ABHA/Aadhaar numbers, OTPs, tokens, private keys or identifiable clinical screenshots in this file.
 
 The November 2025 FAQ, p. 2, requires eight HI types for HMIS; the older M3 workbook lists seven types and an 'any one' branch. Treat that conflict as needing NHA scope confirmation, not permission to certify only one type. HealthDoc currently supports only five types. The separate PHR/Locker workbook is not automatically in scope for an HMIS using NHA's PHR app.
 
@@ -71,38 +132,38 @@ Source: [Copy_of_M1_ABHA_CREATION_AND_VERIFICATION_WITH_APIS_UPDATED_V1_2_7_Aug_
 
 | Row | Case ID | Function / scenario | Source applicability label | Live result | Evidence |
 |---|---|---|---|---|---|
-| 22 | CRT_ABHA_101 | Create ABHA Option | Mandatory | NOT RUN | — |
-| 23 | CRT_ABHA_102 | Consent collection | Mandatory | NOT RUN | — |
-| 24 | CRT_ABHA_103 | Suggestions:- Consent collection should be multilingual | Optional | NOT RUN | — |
-| 25 | CRT_ABHA_104 | Aadhaar collection and Error Message | Mandatory | NOT RUN | — |
-| 26 | CRT_ABHA_105 | Aadhaar OTP Collection | Mandatory | NOT RUN | — |
+| 22 | CRT_ABHA_101 | Create ABHA Option | Mandatory | PASS | 21 Sep 2026 desk: Create ABHA is present, selectable, and switches the identifier to Aadhaar on a new unlinked chart. |
+| 23 | CRT_ABHA_102 | Consent collection | Mandatory | GAP | No desk consent checkbox. Enrol payload still hardcodes `consent: {code: "abha-enrollment", version: "1.4"}` with no patient-facing capture. |
+| 24 | CRT_ABHA_103 | Suggestions:- Consent collection should be multilingual | Optional | GAP | Navbar Hindi translates chrome only. Identity panel and the missing consent copy stay English. |
+| 25 | CRT_ABHA_104 | Aadhaar collection and Error Message | Mandatory | PARTIAL | Local 11-digit/letter invalidation as before. Live enrol Send OTP: ABDM HTTP 400 on `loginId` (REQUEST-ID `63477bdf-800b-427b-9f02-870dd1258cc6`); desk shows generic `abdm_rejected` toast, not the gateway message. |
+| 26 | CRT_ABHA_105 | Aadhaar OTP Collection | Mandatory | PASS | First Aadhaar (already had ABHA): enrol request 502/400, no OTP field. New Aadhaar: enrol request-otp **200**, OTP field shown, participant entered OTP. |
 | 27 | CRT_ABHA_106 | Resend OTP | Mandatory | NOT RUN | — |
-| 28 | CRT_ABHA_107 | OTP based Aadhaar Authentication | Mandatory | NOT RUN | — |
-| 29 | CRT_ABHA_108 | Communication Mobile Number verification-I | Optional | NOT RUN | — |
-| 30 | CRT_ABHA_109 | Communication Mobile Number verification-II | Mandatory | NOT RUN | — |
-| 31 | CRT_ABHA_112 | Suggested ABHA Address | Mandatory for Private /Government (Optional for integrated program using demo auth as they have default ABHA address generated) | NOT RUN | — |
-| 32 | CRT_ABHA_113 | Display of ABHA Number | Mandatory | NOT RUN | — |
-| 33 | CRT_ABHA_114 | View and Download ABHA details. (If integrators is generating ABHA card) | Mandatory for Private | NOT RUN | — |
-| 34 | CRT_ABHA_115 | View and Download ABHA details. (If integrators is not generating ABHA card) | Either of the test cases CRT_ABHA_114 or CRT_ABHA_115 is mandatory for Governement Optional for Private | NOT RUN | — |
-| 36 | CRT_ABHA_201 | Create ABHA Option | Optional | NOT RUN | — |
-| 37 | CRT_ABHA_202 | Consent collection | Optional | NOT RUN | — |
-| 38 | CRT_ABHA_203 | Suggestions:- Consent collection should be multilingual | Optional | NOT RUN | — |
-| 39 | CRT_ABHA_204 | Aadhaar collection and Error Message | Optional | NOT RUN | — |
-| 40 | CRT_ABHA_205 | Biometric based Aadhaar Authentication | Optional | NOT RUN | — |
+| 28 | CRT_ABHA_107 | OTP based Aadhaar Authentication | Mandatory | PASS | Enrol verify-otp **200** after communication-mobile override; identity bound. First verify without mobile was 400 (REQUEST-ID `e1839499-a83f-465e-9401-95accb233907`). |
+| 29 | CRT_ABHA_108 | Communication Mobile Number verification-I | Optional | PARTIAL | Enrol verify requires the optional “Mobile override” for this sandbox Aadhaar; without it verify was 400. Not a separate mobile OTP. |
+| 30 | CRT_ABHA_109 | Communication Mobile Number verification-II | Mandatory | PARTIAL | Participant supplied a 10-digit mobile on enrol verify; ABDM then returned 200. No separate `mobile-verify` continuation OTP. |
+| 31 | CRT_ABHA_112 | Suggested ABHA Address | Mandatory for Private /Government (Optional for integrated program using demo auth as they have default ABHA address generated) | GAP | No suggested-address picker after enrolment. |
+| 32 | CRT_ABHA_113 | Display of ABHA Number | Mandatory | PASS | After enrol, desk shows “ABHA verified and linked” with a 14-digit hyphenated number and a PHR address. Values not copied into this ledger. |
+| 33 | CRT_ABHA_114 | View and Download ABHA details. (If integrators is generating ABHA card) | Mandatory for Private | GAP | Print Patient Card is the local UHID card; on-screen note: no Aadhaar/ABHA encoded. No NHA ABHA-card generator. |
+| 34 | CRT_ABHA_115 | View and Download ABHA details. (If integrators is not generating ABHA card) | Either of the test cases CRT_ABHA_114 or CRT_ABHA_115 is mandatory for Governement Optional for Private | GAP | No ABHA profile/card download API or viewer. |
+| 36 | CRT_ABHA_201 | Create ABHA Option | Optional | PASS | Same Create ABHA control. Biometric branch is CRT_ABHA_205 GAP. |
+| 37 | CRT_ABHA_202 | Consent collection | Optional | GAP | Same missing desk consent as CRT_ABHA_102. |
+| 38 | CRT_ABHA_203 | Suggestions:- Consent collection should be multilingual | Optional | GAP | Same as CRT_ABHA_103. |
+| 39 | CRT_ABHA_204 | Aadhaar collection and Error Message | Optional | PARTIAL | Same local collection/error as CRT_ABHA_104. |
+| 40 | CRT_ABHA_205 | Biometric based Aadhaar Authentication | Optional | GAP | No biometric capture or Aadhaar-bio API on the desk. |
 | 41 | CRT_ABHA_206 | Communication Mobile Number verification-I | Optional | NOT RUN | — |
 | 42 | CRT_ABHA_207 | Communication Mobile Number verification-II | Optional | NOT RUN | — |
 | 43 | CRT_ABHA_208 | Display of ABHA Number | Optional | NOT RUN | — |
-| 44 | CRT_ABHA_209 | View and Download ABHA details. (If integrators is generating ABHA card) | Mandatory for Private | NOT RUN | — |
-| 45 | CRT_ABHA_210 | View and Download ABHA details. (If integrators is not generating ABHA card) | Either of the test cases CRT_ABHA_209 or CRT_ABHA_210 is mandatory for Governement Optional for Private | NOT RUN | — |
-| 47 | CRT_ABHA_301 | Create ABHA Option | Mandatory | NOT RUN | — |
-| 48 | CRT_ABHA_302 | Consent collection | Mandatory | NOT RUN | — |
-| 49 | CRT_ABHA_303 | Suggestions:- Consent collection should be multilingual | Optional | NOT RUN | — |
-| 50 | CRT_ABHA_304 | Aadhaar collection and Error Message | Mandatory | NOT RUN | — |
-| 51 | CRT_ABHA_305 | Demographic Information based authentication | Mandatory | NOT RUN | — |
-| 52 | CRT_ABHA_306 | Profile Completion | Mandatory | NOT RUN | — |
+| 44 | CRT_ABHA_209 | View and Download ABHA details. (If integrators is generating ABHA card) | Mandatory for Private | GAP | Same local UHID card as CRT_ABHA_114; no NHA ABHA card. |
+| 45 | CRT_ABHA_210 | View and Download ABHA details. (If integrators is not generating ABHA card) | Either of the test cases CRT_ABHA_209 or CRT_ABHA_210 is mandatory for Governement Optional for Private | GAP | Same as CRT_ABHA_115. |
+| 47 | CRT_ABHA_301 | Create ABHA Option | Mandatory | PASS | Same Create ABHA control as CRT_ABHA_101. Demographic-auth branch is a separate gap (305). |
+| 48 | CRT_ABHA_302 | Consent collection | Mandatory | GAP | Same missing desk consent as CRT_ABHA_102. |
+| 49 | CRT_ABHA_303 | Suggestions:- Consent collection should be multilingual | Optional | GAP | Same as CRT_ABHA_103. |
+| 50 | CRT_ABHA_304 | Aadhaar collection and Error Message | Mandatory | PARTIAL | Same local collection/error as CRT_ABHA_104. Demographic-auth error path not present. |
+| 51 | CRT_ABHA_305 | Demographic Information based authentication | Mandatory | GAP | No demographic-auth enrolment path in identity APIs or UI. |
+| 52 | CRT_ABHA_306 | Profile Completion | Mandatory | GAP | No ABHA profile-completion wizard after enrolment. |
 | 53 | CRT_ABHA_307 | Display of ABHA Number | Mandatory | NOT RUN | — |
-| 54 | CRT_ABHA_308 | View and Download ABHA details. (If integrators is generating ABHA card) | Mandatory for Private | NOT RUN | — |
-| 55 | CRT_ABHA_309 | View and Download ABHA details. (If integrators is not generating ABHA card) | Either of the test cases CRT_ABHA_308 or CRT_ABHA_309 is mandatory for Governement Optional for Private | NOT RUN | — |
+| 54 | CRT_ABHA_308 | View and Download ABHA details. (If integrators is generating ABHA card) | Mandatory for Private | GAP | Same as CRT_ABHA_114. |
+| 55 | CRT_ABHA_309 | View and Download ABHA details. (If integrators is not generating ABHA card) | Either of the test cases CRT_ABHA_308 or CRT_ABHA_309 is mandatory for Governement Optional for Private | GAP | Same as CRT_ABHA_115. |
 | 57 | CRT_ABHA_401 | Create ABHA Option | Optional | NOT RUN | — |
 | 58 | CRT_ABHA_402 | Consent Collection | Optional | NOT RUN | — |
 | 59 | CRT_ABHA_403 | Communication Mobile Number | Optional | NOT RUN | — |
@@ -113,29 +174,29 @@ Source: [Copy_of_M1_ABHA_CREATION_AND_VERIFICATION_WITH_APIS_UPDATED_V1_2_7_Aug_
 | 64 | CRT_ABHA_408 | Display of ABHA Number | Optional | NOT RUN | — |
 | 65 | CRT_ABHA_410 | View and Download ABHA details. (If integrators is generating ABHA card) | Optional | NOT RUN | — |
 | 66 | CRT_ABHA_411 | View and Download ABHA details. (If integrators is not generating ABHA card) | Optional | NOT RUN | — |
-| 69 | VRFY_ABHA_101 | ABHA Number Verification using Aadhaar OTP | Mandatory | NOT RUN | — |
+| 69 | VRFY_ABHA_101 | ABHA Number Verification using Aadhaar OTP | Mandatory | PARTIAL | 21 Sep ~11:38 UTC: login via Aadhaar OTP request 200, verify 409 `duplicate_abha`. ABDM accepted the OTP; bind refused on the second chart. Green linked banner not shown here (already bound to the first chart). |
 | 70 | VRFY_ABHA_102 | ABHA Address Verification using Aadhaar OTP | Mandatory | NOT RUN | — |
-| 72 | VRFY_ABHA_201 | ABHA Number verification using mobile OTP(ABHA Linked Mobile Number ) | Mandatory | PARTIAL | Browser request/verify HTTP 200; participant submitted OTP; verified-and-linked UI. Full profile, edit restrictions, wrong OTP and resend checks remain. See live preflight. |
+| 72 | VRFY_ABHA_201 | ABHA Number verification using mobile OTP(ABHA Linked Mobile Number ) | Mandatory | PARTIAL | Re-run 21 Sep 2026: request-otp HTTP 200 at 10:46:19 UTC, participant-entered OTP, verify-otp HTTP 200 at 10:47:40 UTC, verified-and-linked UI on the existing chart. Full profile, edit restrictions, wrong OTP and resend checks remain. |
 | 73 | VRFY_ABHA_202 | ABHA Address verification using mobile OTP(ABHA Linked Mobile Number ) | Mandatory | NOT RUN | — |
 | 75 | VRFY_ABHA _301 | Fetch ABHA details using Mobile (communication)authentication . Multi authentication feature also need to be implemented like Captcha preferred | Mandatory | NOT RUN | — |
 | 76 | VRFY_ABHA _302 | ABHA Details not exists to communicated Mobile Number | Mandatory | NOT RUN | — |
 | 77 | VRFY_ABHA _303 | ABHA Details exists to communicated Mobile Number. | Mandatory | NOT RUN | — |
 | 78 | VRFY_ABHA _304 | Incorrect OTP | Mandatory | NOT RUN | — |
 | 79 | VRFY_ABHA _305 | Resend OTP Functionality | Mandatory | NOT RUN | — |
-| 81 | VRFY_ABHA_401 | Fetch ABHA details using Aadhaar Number | Mandatory | NOT RUN | — |
+| 81 | VRFY_ABHA_401 | Fetch ABHA details using Aadhaar Number | Mandatory | PARTIAL | Same login-via-Aadhaar verify as 101: ABDM returned an identity (else persist would not reach the duplicate guard). Details were not shown on this chart because bind was refused. |
 | 82 | VRFY_ABHA_402 | Incorrect OTP | Mandatory | NOT RUN | — |
 | 83 | VRFY_ABHA_403 | ABHA Details not exists to Aadhaar Number | Mandatory | NOT RUN | — |
-| 84 | VRFY_ABHA_404 | ABHA Details exists to Aadhaar Number | Mandatory | NOT RUN | — |
+| 84 | VRFY_ABHA_404 | ABHA Details exists to Aadhaar Number | Mandatory | PARTIAL | Enrol OTP 400 `loginId` on Create ABHA, then login-via-Aadhaar OTP 200 + verify reaching `duplicate_abha`, show this Aadhaar already has an ABHA. |
 | 85 | VRFY_ABHA_405 | Resend OTP Functionality | Mandatory | NOT RUN | — |
-| 87 | VRFY_ABHA_501 | ABHA Number verification using Aadhaar Biometric - Fingerprint | Optional | NOT RUN | — |
-| 88 | VRFY_ABHA_502 | ABHA Address verification using Aadhaar Biometric - Fingerprint | Optional | NOT RUN | — |
+| 87 | VRFY_ABHA_501 | ABHA Number verification using Aadhaar Biometric - Fingerprint | Optional | GAP | No fingerprint/biometric verifier on the desk. |
+| 88 | VRFY_ABHA_502 | ABHA Address verification using Aadhaar Biometric - Fingerprint | Optional | GAP | Same as 501. |
 | 90 | VRFY_ABHA_501 | Reading ABHA Profile Info using ABHA QR Code | Optional | NOT RUN | — |
-| 92 | PROF_ABHA_601 | Mobile Update | Optional | NOT RUN | — |
-| 93 | PROF_ABHA_602 | Photo Update | Optional | NOT RUN | — |
-| 94 | PROF_ABHA_603 | Email Update | Optional | NOT RUN | — |
-| 95 | PROF_ABHA_604 | Re-KYC | Optional | NOT RUN | — |
-| 96 | PROF_ABHA_605 | Delete ABHA | Optional | NOT RUN | — |
-| 98 | TAGGING_UNIQUEPATIENTID_UNIQUEABHANUMBER | Verify one ABHA Number is linked to the unique patient ID in HIMS | Mandatory | PARTIAL | Existing-ABHA positive binding persisted; one active matching identity in facility. Duplicate-refusal and new-ABHA branch not proven live. |
+| 92 | PROF_ABHA_601 | Mobile Update | Optional | GAP | No ABHA profile-update APIs or desk/portal editors. |
+| 93 | PROF_ABHA_602 | Photo Update | Optional | GAP | Same as 601. |
+| 94 | PROF_ABHA_603 | Email Update | Optional | GAP | Same as 601. |
+| 95 | PROF_ABHA_604 | Re-KYC | Optional | GAP | Same as 601. |
+| 96 | PROF_ABHA_605 | Delete ABHA | Optional | GAP | Same as 601. |
+| 98 | TAGGING_UNIQUEPATIENTID_UNIQUEABHANUMBER | Verify one ABHA Number is linked to the unique patient ID in HIMS | Mandatory | PARTIAL | Positive bind on first chart (mobile OTP). Duplicate bind on second chart refused (`409 duplicate_abha`). New-ABHA enrolment then bound a different ABHA onto the participant-approved new chart (`identity_status=verified`; chart identifier withheld). |
 | 100 | SHARE _PATIENT_PROFILE_701 | Share Patient Profile | Mandatory | NOT RUN | — |
 
 ## M2

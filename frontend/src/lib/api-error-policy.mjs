@@ -27,6 +27,7 @@ export function userFacingApiError(code, payload) {
     actor_not_provisioned: "Sign-in succeeded, but this account is not linked to a HealthDoc staff profile. Ask your facility administrator to check account provisioning.",
     user_deactivated: "Your HealthDoc staff account is deactivated. Contact your facility administrator.",
     abdm_rejected: "ABDM declined this request. Check the details before retrying; contact support if it continues.",
+    duplicate_abha: "This ABHA number is already linked to another patient. Open that record instead of linking it here.",
     abdm_requester_required: "Ask your facility administrator to verify your name, registration number, identifier type and issuing registry URI before requesting ABDM records.",
     invalid_abdm_requester_profile: "Enter the real registration number, identifier type and issuing registry URI together, or clear all three registration fields.",
   };
