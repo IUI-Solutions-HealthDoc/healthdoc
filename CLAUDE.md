@@ -12,11 +12,20 @@ established by counting commits or test cases.**
 
 ### Latest integration snapshot — 21 September, branch consolidation
 
+**Promotion follow-up:** #588 passed all four CI jobs and was approved, but was
+squash-merged as `f96321d`. Its source changes are in staging; the main-parent
+ancestry was dropped. #589 (staging -> main) is approved but was conflicting at
+this snapshot. `fix/promotion-589-history` restores the verified already-integrated
+main ancestry without changing application files. Merge the repair and #589
+with **merge commits**, not squash/rebase. Verify their final GitHub state before
+using these preparation-time notes as a release claim. Updated next-agent task:
+[completion prompt](docs/next-agent-completion-prompt-2026-09-21.md).
+
 This subsection supersedes pending-PR/runtime statements in the dated sections
 below. PR **#586** is merged into staging as `c0113dc`; PR **#587** (M1 OTP
 resend, existing-ABHA Aadhaar verification and correctable OTP refusal) is merged
 as `5771931`. Main is `9222f07` from #585 and has not yet received those tranches.
-The current follow-up branch is **release/staging-consolidation**. It preserves
+The consolidation branch was **release/staging-consolidation**. It preserves
 the remaining duplicate-ABHA error-message fix/test, redacted live case ledger,
 support draft and the previously unpublished 19 September review. See
 [branch reconciliation](docs/branch-consolidation-2026-09-21.md).
