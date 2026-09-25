@@ -23,6 +23,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.common.db import Base
 from app.common.enums import (
+    AbhaProfileTokenKind,
     GuardianVerificationMethod,
     IdentifierType,
     IdentityPath,
@@ -61,6 +62,10 @@ class Patient(Base, UUIDPk, Timestamps, Blame, Versioned):
             "(abha_profile_token_encrypted IS NULL) = (abha_profile_token_key_version IS NULL)",
             name="abha_profile_token_key_version",
         ),
+        CheckConstraint(
+            AbhaProfileTokenKind.sql_check("abha_profile_token_kind"),
+            name="abha_profile_token_kind",
+        ),
     )
 
     uhid: Mapped[str | None] = mapped_column(String(30), nullable=True)  # unique via partial index
@@ -95,6 +100,11 @@ class Patient(Base, UUIDPk, Timestamps, Blame, Versioned):
     # 0083 — enrolment/login profile X-token, distinct from the HIP linking token.
     abha_profile_token_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     abha_profile_token_key_version: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    # 0085 — which login family issued the profile token; decides whether it
+    # opens /v3/profile/account (abha) or /v3/phr/web/login/profile (phr).
+    abha_profile_token_kind: Mapped[str] = mapped_column(
+        String(50), nullable=False, server_default=AbhaProfileTokenKind.ABHA.value
+    )
 
     # 0042 — guardian verification (B2). The comment here said 0022 for months;
     # no migration created these columns until 0042, so every ORM INSERT into

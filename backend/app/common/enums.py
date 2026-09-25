@@ -42,6 +42,18 @@ class IdentityStatus(CheckedEnum):
     PHOTO_PENDING = "photo_pending"
 
 
+class AbhaProfileTokenKind(CheckedEnum):
+    """Which ABHA login issued the stored profile X-token (0085).
+
+    The token is only accepted by the endpoint family that issued it: an
+    ABHA-number/Aadhaar/mobile login token opens /v3/profile/account, while an
+    ABHA-address (PHR) login token opens /v3/phr/web/login/profile. Sending one
+    to the other family is refused by ABDM, so the kind travels with the token.
+    """
+    ABHA = "abha"
+    PHR = "phr"
+
+
 class VisitType(CheckedEnum):
     OPD = "opd"
     IPD = "ipd"
