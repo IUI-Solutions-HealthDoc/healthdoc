@@ -1,0 +1,1083 @@
+{
+  "info": {
+    "name": "HealthDoc ABDM — Readiness and Webhook Evidence (24 Sep)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Credential-free sandbox readiness requests. Correct facility/HIP/HIU service: IN0910034387; bridge SBXID_053401. No registry writes, OTPs, patient identifiers, clinical bodies or captured responses. GET 405 proves routing only. Session is separately armed and uses Local Vault. Do not run all requests as milestone acceptance. See README.md and the self-service runbook."
+  },
+  "variable": [
+    {
+      "key": "arm_session_once",
+      "value": "no",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "00 Public callback routing — synthetic, not milestone passes",
+      "item": [
+        {
+          "name": "M1 profile share — GET probe, expect 405",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "https://abdm.healthdoc.world/api/v3/hip/patient/share",
+            "description": "Synthetic routing check only. This does NOT execute the milestone or prove NHA origin. Actual callbacks use POST. Do not change method/body to replay a real callback."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.variables.replaceIn(pm.request.url.toString()) !== \"https://abdm.healthdoc.world/api/v3/hip/patient/share\") {",
+                  "  pm.execution.skipRequest(); throw new Error(\"Unexpected destination; request skipped.\");",
+                  "}",
+                  "pm.variables.set(\"request_id\", pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"request_timestamp\", new Date().toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"POST-only route reached: HTTP 405\", () => pm.response.to.have.status(405));",
+                  "pm.test(\"Durable HealthDoc receipt ID present\", function () {",
+                  "  pm.expect(pm.response.headers.get(\"X-HealthDoc-Receipt-ID\")).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "M2 token callback — GET probe, expect 405",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "https://abdm.healthdoc.world/api/v3/hip/token/on-generate-token",
+            "description": "Synthetic routing check only. This does NOT execute the milestone or prove NHA origin. Actual callbacks use POST. Do not change method/body to replay a real callback."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.variables.replaceIn(pm.request.url.toString()) !== \"https://abdm.healthdoc.world/api/v3/hip/token/on-generate-token\") {",
+                  "  pm.execution.skipRequest(); throw new Error(\"Unexpected destination; request skipped.\");",
+                  "}",
+                  "pm.variables.set(\"request_id\", pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"request_timestamp\", new Date().toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"POST-only route reached: HTTP 405\", () => pm.response.to.have.status(405));",
+                  "pm.test(\"Durable HealthDoc receipt ID present\", function () {",
+                  "  pm.expect(pm.response.headers.get(\"X-HealthDoc-Receipt-ID\")).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "M2 link confirmation — GET probe, expect 405",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "https://abdm.healthdoc.world/api/v3/link/on_carecontext",
+            "description": "Synthetic routing check only. This does NOT execute the milestone or prove NHA origin. Actual callbacks use POST. Do not change method/body to replay a real callback."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.variables.replaceIn(pm.request.url.toString()) !== \"https://abdm.healthdoc.world/api/v3/link/on_carecontext\") {",
+                  "  pm.execution.skipRequest(); throw new Error(\"Unexpected destination; request skipped.\");",
+                  "}",
+                  "pm.variables.set(\"request_id\", pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"request_timestamp\", new Date().toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"POST-only route reached: HTTP 405\", () => pm.response.to.have.status(405));",
+                  "pm.test(\"Durable HealthDoc receipt ID present\", function () {",
+                  "  pm.expect(pm.response.headers.get(\"X-HealthDoc-Receipt-ID\")).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "M2 context notify — GET probe, expect 405",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "https://abdm.healthdoc.world/api/v3/links/context/on-notify",
+            "description": "Synthetic routing check only. This does NOT execute the milestone or prove NHA origin. Actual callbacks use POST. Do not change method/body to replay a real callback."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.variables.replaceIn(pm.request.url.toString()) !== \"https://abdm.healthdoc.world/api/v3/links/context/on-notify\") {",
+                  "  pm.execution.skipRequest(); throw new Error(\"Unexpected destination; request skipped.\");",
+                  "}",
+                  "pm.variables.set(\"request_id\", pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"request_timestamp\", new Date().toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"POST-only route reached: HTTP 405\", () => pm.response.to.have.status(405));",
+                  "pm.test(\"Durable HealthDoc receipt ID present\", function () {",
+                  "  pm.expect(pm.response.headers.get(\"X-HealthDoc-Receipt-ID\")).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "M2 SMS notify — GET probe, expect 405",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "https://abdm.healthdoc.world/api/v3/patients/sms/on-notify",
+            "description": "Synthetic routing check only. This does NOT execute the milestone or prove NHA origin. Actual callbacks use POST. Do not change method/body to replay a real callback."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.variables.replaceIn(pm.request.url.toString()) !== \"https://abdm.healthdoc.world/api/v3/patients/sms/on-notify\") {",
+                  "  pm.execution.skipRequest(); throw new Error(\"Unexpected destination; request skipped.\");",
+                  "}",
+                  "pm.variables.set(\"request_id\", pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"request_timestamp\", new Date().toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"POST-only route reached: HTTP 405\", () => pm.response.to.have.status(405));",
+                  "pm.test(\"Durable HealthDoc receipt ID present\", function () {",
+                  "  pm.expect(pm.response.headers.get(\"X-HealthDoc-Receipt-ID\")).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "M2 discover — GET probe, expect 405",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "https://abdm.healthdoc.world/api/v3/hip/patient/care-context/discover",
+            "description": "Synthetic routing check only. This does NOT execute the milestone or prove NHA origin. Actual callbacks use POST. Do not change method/body to replay a real callback."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.variables.replaceIn(pm.request.url.toString()) !== \"https://abdm.healthdoc.world/api/v3/hip/patient/care-context/discover\") {",
+                  "  pm.execution.skipRequest(); throw new Error(\"Unexpected destination; request skipped.\");",
+                  "}",
+                  "pm.variables.set(\"request_id\", pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"request_timestamp\", new Date().toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"POST-only route reached: HTTP 405\", () => pm.response.to.have.status(405));",
+                  "pm.test(\"Durable HealthDoc receipt ID present\", function () {",
+                  "  pm.expect(pm.response.headers.get(\"X-HealthDoc-Receipt-ID\")).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "M2 link init — GET probe, expect 405",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "https://abdm.healthdoc.world/api/v3/hip/link/care-context/init",
+            "description": "Synthetic routing check only. This does NOT execute the milestone or prove NHA origin. Actual callbacks use POST. Do not change method/body to replay a real callback."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.variables.replaceIn(pm.request.url.toString()) !== \"https://abdm.healthdoc.world/api/v3/hip/link/care-context/init\") {",
+                  "  pm.execution.skipRequest(); throw new Error(\"Unexpected destination; request skipped.\");",
+                  "}",
+                  "pm.variables.set(\"request_id\", pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"request_timestamp\", new Date().toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"POST-only route reached: HTTP 405\", () => pm.response.to.have.status(405));",
+                  "pm.test(\"Durable HealthDoc receipt ID present\", function () {",
+                  "  pm.expect(pm.response.headers.get(\"X-HealthDoc-Receipt-ID\")).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "M2 link confirm — GET probe, expect 405",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "https://abdm.healthdoc.world/api/v3/hip/link/care-context/confirm",
+            "description": "Synthetic routing check only. This does NOT execute the milestone or prove NHA origin. Actual callbacks use POST. Do not change method/body to replay a real callback."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.variables.replaceIn(pm.request.url.toString()) !== \"https://abdm.healthdoc.world/api/v3/hip/link/care-context/confirm\") {",
+                  "  pm.execution.skipRequest(); throw new Error(\"Unexpected destination; request skipped.\");",
+                  "}",
+                  "pm.variables.set(\"request_id\", pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"request_timestamp\", new Date().toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"POST-only route reached: HTTP 405\", () => pm.response.to.have.status(405));",
+                  "pm.test(\"Durable HealthDoc receipt ID present\", function () {",
+                  "  pm.expect(pm.response.headers.get(\"X-HealthDoc-Receipt-ID\")).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "M2 HIP consent — GET probe, expect 405",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "https://abdm.healthdoc.world/api/v3/consent/request/hip/notify",
+            "description": "Synthetic routing check only. This does NOT execute the milestone or prove NHA origin. Actual callbacks use POST. Do not change method/body to replay a real callback."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.variables.replaceIn(pm.request.url.toString()) !== \"https://abdm.healthdoc.world/api/v3/consent/request/hip/notify\") {",
+                  "  pm.execution.skipRequest(); throw new Error(\"Unexpected destination; request skipped.\");",
+                  "}",
+                  "pm.variables.set(\"request_id\", pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"request_timestamp\", new Date().toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"POST-only route reached: HTTP 405\", () => pm.response.to.have.status(405));",
+                  "pm.test(\"Durable HealthDoc receipt ID present\", function () {",
+                  "  pm.expect(pm.response.headers.get(\"X-HealthDoc-Receipt-ID\")).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "M2 HIP data request — GET probe, expect 405",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "https://abdm.healthdoc.world/api/v3/hip/health-information/request",
+            "description": "Synthetic routing check only. This does NOT execute the milestone or prove NHA origin. Actual callbacks use POST. Do not change method/body to replay a real callback."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.variables.replaceIn(pm.request.url.toString()) !== \"https://abdm.healthdoc.world/api/v3/hip/health-information/request\") {",
+                  "  pm.execution.skipRequest(); throw new Error(\"Unexpected destination; request skipped.\");",
+                  "}",
+                  "pm.variables.set(\"request_id\", pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"request_timestamp\", new Date().toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"POST-only route reached: HTTP 405\", () => pm.response.to.have.status(405));",
+                  "pm.test(\"Durable HealthDoc receipt ID present\", function () {",
+                  "  pm.expect(pm.response.headers.get(\"X-HealthDoc-Receipt-ID\")).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "M3 consent init — GET probe, expect 405",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "https://abdm.healthdoc.world/api/v3/hiu/consent/request/on-init",
+            "description": "Synthetic routing check only. This does NOT execute the milestone or prove NHA origin. Actual callbacks use POST. Do not change method/body to replay a real callback."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.variables.replaceIn(pm.request.url.toString()) !== \"https://abdm.healthdoc.world/api/v3/hiu/consent/request/on-init\") {",
+                  "  pm.execution.skipRequest(); throw new Error(\"Unexpected destination; request skipped.\");",
+                  "}",
+                  "pm.variables.set(\"request_id\", pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"request_timestamp\", new Date().toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"POST-only route reached: HTTP 405\", () => pm.response.to.have.status(405));",
+                  "pm.test(\"Durable HealthDoc receipt ID present\", function () {",
+                  "  pm.expect(pm.response.headers.get(\"X-HealthDoc-Receipt-ID\")).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "M3 consent status — GET probe, expect 405",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "https://abdm.healthdoc.world/api/v3/hiu/consent/request/on-status",
+            "description": "Synthetic routing check only. This does NOT execute the milestone or prove NHA origin. Actual callbacks use POST. Do not change method/body to replay a real callback."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.variables.replaceIn(pm.request.url.toString()) !== \"https://abdm.healthdoc.world/api/v3/hiu/consent/request/on-status\") {",
+                  "  pm.execution.skipRequest(); throw new Error(\"Unexpected destination; request skipped.\");",
+                  "}",
+                  "pm.variables.set(\"request_id\", pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"request_timestamp\", new Date().toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"POST-only route reached: HTTP 405\", () => pm.response.to.have.status(405));",
+                  "pm.test(\"Durable HealthDoc receipt ID present\", function () {",
+                  "  pm.expect(pm.response.headers.get(\"X-HealthDoc-Receipt-ID\")).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "M3 consent notify — GET probe, expect 405",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "https://abdm.healthdoc.world/api/v3/hiu/consent/request/notify",
+            "description": "Synthetic routing check only. This does NOT execute the milestone or prove NHA origin. Actual callbacks use POST. Do not change method/body to replay a real callback."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.variables.replaceIn(pm.request.url.toString()) !== \"https://abdm.healthdoc.world/api/v3/hiu/consent/request/notify\") {",
+                  "  pm.execution.skipRequest(); throw new Error(\"Unexpected destination; request skipped.\");",
+                  "}",
+                  "pm.variables.set(\"request_id\", pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"request_timestamp\", new Date().toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"POST-only route reached: HTTP 405\", () => pm.response.to.have.status(405));",
+                  "pm.test(\"Durable HealthDoc receipt ID present\", function () {",
+                  "  pm.expect(pm.response.headers.get(\"X-HealthDoc-Receipt-ID\")).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "M3 consent fetch — GET probe, expect 405",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "https://abdm.healthdoc.world/api/v3/hiu/consent/on-fetch",
+            "description": "Synthetic routing check only. This does NOT execute the milestone or prove NHA origin. Actual callbacks use POST. Do not change method/body to replay a real callback."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.variables.replaceIn(pm.request.url.toString()) !== \"https://abdm.healthdoc.world/api/v3/hiu/consent/on-fetch\") {",
+                  "  pm.execution.skipRequest(); throw new Error(\"Unexpected destination; request skipped.\");",
+                  "}",
+                  "pm.variables.set(\"request_id\", pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"request_timestamp\", new Date().toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"POST-only route reached: HTTP 405\", () => pm.response.to.have.status(405));",
+                  "pm.test(\"Durable HealthDoc receipt ID present\", function () {",
+                  "  pm.expect(pm.response.headers.get(\"X-HealthDoc-Receipt-ID\")).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "M3 data request — GET probe, expect 405",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "https://abdm.healthdoc.world/api/v3/hiu/health-information/on-request",
+            "description": "Synthetic routing check only. This does NOT execute the milestone or prove NHA origin. Actual callbacks use POST. Do not change method/body to replay a real callback."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.variables.replaceIn(pm.request.url.toString()) !== \"https://abdm.healthdoc.world/api/v3/hiu/health-information/on-request\") {",
+                  "  pm.execution.skipRequest(); throw new Error(\"Unexpected destination; request skipped.\");",
+                  "}",
+                  "pm.variables.set(\"request_id\", pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"request_timestamp\", new Date().toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"POST-only route reached: HTTP 405\", () => pm.response.to.have.status(405));",
+                  "pm.test(\"Durable HealthDoc receipt ID present\", function () {",
+                  "  pm.expect(pm.response.headers.get(\"X-HealthDoc-Receipt-ID\")).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "M3 data push — GET probe, expect 405",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "https://abdm.healthdoc.world/api/v3/hiu/health-information/transfer",
+            "description": "Synthetic routing check only. This does NOT execute the milestone or prove NHA origin. Actual callbacks use POST. Do not change method/body to replay a real callback."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.variables.replaceIn(pm.request.url.toString()) !== \"https://abdm.healthdoc.world/api/v3/hiu/health-information/transfer\") {",
+                  "  pm.execution.skipRequest(); throw new Error(\"Unexpected destination; request skipped.\");",
+                  "}",
+                  "pm.variables.set(\"request_id\", pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"request_timestamp\", new Date().toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"POST-only route reached: HTTP 405\", () => pm.response.to.have.status(405));",
+                  "pm.test(\"Durable HealthDoc receipt ID present\", function () {",
+                  "  pm.expect(pm.response.headers.get(\"X-HealthDoc-Receipt-ID\")).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "01 Synthetic header validation — no patient data",
+      "item": [
+        {
+          "name": "Missing headers — synthetic POST, expect 400",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "https://abdm.healthdoc.world/api/v3/hip/token/on-generate-token",
+            "description": "Dummy body with no participant data; proves missing required headers are refused. Does not call NHA or generate a token.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.variables.replaceIn(pm.request.url.toString()) !== \"https://abdm.healthdoc.world/api/v3/hip/token/on-generate-token\") {",
+                  "  pm.execution.skipRequest(); throw new Error(\"Unexpected destination; request skipped.\");",
+                  "}",
+                  "pm.variables.set(\"request_id\", pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"request_timestamp\", new Date().toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Missing callback headers refused: HTTP 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"Durable HealthDoc receipt ID present\", function () {",
+                  "  pm.expect(pm.response.headers.get(\"X-HealthDoc-Receipt-ID\")).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "02 NHA registration — Local Vault and manual session",
+      "item": [
+        {
+          "name": "01 Session — manual arm and Local Vault required",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "REQUEST-ID",
+                "value": "{{request_id}}",
+                "type": "text"
+              },
+              {
+                "key": "TIMESTAMP",
+                "value": "{{request_timestamp}}",
+                "type": "text"
+              },
+              {
+                "key": "X-CM-ID",
+                "value": "sbx",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "https://dev.abdm.gov.in/api/hiecm/gateway/v3/sessions",
+            "description": "Creates a short-lived NHA sandbox gateway session. User must add healthdoc-abdm-client-secret to LOCAL Vault, approve this collection's vault scripts, and set arm_session_once to yes immediately before Send. No patient data. Never save the response as an example; it contains tokens.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"clientId\": \"SBXID_053401\",\n  \"clientSecret\": \"{{vault:healthdoc-abdm-client-secret}}\",\n  \"grantType\": \"client_credentials\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.variables.replaceIn(pm.request.url.toString()) !== \"https://dev.abdm.gov.in/api/hiecm/gateway/v3/sessions\") {",
+                  "  pm.execution.skipRequest(); throw new Error(\"Unexpected destination; request skipped.\");",
+                  "}",
+                  "pm.variables.set(\"request_id\", pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"request_timestamp\", new Date().toISOString());",
+                  "if (pm.collectionVariables.get(\"arm_session_once\") !== \"yes\") {",
+                  " pm.execution.skipRequest(); throw new Error(\"Session is not armed. Review Local Vault setup, then set arm_session_once=yes for one send.\");",
+                  "}",
+                  "pm.collectionVariables.set(\"arm_session_once\", \"no\");",
+                  "try {",
+                  " const secret = await pm.vault.get(\"healthdoc-abdm-client-secret\");",
+                  " if (typeof secret !== \"string\" || !secret.trim()) {",
+                  "  pm.execution.skipRequest(); throw new Error(\"Client secret missing from Local Vault.\");",
+                  " }",
+                  "} catch (error) {",
+                  " pm.execution.skipRequest(); throw new Error(\"Local Vault unavailable or secret missing. Nothing should be sent; complete Vault setup.\");",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Session HTTP 200\", () => pm.response.to.have.status(200));",
+                  "if (pm.response.code === 200) {",
+                  " const data = pm.response.json();",
+                  " const token = data.accessToken || data.access_token;",
+                  " const ttl = Number(data.expiresIn || data.expires_in);",
+                  " pm.test(\"Session contains a token and positive expiry\", () => {",
+                  "   pm.expect(token).to.be.a(\"string\").and.not.empty;",
+                  "   pm.expect(Number.isFinite(ttl) && ttl > 0).to.equal(true);",
+                  " });",
+                  " if (typeof token === \"string\" && token && Number.isFinite(ttl) && ttl > 0) {",
+                  "   await pm.vault.set(\"healthdoc-abdm-access-token\", token);",
+                  " }",
+                  "}",
+                  "// No token/body logging, environment persistence, or automatic next request."
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "02 Read bridge and services — expect 200",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "REQUEST-ID",
+                "value": "{{request_id}}",
+                "type": "text"
+              },
+              {
+                "key": "TIMESTAMP",
+                "value": "{{request_timestamp}}",
+                "type": "text"
+              },
+              {
+                "key": "X-CM-ID",
+                "value": "sbx",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{vault:healthdoc-abdm-access-token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "https://dev.abdm.gov.in/api/hiecm/gateway/v3/bridge-services",
+            "description": "Read-only registration inventory. Does not register or edit a service. Token stays in Local Vault."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.variables.replaceIn(pm.request.url.toString()) !== \"https://dev.abdm.gov.in/api/hiecm/gateway/v3/bridge-services\") {",
+                  "  pm.execution.skipRequest(); throw new Error(\"Unexpected destination; request skipped.\");",
+                  "}",
+                  "pm.variables.set(\"request_id\", pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"request_timestamp\", new Date().toISOString());",
+                  "try {\n const token = await pm.vault.get(\"healthdoc-abdm-access-token\");\n if (typeof token !== \"string\" || !token.trim()) {\n  pm.execution.skipRequest(); throw new Error(\"Missing session token.\");\n }\n} catch (error) {\n pm.execution.skipRequest(); throw new Error(\"Local Vault session token unavailable. Run the separately approved session request first.\");\n}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Bridge inventory HTTP 200\", () => pm.response.to.have.status(200));",
+                  "if (pm.response.code === 200) {",
+                  " const data = pm.response.json();",
+                  " pm.test(\"Correct bridge and callback URL\", () => {",
+                  "  pm.expect(data.bridge.id).to.equal(\"SBXID_053401\");",
+                  "  pm.expect(data.bridge.url).to.equal(\"https://abdm.healthdoc.world\");",
+                  "  pm.expect(data.bridge.active).to.equal(true);",
+                  " });",
+                  " pm.test(\"Correct new facility is active\", () => {",
+                  "  pm.expect(data.services.some(s => s.id === \"IN0910034387\" && s.active === true)).to.equal(true);",
+                  " });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "03 Read IN0910034387 — HIP and HIU active",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "REQUEST-ID",
+                "value": "{{request_id}}",
+                "type": "text"
+              },
+              {
+                "key": "TIMESTAMP",
+                "value": "{{request_timestamp}}",
+                "type": "text"
+              },
+              {
+                "key": "X-CM-ID",
+                "value": "sbx",
+                "type": "text"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{vault:healthdoc-abdm-access-token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "https://dev.abdm.gov.in/api/hiecm/gateway/v3/bridge-service/serviceId/IN0910034387",
+            "description": "Read-only facility-service details. Both HIP and HIU flags were confirmed by a separate backend readback on 24 Sep. Postman results must be independently observed."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.variables.replaceIn(pm.request.url.toString()) !== \"https://dev.abdm.gov.in/api/hiecm/gateway/v3/bridge-service/serviceId/IN0910034387\") {",
+                  "  pm.execution.skipRequest(); throw new Error(\"Unexpected destination; request skipped.\");",
+                  "}",
+                  "pm.variables.set(\"request_id\", pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"request_timestamp\", new Date().toISOString());",
+                  "try {\n const token = await pm.vault.get(\"healthdoc-abdm-access-token\");\n if (typeof token !== \"string\" || !token.trim()) {\n  pm.execution.skipRequest(); throw new Error(\"Missing session token.\");\n }\n} catch (error) {\n pm.execution.skipRequest(); throw new Error(\"Local Vault session token unavailable. Run the separately approved session request first.\");\n}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Service details HTTP 200\", () => pm.response.to.have.status(200));",
+                  "if (pm.response.code === 200) {",
+                  " const data = pm.response.json();",
+                  " pm.test(\"Correct service belongs to this bridge\", () => {",
+                  "  pm.expect(data.bridgeId).to.equal(\"SBXID_053401\");",
+                  "  pm.expect(data.serviceId).to.equal(\"IN0910034387\");",
+                  " });",
+                  " pm.test(\"HIP, HIU and active flags are true\", () => {",
+                  "  pm.expect(data.isHip).to.equal(true);",
+                  "  pm.expect(data.isHiu).to.equal(true);",
+                  "  pm.expect(data.active).to.equal(true);",
+                  " });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "03 Local API — certificate trust required",
+      "item": [
+        {
+          "name": "Local HealthDoc health — trust certificate, expect 200",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "https://localhost/api/v1/health",
+            "description": "Local browser certificate acceptance does not configure Postman's trust store. Trust the approved development CA if needed; do not disable SSL verification."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.variables.replaceIn(pm.request.url.toString()) !== \"https://localhost/api/v1/health\") {",
+                  "  pm.execution.skipRequest(); throw new Error(\"Unexpected destination; request skipped.\");",
+                  "}",
+                  "pm.variables.set(\"request_id\", pm.variables.replaceIn(\"{{$guid}}\"));",
+                  "pm.variables.set(\"request_timestamp\", new Date().toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Local API healthy\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    }
+  ]
+}
