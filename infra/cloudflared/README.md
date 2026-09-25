@@ -48,5 +48,16 @@ supervised always-on origin and monitoring before relying on unattended
 production callbacks. The existing local self-signed-origin exception is
 not broadened by this service; production must use verified origin TLS.
 
+The dev Compose stack restarts its long-running services after Docker Desktop
+restarts. This does not repair a deleted bind-mount source: do not run the
+callback origin from a disposable `/private/tmp` worktree. If the stable code
+worktree is separate from the checkout holding private `.env` and local TLS
+certificates, set `HEALTHDOC_RUNTIME_ENV_FILE` to that existing `.env` and
+`HEALTHDOC_RUNTIME_CERTS_DIR` to that existing certificate directory when
+invoking Compose. Both default to paths inside the code checkout; neither
+copies credentials into Git. Validate resolved bind mounts with
+`docker compose ... config` before `up -d`, and verify local health plus a
+safe public GET returning 405 with `X-HealthDoc-Receipt-ID` afterward.
+
 Sources: [Cloudflare macOS service guidance](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/local-management/as-a-service/macos/),
 [Cloudflare 1033 troubleshooting](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/troubleshoot-tunnels/common-errors/).
