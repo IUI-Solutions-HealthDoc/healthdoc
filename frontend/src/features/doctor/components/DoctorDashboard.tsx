@@ -9,6 +9,7 @@ import Link from "next/link";
 
 import { listEmergencyWorklist, type EmergencyWorklistItem } from "@/features/emergency/api";
 import { meridian } from "@/styles/theme";
+import { useLocale } from "@/lib/i18n";
 import { doctorPageHeaderSx } from "../panelSx";
 import { useDoctorQueue } from "../hooks/useDoctorQueue";
 import { BreakGlassGate } from "./BreakGlassGate";
@@ -20,6 +21,7 @@ import { PatientSummarySidebar } from "./PatientSummarySidebar";
  * (fixed desktop two-column layout — no responsive breakpoints by design).
  */
 export function DoctorDashboard() {
+  const { t } = useLocale();
   const { patients, loading, error, selected, select } = useDoctorQueue();
   const [emergencyArrivals, setEmergencyArrivals] = useState<EmergencyWorklistItem[]>([]);
 
@@ -74,7 +76,7 @@ export function DoctorDashboard() {
             lineHeight: 1.2,
           }}
         >
-          Clinical dashboard
+          {t("doctor.dashboardTitle")}
         </Typography>
         <Typography
           sx={{
@@ -86,8 +88,7 @@ export function DoctorDashboard() {
             lineHeight: 1.45,
           }}
         >
-          Today&apos;s clinical worklist — select a queue patient or emergency arrival to start
-          consultation.
+          {t("doctor.dashboardSubtitle")}
         </Typography>
       </Box>
 

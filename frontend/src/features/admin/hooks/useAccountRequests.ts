@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { translate } from "@/lib/i18n";
+
 import { listAccountRequests } from "../api";
 import type { ApprovalStatus, UserAccountRequest } from "../types";
 
@@ -18,7 +20,7 @@ export function useAccountRequests(initialStatus: ApprovalStatus | "all" = "pend
       const res = await listAccountRequests({ status });
       setItems(res.items);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load requests");
+      setError(e instanceof Error ? e.message : translate("admin.accountRequests.loadFailed"));
     } finally {
       setLoading(false);
     }

@@ -20,6 +20,7 @@ import {
   DISCHARGE_TYPES,
   DischargeType,
 } from "./validation";
+import { useLocale } from "@/lib/i18n";
 
 export default function DischargeForm({
   admissionId,
@@ -27,6 +28,7 @@ export default function DischargeForm({
   isSubmitting = false,
   onSubmit,
 }: DischargeFormProps) {
+  const { t } = useLocale();
   const [showPreview, setShowPreview] = useState(false);
 
   const {
@@ -62,13 +64,10 @@ export default function DischargeForm({
   };
 
   return (
-    <FormSection
-      title="Discharge Patient"
-      description="Record discharge details and preview downstream notifications."
-    >
+    <FormSection title={t("ipd.dischargeFormTitle")} description={t("ipd.dischargeFormDescription")}>
       <form onSubmit={handleSubmit(submitHandler)} className="space-y-6">
         <SelectField
-          label="Discharge Type"
+          label={t("ipd.dischargeType")}
           options={DISCHARGE_TYPES.map((type) => ({
             label: DISCHARGE_TYPE_LABELS[type],
             value: type,
@@ -79,22 +78,19 @@ export default function DischargeForm({
 
         {isEmergencyType && (
           <div className="rounded-lg border border-warning bg-warning-muted px-4 py-3 text-sm text-warning">
-            This is an emergency-type discharge. Billing settlement will not
-            block this discharge, but outstanding dues may still apply.
+            {t("ipd.dischargeEmergencyWarning")}
           </div>
         )}
 
      {dischargeType === "transferred" && (
   <>
     <div className="rounded-lg border border-border bg-muted px-4 py-3 text-sm text-muted-foreground">
-      Discharge type &quot;transferred&quot; means the patient is leaving
-      this facility for another facility. It is not an in-hospital ward or
-      bed move (use Ward transfer / patient movement for that).
+      {t("ipd.dischargeTransferHint")}
     </div>
 
     <TextField
-      label="Destination facility name"
-      placeholder="Name of the facility the patient is being sent to"
+      label={t("ipd.destinationFacilityName")}
+      placeholder={t("ipd.destinationFacilityPlaceholder")}
       registration={register("destination_facility_name")}
       error={errors.destination_facility_name}
     />
@@ -102,21 +98,21 @@ export default function DischargeForm({
 )}
 
         <DateTimeField
-          label="Discharged At"
+          label={t("ipd.dischargedAt")}
           registration={register("discharged_at")}
           error={errors.discharged_at}
         />
 
         <TextAreaField
-          label="Discharge Summary"
-          placeholder="Enter discharge summary..."
+          label={t("ipd.dischargeSummary")}
+          placeholder={t("ipd.dischargeSummaryPlaceholder")}
           rows={4}
           registration={register("discharge_summary")}
           error={errors.discharge_summary}
         />
 
         <DateTimeField
-          label="Follow-up Date (optional)"
+          label={t("ipd.followUpDateOptional")}
           registration={register("follow_up_date")}
           error={errors.follow_up_date}
         />
@@ -124,7 +120,7 @@ export default function DischargeForm({
         {showPreview && (
           <div className="surface-muted space-y-2 p-4">
             <h3 className="text-sm font-semibold">
-              The following modules will be notified after discharge:
+              {t("ipd.dischargePreviewHeading")}
             </h3>
 
             <ul className="space-y-1 text-sm">
@@ -145,8 +141,8 @@ export default function DischargeForm({
 
         <FormActions
           isSubmitting={isSubmitting}
-          submitLabel={showPreview ? "Confirm Discharge" : "Preview Discharge"}
-          resetLabel="Reset"
+          submitLabel={showPreview ? t("ipd.confirmDischarge") : t("ipd.previewDischarge")}
+          resetLabel={t("common.reset")}
           onReset={handleReset}
         />
       </form>

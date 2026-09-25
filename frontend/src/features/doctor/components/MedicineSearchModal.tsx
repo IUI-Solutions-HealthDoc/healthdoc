@@ -6,6 +6,7 @@ import Stack from "@mui/material/Stack";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { SearchAutocomplete } from "@/components/ui/SearchAutocomplete";
+import { useLocale } from "@/lib/i18n";
 import { searchMedicines } from "../api";
 import { doctorButtonSx } from "../panelSx";
 import type { Medicine } from "../types";
@@ -17,6 +18,7 @@ export interface MedicineSearchModalProps {
 }
 
 export function MedicineSearchModal({ open, onClose, onPick }: MedicineSearchModalProps) {
+  const { t } = useLocale();
   const [options, setOptions] = React.useState<Medicine[]>([]);
   const [value, setValue] = React.useState<Medicine | null>(null);
 
@@ -44,22 +46,22 @@ export function MedicineSearchModal({ open, onClose, onPick }: MedicineSearchMod
     <Modal
       open={open}
       onClose={close}
-      title="Add medicine"
+      title={t("doctor.medicineModalTitle")}
       actions={
         <>
           <Button sx={doctorButtonSx} onClick={close}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button variant="contained" sx={doctorButtonSx} onClick={add} disabled={!value}>
-            Add medicine
+            {t("doctor.medicineModalAdd")}
           </Button>
         </>
       }
     >
       <Stack spacing={2}>
         <SearchAutocomplete<Medicine>
-          label="Search medicine"
-          placeholder="e.g. paracetamol, amox, metformin"
+          label={t("doctor.medicineSearchLabel")}
+          placeholder={t("doctor.medicineSearchPlaceholder")}
           options={options}
           value={value}
           onChange={setValue}

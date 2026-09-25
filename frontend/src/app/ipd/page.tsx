@@ -24,10 +24,13 @@ import { DEFAULT_NOTIFICATION_PREVIEW } from "@/features/ipd/constants";
 
 import type { Ward } from "@/features/nurse/components/WardSelector/WardSelector.types";
 import { flattenBedGrids, type Bed } from "@/components/BedGrid/BedGrid.types";
+import { PageHeading } from "@/components/common/PageHeading";
+import { useLocale } from "@/lib/i18n";
 
 type Tab = "dashboard" | "to_admit" | "admit" | "transfer" | "discharge";
 
 export default function IpdPage() {
+  const { t, localizeField } = useLocale();
   const [tab, setTab] = useState<Tab>("dashboard");
 
   const [wards, setWards] = useState<Ward[]>([]);
@@ -88,34 +91,35 @@ export default function IpdPage() {
 
   return (
     <div className="space-y-6 p-6">
-      <div>
-        <h1 className="text-3xl font-bold text-primary">IPD</h1>
-        <p className="mt-2 text-muted-foreground">
-          Admit patients, record in-hospital ward/bed transfers, or discharge
-          (including transfer to another facility).
-        </p>
-      </div>
+      <PageHeading
+        titleKey="ipd.title"
+        subtitleKey="ipd.subtitle"
+        titleClassName="text-3xl font-bold text-primary"
+      />
 
       <div className="flex gap-2 border-b">
         {(
           [
-            { id: "dashboard", label: "Dashboard" },
-            { id: "to_admit", label: `To Admit Queue (${pendingAdmissions.length})` },
-            { id: "admit", label: "Admit" },
-            { id: "transfer", label: "Ward transfer" },
-            { id: "discharge", label: "Discharge" },
-          ] as const
-        ).map((t) => (
+            { id: "dashboard" as const, labelKey: "ipd.dashboard" as const },
+            {
+              id: "to_admit" as const,
+              label: `${t("ipd.toAdmitQueue")} (${pendingAdmissions.length})`,
+            },
+            { id: "admit" as const, labelKey: "ipd.admit" as const },
+            { id: "transfer" as const, labelKey: "ipd.wardTransfer" as const },
+            { id: "discharge" as const, labelKey: "ipd.discharge" as const },
+          ]
+        ).map((entry) => (
           <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
+            key={entry.id}
+            onClick={() => setTab(entry.id)}
             className={`px-4 py-2 text-sm font-medium ${
-              tab === t.id
+              tab === entry.id
                 ? "border-b-2 border-primary text-primary font-bold"
                 : "text-muted-foreground hover:text-slate-900"
             }`}
           >
-            {t.label}
+            {"label" in entry ? entry.label : t(entry.labelKey)}
           </button>
         ))}
       </div>
@@ -133,10 +137,10 @@ export default function IpdPage() {
             <span className="text-3xl">⚠️</span>
             <div className="flex-1">
               <h3 className="text-base font-bold text-amber-900">
-                No Inpatient Wards Configured
+                {t("ipd.noWardsTitle")}
               </h3>
               <p className="mt-1 text-sm text-amber-800">
-                This facility has no active wards or beds set up yet. Hospital administrators must configure wards and bed layouts before patient admissions can be accepted.
+                {t("ipd.noWardsBody")}
               </p>
               <div className="mt-3">
                 <a
@@ -231,7 +235,7 @@ export default function IpdPage() {
                           : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                       }`}
                     >
-                      {ward.name} ({wardBeds.length})
+                      {localizeField(ward.name, ward.name_hi)} ({wardBeds.length})
                     </button>
                   );
                 })}
@@ -274,9 +278,9 @@ export default function IpdPage() {
 
           {pendingAdmissions.length === 0 ? (
             <div className="surface-card p-10 text-center">
-              <p className="text-base font-semibold text-slate-700">No Pending Admissions</p>
+              <p className="text-base font-semibold text-slate-700">{t("ipd.noPendingAdmissionsTitle")}</p>
               <p className="mt-1 text-sm text-muted-foreground">
-                All doctor-ordered inpatient dispositions have been assigned to beds.
+                {t("ipd.noPendingAdmissionsBody")}
               </p>
             </div>
           ) : (
@@ -316,7 +320,14 @@ export default function IpdPage() {
                       <div className="mt-3 space-y-1.5 text-xs">
                         {item.recommended_ward_name && (
                           <p className="text-slate-700">
-                            <strong className="text-slate-900">Rec Ward:</strong> {item.recommended_ward_name}
+                            <strong className="text-slate-900">{t("ipd.recommendedWard")}:</strong>{" "}
+                            {localizeField(item.recommended_ward_name, item.recommended_ward_name_hi)}
+                          </p>
+                        )}
+                        {item.recommended_department_name && (
+                          <p className="text-slate-700">
+                            <strong className="text-slate-900">{t("receptionist.department")}:</strong>{" "}
+                            {localizeField(item.recommended_department_name, item.recommended_department_name_hi)}
                           </p>
                         )}
                         {item.doctor_name && (

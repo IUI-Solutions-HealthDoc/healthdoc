@@ -15,10 +15,12 @@ import { MetricCard } from "@/components/ui/MetricCard";
 import { toast } from "@/components/ui/toast";
 import { getFacilityCapabilities } from "@/features/admin/api";
 import type { FacilityCapabilities } from "@/features/admin/types";
+import { useLocale } from "@/lib/i18n";
 import { kpiSnapshotToMetricCardProps, kpiLabel } from "@/lib/kpi";
 import { meridian } from "@/styles/theme";
 
 import { KPI_SERIES_COLORS, PERIOD_OPTIONS } from "../constants";
+import { KPI_PERIOD_MESSAGE_KEYS } from "../lib/periodLabels";
 import { useKpis } from "../hooks";
 import { visibleKpiCodes } from "../lib/capabilitiesFilter";
 import {
@@ -41,16 +43,17 @@ const KPI_ICONS: Record<CoreKpiCode, React.ReactNode> = {
   sharp_injury_count: <WarningAmberOutlinedIcon />,
 };
 
-function formatDeltaLabel(diff: number, code: CoreKpiCode): string {
-  const abs = Math.abs(diff);
-  const unit = code === "avg_opd_wait_minutes" ? " min" : "";
-  const sign = diff > 0 ? "+" : diff < 0 ? "−" : "";
-  const formatted =
-    code === "sharp_injury_count" ? String(abs) : abs.toFixed(abs >= 10 ? 0 : 1);
-  return `${sign}${formatted}${unit} vs prior day`;
-}
-
 export function MisDashboard() {
+  const { t } = useLocale();
+
+  const formatDeltaLabel = (diff: number, code: CoreKpiCode): string => {
+    const abs = Math.abs(diff);
+    const unit = code === "avg_opd_wait_minutes" ? t("reports.reception.minSuffix") : "";
+    const sign = diff > 0 ? "+" : diff < 0 ? "−" : "";
+    const formatted =
+      code === "sharp_injury_count" ? String(abs) : abs.toFixed(abs >= 10 ? 0 : 1);
+    return t("reports.kpi.deltaVsPrior", { sign, formatted, unit });
+  };
   const { items, loading, error, period, setPeriod, customFrom, customTo, setCustomFrom, setCustomTo } = useKpis("7d");
   const [focusCode, setFocusCode] = useState<CoreKpiCode | null>(null);
   const [capabilities, setCapabilities] = useState<FacilityCapabilities | null>(null);
@@ -91,7 +94,7 @@ export function MisDashboard() {
 
   const handleExport = async (format: ExportFormat) => {
     if (items.length === 0) {
-      toast.error("Nothing to export for this period");
+      toast.error(t("reports.kpi.exportNothing"));
       return;
     }
     if (format === "pdf") {
@@ -105,8 +108,8 @@ export function MisDashboard() {
       csv,
       "text/csv;charset=utf-8",
     );
-    if (format === "csv") toast.success("CSV downloaded");
-    else toast.success("Downloaded as CSV (Excel-compatible)");
+    if (format === "csv") toast.success(t("reports.kpi.csvDownloaded"));
+    else toast.success(t("reports.kpi.csvExcel"));
   };
 
   return (
@@ -167,7 +170,7 @@ export function MisDashboard() {
                 color: "rgba(255, 255, 255, 0.8)",
               }}
             >
-              Reports · MIS
+              {t("reports.kpi.eyebrow")}
             </Typography>
             <Typography
               component="h1"
@@ -180,7 +183,7 @@ export function MisDashboard() {
                 color: "#ffffff",
               }}
             >
-              Facility KPIs
+              {t("reports.kpi.title")}
             </Typography>
             <Typography
               sx={{
@@ -192,9 +195,7 @@ export function MisDashboard() {
                 color: "rgba(255, 255, 255, 0.88)",
               }}
             >
-              Live facility KPI snapshots for OPD wait and sharp injuries from
-              /reports/kpis. The finance MIS is a separate panel with a
-              separate audience.
+              {t("reports.kpi.subtitle")}
             </Typography>
           </Box>
 
@@ -208,7 +209,7 @@ export function MisDashboard() {
               size="small"
               value={period}
               onChange={handlePeriod}
-              aria-label="KPI period"
+              aria-label={t("reports.kpi.periodAria")}
               sx={{
                 bgcolor: "rgb(255 255 255 / 0.1)",
                 border: "1px solid rgb(255 255 255 / 0.22)",
@@ -232,7 +233,7 @@ export function MisDashboard() {
             >
               {PERIOD_OPTIONS.map((opt) => (
                 <ToggleButton key={opt.value} value={opt.value}>
-                  {opt.label}
+                  {t(KPI_PERIOD_MESSAGE_KEYS[opt.value])}
                 </ToggleButton>
               ))}
             </ToggleButtonGroup>
@@ -245,7 +246,7 @@ export function MisDashboard() {
                 <TextField
                   size="small"
                   type="date"
-                  label="From"
+                  label={t("reports.kpi.from")}
                   value={customFrom}
                   onChange={(e) => setCustomFrom(e.target.value)}
                   slotProps={{ inputLabel: { shrink: true } }}
@@ -266,11 +267,11 @@ export function MisDashboard() {
                 <TextField
                   size="small"
                   type="date"
-                  label="To"
+                  label={t("reports.kpi.to")}
                   value={customTo}
                   onChange={(e) => setCustomTo(e.target.value)}
                   error={customRangeInvalid}
-                  helperText={customRangeInvalid ? "Must be on or after From" : undefined}
+                  helperText={customRangeInvalid ? t("reports.kpi.customRangeInvalid") : undefined}
                   slotProps={{ inputLabel: { shrink: true } }}
                   sx={{
                     minWidth: { xs: 0, sm: 150 },
@@ -350,7 +351,7 @@ export function MisDashboard() {
                   ? {
                       value: formatDeltaLabel(delta.value, code),
                       direction: delta.direction,
-                      label: "in window",
+                      label: t("reports.kpi.inWindow"),
                     }
                   : undefined
               }
@@ -394,8 +395,7 @@ export function MisDashboard() {
       </Box>
 
       <Typography sx={{ m: 0, fontSize: "0.75rem", color: meridian.textSecondary }}>
-        Click a tile to focus its trend; click again to show both. Values come from
-        kpi_snapshots (computed daily).
+        {t("reports.kpi.tileHint")}
       </Typography>
 
       <KpiTrendChart
@@ -403,12 +403,12 @@ export function MisDashboard() {
         codes={chartCodes}
         loading={loading}
         title={
-          focusCode ? `${kpiLabel(focusCode)} trend` : "Core KPI trends"
+          focusCode
+            ? t("reports.kpi.trendFocused", { label: kpiLabel(focusCode) })
+            : t("reports.kpi.trendCore")
         }
         description={
-          focusCode
-            ? "Filled area for the selected series · hover for daily values"
-            : "Multi-series line view (different units) · select a tile for a focused area chart"
+          focusCode ? t("reports.kpi.trendDescFocused") : t("reports.kpi.trendDescMulti")
         }
       />
 

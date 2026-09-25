@@ -3,13 +3,14 @@
 import { useMemo } from "react";
 
 import { HealthDocBrand } from "@/components/common/HealthDocBrand";
+import { useLocale, type MessageKey } from "@/lib/i18n";
 import { useQueueStream } from "./useQueueStream";
 import type { NowServing, StreamStatus } from "./types";
 
-const STATUS_LABEL: Record<StreamStatus, string> = {
-  connecting: "Connecting…",
-  live: "Live",
-  reconnecting: "Reconnecting…",
+const STATUS_KEYS: Record<StreamStatus, MessageKey> = {
+  connecting: "queueDisplay.status.connecting",
+  live: "queueDisplay.status.live",
+  reconnecting: "queueDisplay.status.reconnecting",
 };
 
 const STATUS_COLOUR: Record<StreamStatus, string> = {
@@ -19,6 +20,7 @@ const STATUS_COLOUR: Record<StreamStatus, string> = {
 };
 
 function CounterCard({ entry }: { entry: NowServing }) {
+  const { t } = useLocale();
   return (
     <div
       style={{
@@ -41,12 +43,11 @@ function CounterCard({ entry }: { entry: NowServing }) {
           color: "rgba(255,255,255,0.62)",
         }}
       >
-        {entry.room_number ? `Room ${entry.room_number}` : "Consulting room"}
+        {entry.room_number
+          ? t("queueDisplay.room", { number: entry.room_number })
+          : t("queueDisplay.consultingRoom")}
       </p>
 
-      {/* The number is the entire point of the screen. It is sized to be read
-          from the far end of a corridor, which is why this uses vw rather than
-          the app's normal type scale. */}
       <p
         style={{
           margin: 0,
@@ -68,13 +69,14 @@ function CounterCard({ entry }: { entry: NowServing }) {
           color: "rgba(255,255,255,0.86)",
         }}
       >
-        {entry.doctor_name ?? "Doctor"}
+        {entry.doctor_name ?? t("common.doctor")}
       </p>
     </div>
   );
 }
 
 export function QueueDisplayBoard({ departmentId }: { departmentId: string | null }) {
+  const { t } = useLocale();
   const { status, serving, receivedAny } = useQueueStream(departmentId);
 
   const counters = useMemo(
@@ -110,12 +112,10 @@ export function QueueDisplayBoard({ departmentId }: { departmentId: string | nul
             imageClassName="bg-white"
           />
           <h1 style={{ margin: 0, fontSize: "clamp(1.5rem, 3vw, 3rem)", fontWeight: 700 }}>
-            Now serving
+            {t("queueDisplay.nowServing")}
           </h1>
         </div>
 
-        {/* Staff need to know the board is stale, and they cannot open a
-            console on a wall-mounted TV. */}
         <p
           aria-live="polite"
           style={{ margin: 0, display: "flex", alignItems: "center", gap: "0.6rem", fontSize: "clamp(0.9rem, 1.2vw, 1.25rem)", color: "rgba(255,255,255,0.7)" }}
@@ -124,28 +124,23 @@ export function QueueDisplayBoard({ departmentId }: { departmentId: string | nul
             aria-hidden
             style={{ width: 12, height: 12, borderRadius: "50%", background: STATUS_COLOUR[status], display: "inline-block" }}
           />
-          {STATUS_LABEL[status]}
+          {t(STATUS_KEYS[status])}
         </p>
       </header>
 
       {!departmentId ? (
         <p style={{ fontSize: "clamp(1rem, 2vw, 1.75rem)", color: "rgba(255,255,255,0.72)" }}>
-          No department selected. Open this screen as{" "}
-          <code>/queue-display?department=&lt;department_id&gt;</code>.
+          {t("queueDisplay.noDepartment")}
         </p>
       ) : counters.length === 0 ? (
         <div style={{ display: "flex", flex: 1, alignItems: "center", justifyContent: "center", textAlign: "center" }}>
           <div>
             <p style={{ fontSize: "clamp(1.25rem, 2.5vw, 2.25rem)", margin: 0 }}>
-              {receivedAny ? "No token is currently being called." : "Waiting for the next token to be called."}
+              {receivedAny ? t("queueDisplay.noTokenCalled") : t("queueDisplay.waitingForCall")}
             </p>
-            {/* Honest about the gap rather than showing a blank board that
-                looks like an empty waiting room. The stream carries events
-                from now on; it does not replay what was called before this
-                screen connected. */}
             {!receivedAny && (
               <p style={{ marginTop: "0.75rem", fontSize: "clamp(0.85rem, 1.2vw, 1.1rem)", color: "rgba(255,255,255,0.55)" }}>
-                This board shows calls made from the moment it connected.
+                {t("queueDisplay.boardFromConnect")}
               </p>
             )}
           </div>

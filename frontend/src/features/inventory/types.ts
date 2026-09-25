@@ -161,6 +161,7 @@ export interface IndentListRow {
   id: string;
   department_id: string;
   department_name: string;
+  department_name_hi?: string | null;
   status: IndentStatus;
   approved_by: string | null;
   approved_by_name: string | null;

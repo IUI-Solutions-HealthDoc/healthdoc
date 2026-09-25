@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import type { LabAnalyte } from "../types";
+import { useLocale, type MessageKey } from "@/lib/i18n";
 
 export interface StructuredResultFormProps {
   analytes: LabAnalyte[];
@@ -14,27 +15,12 @@ export interface StructuredResultFormProps {
 
 type ClinicalFlag = "normal" | "abnormal_low" | "abnormal_high" | "critical_low" | "critical_high";
 
-const FLAG_CONFIG: Record<ClinicalFlag, { label: string; badge: string }> = {
-  critical_low: {
-    label: "CRITICAL LOW",
-    badge: "bg-red-600 text-white font-bold",
-  },
-  critical_high: {
-    label: "CRITICAL HIGH",
-    badge: "bg-red-600 text-white font-bold",
-  },
-  abnormal_low: {
-    label: "LOW",
-    badge: "bg-amber-500 text-white font-semibold",
-  },
-  abnormal_high: {
-    label: "HIGH",
-    badge: "bg-amber-500 text-white font-semibold",
-  },
-  normal: {
-    label: "NORMAL",
-    badge: "bg-emerald-600 text-white font-medium",
-  },
+const FLAG_KEYS: Record<ClinicalFlag, MessageKey> = {
+  critical_low: "lab.flag.criticalLow",
+  critical_high: "lab.flag.criticalHigh",
+  abnormal_low: "lab.flag.low",
+  abnormal_high: "lab.flag.high",
+  normal: "lab.flag.normal",
 };
 
 function computeFlag(analyte: LabAnalyte, valStr: string): ClinicalFlag | null {
@@ -68,6 +54,22 @@ export default function StructuredResultForm({
   onSubmit,
   busy = false,
 }: StructuredResultFormProps) {
+  const { t } = useLocale();
+
+  const flagBadge = useCallback(
+    (flag: ClinicalFlag) => {
+      const badges: Record<ClinicalFlag, string> = {
+        critical_low: "bg-red-600 text-white font-bold",
+        critical_high: "bg-red-600 text-white font-bold",
+        abnormal_low: "bg-amber-500 text-white font-semibold",
+        abnormal_high: "bg-amber-500 text-white font-semibold",
+        normal: "bg-emerald-600 text-white font-medium",
+      };
+      return { label: t(FLAG_KEYS[flag]), badge: badges[flag] };
+    },
+    [t],
+  );
+
   const [values, setValues] = useState<Record<string, string>>(() => {
     const init: Record<string, string> = {};
     for (const a of analytes) {
@@ -80,7 +82,6 @@ export default function StructuredResultForm({
   const [remarks, setRemarks] = useState(initialRemarks);
   const [error, setError] = useState<string | null>(null);
 
-  // Calculate flags for all current values
   const flagMap = useMemo(() => {
     const map: Record<string, ClinicalFlag | null> = {};
     for (const a of analytes) {
@@ -89,10 +90,9 @@ export default function StructuredResultForm({
     return map;
   }, [analytes, values]);
 
-  // Check if any flag is critical
   const hasCritical = useMemo(() => {
     return Object.values(flagMap).some(
-      (flag) => flag === "critical_low" || flag === "critical_high"
+      (flag) => flag === "critical_low" || flag === "critical_high",
     );
   }, [flagMap]);
 
@@ -104,17 +104,16 @@ export default function StructuredResultForm({
     e.preventDefault();
     setError(null);
 
-    // Validate required analytes
     for (const a of analytes) {
       const val = values[a.analyte_code]?.trim();
       if (a.is_required && !val) {
-        setError(`Analyte '${a.analyte_name}' is required.`);
+        setError(t("lab.structured.errRequiredAnalyte", { name: a.analyte_name }));
         return;
       }
       if (val && a.value_type === "numeric") {
         const num = parseFloat(val);
         if (isNaN(num)) {
-          setError(`Analyte '${a.analyte_name}' must be a valid number.`);
+          setError(t("lab.structured.errInvalidNumber", { name: a.analyte_name }));
           return;
         }
       }
@@ -135,7 +134,7 @@ export default function StructuredResultForm({
     try {
       await onSubmit(payload, remarks);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to record lab results");
+      setError(err instanceof Error ? err.message : t("lab.structured.errSaveResults"));
     }
   }
 
@@ -143,11 +142,9 @@ export default function StructuredResultForm({
     <form onSubmit={handleSubmit} className="space-y-5 text-sm">
       <div className="border-b border-border pb-2">
         <h3 className="font-semibold text-foreground text-base">
-          Structured Analyte Entry — {testName}
+          {t("lab.structured.title", { testName })}
         </h3>
-        <p className="text-xs text-muted-foreground">
-          Versioned clinical rules validate bounds and automatically compute diagnostic flags.
-        </p>
+        <p className="text-xs text-muted-foreground">{t("lab.structured.subtitle")}</p>
       </div>
 
       {error && (
@@ -159,54 +156,53 @@ export default function StructuredResultForm({
       {hasCritical && (
         <div className="rounded-md border border-red-500/40 bg-red-500/10 p-3 text-xs text-red-700 dark:text-red-300">
           <div className="flex items-center gap-1.5 font-bold">
-            <span>⚠️ CRITICAL THRESHOLD ALERT</span>
+            <span>⚠️ {t("lab.structured.criticalBannerTitle")}</span>
           </div>
-          <p className="mt-1">
-            One or more recorded analyte values breach emergency panic limits. Saving this result
-            will automatically dispatch high-priority notifications to the treating clinical team.
-          </p>
+          <p className="mt-1">{t("lab.structured.criticalBannerBody")}</p>
         </div>
       )}
 
       <div className="divide-y divide-border rounded-lg border border-border bg-card">
         {analytes.map((analyte) => {
           const flag = flagMap[analyte.analyte_code];
-          const flagConfig = flag ? FLAG_CONFIG[flag] : null;
+          const flagConfig = flag ? flagBadge(flag) : null;
 
           return (
             <div
               key={analyte.id}
               className={`p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
-                flag === "critical_low" || flag === "critical_high"
-                  ? "bg-red-500/5"
-                  : ""
+                flag === "critical_low" || flag === "critical_high" ? "bg-red-500/5" : ""
               }`}
             >
               <div className="space-y-1 flex-1">
                 <div className="flex items-center gap-2">
-                  <span className="font-medium text-foreground">
-                    {analyte.analyte_name}
-                  </span>
+                  <span className="font-medium text-foreground">{analyte.analyte_name}</span>
                   {analyte.is_required && (
-                    <span className="text-[10px] text-danger font-semibold">*Required</span>
+                    <span className="text-[10px] text-danger font-semibold">{t("lab.structured.required")}</span>
                   )}
                   {analyte.unit && (
-                    <span className="text-xs text-muted-foreground">
-                      ({analyte.unit})
-                    </span>
+                    <span className="text-xs text-muted-foreground">({analyte.unit})</span>
                   )}
                 </div>
 
                 <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
                   {analyte.reference_low !== null && analyte.reference_high !== null && (
                     <span>
-                      Ref: {analyte.reference_low} – {analyte.reference_high} {analyte.unit ?? ""}
+                      {t("lab.structured.refRange", {
+                        low: analyte.reference_low,
+                        high: analyte.reference_high,
+                        unit: analyte.unit ?? "",
+                      })}
                     </span>
                   )}
                   {(analyte.critical_low !== null || analyte.critical_high !== null) && (
                     <span className="text-red-600 dark:text-red-400">
-                      Panic: {analyte.critical_low !== null ? `< ${analyte.critical_low}` : ""}{" "}
-                      {analyte.critical_high !== null ? `> ${analyte.critical_high}` : ""}
+                      {analyte.critical_low !== null
+                        ? t("lab.structured.panicLow", { value: analyte.critical_low })
+                        : ""}{" "}
+                      {analyte.critical_high !== null
+                        ? t("lab.structured.panicHigh", { value: analyte.critical_high })
+                        : ""}
                     </span>
                   )}
                 </div>
@@ -218,7 +214,7 @@ export default function StructuredResultForm({
                     type={analyte.value_type === "numeric" ? "number" : "text"}
                     step="any"
                     required={analyte.is_required}
-                    placeholder="Enter value"
+                    placeholder={t("lab.structured.valuePlaceholder")}
                     className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:border-primary"
                     value={values[analyte.analyte_code] ?? ""}
                     onChange={(e) => handleValueChange(analyte.analyte_code, e.target.value)}
@@ -241,11 +237,11 @@ export default function StructuredResultForm({
       </div>
 
       <label className="block space-y-1">
-        <span className="font-medium text-foreground">Pathologist / Tech Remarks</span>
+        <span className="font-medium text-foreground">{t("lab.structured.remarksLabel")}</span>
         <textarea
           rows={2}
           className="w-full rounded-md border border-border bg-background px-3 py-2 text-foreground"
-          placeholder="Clinical comments, specimen quality, delta check notes..."
+          placeholder={t("lab.structured.remarksPlaceholder")}
           value={remarks}
           onChange={(e) => setRemarks(e.target.value)}
         />
@@ -260,10 +256,10 @@ export default function StructuredResultForm({
           }`}
         >
           {busy
-            ? "Saving Results…"
+            ? t("lab.structured.saving")
             : hasCritical
-            ? "Save Result & Dispatch Alert"
-            : "Save Preliminary Result"}
+              ? t("lab.structured.saveWithAlert")
+              : t("lab.structured.savePreliminary")}
         </button>
       </div>
     </form>

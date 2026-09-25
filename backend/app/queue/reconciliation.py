@@ -46,6 +46,7 @@ async def get_stale_visits_candidates(
             Patient.full_name.label("patient_name"),
             Patient.uhid.label("patient_uhid"),
             Department.name.label("department_name"),
+            Department.name_hi.label("department_name_hi"),
         )
         .join(Patient, Patient.id == Visit.patient_id)
         .outerjoin(Department, Department.id == Visit.department_id)
@@ -61,7 +62,7 @@ async def get_stale_visits_candidates(
     rows = (await db.execute(stmt)).all()
     candidates: list[StaleVisitCandidateOut] = []
 
-    for visit, patient_name, patient_uhid, department_name in rows:
+    for visit, patient_name, patient_uhid, department_name, department_name_hi in rows:
         # Check for live token
         token_stmt = select(QueueToken).where(
             QueueToken.visit_id == visit.id,
@@ -85,6 +86,7 @@ async def get_stale_visits_candidates(
             patient_uhid=patient_uhid or "",
             department_id=visit.department_id,
             department_name=department_name,
+            department_name_hi=department_name_hi,
             visit_date=visit.visit_date,
             current_status=visit.status,
             live_token_id=token.id if token else None,

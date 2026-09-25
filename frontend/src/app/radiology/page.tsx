@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { ModuleCapabilityGate } from "@/components/common/ModuleCapabilityGate";
+import { PageHeading } from "@/components/common/PageHeading";
 import {
   cancelScan,
   draftRadiologyReport,
@@ -22,16 +23,24 @@ import type {
   RadiologyReport,
 } from "@/features/radiology/types";
 import { ApiError, downloadBlob, formatDateTime } from "@/lib/api";
+import { useLocale, type MessageKey } from "@/lib/i18n";
 import { useAuth } from "@/providers/auth-provider";
 import { Download, FileUp, Image as ImageIcon } from "lucide-react";
 
-const WORKFLOW: { status: string; label: string; hint: string }[] = [
-  { status: "placed", label: "To schedule", hint: "Ordered, not yet booked onto a machine" },
-  { status: "scheduled", label: "Booked", hint: "Slot assigned; patient not yet imaged" },
-  { status: "scanned", label: "To report", hint: "Imaged, awaiting a radiologist" },
-  { status: "reporting", label: "Preliminary", hint: "Drafted, not signed off" },
-  { status: "released", label: "Released", hint: "Signed and available to the ordering doctor" },
-  { status: "cancelled", label: "Cancelled", hint: "Cancelled before imaging" },
+const WORKFLOW: { status: string; labelKey: MessageKey; hint: string }[] = [
+  { status: "placed", labelKey: "radiology.filter.toSchedule", hint: "Ordered, not yet booked onto a machine" },
+  { status: "scheduled", labelKey: "radiology.filter.booked", hint: "Slot assigned; patient not yet imaged" },
+  { status: "scanned", labelKey: "radiology.filter.toReport", hint: "Imaged, awaiting a radiologist" },
+  { status: "reporting", labelKey: "radiology.filter.preliminary", hint: "Drafted, not signed off" },
+  { status: "released", labelKey: "radiology.filter.released", hint: "Signed and available to the ordering doctor" },
+  { status: "cancelled", labelKey: "radiology.filter.cancelled", hint: "Cancelled before imaging" },
+];
+
+const RADIOLOGY_COLUMNS: MessageKey[] = [
+  "radiology.col.accession",
+  "radiology.col.scan",
+  "radiology.col.slot",
+  "radiology.col.status",
 ];
 
 function StatusChip({ status }: { status: string }) {
@@ -47,6 +56,7 @@ function StatusChip({ status }: { status: string }) {
 }
 
 function RadiologyPageContent() {
+  const { t } = useLocale();
   const { user } = useAuth();
   // Match the existing API boundary: technicians operate the machine;
   // doctors author and sign reports. Read access does not imply both jobs.
@@ -90,17 +100,17 @@ function RadiologyPageContent() {
     } catch (e) {
       setError(
         e instanceof ApiError && e.isModuleDisabled
-          ? "Radiology is not enabled at this facility."
+          ? t("radiology.moduleDisabled")
           : e instanceof Error
             ? e.message
-            : "Could not load the radiology worklist",
+            : t("radiology.errLoadWorklist"),
       );
       setItems([]);
       return [];
     } finally {
       setLoading(false);
     }
-  }, [filter]);
+  }, [filter, t]);
 
   useEffect(() => {
     void refresh();
@@ -164,7 +174,7 @@ function RadiologyPageContent() {
       await uploadOrderAttachment(selected.order_id, file, selected.id);
       await loadAttachments(selected.order_id);
     } catch (err) {
-      setAttachmentError(err instanceof Error ? err.message : "Failed to upload attachment");
+      setAttachmentError(err instanceof Error ? err.message : t("radiology.errUploadAttachment"));
     } finally {
       setUploadingFile(false);
       e.target.value = "";
@@ -183,7 +193,7 @@ function RadiologyPageContent() {
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
     } catch {
-      setAttachmentError("Could not download attachment");
+      setAttachmentError(t("radiology.errDownloadAttachment"));
     }
   }
 
@@ -230,11 +240,11 @@ function RadiologyPageContent() {
       setFhirBundle(await getRadiologyFhirBundle(selected.id));
     } catch (e) {
       setFhirBundle(null);
-      setFhirError(e instanceof ApiError ? e.message : "Could not load FHIR bundle");
+      setFhirError(e instanceof ApiError ? e.message : t("radiology.errLoadFhir"));
     } finally {
       setFhirLoading(false);
     }
-  }, [selected]);
+  }, [selected, t]);
 
   useEffect(() => {
     if (selected && (selected.status === "released" || selected.status === "reporting")) {
@@ -255,13 +265,7 @@ function RadiologyPageContent() {
 
   return (
     <main className="space-y-6 p-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Radiology</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Booked, imaged, reported, signed. Preliminary reads stay visible after a final one
-          supersedes them.
-        </p>
-      </div>
+      <PageHeading titleKey="radiology.title" subtitleKey="radiology.subtitle" />
 
       <div className="flex flex-wrap gap-2">
         <button
@@ -271,7 +275,7 @@ function RadiologyPageContent() {
             filter === "all" ? "border-primary text-primary" : "border-border"
           }`}
         >
-          All
+          {t("radiology.filter.all")}
         </button>
         {WORKFLOW.map((stage) => (
           <button
@@ -283,7 +287,7 @@ function RadiologyPageContent() {
               filter === stage.status ? "border-primary text-primary" : "border-border"
             }`}
           >
-            {stage.label}
+            {t(stage.labelKey)}
             {counts[stage.status] ? ` (${counts[stage.status]})` : ""}
           </button>
         ))}
@@ -298,17 +302,18 @@ function RadiologyPageContent() {
       <div className="grid gap-6 lg:grid-cols-[3fr_2fr]">
         <section className="surface-card overflow-hidden">
           {loading ? (
-            <p className="p-6 text-sm text-muted-foreground">Loading worklist…</p>
+            <p className="p-6 text-sm text-muted-foreground">{t("radiology.loadingWorklist")}</p>
           ) : items.length === 0 ? (
-            <p className="p-6 text-sm text-muted-foreground">Nothing in this stage.</p>
+            <p className="p-6 text-sm text-muted-foreground">{t("radiology.emptyStage")}</p>
           ) : (
             <table className="min-w-full border-collapse">
               <thead className="bg-muted">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs">Accession</th>
-                  <th className="px-4 py-3 text-left text-xs">Scan</th>
-                  <th className="px-4 py-3 text-left text-xs">Slot</th>
-                  <th className="px-4 py-3 text-left text-xs">Status</th>
+                  {RADIOLOGY_COLUMNS.map((labelKey) => (
+                    <th key={labelKey} className="px-4 py-3 text-left text-xs">
+                      {t(labelKey)}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
@@ -344,7 +349,7 @@ function RadiologyPageContent() {
         <section className="surface-card space-y-5 p-5">
           {!selected ? (
             <p className="text-sm text-muted-foreground">
-              Select a scan to schedule, complete or report it.
+              {t("radiology.selectScanHint")}
             </p>
           ) : (
             <>
@@ -357,15 +362,15 @@ function RadiologyPageContent() {
 
               {!canOperate && (selected.status === "placed" || selected.status === "scheduled") && (
                 <p className="text-sm text-muted-foreground">
-                  Scheduling and scan completion are handled by a radiology technician.
+                  {t("radiology.techSchedulingHint")}
                 </p>
               )}
 
               {canOperate && selected.status === "placed" && (
                 <div className="space-y-3">
-                  <p className="text-sm font-medium">Book a slot</p>
+                  <p className="text-sm font-medium">{t("radiology.bookSlot")}</p>
                   <label className="block space-y-1 text-sm">
-                    <span className="text-muted-foreground">Scheduled at</span>
+                    <span className="text-muted-foreground">{t("radiology.scheduledAt")}</span>
                     <input
                       type="datetime-local"
                       className="w-full rounded-md border border-border px-3 py-2"
@@ -374,12 +379,12 @@ function RadiologyPageContent() {
                     />
                   </label>
                   <label className="block space-y-1 text-sm">
-                    <span className="text-muted-foreground">Machine</span>
+                    <span className="text-muted-foreground">{t("radiology.machine")}</span>
                     <input
                       className="w-full rounded-md border border-border px-3 py-2"
                       value={machine}
                       onChange={(e) => setMachine(e.target.value)}
-                      placeholder="e.g. CT-01"
+                      placeholder={t("radiology.machinePlaceholder")}
                     />
                   </label>
                   <button
@@ -394,11 +399,11 @@ function RadiologyPageContent() {
                             new Date(slot).toISOString(),
                             machine.trim(),
                           ),
-                        "Could not schedule",
+                        t("radiology.errSchedule"),
                       )
                     }
                   >
-                    Schedule
+                    {t("radiology.schedule")}
                   </button>
                 </div>
               )}
@@ -406,18 +411,22 @@ function RadiologyPageContent() {
               {canOperate && selected.status === "scheduled" && (
                 <div className="space-y-3">
                   <p className="text-sm">
-                    Booked for {selected.scheduled_at ? formatDateTime(selected.scheduled_at) : "—"}
-                    {selected.machine_id ? ` on ${selected.machine_id}` : ""}.
+                    {t("radiology.bookedFor", {
+                      when: selected.scheduled_at ? formatDateTime(selected.scheduled_at) : "—",
+                      machine: selected.machine_id
+                        ? t("radiology.bookedOnMachine", { machine: selected.machine_id })
+                        : "",
+                    })}
                   </p>
                   <button
                     type="button"
                     disabled={busy}
                     className="rounded-md bg-primary px-4 py-2 text-sm text-white disabled:opacity-50"
                     onClick={() =>
-                      void run(() => markScanComplete(selected.id), "Could not complete")
+                      void run(() => markScanComplete(selected.id), t("radiology.errComplete"))
                     }
                   >
-                    Mark scan complete
+                    {t("radiology.markScanComplete")}
                   </button>
                   <div className="space-y-3 border-t border-border pt-3">
                     <p className="text-sm font-medium">Reschedule</p>
@@ -467,11 +476,11 @@ function RadiologyPageContent() {
                               rescheduleMachine.trim(),
                               rescheduleReason.trim(),
                             ),
-                          "Could not reschedule",
+                          t("radiology.errReschedule"),
                         )
                       }
                     >
-                      Save new slot
+                      {t("radiology.saveNewSlot")}
                     </button>
                   </div>
                 </div>
@@ -479,9 +488,9 @@ function RadiologyPageContent() {
 
               {canOperate && (selected.status === "placed" || selected.status === "scheduled") && (
                 <div className="space-y-3 border-t border-border pt-4">
-                  <p className="text-sm font-medium text-danger">Cancel scan</p>
+                  <p className="text-sm font-medium text-danger">{t("radiology.cancelScanTitle")}</p>
                   <label className="block space-y-1 text-sm">
-                    <span className="text-muted-foreground">Cancellation reason</span>
+                    <span className="text-muted-foreground">{t("radiology.cancellationReason")}</span>
                     <textarea
                       minLength={5}
                       maxLength={500}
@@ -498,11 +507,11 @@ function RadiologyPageContent() {
                     onClick={() =>
                       void run(
                         () => cancelScan(selected.id, cancelReason.trim()),
-                        "Could not cancel",
+                        t("radiology.errCancel"),
                       )
                     }
                   >
-                    Cancel scan
+                    {t("radiology.cancelScanButton")}
                   </button>
                 </div>
               )}
@@ -564,11 +573,11 @@ function RadiologyPageContent() {
                               impression,
                               pacsStudyUid,
                             ),
-                          "Could not draft",
+                          t("radiology.errDraft"),
                         )
                       }
                     >
-                      Save preliminary
+                      {t("radiology.savePreliminary")}
                     </button>
                   )}
 
@@ -580,11 +589,11 @@ function RadiologyPageContent() {
                       onClick={() =>
                         void run(
                           () => signOffRadiologyReport(selected.id, findings, impression),
-                          "Could not sign off",
+                          t("radiology.errSignOff"),
                         )
                       }
                     >
-                      Sign off as final
+                      {t("radiology.signOffFinal")}
                     </button>
                   )}
                 </div>
@@ -613,14 +622,14 @@ function RadiologyPageContent() {
               {(selected.status === "reporting" || selected.status === "released") && (
                 <div className="border-t border-border pt-4">
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-medium">FHIR bundle</p>
+                    <p className="text-sm font-medium">{t("radiology.fhirBundleTitle")}</p>
                     <button
                       type="button"
                       className="text-xs underline"
                       disabled={fhirLoading}
                       onClick={() => void loadFhir()}
                     >
-                      {fhirLoading ? "Loading…" : "Refresh"}
+                      {fhirLoading ? t("common.loading") : t("common.refresh")}
                     </button>
                   </div>
                   {fhirError ? (
@@ -630,7 +639,7 @@ function RadiologyPageContent() {
                       {JSON.stringify(fhirBundle, null, 2)}
                     </pre>
                   ) : fhirLoading ? (
-                    <p className="mt-2 text-xs text-muted-foreground">Loading FHIR bundle…</p>
+                    <p className="mt-2 text-xs text-muted-foreground">{t("radiology.loadingFhirBundle")}</p>
                   ) : null}
                 </div>
               )}
@@ -639,12 +648,12 @@ function RadiologyPageContent() {
                 <div className="flex items-center justify-between gap-2 mb-2">
                   <div className="flex items-center gap-1.5">
                     <ImageIcon className="h-4 w-4 text-primary" />
-                    <p className="text-sm font-medium">DICOM & Attachments</p>
+                    <p className="text-sm font-medium">{t("radiology.dicomAttachments")}</p>
                     <span className="text-xs text-muted-foreground">({attachments.length})</span>
                   </div>
                   <label className={`flex items-center gap-1 text-xs bg-primary text-primary-foreground px-2.5 py-1 rounded cursor-pointer hover:bg-primary/90 transition-colors ${uploadingFile ? "opacity-50 pointer-events-none" : ""}`}>
                     <FileUp className="h-3.5 w-3.5" />
-                    <span>{uploadingFile ? "Uploading…" : "Upload File"}</span>
+                    <span>{uploadingFile ? t("radiology.uploading") : t("radiology.uploadFile")}</span>
                     <input
                       type="file"
                       className="hidden"
@@ -659,10 +668,10 @@ function RadiologyPageContent() {
                 )}
 
                 {attachmentsLoading ? (
-                  <p className="text-xs text-muted-foreground">Loading attachments…</p>
+                  <p className="text-xs text-muted-foreground">{t("radiology.loadingAttachments")}</p>
                 ) : attachments.length === 0 ? (
                   <p className="text-xs text-muted-foreground italic">
-                    No DICOM or radiology attachments uploaded yet.
+                    {t("radiology.noDicomAttachments")}
                   </p>
                 ) : (
                   <div className="space-y-2 mt-2">

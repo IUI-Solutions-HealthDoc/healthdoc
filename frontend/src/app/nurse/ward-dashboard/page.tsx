@@ -28,6 +28,7 @@ import HandoverNotes from "@/features/nurse/components/HandoverNotes";
 import type { HandoverNote } from "@/features/nurse/components/HandoverNotes/HandoverNotes.types";
 import type { HandoverRecipientOption } from "@/features/nurse/types";
 import IncidentReportForm from "@/features/nurse/components/IncidentReportForm";
+import { PageHeading } from "@/components/common/PageHeading";
 import { IncidentListPanel } from "@/features/nurse/components/IncidentListPanel";
 import TaskQueue, { type Order } from "@/features/nurse/components/TaskQueue";
 import WardSelector from "@/features/nurse/components/WardSelector";
@@ -50,6 +51,7 @@ import {
   type NursingTask,
 } from "@/features/nurse/api/nursing";
 import { ApiError, formatDateTime } from "@/lib/api";
+import { useLocale } from "@/lib/i18n";
 
 type PatientAction = "vitals" | "fluid" | "transfer" | "incident" | "handover" | null;
 
@@ -81,6 +83,7 @@ function Metric({ label, value, detail }: { label: string; value: number; detail
 }
 
 export default function Page() {
+  const { t, localizeField } = useLocale();
   // `null` means "not loaded yet", which is NOT the same as "loaded, and
   // there are none" (#488). While this was `Ward[]` starting at `[]`, the two
   // were indistinguishable and the panel rendered "Loading wards…" forever on
@@ -146,10 +149,10 @@ export default function Page() {
       setTaskQueueStatus("connected");
     } catch (reason) {
       console.error("Unable to load live ward data", reason);
-      setLoadError("Unable to load live ward data. Check the API connection and retry.");
+      setLoadError(t("nurse.ward.loadLiveError"));
       setTaskQueueStatus("error");
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void loadBase();
@@ -198,10 +201,10 @@ export default function Page() {
         (entry) => entry.status === "rejected",
       )
     ) {
-      setDetailError("Some live patient panels could not be loaded. Retry before acting on this chart.");
+      setDetailError(t("nurse.ward.panelsLoadError"));
     }
     setDetailLoading(false);
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void loadPatientDetail(selectedBed);
@@ -250,30 +253,32 @@ export default function Page() {
     ? orders.filter((order) => order.patient_id === occupant.patient_id)
     : [];
 
-  const wardName = (wardId: string | null) =>
-    (wards ?? []).find((ward) => ward.id === wardId)?.name ?? (wardId ? wardId.slice(0, 8) : "—");
+  const wardName = (wardId: string | null) => {
+    const ward = (wards ?? []).find((w) => w.id === wardId);
+    if (!ward) return wardId ? wardId.slice(0, 8) : "—";
+    return localizeField(ward.name, ward.name_hi);
+  };
   const bedName = (bedId: string | null) =>
     allBeds.find((bed) => bed.bed_id === bedId)?.bed_number ?? (bedId ? bedId.slice(0, 8) : "—");
 
   return (
     <main className="mx-auto max-w-screen-2xl space-y-8 px-6 py-8">
       <section className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold text-primary">Nurse ward dashboard</h1>
-          <p className="mt-2 text-muted-foreground">
-            Live bed occupancy, observations, fluid balance, eMAR, incidents and doctor orders.
-          </p>
-        </div>
+        <PageHeading
+          titleKey="nurse.wardDashboardTitle"
+          subtitleKey="nurse.wardDashboardSubtitle"
+          titleClassName="text-3xl font-bold text-primary"
+        />
         <div className="flex flex-wrap gap-3">
           <button
             type="button"
             className="rounded-md border border-border px-3 py-2 text-sm"
             onClick={() => setActiveAction(activeAction === "incident" ? null : "incident")}
           >
-            Report incident
+            {t("nurse.reportIncident")}
           </button>
           <button type="button" onClick={() => void loadBase()} className="text-sm underline">
-            Refresh ward
+            {t("nurse.refreshWard")}
           </button>
         </div>
       </section>
@@ -292,7 +297,7 @@ export default function Page() {
       ) : null}
 
       {wards === null ? (
-        <div className="surface-card p-6 text-sm text-muted-foreground">Loading wards…</div>
+        <div className="surface-card p-6 text-sm text-muted-foreground">{t("nurse.loadingWards")}</div>
       ) : wards.length > 0 ? (
         <WardSelector wards={wards} selectedWard={selectedWard} onChange={changeWard} />
       ) : (
@@ -300,81 +305,81 @@ export default function Page() {
         // available", "No pending orders") so a ward-less facility reads as a
         // fact about the data rather than a page that never finished.
         <div className="surface-card p-6 text-sm text-muted-foreground">
-          No wards found for this facility.
+          {t("nurse.noWardsFound")}
         </div>
       )}
 
       <section className="grid gap-4 sm:grid-cols-3">
         <Metric
-          label="Occupied beds"
+          label={t("nurse.metricOccupiedBeds")}
           value={wardBeds.filter((bed) => bed.status === "occupied").length}
-          detail="Live admissions in this ward"
+          detail={t("nurse.metricOccupiedDetail")}
         />
         <Metric
-          label="Vacant beds"
+          label={t("nurse.metricVacantBeds")}
           value={wardBeds.filter((bed) => bed.status === "vacant").length}
-          detail="Available now"
+          detail={t("nurse.metricVacantDetail")}
         />
-        <Metric label="Discharges today" value={dischargesToday} detail="Facility-wide" />
+        <Metric label={t("nurse.metricDischargesToday")} value={dischargesToday} detail={t("nurse.metricDischargesDetail")} />
       </section>
 
       <section className="space-y-4">
         <div>
-          <h2 className="text-xl font-semibold">Pending doctor orders</h2>
-          <p className="text-sm text-muted-foreground">
-            Accept a task when work begins, then mark it complete with the required clinical note.
-          </p>
+          <h2 className="text-xl font-semibold">{t("nurse.pendingOrdersTitle")}</h2>
+          <p className="text-sm text-muted-foreground">{t("nurse.pendingOrdersSubtitle")}</p>
         </div>
         <p
           data-testid="nursing-api-status"
           data-status={taskQueueStatus}
           className={taskQueueStatus === "error" ? "text-sm text-danger" : "sr-only"}
         >
-          {taskQueueStatus === "error"
-            ? "Unable to load nursing tasks. Check the API connection and retry."
-            : `Nursing API ${taskQueueStatus}`}
+          {taskQueueStatus === "error" ? t("nurse.taskQueueError") : `Nursing API ${taskQueueStatus}`}
         </p>
         <TaskQueue orders={orders} onAccept={acceptOrder} onCheckOff={checkOff} />
       </section>
 
       <section className="space-y-4">
         <div>
-          <h2 className="text-xl font-semibold">Ward overview</h2>
-          <p className="text-sm text-muted-foreground">
-            Occupants come directly from the active admission attached to each bed.
-          </p>
+          <h2 className="text-xl font-semibold">{t("nurse.wardOverviewTitle")}</h2>
+          <p className="text-sm text-muted-foreground">{t("nurse.wardOverviewSubtitle")}</p>
         </div>
         <BedGrid beds={wardBeds} selectedBedId={selectedBedId} onBedClick={selectBed} />
       </section>
 
       {!selectedBed ? (
         <section className="surface-card p-6 text-sm text-muted-foreground">
-          Select a bed to open its live clinical panels.
+          {t("nurse.selectBedPrompt")}
         </section>
       ) : !occupant ? (
         <section className="surface-card p-6 text-sm text-muted-foreground">
-          Bed {selectedBed.bed_number} has no active occupant.
+          {t("nurse.bedNoOccupant", { bed: selectedBed.bed_number })}
         </section>
       ) : (
         <>
           <section className="surface-card space-y-3 p-6">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
-                <h2 className="text-xl font-semibold">{occupant.patient_name ?? "Unnamed patient"}</h2>
+                <h2 className="text-xl font-semibold">{occupant.patient_name ?? t("nurse.ward.unnamedPatient")}</h2>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  {occupant.uhid ?? occupant.patient_id} · Bed {selectedBed.bed_number}
+                  {t("nurse.ward.patientMeta", {
+                    uhid: occupant.uhid ?? occupant.patient_id,
+                    bed: selectedBed.bed_number,
+                  })}
                 </p>
               </div>
               <span className="rounded-full bg-info-muted px-3 py-1 text-sm text-info">
-                Admitted {formatDateTime(occupant.admitted_at)}
+                {t("nurse.ward.admittedBadge", { date: formatDateTime(occupant.admitted_at) })}
               </span>
             </div>
             <p className="text-xs text-muted-foreground">
-              Admission <span className="font-mono">{occupant.admission_id}</span>
+              {t("nurse.ward.admissionLabel")}{" "}
+              <span className="font-mono">{occupant.admission_id}</span>
             </p>
           </section>
 
-          {detailLoading ? <p className="text-sm text-muted-foreground">Loading patient chart…</p> : null}
+          {detailLoading ? (
+            <p className="text-sm text-muted-foreground">{t("nurse.ward.loadingPatientChart")}</p>
+          ) : null}
           {detailError ? (
             <p role="alert" className="rounded-md bg-danger-muted p-4 text-sm text-danger">
               {detailError}
@@ -384,15 +389,15 @@ export default function Page() {
           <section className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 className="text-xl font-semibold">Vitals</h2>
-                <p className="text-sm text-muted-foreground">All recorded observations for this patient.</p>
+                <h2 className="text-xl font-semibold">{t("nurse.ward.sectionVitalsTitle")}</h2>
+                <p className="text-sm text-muted-foreground">{t("nurse.ward.sectionVitalsSubtitle")}</p>
               </div>
               <button
                 type="button"
                 className="rounded-md border border-border px-3 py-2 text-sm"
                 onClick={() => setActiveAction(activeAction === "vitals" ? null : "vitals")}
               >
-                Record vitals
+                {t("nurse.ward.recordVitals")}
               </button>
             </div>
             <VitalsTimeline records={vitals} />
@@ -417,21 +422,21 @@ export default function Page() {
           <section className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 className="text-xl font-semibold">Fluid balance</h2>
-                <p className="text-sm text-muted-foreground">Running admission totals from recorded intake/output.</p>
+                <h2 className="text-xl font-semibold">{t("nurse.ward.sectionFluidTitle")}</h2>
+                <p className="text-sm text-muted-foreground">{t("nurse.ward.sectionFluidSubtitle")}</p>
               </div>
               <button
                 type="button"
                 className="rounded-md border border-border px-3 py-2 text-sm"
                 onClick={() => setActiveAction(activeAction === "fluid" ? null : "fluid")}
               >
-                Add intake/output
+                {t("nurse.ward.addIntakeOutput")}
               </button>
             </div>
             <div className="grid gap-4 sm:grid-cols-3">
-              <Metric label="Intake" value={fluidBalance?.total_intake_ml ?? 0} detail="mL" />
-              <Metric label="Output" value={fluidBalance?.total_output_ml ?? 0} detail="mL" />
-              <Metric label="Net" value={fluidBalance?.net_ml ?? 0} detail="mL" />
+              <Metric label={t("nurse.ward.fluidIntake")} value={fluidBalance?.total_intake_ml ?? 0} detail={t("nurse.ward.fluidMl")} />
+              <Metric label={t("nurse.ward.fluidOutput")} value={fluidBalance?.total_output_ml ?? 0} detail={t("nurse.ward.fluidMl")} />
+              <Metric label={t("nurse.ward.fluidNet")} value={fluidBalance?.net_ml ?? 0} detail={t("nurse.ward.fluidMl")} />
             </div>
             {activeAction === "fluid" ? (
               <AddIntakeOutputForm
@@ -452,11 +457,11 @@ export default function Page() {
           <section className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 className="text-xl font-semibold">eMAR</h2>
-                <p className="text-sm text-muted-foreground">Recorded doses for this admission only.</p>
+                <h2 className="text-xl font-semibold">{t("nurse.ward.sectionEmarTitle")}</h2>
+                <p className="text-sm text-muted-foreground">{t("nurse.ward.sectionEmarSubtitle")}</p>
               </div>
               <Link href="/nurse/emar" className="text-sm underline">
-                Open full eMAR
+                {t("nurse.ward.openFullEmar")}
               </Link>
             </div>
             <EMARTable medications={medications} />
@@ -465,17 +470,15 @@ export default function Page() {
           <section className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 className="text-xl font-semibold">Shift handover</h2>
-                <p className="text-sm text-muted-foreground">
-                  SBAR handovers for this admission, most recent first.
-                </p>
+                <h2 className="text-xl font-semibold">{t("nurse.ward.sectionHandoverTitle")}</h2>
+                <p className="text-sm text-muted-foreground">{t("nurse.ward.sectionHandoverSubtitle")}</p>
               </div>
               <button
                 type="button"
                 className="rounded-md border border-border px-3 py-2 text-sm"
                 onClick={() => setActiveAction(activeAction === "handover" ? null : "handover")}
               >
-                Record handover
+                {t("nurse.ward.recordHandover")}
               </button>
             </div>
             <HandoverNotes admissionId={occupant.admission_id} notes={handovers} />
@@ -493,7 +496,7 @@ export default function Page() {
                     // Surfaced, never swallowed: a handover that silently
                     // failed to save is worse than one never attempted.
                     setDetailError(
-                      reason instanceof ApiError ? reason.message : "Could not record the handover",
+                      reason instanceof ApiError ? reason.message : t("nurse.ward.handoverFailed"),
                     );
                     return false;
                   }
@@ -505,15 +508,15 @@ export default function Page() {
           <section className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 className="text-xl font-semibold">Movement history</h2>
-                <p className="text-sm text-muted-foreground">Audited ward and bed changes for this admission.</p>
+                <h2 className="text-xl font-semibold">{t("nurse.ward.sectionMovementTitle")}</h2>
+                <p className="text-sm text-muted-foreground">{t("nurse.ward.sectionMovementSubtitle")}</p>
               </div>
               <button
                 type="button"
                 className="rounded-md border border-border px-3 py-2 text-sm"
                 onClick={() => setActiveAction(activeAction === "transfer" ? null : "transfer")}
               >
-                Transfer patient
+                {t("nurse.ward.transferPatient")}
               </button>
             </div>
             <div className="surface-card p-5">
@@ -521,11 +524,19 @@ export default function Page() {
                 <ol className="space-y-3 text-sm">
                   {summary.movements.map((movement) => (
                     <li key={movement.id} className="border-b border-border pb-3 last:border-none last:pb-0">
-                      <strong>{wardName(movement.to_ward_id)} · Bed {bedName(movement.to_bed_id)}</strong>
+                      <strong>
+                        {t("nurse.ward.movementBedLine", {
+                          ward: wardName(movement.to_ward_id),
+                          bed: bedName(movement.to_bed_id),
+                        })}
+                      </strong>
                       <span className="ml-2 text-muted-foreground">{formatDateTime(movement.moved_at)}</span>
                       {movement.from_ward_id ? (
                         <span className="mt-1 block text-muted-foreground">
-                          From {wardName(movement.from_ward_id)} · Bed {bedName(movement.from_bed_id)}
+                          {t("nurse.ward.movementFromLine", {
+                            ward: wardName(movement.from_ward_id),
+                            bed: bedName(movement.from_bed_id),
+                          })}
                         </span>
                       ) : null}
                       {movement.reason ? <span className="mt-1 block">{movement.reason}</span> : null}
@@ -533,7 +544,7 @@ export default function Page() {
                   ))}
                 </ol>
               ) : (
-                <p className="text-sm text-muted-foreground">No transfers recorded for this admission.</p>
+                <p className="text-sm text-muted-foreground">{t("nurse.ward.noTransfers")}</p>
               )}
             </div>
             {activeAction === "transfer" ? (
@@ -558,17 +569,15 @@ export default function Page() {
           <section className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 className="text-xl font-semibold">Clinical incident</h2>
-                <p className="text-sm text-muted-foreground">
-                  Record a patient-safety incident for review and follow-up.
-                </p>
+                <h2 className="text-xl font-semibold">{t("nurse.ward.sectionIncidentTitle")}</h2>
+                <p className="text-sm text-muted-foreground">{t("nurse.ward.sectionIncidentSubtitle")}</p>
               </div>
               <button
                 type="button"
                 className="rounded-md border border-border px-3 py-2 text-sm"
                 onClick={() => setActiveAction(activeAction === "incident" ? null : "incident")}
               >
-                Report incident
+                {t("nurse.reportIncident")}
               </button>
             </div>
             <IncidentListPanel
@@ -590,7 +599,7 @@ export default function Page() {
           </section>
 
           <section className="space-y-4">
-            <h2 className="text-xl font-semibold">Outstanding orders for this patient</h2>
+            <h2 className="text-xl font-semibold">{t("nurse.ward.sectionPatientOrdersTitle")}</h2>
             <TaskQueue orders={patientOrders} onAccept={acceptOrder} onCheckOff={checkOff} />
           </section>
         </>

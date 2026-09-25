@@ -7,6 +7,7 @@ import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 
 import { toast } from "@/components/ui/toast";
+import { useLocale } from "@/lib/i18n";
 import { meridian } from "@/styles/theme";
 import { formatDateTime, formatJson, truncateHash } from "../lib/formatters";
 import type { AuditLog } from "../types";
@@ -38,19 +39,21 @@ function Field({ label, value }: { label: string; value: ReactNode }) {
   );
 }
 
-async function copyText(label: string, text: string) {
-  try {
-    await navigator.clipboard.writeText(text);
-    toast.success("Copied", label);
-  } catch {
-    toast.error("Copy failed");
-  }
-}
-
 export function AuditEntryDetail({ entry, loading }: Props) {
+  const { t } = useLocale();
+
+  async function copyText(label: string, text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(t("audit.detail.copied"), label);
+    } catch {
+      toast.error(t("audit.detail.copyFailed"));
+    }
+  }
+
   if (loading) {
     return (
-      <Typography sx={{ color: meridian.textSecondary, p: 2 }}>Loading entry…</Typography>
+      <Typography sx={{ color: meridian.textSecondary, p: 2 }}>{t("audit.detail.loading")}</Typography>
     );
   }
 
@@ -65,7 +68,7 @@ export function AuditEntryDetail({ entry, loading }: Props) {
           color: meridian.textSecondary,
         }}
       >
-        Select an audit log entry to inspect entry_hash and JSON diff (§4.4).
+        {t("audit.detail.selectPrompt")}
       </Box>
     );
   }
@@ -115,7 +118,7 @@ export function AuditEntryDetail({ entry, loading }: Props) {
                   onClick={() => void copyText("entry_hash", entry.entry_hash!)}
                   sx={{ textTransform: "none" }}
                 >
-                  Copy
+                  {t("audit.detail.copy")}
                 </Button>
               ) : null}
             </Stack>

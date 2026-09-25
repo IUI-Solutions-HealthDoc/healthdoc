@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import ts from "typescript";
+import { i18nStub } from "./helpers/i18n-stub.mjs";
 
 // Execute the real TSX with deferred transport. This minimal hook/key harness
 // tests component state and cleanup, not layout, hydration or real SSO.
@@ -44,6 +45,7 @@ function harness(kind) {
   const request = (name) => (...args) => new Promise((resolve, reject) => calls.push({ name, args, resolve, reject }));
   const dependencies = {
     react,
+    "@/lib/i18n": i18nStub,
     "react/jsx-runtime": {
       jsx: (type, props, key) => ({ type, props, key }),
       jsxs: (type, props, key) => ({ type, props, key }),

@@ -8,7 +8,9 @@ import {
   unmergeThidPromotion,
   type PromotionLog,
 } from "@/features/emergency/api";
+import { PageHeading } from "@/components/common/PageHeading";
 import { ApiError } from "@/lib/api";
+import { useLocale, type MessageKey } from "@/lib/i18n";
 
 type Tab = "request" | "approve" | "unmerge";
 
@@ -81,6 +83,7 @@ function ResultCard({ log }: { log: PromotionLog }) {
 }
 
 export function IdentityMergeWorkspace() {
+  const { t } = useLocale();
   const [tab, setTab] = useState<Tab>("request");
   const [patientId, setPatientId] = useState("");
   const [mergeLogId, setMergeLogId] = useState("");
@@ -142,22 +145,15 @@ export function IdentityMergeWorkspace() {
     }
   }
 
-  const tabs: { id: Tab; label: string }[] = [
-    { id: "request", label: "1. Request promote" },
-    { id: "approve", label: "2. Approve" },
-    { id: "unmerge", label: "3. Unmerge" },
+  const tabs: { id: Tab; labelKey: MessageKey }[] = [
+    { id: "request", labelKey: "supervisor.merge.step.request" },
+    { id: "approve", labelKey: "supervisor.merge.step.approve" },
+    { id: "unmerge", labelKey: "supervisor.merge.step.unmerge" },
   ];
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 p-6">
-      <div>
-        <h1 className="text-3xl font-semibold">Identity merges</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          THID→UHID promotion with maker–checker confirmation. Request and
-          approval must be completed by different supervisors; unmerge must not
-          be performed by the approver. Superadmin cannot run this flow.
-        </p>
-      </div>
+      <PageHeading titleKey="supervisor.mergesTitle" titleClassName="text-3xl font-semibold" />
 
       <nav className="flex flex-wrap gap-2" aria-label="Identity merge steps">
         {tabs.map((item) => (
@@ -175,7 +171,7 @@ export function IdentityMergeWorkspace() {
               resetFeedback();
             }}
           >
-            {item.label}
+            {t(item.labelKey)}
           </button>
         ))}
       </nav>
@@ -190,14 +186,14 @@ export function IdentityMergeWorkspace() {
 
       {tab === "request" ? (
         <form onSubmit={onRequest} className="surface-card space-y-4 p-6">
-          <h2 className="text-lg font-medium">Request THID→UHID promotion</h2>
+          <h2 className="text-lg font-medium">{t("supervisor.merge.requestTitle")}</h2>
           <p className="text-sm text-muted-foreground">
             Paste the patient ID from emergency registration. Only charts on the
             THID identity path can be promoted. Patient search is not available
             to records supervisors; use the ID from the emergency handoff.
           </p>
           <label className="block space-y-1 text-sm">
-            <span className="text-muted-foreground">Patient ID</span>
+            <span className="text-muted-foreground">{t("supervisor.merge.patientId")}</span>
             <input
               className="w-full rounded-md border border-border px-3 py-2 font-mono text-sm"
               value={patientId}
@@ -207,7 +203,7 @@ export function IdentityMergeWorkspace() {
             />
           </label>
           <label className="block space-y-1 text-sm">
-            <span className="text-muted-foreground">Reason (optional)</span>
+            <span className="text-muted-foreground">{t("supervisor.merge.reasonOptional")}</span>
             <input
               className="w-full rounded-md border border-border px-3 py-2"
               value={reason}
@@ -219,19 +215,19 @@ export function IdentityMergeWorkspace() {
             disabled={busy || !patientId.trim()}
             className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
           >
-            {busy ? "Requesting…" : "Request promotion"}
+            {busy ? t("supervisor.merge.requesting") : t("supervisor.merge.requestButton")}
           </button>
         </form>
       ) : null}
 
       {tab === "approve" ? (
         <form onSubmit={onApprove} className="surface-card space-y-4 p-6">
-          <h2 className="text-lg font-medium">Approve pending promotion</h2>
+          <h2 className="text-lg font-medium">{t("supervisor.merge.approveTitle")}</h2>
           <p className="text-sm text-muted-foreground">
             Must be a different supervisor from the requester. Assigns the UHID.
           </p>
           <label className="block space-y-1 text-sm">
-            <span className="text-muted-foreground">Merge log ID</span>
+            <span className="text-muted-foreground">{t("supervisor.merge.mergeLogId")}</span>
             <input
               className="w-full rounded-md border border-border px-3 py-2 font-mono text-sm"
               value={mergeLogId}
@@ -245,20 +241,20 @@ export function IdentityMergeWorkspace() {
             disabled={busy || !mergeLogId.trim()}
             className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
           >
-            {busy ? "Approving…" : "Confirm and assign UHID"}
+            {busy ? t("supervisor.merge.approving") : t("supervisor.merge.approveButton")}
           </button>
         </form>
       ) : null}
 
       {tab === "unmerge" ? (
         <form onSubmit={onUnmerge} className="surface-card space-y-4 p-6">
-          <h2 className="text-lg font-medium">Unmerge approved promotion</h2>
+          <h2 className="text-lg font-medium">{t("supervisor.merge.unmergeTitle")}</h2>
           <p className="text-sm text-muted-foreground">
             Clears the UHID and returns the chart to THID. Cannot be the same
             supervisor who approved.
           </p>
           <label className="block space-y-1 text-sm">
-            <span className="text-muted-foreground">Merge log ID</span>
+            <span className="text-muted-foreground">{t("supervisor.merge.mergeLogId")}</span>
             <input
               className="w-full rounded-md border border-border px-3 py-2 font-mono text-sm"
               value={mergeLogId}
@@ -268,7 +264,7 @@ export function IdentityMergeWorkspace() {
             />
           </label>
           <label className="block space-y-1 text-sm">
-            <span className="text-muted-foreground">Unmerge reason</span>
+            <span className="text-muted-foreground">{t("supervisor.merge.unmergeReason")}</span>
             <input
               className="w-full rounded-md border border-border px-3 py-2"
               value={reason}
@@ -281,7 +277,7 @@ export function IdentityMergeWorkspace() {
             disabled={busy || !mergeLogId.trim() || !reason.trim()}
             className="rounded-md bg-danger px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
           >
-            {busy ? "Unmerging…" : "Unmerge promotion"}
+            {busy ? t("supervisor.merge.unmerging") : t("supervisor.merge.unmergeButton")}
           </button>
         </form>
       ) : null}

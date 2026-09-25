@@ -24,6 +24,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { searchMedicines } from "@/features/pharmacy/api";
 import type { MedicineSearchResult } from "@/features/pharmacy/types";
 import { ApiError } from "@/lib/api";
+import { useLocale } from "@/lib/i18n";
 
 import {
   createPurchaseOrder,
@@ -56,6 +57,7 @@ function outstanding(quantity: string, received: string): string {
 }
 
 export function PurchaseOrderWorkspace() {
+  const { t } = useLocale();
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [orders, setOrders] = useState<PurchaseOrder[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -77,7 +79,7 @@ export function PurchaseOrderWorkspace() {
       setOrders(orderList);
       setError(null);
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Could not load purchase orders");
+      setError(reason instanceof ApiError ? reason.message : t("inventory.err.loadPurchaseOrders"));
     }
   }, []);
 
@@ -126,7 +128,7 @@ export function PurchaseOrderWorkspace() {
       setLines([]);
       await reload();
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Could not raise the order");
+      setError(reason instanceof ApiError ? reason.message : t("inventory.err.raiseOrder"));
     } finally {
       setBusy(false);
     }
@@ -138,7 +140,7 @@ export function PurchaseOrderWorkspace() {
       await transitionPurchaseOrder(id, target);
       await reload();
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Could not update the order");
+      setError(reason instanceof ApiError ? reason.message : t("inventory.err.updateOrder"));
     } finally {
       setBusy(false);
     }
@@ -153,22 +155,18 @@ export function PurchaseOrderWorkspace() {
       ) : null}
 
       <section className="rounded border border-gray-200 p-4">
-        <h3 className="text-base font-semibold">Raise a purchase order</h3>
-        <p className="mt-1 text-sm text-gray-600">
-          What the hospital has asked a supplier to deliver. A goods receipt can
-          then be linked to it, so what arrives is checked against what was
-          ordered.
-        </p>
+        <h3 className="text-base font-semibold">{t("inventory.po.raiseTitle")}</h3>
+        <p className="mt-1 text-sm text-gray-600">{t("inventory.po.raiseHint")}</p>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <label className="text-sm">
-            <span className="block text-gray-700">Supplier</span>
+            <span className="block text-gray-700">{t("inventory.po.supplier")}</span>
             <select
               className="mt-1 w-full rounded border border-gray-300 p-2"
               value={supplierId}
               onChange={(e) => setSupplierId(e.target.value)}
             >
-              <option value="">Select…</option>
+              <option value="">{t("common.selectEllipsis")}</option>
               {suppliers.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name}
@@ -177,7 +175,7 @@ export function PurchaseOrderWorkspace() {
             </select>
           </label>
           <label className="text-sm">
-            <span className="block text-gray-700">Expected delivery</span>
+            <span className="block text-gray-700">{t("inventory.po.expectedDelivery")}</span>
             <input
               type="date"
               className="mt-1 w-full rounded border border-gray-300 p-2"
@@ -190,7 +188,7 @@ export function PurchaseOrderWorkspace() {
         <div className="mt-4">
           <input
             className="w-full rounded border border-gray-300 p-2 text-sm sm:max-w-sm"
-            placeholder="Search items to add…"
+            placeholder={t("inventory.po.searchItemsPlaceholder")}
             value={term}
             onChange={(e) => setTerm(e.target.value)}
           />
@@ -228,7 +226,7 @@ export function PurchaseOrderWorkspace() {
               <li key={line.item_id} className="flex flex-wrap items-center gap-3 text-sm">
                 <span className="flex-1">{line.item_name}</span>
                 <input
-                  type="number" min="0" step="0.01" placeholder="Qty"
+                  type="number" min="0" step="0.01" placeholder={t("inventory.po.qtyPlaceholder")}
                   className="w-24 rounded border border-gray-300 p-1"
                   value={line.quantity}
                   onChange={(e) =>
@@ -238,7 +236,7 @@ export function PurchaseOrderWorkspace() {
                   }
                 />
                 <input
-                  type="number" min="0" step="0.01" placeholder="Unit price"
+                  type="number" min="0" step="0.01" placeholder={t("inventory.po.unitPricePlaceholder")}
                   className="w-28 rounded border border-gray-300 p-1"
                   value={line.unit_price}
                   onChange={(e) =>
@@ -252,7 +250,7 @@ export function PurchaseOrderWorkspace() {
                   className="text-xs text-blue-700 underline"
                   onClick={() => setLines((cur) => cur.filter((_, i) => i !== index))}
                 >
-                  remove
+                  {t("common.remove")}
                 </button>
               </li>
             ))}
@@ -265,16 +263,16 @@ export function PurchaseOrderWorkspace() {
           onClick={() => void submit()}
           className="mt-5 rounded bg-blue-700 px-4 py-2 text-sm text-white disabled:bg-gray-300"
         >
-          Raise order
+          {t("inventory.po.raiseOrder")}
         </button>
       </section>
 
       <section>
-        <h3 className="text-base font-semibold">Orders</h3>
+        <h3 className="text-base font-semibold">{t("inventory.po.ordersTitle")}</h3>
         {orders === null ? (
-          <p className="mt-2 text-sm text-gray-600">Loading…</p>
+          <p className="mt-2 text-sm text-gray-600">{t("common.loading")}</p>
         ) : orders.length === 0 ? (
-          <p className="mt-2 text-sm text-gray-600">No purchase orders raised yet.</p>
+          <p className="mt-2 text-sm text-gray-600">{t("inventory.po.empty")}</p>
         ) : (
           <ul className="mt-3 space-y-2">
             {orders.map((po) => (
@@ -285,7 +283,9 @@ export function PurchaseOrderWorkspace() {
                     <span className="text-gray-600">
                       {" "}
                       · {po.supplier_name}
-                      {po.expected_date ? ` · expected ${po.expected_date}` : ""}
+                      {po.expected_date
+                        ? ` · ${t("inventory.expectedLabel", { date: po.expected_date })}`
+                        : ""}
                     </span>
                   </div>
                   <span className={`rounded px-2 py-0.5 text-xs ${statusTone(po.status)}`}>
@@ -296,9 +296,12 @@ export function PurchaseOrderWorkspace() {
                 <ul className="mt-2 text-gray-600">
                   {po.items.map((item) => (
                     <li key={item.id}>
-                      {item.item_name} — ordered {item.quantity}, received{" "}
-                      {item.received_quantity}, outstanding{" "}
-                      <strong>{outstanding(item.quantity, item.received_quantity)}</strong>
+                      {t("inventory.po.lineSummary", {
+                        name: item.item_name,
+                        ordered: item.quantity,
+                        received: item.received_quantity,
+                        outstanding: outstanding(item.quantity, item.received_quantity),
+                      })}
                     </li>
                   ))}
                 </ul>
@@ -311,7 +314,7 @@ export function PurchaseOrderWorkspace() {
                         onClick={() => void move(po.id, "approved")}
                         className="rounded bg-blue-700 px-3 py-1 text-xs text-white disabled:bg-gray-300"
                       >
-                        Approve
+                        {t("common.approve")}
                       </button>
                     ) : (
                       <button
@@ -319,7 +322,7 @@ export function PurchaseOrderWorkspace() {
                         onClick={() => void move(po.id, "sent")}
                         className="rounded bg-blue-700 px-3 py-1 text-xs text-white disabled:bg-gray-300"
                       >
-                        Mark sent to supplier
+                        {t("inventory.po.markSent")}
                       </button>
                     )}
                     <button
@@ -327,15 +330,14 @@ export function PurchaseOrderWorkspace() {
                       onClick={() => void move(po.id, "cancelled")}
                       className="rounded border border-gray-300 px-3 py-1 text-xs disabled:opacity-50"
                     >
-                      Cancel
+                      {t("common.cancel")}
                     </button>
                   </div>
                 ) : null}
 
                 {po.status === "partially_received" || po.status === "received" ? (
                   <p className="mt-2 text-xs text-gray-600">
-                    Set by the server as goods receipts against this order are
-                    verified — not something anyone marks by hand.
+                    {t("inventory.po.receivedByServerHint")}
                   </p>
                 ) : null}
               </li>

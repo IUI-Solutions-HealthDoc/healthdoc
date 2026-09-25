@@ -3,7 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { ApiError, newIdempotencyKey } from "@/lib/api";
+import { useLocale } from "@/lib/i18n";
 import { createConsentRecord, listConsentPurposes } from "../api";
+import { consentChannelFormLabel } from "../i18nLabels";
 import type {
   ConsentChannel,
   ConsentPurpose,
@@ -16,11 +18,7 @@ type Props = {
   onCreated: (record: ConsentRecord) => void;
 };
 
-const CHANNELS: Array<{ value: ConsentChannel; label: string }> = [
-  { value: "written", label: "Written form" },
-  { value: "verbal", label: "Verbal consent" },
-  { value: "digital_otp", label: "Digital OTP" },
-];
+const GRANT_FORM_CHANNELS: ConsentChannel[] = ["written", "verbal", "digital_otp"];
 
 const GRANTERS: Array<{ value: GrantedByType; label: string }> = [
   { value: "patient", label: "Patient" },
@@ -47,6 +45,7 @@ function localDate(value = new Date()): string {
 }
 
 export function ConsentGrantForm({ patientId, onCreated }: Props) {
+  const { t } = useLocale();
   const [purposes, setPurposes] = useState<ConsentPurpose[] | null>(null);
   const [purposeId, setPurposeId] = useState("");
   const [channel, setChannel] = useState<ConsentChannel>("written");
@@ -155,14 +154,14 @@ export function ConsentGrantForm({ patientId, onCreated }: Props) {
   return (
     <form onSubmit={submit} className="surface-card space-y-4 p-5">
       <div>
-        <h2 className="text-base font-semibold">Record consent</h2>
+        <h2 className="text-base font-semibold">{t("consent.recordConsent")}</h2>
         <p className="mt-1 text-sm text-muted-foreground">
           Record the decision communicated by the patient or their authorised representative.
         </p>
       </div>
 
       {purposes === null ? (
-        <p className="text-sm text-muted-foreground">Loading consent purposes…</p>
+        <p className="text-sm text-muted-foreground">{t("consent.loadingPurposes")}</p>
       ) : purposes.length === 0 ? (
         <p role="alert" className="text-sm text-danger">
           No active consent purpose is configured. Ask an administrator to configure one.
@@ -170,7 +169,7 @@ export function ConsentGrantForm({ patientId, onCreated }: Props) {
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
           <label className="space-y-1 text-sm">
-            <span className="text-muted-foreground">Purpose *</span>
+            <span className="text-muted-foreground">{t("field.purpose")} *</span>
             <select
               required
               value={purposeId}
@@ -186,15 +185,17 @@ export function ConsentGrantForm({ patientId, onCreated }: Props) {
           </label>
 
           <label className="space-y-1 text-sm">
-            <span className="text-muted-foreground">Consent channel *</span>
+            <span className="text-muted-foreground">{t("field.channel")} *</span>
             <select
               required
               value={channel}
               onChange={(event) => setChannel(event.target.value as ConsentChannel)}
               className="w-full rounded-md border border-border bg-background px-3 py-2"
             >
-              {CHANNELS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
+              {GRANT_FORM_CHANNELS.map((value) => (
+                <option key={value} value={value}>
+                  {consentChannelFormLabel(t, value)}
+                </option>
               ))}
             </select>
           </label>
@@ -214,7 +215,7 @@ export function ConsentGrantForm({ patientId, onCreated }: Props) {
           </label>
 
           <label className="space-y-1 text-sm">
-            <span className="text-muted-foreground">Valid until</span>
+            <span className="text-muted-foreground">{t("field.validUntil")}</span>
             <input
               type="date"
               min={localDate()}
@@ -261,7 +262,7 @@ export function ConsentGrantForm({ patientId, onCreated }: Props) {
         disabled={!canSubmit || purposes?.length === 0}
         className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
       >
-        {busy ? "Recording…" : "Record consent"}
+        {busy ? t("consent.recording") : t("consent.recordConsent")}
       </button>
     </form>
   );

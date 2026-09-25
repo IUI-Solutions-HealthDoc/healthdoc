@@ -16,6 +16,7 @@ import { AddVitalsFormProps } from "./AddVitalsForm.types";
 import { DEFAULT_VALUES, nowForDateTimeLocal, PAIN_SCORE_OPTIONS } from "./constants";
 
 import { addVitalsSchema, type AddVitalsSchema } from "./validation";
+import { useLocale } from "@/lib/i18n";
 
 /**
  * An empty number input reports `valueAsNumber` as NaN, not undefined. Passed
@@ -34,6 +35,7 @@ export default function AddVitalsForm({
   isSubmitting = false,
   onSubmit,
 }: AddVitalsFormProps) {
+  const { t } = useLocale();
   const {
     register,
     handleSubmit,
@@ -79,10 +81,7 @@ export default function AddVitalsForm({
   };
 
   return (
-    <FormSection
-      title="Add Patient Vitals"
-      description="Record latest vital signs for the selected patient."
-    >
+    <FormSection title={t("nurse.vitalsTitle")} description={t("nurse.vitalsDescription")}>
       {/* noValidate: the zod schema is the single validation authority. Native
           constraint validation blocks submit without rendering anything the
           user can act on inside the app, which silently defeated every attempt
@@ -102,69 +101,69 @@ export default function AddVitalsForm({
               charted twenty minutes late must record when they were taken,
               not when they were typed. */}
           <DateTimeField
-            label="Measured At"
+            label={t("nurse.vitalsMeasuredAt")}
             registration={register("measured_at")}
             error={errors.measured_at}
           />
 
           <NumberField
-            label="Temperature (°C)"
+            label={t("nurse.vitalsTemp")}
             placeholder="36.8"
             registration={register("temp_c", optionalNumber)}
             error={errors.temp_c}
           />
 
           <NumberField
-            label="Pulse (bpm)"
+            label={t("nurse.vitalsPulse")}
             placeholder="72"
             registration={register("pulse_bpm", optionalNumber)}
             error={errors.pulse_bpm}
           />
 
           <NumberField
-            label="Respiratory Rate"
+            label={t("nurse.vitalsRespRate")}
             placeholder="18"
             registration={register("resp_rate", optionalNumber)}
             error={errors.resp_rate}
           />
 
           <NumberField
-            label="Systolic BP"
+            label={t("nurse.vitalsSystolic")}
             placeholder="120"
             registration={register("bp_systolic", optionalNumber)}
             error={errors.bp_systolic}
           />
 
           <NumberField
-            label="Diastolic BP"
+            label={t("nurse.vitalsDiastolic")}
             placeholder="80"
             registration={register("bp_diastolic", optionalNumber)}
             error={errors.bp_diastolic}
           />
 
           <NumberField
-            label="SpO₂ (%)"
+            label={t("nurse.vitalsSpo2")}
             placeholder="98"
             registration={register("spo2_pct", optionalNumber)}
             error={errors.spo2_pct}
           />
 
           <NumberField
-            label="Weight (kg)"
+            label={t("nurse.vitalsWeight")}
             placeholder="65"
             registration={register("weight_kg", optionalNumber)}
             error={errors.weight_kg}
           />
 
           <NumberField
-            label="Height (cm)"
+            label={t("nurse.vitalsHeight")}
             placeholder="170"
             registration={register("height_cm", optionalNumber)}
             error={errors.height_cm}
           />
 
           <SelectField
-            label="Pain Score"
+            label={t("nurse.vitalsPainScore")}
             options={PAIN_SCORE_OPTIONS.map((score) => ({
               label: score.toString(),
               value: score,
@@ -176,8 +175,8 @@ export default function AddVitalsForm({
 
         <FormActions
           isSubmitting={isSubmitting}
-          submitLabel="Save Vitals"
-          resetLabel="Reset"
+          submitLabel={t("nurse.saveVitals")}
+          resetLabel={t("common.reset")}
           onReset={handleReset}
         />
       </form>

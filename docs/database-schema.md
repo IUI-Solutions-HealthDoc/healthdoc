@@ -203,6 +203,9 @@ do not merge out of order.**
 | 0082 | scan_share_checkin_timestamp | scan_share_tickets | Adds checked_in_at; historical unknown times remain null. |
 | 0083 | abha_profile_token | ALTER patients: abha_profile_token_encrypted, abha_profile_token_key_version | Enrolment/login profile X-token, stored apart from the HIP linking token. Both-or-neither CHECK. No backfill. |
 | 0084 | program_review_interval | ALTER care_programs: review_interval_days | Optional first-review interval. Null schedules nothing; there is no 30-day default. |
+| 0085 | abha_profile_token_kind | ALTER patients: abha_profile_token_kind | Records whether the encrypted M1 profile token came from ABHA login or PHR login. Existing tokens default to ABHA login. |
+| 0086 | catalogue_hindi_labels | ALTER facilities: name_hi; ALTER departments: name_hi; ALTER wards: name_hi; ALTER charge_master: description_hi | Optional Hindi catalogue labels; English remains the fallback. Widens the existing profile-token kind to varchar(50) for local schema parity. |
+| 0087 | appointment_service_hindi | ALTER appointment_services: name_hi | Optional Hindi appointment-service label; English remains the fallback. |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.

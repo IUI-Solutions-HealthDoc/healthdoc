@@ -5,21 +5,19 @@ import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Tab from "@mui/material/Tab";
 import Tabs from "@mui/material/Tabs";
-import Typography from "@mui/material/Typography";
-
-import { meridian } from "@/styles/theme";
-import { doctorPageHeaderSx } from "../panelSx";
 import { useResults } from "../hooks/useResults";
 import { ResultDetailPanel } from "./ResultDetailPanel";
 import { ResultsWorklistPanel } from "./ResultsWorklistPanel";
 import { ExternalReferralInbox } from "./ExternalReferralInbox";
+import { useLocale } from "@/lib/i18n";
 
 export function ResultsWorkspace() {
   const [source, setSource] = useState("local");
+  const { t } = useLocale();
   return <Box>
     <Tabs value={source} onChange={(_event, value: string) => setSource(value)} aria-label="Results source" sx={{ mb: 2 }}>
-      <Tab id="local-results-tab" aria-controls="local-results-panel" value="local" label="Local results" />
-      <Tab id="external-results-tab" aria-controls="external-results-panel" value="external" label="External referrals" />
+      <Tab id="local-results-tab" aria-controls="local-results-panel" value="local" label={t("doctor.resultsTabLocal")} />
+      <Tab id="external-results-tab" aria-controls="external-results-panel" value="external" label={t("doctor.resultsTabExternal")} />
     </Tabs>
     <Box role="tabpanel" id={`${source}-results-panel`} aria-labelledby={`${source}-results-tab`}>
       {source === "local" ? <LocalResultsWorkspace /> : <ExternalReferralInbox />}
@@ -64,48 +62,6 @@ function LocalResultsWorkspace() {
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
-      <Box sx={doctorPageHeaderSx}>
-        <Typography
-          sx={{
-            m: 0,
-            mb: 0.5,
-            fontSize: "0.6875rem",
-            fontWeight: 700,
-            letterSpacing: "0.08em",
-            textTransform: "uppercase",
-            color: meridian.textSecondary,
-          }}
-        >
-          OPD · Doctor
-        </Typography>
-        <Typography
-          component="h1"
-          sx={{
-            m: 0,
-            fontSize: { xs: "1.375rem", md: "1.5rem" },
-            fontWeight: 700,
-            letterSpacing: "-0.03em",
-            color: meridian.textPrimary,
-            lineHeight: 1.2,
-          }}
-        >
-          Results review
-        </Typography>
-        <Typography
-          sx={{
-            m: 0,
-            mt: 0.6,
-            fontSize: "0.875rem",
-            color: meridian.textSecondary,
-            maxWidth: 620,
-            lineHeight: 1.45,
-          }}
-        >
-          Lab and radiology results for your orders. Critical values surface first — open a result,
-          review it, then sign it off.
-        </Typography>
-      </Box>
-
       {error ? (
         <Alert severity="error" sx={{ borderRadius: "12px" }}>
           {error}

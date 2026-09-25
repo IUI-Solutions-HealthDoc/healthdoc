@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Printer } from "lucide-react";
 
 import { ApiError, newIdempotencyKey } from "@/lib/api";
+import { useLocale } from "@/lib/i18n";
 import { PatientAvatar } from "@/components/ui/PatientAvatar";
 
 import { registerPatient, uploadPatientPhoto } from "./api";
@@ -24,6 +25,7 @@ const SEXES = ["male", "female", "other"] as const;
 type AgeMode = "dob" | "age";
 
 export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient) => void }) {
+  const { t } = useLocale();
   const [fullName, setFullName] = useState("");
   const [sex, setSex] = useState<PatientCreate["sex"] | "">("");
   const [ageMode, setAgeMode] = useState<AgeMode>("dob");
@@ -230,7 +232,7 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
     <form onSubmit={submit} className="surface-card space-y-5 p-6">
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="space-y-1 text-sm sm:col-span-2">
-          <span className="text-muted-foreground">Full name *</span>
+          <span className="text-muted-foreground">{t("field.fullName")} *</span>
           <input
             required
             className={inputClass(Boolean(fullName) && !fullNameValid)}
@@ -245,14 +247,14 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
         </label>
 
         <label className="space-y-1 text-sm">
-          <span className="text-muted-foreground">Sex *</span>
+          <span className="text-muted-foreground">{t("field.sex")} *</span>
           <select
             required
             className={inputClass(false)}
             value={sex}
             onChange={(e) => setSex(e.target.value as PatientCreate["sex"] | "")}
           >
-            <option value="">Select…</option>
+            <option value="">{t("common.select")}…</option>
             {SEXES.map((value) => (
               <option key={value} value={value}>
                 {value}
@@ -263,7 +265,7 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
 
         <div className="space-y-1 text-sm">
           <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">Age / Date of Birth *</span>
+            <span className="text-muted-foreground">{t("field.ageDob")} *</span>
             {derivedAge && (
               <span className="rounded bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
                 Derived: {derivedAge.displayText}
@@ -276,8 +278,8 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
               value={ageMode}
               onChange={(e) => setAgeMode(e.target.value as AgeMode)}
             >
-              <option value="dob">Date of birth</option>
-              <option value="age">Age in years</option>
+              <option value="dob">{t("field.dob")}</option>
+              <option value="age">{t("field.age")}</option>
             </select>
 
             {/* Either, never both. Many patients at a district hospital do not
@@ -310,7 +312,7 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
         </div>
 
         <label className="space-y-1 text-sm">
-          <span className="text-muted-foreground">Mobile</span>
+          <span className="text-muted-foreground">{t("field.mobile")}</span>
           <input
             className={inputClass(!mobileValid)}
             aria-invalid={!mobileValid}
@@ -318,7 +320,7 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
             onChange={(e) => setMobile(e.target.value)}
             inputMode="tel"
             maxLength={18}
-            placeholder="10 digits or +91"
+            placeholder={t("patient.mobilePlaceholder")}
           />
           {!mobileValid ? (
             <span className="text-xs text-danger">Enter a valid Indian mobile number.</span>
@@ -326,7 +328,7 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
         </label>
 
         <label className="space-y-1 text-sm">
-          <span className="text-muted-foreground">ABHA number</span>
+          <span className="text-muted-foreground">{t("field.abha")}</span>
           <input
             className={inputClass(!abhaValid)}
             aria-invalid={!abhaValid}
@@ -383,17 +385,17 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
         {showAddressDetails && (
           <div className="mt-4 grid gap-4 sm:grid-cols-2 rounded-lg border border-border/60 bg-muted/10 p-4">
             <label className="space-y-1 text-sm">
-              <span className="text-muted-foreground">Guardian Name</span>
+              <span className="text-muted-foreground">{t("field.guardianName")}</span>
               <input
                 className={inputClass(false)}
                 value={guardianName}
                 onChange={(e) => setGuardianName(e.target.value)}
-                placeholder="e.g. Dashrath Kumar"
+                placeholder={t("receptionist.phGuardianName")}
               />
             </label>
 
             <label className="space-y-1 text-sm">
-              <span className="text-muted-foreground">Guardian Relationship</span>
+              <span className="text-muted-foreground">{t("field.guardianRelationship")}</span>
               <select
                 className={inputClass(false)}
                 value={guardianRelationship}
@@ -409,54 +411,54 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
             </label>
 
             <label className="space-y-1 text-sm sm:col-span-2">
-              <span className="text-muted-foreground">Address Line</span>
+              <span className="text-muted-foreground">{t("field.address")}</span>
               <input
                 className={inputClass(false)}
                 value={addressLine}
                 onChange={(e) => setAddressLine(e.target.value)}
-                placeholder="Flat / House number, Building / Street"
+                placeholder={t("receptionist.phAddressLine")}
               />
             </label>
 
             <label className="space-y-1 text-sm">
-              <span className="text-muted-foreground">Village / Town / City</span>
+              <span className="text-muted-foreground">{t("field.villageTown")}</span>
               <input
                 className={inputClass(false)}
                 value={villageTown}
                 onChange={(e) => setVillageTown(e.target.value)}
-                placeholder="e.g. Vasant Kunj"
+                placeholder={t("receptionist.phVillage")}
               />
             </label>
 
             <label className="space-y-1 text-sm">
-              <span className="text-muted-foreground">District</span>
+              <span className="text-muted-foreground">{t("field.district")}</span>
               <input
                 className={inputClass(false)}
                 value={district}
                 onChange={(e) => setDistrict(e.target.value)}
-                placeholder="e.g. South West Delhi"
+                placeholder={t("receptionist.phDistrict")}
               />
             </label>
 
             <label className="space-y-1 text-sm">
-              <span className="text-muted-foreground">State Code</span>
+              <span className="text-muted-foreground">{t("field.state")}</span>
               <input
                 maxLength={4}
                 className={inputClass(false)}
                 value={stateCode}
                 onChange={(e) => setStateCode(e.target.value.toUpperCase())}
-                placeholder="e.g. DL, MH, KA"
+                placeholder={t("receptionist.phState")}
               />
             </label>
 
             <label className="space-y-1 text-sm">
-              <span className="text-muted-foreground">Pincode</span>
+              <span className="text-muted-foreground">{t("field.pincode")}</span>
               <input
                 maxLength={6}
                 className={inputClass(false)}
                 value={pincode}
                 onChange={(e) => setPincode(e.target.value)}
-                placeholder="e.g. 110070"
+                placeholder={t("receptionist.phPincode")}
                 inputMode="numeric"
               />
             </label>
@@ -475,7 +477,7 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
         disabled={!canSubmit}
         className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
       >
-        {busy ? "Registering…" : "Register patient"}
+        {busy ? t("forms.saving") : t("receptionist.registerPatient")}
       </button>
     </form>
   );

@@ -101,6 +101,7 @@ async def get_doctor_worklist(
             Queue.doctor_user_id,
             doctor.c.full_name.label("provider_name"),
             Department.name.label("department_name"),
+            Department.name_hi.label("department_name_hi"),
         )
         .join(Queue, Queue.id == QueueToken.queue_id)
         .join(Visit, Visit.id == QueueToken.visit_id)
@@ -150,6 +151,7 @@ async def get_doctor_worklist(
             "provider_user_id": doctor_user_id,
             "provider_name": provider_name,
             "department": department_name,
+            "department_hi": department_name_hi,
         }
         for (
             token,
@@ -163,6 +165,7 @@ async def get_doctor_worklist(
             doctor_user_id,
             provider_name,
             department_name,
+            department_name_hi,
         ) in rows
     ]
 
@@ -293,6 +296,7 @@ async def list_queue_opening_options(
                 User.full_name,
                 Roster.department_id,
                 Department.name,
+                Department.name_hi,
                 Roster.room_id,
                 Room.room_number,
                 Roster.shift,
@@ -325,6 +329,7 @@ async def list_queue_opening_options(
             "staff_name": staff_name,
             "department_id": department_id,
             "department_name": department_name,
+            "department_name_hi": department_name_hi,
             "room_id": room_id,
             "room_number": room_number,
             "shift": shift,
@@ -335,6 +340,7 @@ async def list_queue_opening_options(
             staff_name,
             department_id,
             department_name,
+            department_name_hi,
             room_id,
             room_number,
             shift,
@@ -389,6 +395,7 @@ async def list_visits_without_tokens(
             Patient.thid,
             Visit.department_id,
             Department.name.label("department_name"),
+            Department.name_hi.label("department_name_hi"),
             Visit.visit_type,
             Visit.visit_date,
         )

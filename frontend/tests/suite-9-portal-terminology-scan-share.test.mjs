@@ -61,5 +61,5 @@ test("HD-36: Receptionist dashboard integrates ABDM M1 Scan & Share ticket flow"
   assert.match(source.scanShareModal, /scan-share-slip-print-root/);
   assert.match(source.scanShareModal, /checkInScanShareTicket/);
   assert.match(source.receptionQueuePage, /ScanShareDeskModal/);
-  assert.match(source.receptionQueuePage, /ABDM Scan &amp; Share/);
+  assert.match(source.receptionQueuePage, /t\("receptionist\.abdmScanShare"\)/);
 });

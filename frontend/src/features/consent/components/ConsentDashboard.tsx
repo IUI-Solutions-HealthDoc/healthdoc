@@ -5,6 +5,7 @@ import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 
 import { PatientSearch } from "@/features/receptionist/PatientSearch";
+import { useLocale } from "@/lib/i18n";
 import { meridian } from "@/styles/theme";
 import { useConsentDetail } from "../hooks/useConsentDetail";
 import { useConsentRecords } from "../hooks/useConsentRecords";
@@ -13,6 +14,7 @@ import { ConsentRecordDetail } from "./ConsentRecordDetail";
 import { ConsentGrantForm } from "./ConsentGrantForm";
 
 export function ConsentDashboard() {
+  const { t } = useLocale();
   /**
    * Consent is read per patient, not per facility.
    *
@@ -47,10 +49,10 @@ export function ConsentDashboard() {
             color: meridian.textPrimary,
           }}
         >
-          Consent records
+          {t("consent.title")}
         </Typography>
         <Typography sx={{ m: 0, mt: 0.5, fontSize: "0.875rem", color: meridian.textSecondary }}>
-          Record consent decisions and review the patient&apos;s consent history.
+          {t("consent.subtitle")}
         </Typography>
       </Box>
 
@@ -65,17 +67,16 @@ export function ConsentDashboard() {
           fontWeight: 600,
         }}
       >
-        Consent decisions remain in the audit history. Revoked consent is recorded, not erased.
+        {t("consent.auditBanner")}
       </Box>
 
       {!patient ? (
         <Box sx={{ mt: 2 }}>
           <Typography sx={{ mb: 1.5, fontSize: "0.875rem", color: meridian.textSecondary }}>
-            Find the patient whose consents you need. Records are read per
-            patient — there is no facility-wide consent list.
+            {t("consent.findPatient")}
           </Typography>
           <PatientSearch
-            selectLabel="View consents"
+            selectLabel={t("common.viewConsents")}
             onSelect={(found) => {
               setPatient({ id: found.id, full_name: found.full_name });
               setSelectedId(null);
@@ -96,7 +97,7 @@ export function ConsentDashboard() {
                 }}
                 style={{ textDecoration: "underline", background: "none", border: 0, cursor: "pointer" }}
               >
-                change patient
+                {t("consent.changePatient")}
               </button>
             </Typography>
           </Box>

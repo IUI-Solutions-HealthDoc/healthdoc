@@ -10,6 +10,7 @@ class Ward(Base, UUIDPk, Timestamps):
     __tablename__ = "wards"
 
     name = Column(Text, nullable=False)
+    name_hi = Column(Text, nullable=True)
     department_id = Column(
         UUID(as_uuid=True), ForeignKey("departments.id", ondelete="RESTRICT"), nullable=True
     )

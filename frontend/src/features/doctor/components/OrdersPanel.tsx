@@ -15,6 +15,7 @@ import { doctorPanelSx, doctorButtonSx } from "../panelSx";
 import type { ActiveEncounter, OrderPriority, PlacedOrder } from "../types";
 import { OrderFormModal } from "./OrderFormModal";
 import { ExternalResultPanel } from "./ExternalResultPanel";
+import { useLocale } from "@/lib/i18n";
 
 const PRIORITY_BADGE: Record<OrderPriority, BadgeVariant> = {
   routine: "secondary",
@@ -39,36 +40,37 @@ function EncounterOrders({ encounter, patientLabel }: OrdersPanelProps) {
   const [referredOnly, setReferredOnly] = React.useState(false);
   const [selected, setSelected] = React.useState<PlacedOrder | null>(null);
   const visible = referredOnly ? placed.filter((order) => order.fulfilment_mode === "external_referral") : placed;
+  const { t } = useLocale();
 
   return (
     <Box sx={{ ...doctorPanelSx, display: "flex", flexDirection: "column", gap: 2 }}>
       <Stack direction="row" spacing={2} sx={{ alignItems: "flex-start", justifyContent: "space-between" }}>
         <Box>
-          <Typography sx={{ fontSize: "1.0625rem", fontWeight: 700 }}>Orders</Typography>
+          <Typography sx={{ fontSize: "1.0625rem", fontWeight: 700 }}>{t("doctor.ordersPanelTitle")}</Typography>
           <Typography sx={{ fontSize: "0.8125rem", color: meridian.textSecondary, mt: 0.25 }}>
-            Lab, radiology and procedure orders for this encounter
+            {t("doctor.ordersPanelSubtitle")}
           </Typography>
         </Box>
         <Button variant="outlined" size="small" sx={doctorButtonSx} disabled={loading || adding || !!error || !!encounter.ended_at} onClick={() => setOpen(true)}>
-          + Add order
+          {t("doctor.addOrder")}
         </Button>
       </Stack>
 
       {patientLabel && <Typography>{patientLabel}</Typography>}
-      {encounter.ended_at && <Alert severity="info">Consultation completed. New orders are locked; outside results for existing referrals can still be recorded.</Alert>}
+      {encounter.ended_at && <Alert severity="info">{t("doctor.consultationCompletedOrdersLocked")}</Alert>}
       <Stack direction="row" spacing={1}>
-        <Button aria-pressed={!referredOnly} onClick={() => setReferredOnly(false)}>All orders</Button>
-        <Button aria-pressed={referredOnly} onClick={() => setReferredOnly(true)}>Referred externally</Button>
-        <Button disabled={loading || adding} onClick={refresh}>Refresh orders</Button>
+        <Button aria-pressed={!referredOnly} onClick={() => setReferredOnly(false)}>{t("doctor.allOrders")}</Button>
+        <Button aria-pressed={referredOnly} onClick={() => setReferredOnly(true)}>{t("doctor.referredExternally")}</Button>
+        <Button disabled={loading || adding} onClick={refresh}>{t("doctor.refreshOrders")}</Button>
       </Stack>
 
       {loading ? (
         <Typography sx={{ fontSize: "0.8125rem", color: meridian.textSecondary }}>
-          Loading orders…
+          {t("doctor.loadingOrders")}
         </Typography>
       ) : error ? <Alert severity="error">{error}</Alert> : visible.length === 0 ? (
         <Typography sx={{ fontSize: "0.8125rem", color: meridian.textSecondary }}>
-          {referredOnly ? "No externally referred orders in this encounter." : "No orders added yet for this encounter."}
+          {referredOnly ? t("doctor.noExternalOrders") : t("doctor.noOrdersYet")}
         </Typography>
       ) : (
         <Stack spacing={1}>
@@ -105,7 +107,11 @@ function EncounterOrders({ encounter, patientLabel }: OrdersPanelProps) {
                 <Badge variant="outline">{typeLabel(order.order_type)}</Badge>
                 <Badge variant={PRIORITY_BADGE[order.priority]}>{order.priority}</Badge>
                 <Badge variant="outline">{order.status}</Badge>
-                {order.fulfilment_mode === "external_referral" ? <Button size="small" onClick={() => setSelected(order)}>Outside results</Button> : !order.fulfilment_mode ? <span>Fulfilment unknown — refresh orders</span> : null}
+                {order.fulfilment_mode === "external_referral" ? (
+                  <Button size="small" onClick={() => setSelected(order)}>{t("doctor.outsideResults")}</Button>
+                ) : !order.fulfilment_mode ? (
+                  <span>{t("doctor.refreshOrders")}</span>
+                ) : null}
               </Stack>
             </Box>
           ))}

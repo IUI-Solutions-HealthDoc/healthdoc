@@ -10,6 +10,7 @@ import Typography from "@mui/material/Typography";
 
 import { toast } from "@/components/ui/toast";
 import { useCurrentUser } from "@/features/session/useCurrentUser";
+import { useLocale } from "@/lib/i18n";
 import { meridian } from "@/styles/theme";
 import { approveAccountRequest, rejectAccountRequest } from "../api";
 import { REALM_ROLE_LABELS } from "../constants";
@@ -21,6 +22,7 @@ import { ApprovalStatusChip } from "./ApprovalStatusChip";
 import { CreateAccountRequestModal } from "./CreateAccountRequestModal";
 
 export function AccountRequestsWorkspace() {
+  const { t } = useLocale();
   const { user: currentUser } = useCurrentUser();
   const { items, loading, error: loadError, status, setStatus, refresh } = useAccountRequests("pending");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -48,19 +50,19 @@ export function AccountRequestsWorkspace() {
   const onApprove = async () => {
     if (!selected) return;
     if (temporaryPassword.trim().length < 8) {
-      toast.error("A temporary password of at least 8 characters is required");
+      toast.error(t("admin.accountRequests.temporaryPasswordRequired"));
       return;
     }
     setBusy(true);
     try {
       await approveAccountRequest(selected.id, temporaryPassword);
-      toast.success("Request approved", "The staff account is ready for first sign-in.");
+      toast.success(t("admin.accountRequests.approveSuccess"), t("admin.accountRequests.approveSuccessDetail"));
       setTemporaryPassword("");
       setDecision(null);
       setSelectedId(null);
       void refresh();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Approve failed");
+      toast.error(e instanceof Error ? e.message : t("admin.accountRequests.approveFailed"));
     } finally {
       setBusy(false);
     }
@@ -69,19 +71,19 @@ export function AccountRequestsWorkspace() {
   const onReject = async () => {
     if (!selected) return;
     if (!rejection_reason.trim()) {
-      toast.error("Enter a reason for rejecting this request.");
+      toast.error(t("admin.accountRequests.rejectReasonRequired"));
       return;
     }
     setBusy(true);
     try {
       await rejectAccountRequest(selected.id, rejection_reason);
-      toast.success("Request rejected");
+      toast.success(t("admin.accountRequests.rejectSuccess"));
       setRejectionReason("");
       setDecision(null);
       setSelectedId(null);
       void refresh();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Reject failed");
+      toast.error(e instanceof Error ? e.message : t("admin.accountRequests.rejectFailed"));
     } finally {
       setBusy(false);
     }
@@ -91,9 +93,9 @@ export function AccountRequestsWorkspace() {
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
       <AdminPageHeader
         backHref="/admin"
-        eyebrow="Admin"
-        title="Account requests"
-        subtitle="Review staff access requests with independent approval."
+        eyebrow={t("admin.eyebrow")}
+        title={t("admin.hub.accountRequestsTitle")}
+        subtitle={t("admin.hub.accountRequestsSubtitle")}
         actions={
           <Button
             variant="contained"
@@ -108,7 +110,7 @@ export function AccountRequestsWorkspace() {
               "&:hover": { bgcolor: meridian.brandDeep },
             }}
           >
-            New request
+            {t("admin.accountRequests.newRequest")}
           </Button>
         }
       />
@@ -141,27 +143,27 @@ export function AccountRequestsWorkspace() {
               select
               size="small"
               fullWidth
-              label="Status"
+              label={t("common.status")}
               value={status}
               onChange={(e) => {
                 setStatus(e.target.value as typeof status);
                 setSelectedId(null);
               }}
             >
-              <MenuItem value="all">All</MenuItem>
-              <MenuItem value="pending">Pending</MenuItem>
-              <MenuItem value="approved">Approved</MenuItem>
-              <MenuItem value="rejected">Rejected</MenuItem>
+              <MenuItem value="all">{t("common.all")}</MenuItem>
+              <MenuItem value="pending">{t("admin.accountRequests.status.pending")}</MenuItem>
+              <MenuItem value="approved">{t("admin.accountRequests.status.approved")}</MenuItem>
+              <MenuItem value="rejected">{t("admin.accountRequests.status.rejected")}</MenuItem>
             </TextField>
           </Box>
           <Box sx={{ borderTop: `1px solid ${meridian.border}`, maxHeight: 520, overflowY: "auto" }}>
             {loading ? (
               <Typography sx={{ p: 2.5, color: meridian.textSecondary, fontSize: "0.875rem" }}>
-                Loading…
+                {t("common.loading")}
               </Typography>
             ) : items.length === 0 ? (
               <Typography sx={{ p: 2.5, color: meridian.textSecondary, fontSize: "0.875rem" }}>
-                No requests.
+                {t("admin.accountRequests.noRequests")}
               </Typography>
             ) : (
               items.map((row) => (
@@ -233,10 +235,10 @@ export function AccountRequestsWorkspace() {
             }}
           >
             <Typography sx={{ m: 0, fontWeight: 700, fontSize: "1rem", color: meridian.textPrimary }}>
-              No request selected
+              {t("admin.accountRequests.noRequestSelected")}
             </Typography>
             <Typography sx={{ m: 0, fontSize: "0.875rem", maxWidth: 300 }}>
-              Select a request from the queue to review, approve, or reject.
+              {t("admin.accountRequests.selectFromQueue")}
             </Typography>
           </Box>
         ) : (
@@ -267,7 +269,7 @@ export function AccountRequestsWorkspace() {
 
             <Box sx={{ px: 2.5, py: 2.5, flex: 1 }}>
               <Typography sx={{ fontSize: "0.875rem", color: meridian.textPrimary, mb: 1.5 }}>
-                <Box component="span" sx={{ fontWeight: 700 }}>Justification: </Box>
+                <Box component="span" sx={{ fontWeight: 700 }}>{t("admin.accountRequests.justification")} </Box>
                 {selected.justification}
               </Typography>
               <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary, mb: 2 }}>
@@ -293,34 +295,32 @@ export function AccountRequestsWorkspace() {
                         fontSize: "0.875rem",
                       }}
                     >
-                      You submitted this request. Maker-checker policy requires a different
-                      administrator to approve or reject it.
+                      {t("admin.accountRequests.makerCheckerOwnRequest")}
                     </Box>
                   ) : decision === "approve" ? (
                     <TextField
                       autoFocus
-                      label="Temporary password"
+                      label={t("admin.accountRequests.temporaryPassword")}
                       type="password"
                       size="small"
                       fullWidth
                       value={temporaryPassword}
                       onChange={(e) => setTemporaryPassword(e.target.value)}
-                      helperText="Minimum 8 characters. The user must change it at first sign-in."
+                      helperText={t("admin.accountRequests.temporaryPasswordHint")}
                     />
                   ) : decision === "reject" ? (
                     <TextField
                       autoFocus
-                      label="Rejection reason"
+                      label={t("admin.accountRequests.rejectionReason")}
                       size="small"
                       fullWidth
                       value={rejection_reason}
                       onChange={(e) => setRejectionReason(e.target.value)}
-                      helperText="Required for the reviewable audit trail"
+                      helperText={t("admin.accountRequests.rejectionReasonHint")}
                     />
                   ) : (
                     <Typography sx={{ fontSize: "0.875rem", color: meridian.textSecondary }}>
-                      Choose approve or reject below. Only the field required for that decision
-                      will be shown.
+                      {t("admin.accountRequests.chooseDecision")}
                     </Typography>
                   )}
                 </>
@@ -332,7 +332,7 @@ export function AccountRequestsWorkspace() {
                 <Typography
                   sx={{ m: 0, fontSize: "0.8125rem", fontWeight: 600, color: meridian.textSecondary }}
                 >
-                  Maker-checker · approver ≠ requester
+                  {t("admin.accountRequests.makerCheckerNote")}
                 </Typography>
                 <Stack direction="row" useFlexGap sx={{ gap: 1.25, flexWrap: "wrap" }}>
                   {decision ? (
@@ -342,7 +342,7 @@ export function AccountRequestsWorkspace() {
                       onClick={() => setDecision(null)}
                       sx={{ textTransform: "none", fontWeight: 600 }}
                     >
-                      Cancel
+                      {t("common.cancel")}
                     </Button>
                   ) : null}
                   <Button
@@ -355,7 +355,7 @@ export function AccountRequestsWorkspace() {
                     }}
                     sx={{ textTransform: "none", fontWeight: 600, borderRadius: "10px" }}
                   >
-                    {decision === "reject" ? "Confirm rejection" : "Reject"}
+                    {decision === "reject" ? t("admin.accountRequests.confirmRejection") : t("common.reject")}
                   </Button>
                   <Button
                     variant="contained"
@@ -374,7 +374,7 @@ export function AccountRequestsWorkspace() {
                       "&:hover": { bgcolor: meridian.brandDeep },
                     }}
                   >
-                    {decision === "approve" ? "Confirm approval" : "Approve"}
+                    {decision === "approve" ? t("admin.accountRequests.confirmApproval") : t("common.approve")}
                   </Button>
                 </Stack>
               </Box>

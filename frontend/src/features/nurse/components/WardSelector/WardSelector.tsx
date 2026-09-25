@@ -1,3 +1,6 @@
+"use client";
+
+import { useLocale } from "@/lib/i18n";
 import { WardSelectorProps } from "./WardSelector.types";
 
 export default function WardSelector({
@@ -5,13 +8,13 @@ export default function WardSelector({
   selectedWard,
   onChange,
 }: WardSelectorProps) {
-
+  const { t, localizeField } = useLocale();
   const activeWards = wards.filter((ward) => ward.is_active);
 
   return (
     <section className="surface-card p-6">
       <label htmlFor="ward" className="mb-2 block text-sm font-semibold">
-        Ward
+        {t("ipd.ward")}
       </label>
 
       <select
@@ -22,7 +25,7 @@ export default function WardSelector({
       >
         {activeWards.map((ward) => (
           <option key={ward.id} value={ward.id}>
-            {ward.name}
+            {localizeField(ward.name, ward.name_hi)}
           </option>
         ))}
       </select>

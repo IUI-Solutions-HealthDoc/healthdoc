@@ -457,6 +457,7 @@ class IndentListItem(BaseModel):
     id: UUID
     department_id: UUID
     department_name: str
+    department_name_hi: str | None = None
     status: str
     approved_by: UUID | None
     approved_by_name: str | None

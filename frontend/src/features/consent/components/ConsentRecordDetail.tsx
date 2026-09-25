@@ -13,9 +13,10 @@ import Typography from "@mui/material/Typography";
 
 import { StatusChip } from "@/components/ui/StatusChip";
 import { toast } from "@/components/ui/toast";
+import { useLocale } from "@/lib/i18n";
 import { meridian } from "@/styles/theme";
 import { transitionConsentStatus, withdrawConsent } from "../api/consent";
-import { CONSENT_CHANNEL_LABELS, CONSENT_STATUS_LABELS, PURPOSE_LABELS } from "../constants";
+import { consentChannelLabel, consentPurposeLabel, consentStatusLabel } from "../i18nLabels";
 import { formatDate, formatDateTime } from "../lib/formatters";
 import type { ConsentRecord } from "../types";
 import { ConsentAccessHistory } from "./ConsentAccessHistory";
@@ -31,6 +32,7 @@ export function ConsentRecordDetail({
   loading,
   onRecordUpdated,
 }: Props) {
+  const { t } = useLocale();
   const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [withdrawReason, setWithdrawReason] = useState("");
   const [busy, setBusy] = useState(false);
@@ -49,7 +51,7 @@ export function ConsentRecordDetail({
         reason: withdrawReason || null,
       });
       if (!mounted.current) return;
-      toast.success("Consent withdrawn");
+      toast.success(t("consent.withdrawnToast"));
       setWithdrawOpen(false);
       setWithdrawReason("");
       onRecordUpdated?.(next);
@@ -81,7 +83,7 @@ export function ConsentRecordDetail({
   );
   if (loading) {
     return (
-      <Typography sx={{ color: meridian.textSecondary, p: 2 }}>Loading consent…</Typography>
+      <Typography sx={{ color: meridian.textSecondary, p: 2 }}>{t("consent.loadingDetail")}</Typography>
     );
   }
 
@@ -121,7 +123,7 @@ export function ConsentRecordDetail({
               {record.patient?.uhid} · {record.id}
             </Typography>
           </Box>
-          <StatusChip status={record.status} label={CONSENT_STATUS_LABELS[record.status]} />
+          <StatusChip status={record.status} label={consentStatusLabel(t, record.status)} />
         </Stack>
 
         <Box
@@ -132,20 +134,12 @@ export function ConsentRecordDetail({
           }}
         >
           <Meta
-            label="Purpose"
-            value={
-              record.purpose_label ??
-              (record.purpose_code
-                ? (PURPOSE_LABELS[record.purpose_code] ??
-                   record.purpose_code.replaceAll("_", " ").replace(/\b\w/g, (l) => l.toUpperCase()))
-                : "Unknown / Unavailable")
-            }
+            label={t("field.purpose")}
+            value={consentPurposeLabel(t, record.purpose_code, record.purpose_label)}
           />
           <Meta
-            label="Channel"
-            value={
-              CONSENT_CHANNEL_LABELS[record.channel as keyof typeof CONSENT_CHANNEL_LABELS] ?? record.channel
-            }
+            label={t("field.channel")}
+            value={consentChannelLabel(t, record.channel)}
           />
           <Meta
             label="Expires"
@@ -154,7 +148,7 @@ export function ConsentRecordDetail({
           <Meta label="Granted" value={formatDateTime(record.granted_at)} />
           <Meta label="Granted by" value={String(record.granted_by_type)} />
           <Meta
-            label="Status changed"
+            label={t("consent.statusChanged")}
             value={formatDateTime(record.status_changed_at)}
           />
         </Box>
@@ -168,7 +162,7 @@ export function ConsentRecordDetail({
             onClick={() => setWithdrawOpen(true)}
             sx={{ mt: 1, textTransform: "none", fontWeight: 600, borderRadius: "10px" }}
           >
-            Withdraw consent
+            {t("consent.withdraw")}
           </Button>
         ) : null}
 
@@ -182,7 +176,7 @@ export function ConsentRecordDetail({
               onClick={() => void handleTransition("granted")}
               sx={{ textTransform: "none", fontWeight: 600, borderRadius: "10px" }}
             >
-              Approve
+              {t("consent.approve")}
             </Button>
             <Button
               size="small"
@@ -192,14 +186,14 @@ export function ConsentRecordDetail({
               onClick={() => void handleTransition("denied")}
               sx={{ textTransform: "none", fontWeight: 600, borderRadius: "10px" }}
             >
-              Deny
+              {t("consent.deny")}
             </Button>
           </Stack>
         ) : null}
       </Box>
 
       <Dialog open={withdrawOpen} onClose={() => setWithdrawOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle sx={{ fontWeight: 700 }}>Withdraw consent</DialogTitle>
+        <DialogTitle sx={{ fontWeight: 700 }}>{t("consent.withdraw")}</DialogTitle>
         <DialogContent>
           <Typography sx={{ mb: 1.5, fontSize: "0.875rem", color: meridian.textSecondary }}>
             This will revoke the consent record. The action is logged in the audit trail.
@@ -208,14 +202,14 @@ export function ConsentRecordDetail({
             autoFocus
             fullWidth
             size="small"
-            label="Reason (optional)"
+            label={t("consent.reasonOptional")}
             value={withdrawReason}
             onChange={(e) => setWithdrawReason(e.target.value)}
           />
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setWithdrawOpen(false)} sx={{ textTransform: "none" }}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button
             variant="contained"
@@ -224,7 +218,7 @@ export function ConsentRecordDetail({
             onClick={() => void handleWithdraw()}
             sx={{ textTransform: "none", fontWeight: 600 }}
           >
-            Confirm withdrawal
+            {t("consent.confirmWithdrawal")}
           </Button>
         </DialogActions>
       </Dialog>

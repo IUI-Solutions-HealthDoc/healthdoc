@@ -10,6 +10,7 @@ import Typography from "@mui/material/Typography";
 import { Modal } from "@/components/ui/Modal";
 import { listChargeMaster } from "../api/chargeMaster";
 import { formatMoney } from "@/lib/api";
+import { useLocale } from "@/lib/i18n";
 import type { AddInvoiceItemInput, ChargeMaster } from "../types";
 
 type Props = {
@@ -21,6 +22,7 @@ type Props = {
 };
 
 export function AddInvoiceItemModal({ open, onClose, onSave, scheme_code }: Props) {
+  const { t } = useLocale();
   const [tariffs, setTariffs] = useState<ChargeMaster[]>([]);
   const [chargeMasterId, setChargeMasterId] = useState("");
   const [quantity, setQuantity] = useState(1);
@@ -50,12 +52,12 @@ export function AddInvoiceItemModal({ open, onClose, onSave, scheme_code }: Prop
       setTariffs(list);
       setChargeMasterId(list[0]?.id ?? "");
     }).catch((error: unknown) => {
-      if (!cancelled) setError(error instanceof Error ? error.message : "Could not load tariffs.");
+      if (!cancelled) setError(error instanceof Error ? error.message : t("billing.errLoadTariffs"));
     }).finally(() => { if (!cancelled) setLoading(false); });
     return () => {
       cancelled = true;
     };
-  }, [open, scheme_code]);
+  }, [open, scheme_code, t]);
 
   const selected = tariffs.find((t) => t.id === chargeMasterId) ?? null;
 
@@ -83,7 +85,7 @@ export function AddInvoiceItemModal({ open, onClose, onSave, scheme_code }: Prop
       });
       reset();
     } catch (error) {
-      setError(error instanceof Error ? error.message : "Could not add the item.");
+      setError(error instanceof Error ? error.message : t("billing.errAddItem"));
     } finally {
       setSaving(false);
     }
@@ -93,13 +95,13 @@ export function AddInvoiceItemModal({ open, onClose, onSave, scheme_code }: Prop
     <Modal
       open={open}
       onClose={handleClose}
-      title="Add from charge master"
+      title={t("billing.addFromChargeMaster")}
       size="sm"
       loading={saving || loading}
       actions={
         <>
           <Button onClick={handleClose} sx={{ textTransform: "none" }}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button
             variant="contained"
@@ -107,7 +109,7 @@ export function AddInvoiceItemModal({ open, onClose, onSave, scheme_code }: Prop
             disabled={!selected || quantity <= 0}
             sx={{ textTransform: "none", fontWeight: 600, borderRadius: "10px" }}
           >
-            Add
+            {t("billing.modalAdd")}
           </Button>
         </>
       }
