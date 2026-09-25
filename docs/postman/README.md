@@ -1,9 +1,11 @@
 # HealthDoc Postman readiness pack — updated 25 September 2026
 
 The collection is a non-clinical readiness aid, not an M1–M3 certification
-collection. On 25 September, the public callback probe returned **502** and
-`https://localhost/api/v1/health` was unreachable. Restore the local
-backend/nginx/tunnel before repeating callback checks or any milestone flow.
+collection. Earlier on 25 September, the public callback returned **502**
+because app containers still mounted deleted temporary worktrees. They were
+recreated against the current worktree; local health now returns **200** and
+the public POST-only callback returns **405** to a safe GET. Recheck these
+before each live milestone run; reachability alone does not prove delivery.
 
 ## Correct facility and verified response
 
@@ -37,18 +39,20 @@ The new HPID is masked, ending 6184, and the screenshot's professional/council
 application is **Draft**. Do not guess the full number or treat registration
 completeness as verified clinician authority.
 
-## Local identity mismatch — last inspected before runtime outage
+## Local identity mapping — checked after runtime recovery
 
 | Setting | Last inspected local configuration | Correct registered service to plan against |
 |---|---|---|
 | ABDM_HIP_ID | SBXID_053401_HIP | IN0910034387 |
 | ABDM_HIU_ID | SBXID_053401_HIU | IN0910034387 |
-| ABDM_HFR_FACILITY_ID | SBXID_053401_HIP | IN0910034387 |
+| ABDM_HFR_FACILITY_ID | IN0910034387 | IN0910034387 |
 
-The local facility row also used the old HFR value at the last inspection. A backed-up, coordinated
-configuration/facility update and old-job reconciliation are required.
-Changing a Postman request does not update HealthDoc. No local identity
-switch, clinician-profile write or historical-row rewrite was performed.
+After the owner explicitly confirmed the replacement ID, the local facility
+row and backend HFR setting were updated to **IN0910034387**, with a validated
+database backup. The HIP/HIU sender IDs have **not** been switched: 21
+`context_notify` and one `link_context` jobs for this facility remain pending
+under the older identity. Reconcile those jobs before a service-ID cutover.
+No clinician-profile write or historical-job rewrite was performed.
 
 ## Imported collection
 
@@ -125,11 +129,11 @@ Synthetic GET/invalid-POST receipts are not successful M2/M3 evidence.
 |---|---|
 | NHA new-service registration | Two independent backend GETs passed, as recorded above |
 | Postman import | Completed by user; imported collection visible |
-| Postman M2 token callback GET | Passed with **405 + receipt ID** on 24 September; the public endpoint returned **502** on 25 September |
+| Postman M2 token callback GET | Passed with **405 + receipt ID** on 24 September; an independent safe public GET again returned **405** after the 25 September runtime recovery |
 | Remaining Postman callback probes | Not yet run in Postman |
 | Local Vault | Client-secret entry and allowed domain now visible; secret value not inspected |
 | Postman session/registration GETs | Session and both read-only registration GETs previously returned **200** after the user configured Local Vault; retain a fresh redacted run for milestone evidence |
-| Local health in Postman | Not currently testable: local HTTPS port 443 was unreachable on 25 September |
+| Local health in Postman | An independent local GET returned **200** after recovery; rerun in Postman for its own evidence |
 | M1/M2/M3 acceptance | Not established by these readiness checks |
 
 ## Actual clinical workflows

@@ -13,25 +13,26 @@ and HIU**, under SBXID_053401 at https://abdm.healthdoc.world.
 **Do not register it again or repeat the conditional service PUT below.**
 The new HPID is masked, ending 6184; its professional/council application
 is Draft, so clinician authority/full identifier are still unverified.
-HealthDoc's local settings still use the old service IDs; no runtime
-identity switch has been performed. See [Postman setup](postman/README.md).
+HealthDoc's local HFR setting and facility row now use the confirmed ID.
+Its HIP/HIU sender settings still use the old service IDs; those pending jobs
+have not been rewritten. See [Postman setup](postman/README.md).
 
 ## 1. Start here: what is actually ready
 
 | Item | Observed state |
 |---|---|
-| HealthDoc browser | https://localhost — **currently down** (local HTTPS port 443 unreachable on 25 September); accept the local certificate only after the stack is restored |
+| HealthDoc browser | https://localhost — local frontend and issuer returned **200** after the 25 September container recovery; accept only the intended local certificate |
 | Public callback base | **https://abdm.healthdoc.world** |
 | Bridge/client ID | `SBXID_053401` |
 | Registered services | **IN0910034387** active for HIP and HIU; older HIP/HIU service entries also remain |
 | Correct facility supplied by you | **IN0910034387 — HealthDoc Facility**; supersedes the earlier incorrect ID |
 | Corrected HPID screenshot | Masked, ending **6184**; Healthcare Professional & Facility Manager; application/council status **Draft**, not verified clinician authority |
 | Registry environment | Corrected screenshot shows **hspsbx.abdm.gov.in**; association independently confirmed by NHA sandbox GET |
-| New backend repairs | Migration 0085 is now in `staging`; the matching enum/ORM repair is committed and under review in [PR #597](https://github.com/IUI-Solutions-HealthDoc/healthdoc/pull/597), not yet deployed |
-| Database | Migration **0085** applied to the local application database |
-| Public routing test | The 16 GET probes returned **405** on 24 September; the public token callback returned **502** on 25 September. Restore origin/tunnel before proceeding. |
+| New backend repairs | [PR #597](https://github.com/IUI-Solutions-HealthDoc/healthdoc/pull/597) merged into `staging`; the restored local backend runs its enum/ORM repair |
+| Database | Backed up and upgraded from **0085** through **0087** on 25 September; `alembic current` reports `0087 (head)` |
+| Public routing test | The public token callback initially returned **502** on 25 September because its origin containers mounted deleted temporary worktrees; after recovery it returned **405** to a safe GET, as expected for a POST-only route. No NHA transaction was sent. |
 | Durable evidence | Receipt table and persistent nginx access logs exist; receipts survived backend recreation |
-| 24 September queue snapshot | **22 context_notify + 1 link_context pending; 2 link_token jobs done**; re-query after runtime restoration |
+| 25 September queue snapshot | **21 context_notify + 1 link_context pending** for the affected local facility, plus one unrelated context_notify; 2 link_token jobs done. Do not switch HIP/HIU sender IDs blindly. |
 | 24 September data snapshot | **0 stored linking tokens, 0 received-content rows, 0 stored transfer keys**; re-query before a milestone claim |
 | Background processes | No standalone ABDM delivery or cleanup worker appeared in the 24 September inventory; re-check after restart |
 | Test evidence | 809 focused isolated ABDM/Scan-and-Share/schema tests passed previously; not a complete live acceptance run |
@@ -129,12 +130,12 @@ curl --silent --show-error --dump-header - --output /dev/null \
 ```
 
 When the origin is healthy, expect **405** and `X-HealthDoc-Receipt-ID`.
-On 25 September this returned **502** instead; fix the local backend/nginx/tunnel
-before sending any NHA operation. Do not add `-k`.
+It returned **502** during the 25 September outage, then **405** after the
+app containers were rebound to existing files. Do not add `-k`.
 
 When healthy, the public root and `/api/v1/health` intentionally return
-**404**: the tunnel exposes only `/api/v3/**`. The current 502 does not prove
-that this routing policy is operating correctly.
+**404**: the tunnel exposes only `/api/v3/**`. The recovered callback's **405**
+proves that path reaches the app, not that NHA can deliver a real POST.
 For local API health, open **https://localhost/api/v1/health**.
 
 For a synthetic parser/route probe only:
