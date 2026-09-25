@@ -7,6 +7,7 @@ import type { MedicationRecord } from "@/components/tables/EMARTable";
 import MedicationAdministrationModal, {
   PrescriptionOption,
 } from "@/features/nurse/components/MedicationAdministrationModal";
+import { PageHeading } from "@/components/common/PageHeading";
 
 interface Admission {
   id: string;
@@ -119,12 +120,7 @@ export default function Page() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold">eMAR</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Every dose given, held or refused for one admission, with dose identity safeguards and audit trail.
-          </p>
-        </div>
+        <PageHeading titleKey="nurse.emarTitle" />
 
         {selected && selectedAdmission && (
           <button

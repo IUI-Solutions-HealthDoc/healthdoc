@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Printer } from "lucide-react";
 
+import { PageHeading } from "@/components/common/PageHeading";
 import { PatientSearch } from "@/features/receptionist/PatientSearch";
 import { StartVisit } from "@/features/receptionist/StartVisit";
 import { PatientCardModal } from "@/features/receptionist/PatientCardModal";
@@ -14,14 +15,10 @@ export default function Page() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Patient search</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Search before registering. A duplicate chart splits a patient&apos;s
-          history across two records and takes a supervisor-approved merge to
-          undo.
-        </p>
-      </div>
+      <PageHeading
+        titleKey="receptionist.patientSearchTitle"
+        subtitleKey="receptionist.patientSearchSubtitle"
+      />
 
       <PatientSearch onSelect={setSelected} selectLabel="Start visit" />
 

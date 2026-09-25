@@ -1,3 +1,6 @@
+"use client";
+
+import { useLocale } from "@/lib/i18n";
 import { WardSelectorProps } from "./WardSelector.types";
 
 export default function WardSelector({
@@ -5,7 +8,7 @@ export default function WardSelector({
   selectedWard,
   onChange,
 }: WardSelectorProps) {
-
+  const { localizeField } = useLocale();
   const activeWards = wards.filter((ward) => ward.is_active);
 
   return (
@@ -22,7 +25,7 @@ export default function WardSelector({
       >
         {activeWards.map((ward) => (
           <option key={ward.id} value={ward.id}>
-            {ward.name}
+            {localizeField(ward.name, ward.name_hi)}
           </option>
         ))}
       </select>

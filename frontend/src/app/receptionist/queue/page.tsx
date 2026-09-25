@@ -25,6 +25,7 @@ import type {
   VisitWithoutToken,
 } from "@/features/receptionist/types";
 import { ScanShareDeskModal } from "@/features/receptionist/ScanShareDeskModal";
+import { PageHeading } from "@/components/common/PageHeading";
 
 
 /**
@@ -230,12 +231,10 @@ export default function Page() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold">Today&apos;s queues</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Waiting counts for every open clinic.
-          </p>
-        </div>
+        <PageHeading
+          titleKey="receptionist.queueTitle"
+          subtitleKey="receptionist.queueSubtitle"
+        />
         {/* Manual refresh, not a poll. The live board is /queue-display, which
             is push-based; polling here would add load for a screen someone
             looks at when a patient asks, not continuously. */}

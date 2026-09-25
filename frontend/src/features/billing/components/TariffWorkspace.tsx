@@ -5,6 +5,7 @@ import { Alert, Box, Button, Checkbox, FormControlLabel, Stack, Table, TableBody
   TableContainer, TableHead, TablePagination, TableRow, TextField, Typography } from "@mui/material";
 import { Modal } from "@/components/ui/Modal";
 import { formatMoney, newIdempotencyKey } from "@/lib/api";
+import { useLocale } from "@/lib/i18n";
 import { useAuth } from "@/providers/auth-provider";
 import { meridian } from "@/styles/theme";
 import { deactivateTariff, listChargeMaster } from "../api/chargeMaster";
@@ -14,6 +15,7 @@ import { TariffForm } from "./TariffForm";
 
 export function TariffWorkspace() {
   const { user } = useAuth();
+  const { localizeField, t } = useLocale();
   const allowed = user?.role === "billing" || user?.role === "admin";
   const [includeRetired, setIncludeRetired] = useState(false);
   const [query, setQuery] = useState("");
@@ -68,7 +70,7 @@ export function TariffWorkspace() {
   if (!allowed) return <Alert severity="error">Tariff maintenance is available to billing and facility administrators.</Alert>;
 
   return <Stack spacing={2.5} sx={{ color: meridian.textPrimary }}>
-    <Typography component="h1" variant="h5" sx={{ fontWeight: 700 }}>Tariff catalogue</Typography>
+    <Typography component="h1" variant="h5" sx={{ fontWeight: 700 }}>{t("billing.tariffsTitle")}</Typography>
     <Typography>Maintain your facility’s approved effective-dated prices. Each revision creates a new version; existing posted invoice lines keep their recorded amounts.</Typography>
     {message && <Alert severity="success" onClose={() => setMessage(null)}>{message}</Alert>}
     <Stack direction="row" useFlexGap sx={{ flexWrap: "wrap", gap: 2, alignItems: "center" }}>
@@ -83,7 +85,7 @@ export function TariffWorkspace() {
         <TableContainer><Table size="small" aria-label="Tariff versions">
           <TableHead><TableRow>{["Code / description", "Category", "Unit price", "Scheme", "Effective from", "Through (inclusive)", "State", "Actions"].map((label) => <TableCell key={label}>{label}</TableCell>)}</TableRow></TableHead>
           <TableBody>{rows.slice(visiblePage * 15, visiblePage * 15 + 15).map((row) => <TableRow key={row.id}>
-            <TableCell><Typography sx={{ fontWeight: 600 }}>{row.charge_code}</Typography>{row.description}</TableCell>
+            <TableCell><Typography sx={{ fontWeight: 600 }}>{row.charge_code}</Typography>{localizeField(row.description, row.description_hi)}</TableCell>
             <TableCell>{CHARGE_CATEGORY_LABELS[row.charge_category]}</TableCell>
             <TableCell sx={{ whiteSpace: "nowrap" }}>{formatMoney(row.unit_price)}</TableCell>
             <TableCell>{row.scheme_code ?? "General"}</TableCell>

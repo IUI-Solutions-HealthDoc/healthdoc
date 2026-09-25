@@ -28,6 +28,7 @@ import HandoverNotes from "@/features/nurse/components/HandoverNotes";
 import type { HandoverNote } from "@/features/nurse/components/HandoverNotes/HandoverNotes.types";
 import type { HandoverRecipientOption } from "@/features/nurse/types";
 import IncidentReportForm from "@/features/nurse/components/IncidentReportForm";
+import { PageHeading } from "@/components/common/PageHeading";
 import { IncidentListPanel } from "@/features/nurse/components/IncidentListPanel";
 import TaskQueue, { type Order } from "@/features/nurse/components/TaskQueue";
 import WardSelector from "@/features/nurse/components/WardSelector";
@@ -258,12 +259,11 @@ export default function Page() {
   return (
     <main className="mx-auto max-w-screen-2xl space-y-8 px-6 py-8">
       <section className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold text-primary">Nurse ward dashboard</h1>
-          <p className="mt-2 text-muted-foreground">
-            Live bed occupancy, observations, fluid balance, eMAR, incidents and doctor orders.
-          </p>
-        </div>
+        <PageHeading
+          titleKey="nurse.wardDashboardTitle"
+          subtitleKey="nurse.wardDashboardSubtitle"
+          titleClassName="text-3xl font-bold text-primary"
+        />
         <div className="flex flex-wrap gap-3">
           <button
             type="button"

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { ModuleCapabilityGate } from "@/components/common/ModuleCapabilityGate";
+import { PageHeading } from "@/components/common/PageHeading";
 import {
   cancelScan,
   draftRadiologyReport,
@@ -255,13 +256,7 @@ function RadiologyPageContent() {
 
   return (
     <main className="space-y-6 p-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Radiology</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Booked, imaged, reported, signed. Preliminary reads stay visible after a final one
-          supersedes them.
-        </p>
-      </div>
+      <PageHeading titleKey="radiology.title" subtitleKey="radiology.subtitle" />
 
       <div className="flex flex-wrap gap-2">
         <button

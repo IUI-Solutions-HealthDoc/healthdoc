@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 
 import { ModuleCapabilityGate } from "@/components/common/ModuleCapabilityGate";
+import { PageHeading } from "@/components/common/PageHeading";
 import {
   createPharmacyReturn,
   listPharmacyReturns,
@@ -239,7 +240,7 @@ function PharmacyReturnsContent() {
         <div>
           <div className="flex items-center gap-2">
             <RotateCcw className="h-6 w-6 text-primary" />
-            <h1 className="text-2xl font-bold tracking-tight">Medicine Returns & Quarantine</h1>
+            <PageHeading titleKey="pharmacy.returnsTitle" titleClassName="text-2xl font-bold tracking-tight" />
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
             Process patient & ward medication returns. Restock resalable items or isolate quarantine/scrap from active inventory.

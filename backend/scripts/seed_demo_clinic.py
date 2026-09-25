@@ -176,7 +176,8 @@ async def main() -> int:
             select(Ward).where(Ward.facility_id == facility.id))).scalars().first()
         if ward is None:
             ward = Ward(id=uuid.uuid4(), facility_id=facility.id,
-                        department_id=None, name="Demo Ward")
+                        department_id=None, name="Demo Ward",
+                        name_hi="डेमो वार्ड")
             db.add(ward)
             await db.flush()
 

@@ -5,6 +5,7 @@ import Link from "next/link";
 
 import { ApiError, formatDateTime } from "@/lib/api";
 import { ModuleCapabilityGate } from "@/components/common/ModuleCapabilityGate";
+import { PageHeading } from "@/components/common/PageHeading";
 import { listPrescriptionQueue } from "@/features/pharmacy/api";
 import type { PrescriptionQueueItem } from "@/features/pharmacy/types";
 
@@ -57,12 +58,7 @@ function Queue() {
   return (
     <div className="space-y-6">
       <div className="flex items-baseline justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold">Prescription queue</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {items === null ? "Loading…" : `${total} prescription${total === 1 ? "" : "s"} waiting`}
-          </p>
-        </div>
+        <PageHeading titleKey="pharmacy.queueTitle" />
         <button type="button" onClick={() => void load()} className="text-sm underline">
           Refresh
         </button>

@@ -8,6 +8,7 @@ import Typography from "@mui/material/Typography";
 
 import { toast } from "@/components/ui/toast";
 import { useAuth } from "@/providers/auth-provider";
+import { useLocale } from "@/lib/i18n";
 import { meridian } from "@/styles/theme";
 import { createRefund, getInvoice } from "../api";
 import { useCollectPayment } from "../hooks/useCollectPayment";
@@ -27,6 +28,7 @@ import { SchemeSelector } from "./SchemeSelector";
 import "../receipt-print.css";
 
 export function BillingDashboard() {
+  const { t } = useLocale();
   const {
     invoices,
     loading: listLoading,
@@ -58,7 +60,7 @@ export function BillingDashboard() {
             color: meridian.textPrimary,
           }}
         >
-          Billing
+          {t("billing.title")}
         </Typography>
         <Typography sx={{ m: 0, mt: 0.5, fontSize: "0.875rem", color: meridian.textSecondary }}>
           Build departmental charges, issue invoices, collect payments and print receipts.

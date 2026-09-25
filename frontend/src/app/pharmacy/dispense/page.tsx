@@ -5,6 +5,7 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 import { ModuleCapabilityGate } from "@/components/common/ModuleCapabilityGate";
+import { PageHeading } from "@/components/common/PageHeading";
 import {
   createDispense,
   getPrescription,
@@ -425,7 +426,7 @@ function Dispense() {
     return (
       <div className="space-y-8">
         <section className="surface-card p-6">
-          <h1 className="text-2xl font-semibold">Dispense</h1>
+          <PageHeading titleKey="pharmacy.dispenseTitle" />
           <p className="mt-2 text-sm text-muted-foreground">
             Open a live prescription from the queue before stock can be issued.
           </p>
@@ -444,12 +445,7 @@ function Dispense() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold">Dispense prescription</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {loading ? "Loading live prescription…" : prescriptionId}
-          </p>
-        </div>
+        <PageHeading titleKey="pharmacy.dispenseTitle" />
         <Link href="/pharmacy/prescription-queue" className="text-sm underline">
           Back to queue
         </Link>

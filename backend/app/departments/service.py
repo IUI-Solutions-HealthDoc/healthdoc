@@ -24,7 +24,8 @@ def _clamp_page_size(page_size: int) -> int:
 # --------------------------------------------------------------------------- #
 
 async def create_department(
-    db: AsyncSession, name: str, code: str, facility_id: uuid.UUID
+    db: AsyncSession, name: str, code: str, facility_id: uuid.UUID,
+    name_hi: str | None = None,
 ) -> Department:
     facility = await db.get(Facility, facility_id)
     if facility is None:
@@ -36,7 +37,13 @@ async def create_department(
     if existing is not None:
         raise HTTPException(409, f"Department code '{code}' already exists at this facility")
 
-    dept = Department(id=uuid.uuid4(), name=name, code=code, facility_id=facility_id)
+    dept = Department(
+        id=uuid.uuid4(),
+        name=name,
+        name_hi=name_hi,
+        code=code,
+        facility_id=facility_id,
+    )
     db.add(dept)
     try:
         await db.flush()
@@ -93,6 +100,9 @@ async def update_department(
     code: str | None,
     is_active: bool | None,
     facility_id: uuid.UUID | None = None,
+    name_hi: str | None = None,
+    *,
+    update_name_hi: bool = False,
 ) -> Department:
     dept = await get_department(db, department_id, facility_id)
 
@@ -106,6 +116,8 @@ async def update_department(
 
     if name is not None:
         dept.name = name
+    if update_name_hi:
+        dept.name_hi = name_hi
     if is_active is not None:
         dept.is_active = is_active
 

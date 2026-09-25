@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { ModuleCapabilityGate } from "@/components/common/ModuleCapabilityGate";
+import { PageHeading } from "@/components/common/PageHeading";
 import { LabMisPanel } from "@/features/lab/components/LabMisPanel";
 import { LabWorklistPanel } from "@/features/lab/components/LabWorklistPanel";
 
@@ -13,12 +14,7 @@ function LabPageContent() {
 
   return (
     <div className="space-y-6 p-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Laboratory</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Sample collection, result entry, verification, amendments, and MIS.
-        </p>
-      </div>
+      <PageHeading titleKey="lab.title" subtitleKey="lab.subtitle" />
 
       <div className="flex gap-1 border-b border-border">
         {(

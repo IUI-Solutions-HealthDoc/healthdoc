@@ -14,8 +14,10 @@ import {
   type Room,
 } from "@/features/admin/api/departments";
 import { ApiError } from "@/lib/api";
+import { useLocale } from "@/lib/i18n";
 
 export default function Page() {
+  const { localizeField } = useLocale();
   const [departments, setDepartments] = useState<Department[] | null>(null);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [name, setName] = useState("");
@@ -231,7 +233,7 @@ export default function Page() {
               <option value="">Select</option>
               {departments?.filter((department) => department.is_active).map((department) => (
                 <option key={department.id} value={department.id}>
-                  {department.name}
+                  {localizeField(department.name, department.name_hi)}
                 </option>
               ))}
             </select>
@@ -278,7 +280,7 @@ export default function Page() {
             <section key={department.id} className="p-5">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h2 className="font-medium">{department.name}</h2>
+                  <h2 className="font-medium">{localizeField(department.name, department.name_hi)}</h2>
                   <p className="text-sm text-muted-foreground">
                     {department.code} · {departmentRooms.length} room
                     {departmentRooms.length === 1 ? "" : "s"}

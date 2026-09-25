@@ -33,6 +33,7 @@ import type {
 import { listQueueOpeningOptions, searchPatients } from "@/features/receptionist/api";
 import type { PatientSearchResult } from "@/features/receptionist/types";
 import { getUserFacingError } from "@/lib/api";
+import { PageHeading } from "@/components/common/PageHeading";
 
 const STATUS_BADGES: Record<AppointmentStatus, { label: string; bg: string; text: string }> = {
   booked: { label: "Booked", bg: "bg-blue-50 dark:bg-blue-950/40", text: "text-blue-700 dark:text-blue-300" },
@@ -302,14 +303,11 @@ export default function AppointmentsPage() {
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
-            Appointments & Scheduling
-          </h1>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            Desk appointment scheduling, provider conflict checking, and instant visit check-in.
-          </p>
-        </div>
+        <PageHeading
+          titleKey="receptionist.appointmentsTitle"
+          subtitleKey="receptionist.appointmentsSubtitle"
+          titleClassName="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100"
+        />
         <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"

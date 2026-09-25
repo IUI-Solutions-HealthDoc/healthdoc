@@ -768,6 +768,7 @@ async def create_tariff(
             facility_id=facility_id,
             charge_code=payload.charge_code,
             description=payload.description,
+            description_hi=payload.description_hi,
             charge_category=payload.charge_category,
             unit_price=payload.unit_price,
             effective_from=payload.effective_from,

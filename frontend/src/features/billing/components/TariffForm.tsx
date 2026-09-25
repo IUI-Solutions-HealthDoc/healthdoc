@@ -13,7 +13,8 @@ export function TariffForm({ revision, onClose, onSaved }: {
   revision: ChargeMaster | null; onClose: () => void; onSaved: () => void;
 }) {
   const [values, setValues] = useState({ charge_code: revision?.charge_code ?? "",
-    description: revision?.description ?? "", charge_category: revision?.charge_category ?? "",
+    description: revision?.description ?? "", description_hi: revision?.description_hi ?? "",
+    charge_category: revision?.charge_category ?? "",
     unit_price: "", effective_from: "", scheme_code: revision?.scheme_code ?? "" });
   const [errors, setErrors] = useState<Record<string, string[] | undefined>>({});
   const [review, setReview] = useState<TariffCreateInput | null>(null);
@@ -66,6 +67,9 @@ export function TariffForm({ revision, onClose, onSaved }: {
           onChange={(e) => setValues({ ...values, charge_code: e.target.value })} />
         <TextField label="Description" value={values.description} error={!!errors.description} helperText={errors.description?.[0]}
           onChange={(e) => setValues({ ...values, description: e.target.value })} />
+        <TextField label="Description (Hindi)" value={values.description_hi}
+          error={!!errors.description_hi} helperText={errors.description_hi?.[0] ?? "Optional. Shown when the UI language is Hindi."}
+          onChange={(e) => setValues({ ...values, description_hi: e.target.value })} />
         <TextField select label="Category" value={values.charge_category} disabled={!!revision}
           error={!!errors.charge_category} helperText={errors.charge_category ? "Select a category." : undefined}
           onChange={(e) => setValues({ ...values, charge_category: e.target.value })}>

@@ -3,12 +3,14 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { getUserFacingError } from "@/lib/api";
+import { useLocale } from "@/lib/i18n";
 import {
   listPlatformFacilities,
   type PlatformFacility,
 } from "@/features/platform/api";
 
 export default function Page() {
+  const { localizeField } = useLocale();
   const [facilities, setFacilities] = useState<PlatformFacility[]>([]);
   const [total, setTotal] = useState(0);
   const [query, setQuery] = useState("");
@@ -99,7 +101,7 @@ export default function Page() {
               {paginatedFacilities.map((facility) => (
                 <li key={facility.id} className="grid gap-3 px-5 py-4 sm:grid-cols-[1fr_auto]">
                   <div>
-                    <p className="font-medium">{facility.name}</p>
+                    <p className="font-medium">{localizeField(facility.name, facility.name_hi)}</p>
                     <p className="mt-1 text-sm text-muted-foreground">
                       {facility.code} · {facility.state_code}
                       {facility.district ? ` · ${facility.district}` : ""}

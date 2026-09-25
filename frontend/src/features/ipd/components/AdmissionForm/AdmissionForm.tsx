@@ -17,6 +17,7 @@ import { AdmissionFormProps } from "./AdmissionForm.types";
 import { DEFAULT_VALUES } from "./constants";
 import { addAdmissionSchema, AddAdmissionSchema } from "./validation";
 import { getPendingAdmissions, type PendingAdmissionItem } from "@/features/ipd/api/ipd";
+import { useLocale } from "@/lib/i18n";
 
 export default function AdmissionForm({
   wards,
@@ -24,6 +25,7 @@ export default function AdmissionForm({
   isSubmitting = false,
   onSubmit,
 }: AdmissionFormProps) {
+  const { localizeField } = useLocale();
   const {
     register,
     handleSubmit,
@@ -167,7 +169,10 @@ export default function AdmissionForm({
 
           <SelectField
             label="Ward"
-            options={wards.map((ward) => ({ label: ward.name, value: ward.id }))}
+            options={wards.map((ward) => ({
+              label: localizeField(ward.name, ward.name_hi),
+              value: ward.id,
+            }))}
             registration={register("ward_id", {
               onChange: () => setValue("bed_id", ""),
             })}

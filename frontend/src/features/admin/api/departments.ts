@@ -3,6 +3,7 @@ import { api, newIdempotencyKey } from "@/lib/api";
 export interface Department {
   id: string;
   name: string;
+  name_hi?: string | null;
   code: string;
   facility_id: string;
   is_active: boolean;

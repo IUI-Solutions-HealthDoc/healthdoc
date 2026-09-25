@@ -26,6 +26,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { useCurrentUser } from "@/features/session/useCurrentUser";
 import { ApiError } from "@/lib/api";
+import { useLocale } from "@/lib/i18n";
 
 import {
   getOverview,
@@ -72,6 +73,7 @@ function Stat({ label, value, tone }: { label: string; value: number; tone?: str
 }
 
 export function HodDashboard() {
+  const { localizeField } = useLocale();
   const { user, loading: sessionLoading } = useCurrentUser();
   const department = user?.department ?? null;
 
@@ -143,10 +145,12 @@ export function HodDashboard() {
     <div className="space-y-8 p-6">
       <div className="flex flex-wrap items-baseline justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-semibold">{department.name}</h1>
+          <h1 className="text-3xl font-semibold">
+            {localizeField(department.name, department.name_hi)}
+          </h1>
           <p className="mt-2 text-sm text-muted-foreground">
             Queues, workload and approvals for {facilityToday(user!.facility.timezone)} at{" "}
-            {user!.facility.name}.
+            {localizeField(user!.facility.name, user!.facility.name_hi)}.
           </p>
         </div>
         <button type="button" className="text-sm underline" onClick={() => void load()}>

@@ -146,12 +146,14 @@ async def seed(users: list[tuple[str, str]]) -> None:
             text(
                 """
                 INSERT INTO facilities
-                    (id, code, name, state_code, timezone, facility_type, is_active)
+                    (id, code, name, name_hi, state_code, timezone, facility_type, is_active)
                 VALUES
-                    (:id, 'DEV001', 'HealthDoc Development Hospital', 'DL',
+                    (:id, 'DEV001', 'HealthDoc Development Hospital',
+                     'हेल्थडॉक विकास अस्पताल', 'DL',
                      'Asia/Kolkata', 'hospital', true)
                 ON CONFLICT (id) DO UPDATE SET
                     name = EXCLUDED.name,
+                    name_hi = EXCLUDED.name_hi,
                     timezone = EXCLUDED.timezone,
                     is_active = true
                 """
@@ -172,9 +174,11 @@ async def seed(users: list[tuple[str, str]]) -> None:
         await session.execute(
             text(
                 """
-                INSERT INTO departments (id, name, code, facility_id)
-                VALUES (:id, 'General Medicine', 'GENMED', :facility_id)
-                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name
+                INSERT INTO departments (id, name, name_hi, code, facility_id)
+                VALUES (:id, 'General Medicine', 'जनरल मेडिसिन', 'GENMED', :facility_id)
+                ON CONFLICT (id) DO UPDATE SET
+                    name = EXCLUDED.name,
+                    name_hi = EXCLUDED.name_hi
                 """
             ),
             {"id": DEPARTMENT_ID, "facility_id": FACILITY_ID},
@@ -305,12 +309,12 @@ async def seed(users: list[tuple[str, str]]) -> None:
                 text(
                     """
                     INSERT INTO charge_master
-                        (id, facility_id, charge_code, description, charge_category,
-                         unit_price, scheme_code, effective_from, effective_to,
-                         is_active, created_by)
+                        (id, facility_id, charge_code, description, description_hi,
+                         charge_category, unit_price, scheme_code, effective_from,
+                         effective_to, is_active, created_by)
                     SELECT
                         :id, :facility_id, 'REGISTRATION',
-                        'OPD registration fee', 'registration',
+                        'OPD registration fee', 'OPD पंजीकरण शुल्क', 'registration',
                         50.00, NULL, DATE '2020-01-01', NULL, true, :created_by
                     WHERE NOT EXISTS (
                         SELECT 1 FROM charge_master
@@ -326,6 +330,20 @@ async def seed(users: list[tuple[str, str]]) -> None:
                     "facility_id": FACILITY_ID,
                     "created_by": tariff_author,
                 },
+            )
+            # Existing stacks already have REGISTRATION without description_hi.
+            await session.execute(
+                text(
+                    """
+                    UPDATE charge_master
+                       SET description_hi = 'OPD पंजीकरण शुल्क'
+                     WHERE facility_id = :facility_id
+                       AND charge_code = 'REGISTRATION'
+                       AND scheme_code IS NULL
+                       AND (description_hi IS NULL OR description_hi = '')
+                    """
+                ),
+                {"facility_id": FACILITY_ID},
             )
 
         # ------------------------------------------------------------------

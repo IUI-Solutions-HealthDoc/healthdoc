@@ -33,6 +33,7 @@ class PlatformFacilityOut(BaseModel):
     id: uuid.UUID
     code: str
     name: str
+    name_hi: str | None = None
     state_code: str
     district: str | None
     facility_type: str | None
