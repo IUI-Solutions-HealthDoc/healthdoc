@@ -2,7 +2,8 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
-from fastapi import BackgroundTasks
+import pytest
+from fastapi import BackgroundTasks, HTTPException
 from sqlalchemy import select
 
 from app.integrations.abdm import external_router, job_runner, jobs, operations
@@ -13,11 +14,62 @@ from tests.integrations.test_abdm_transfer_scope import transfer_case as transfe
 transfer_case = transfer_fixture
 
 
-async def test_operator_retry_is_facility_scoped_and_does_not_reset_active_jobs(db, seed):
+async def test_old_jobs_freeze_without_touching_new_work(db, seed):
     from types import SimpleNamespace
 
-    import pytest
-    from fastapi import HTTPException
+    dept, _, doctor = seed
+    actor = SimpleNamespace(id=doctor.id, facility_id=dept.facility_id)
+    old_id = await jobs.enqueue(
+        db, kind="context_notify", target_id=uuid.uuid4(), facility_id=dept.facility_id
+    )
+    await db.commit()
+    cutoff = datetime.now(UTC)
+    new_id = await jobs.enqueue(
+        db, kind="context_notify", target_id=uuid.uuid4(), facility_id=dept.facility_id
+    )
+    await db.commit()
+    # SQLite's CURRENT_TIMESTAMP has only second precision. Set explicit
+    # sides of the cutoff so this test proves the filter, not clock rounding.
+    (await db.get(jobs.AbdmJob, old_id)).created_at = cutoff - timedelta(days=1)
+    (await db.get(jobs.AbdmJob, new_id)).created_at = cutoff + timedelta(days=1)
+    await db.commit()
+
+    with pytest.raises(ValueError, match="no jobs frozen"):
+        await jobs.freeze_pending_before(
+            db, facility_id=dept.facility_id, before=cutoff, expected_count=2
+        )
+    assert (await db.get(jobs.AbdmJob, old_id)).status == "pending"
+    assert (await db.get(jobs.AbdmJob, new_id)).status == "pending"
+
+    assert await jobs.freeze_pending_before(
+        db, facility_id=dept.facility_id, before=cutoff, expected_count=1
+    ) == 1
+    await db.commit()
+    assert (await db.get(jobs.AbdmJob, old_id)).status == "frozen"
+    assert await jobs.claim(db, ident=old_id) is None
+    frozen = await operations.list_jobs(actor, db, status="frozen", offset=0, limit=50)
+    assert [row.id for row in frozen] == [old_id]
+    with pytest.raises(HTTPException) as caught:
+        await operations.retry_job(old_id, actor, db, "frozen-retry")
+    assert caught.value.status_code == 409
+    assert caught.value.detail["code"] == "job_frozen"
+    assert (await jobs.claim(db, ident=new_id)).id == new_id
+
+
+async def test_freeze_requires_aware_cutoff_and_positive_exact_count(db, seed):
+    dept, _, _ = seed
+    with pytest.raises(ValueError, match="UTC offset"):
+        await jobs.freeze_pending_before(
+            db, facility_id=dept.facility_id, before=datetime.now(), expected_count=1
+        )
+    with pytest.raises(ValueError, match="positive"):
+        await jobs.freeze_pending_before(
+            db, facility_id=dept.facility_id, before=datetime.now(UTC), expected_count=0
+        )
+
+
+async def test_operator_retry_is_facility_scoped_and_does_not_reset_active_jobs(db, seed):
+    from types import SimpleNamespace
 
     dept, _, doctor = seed
     actor = SimpleNamespace(id=doctor.id, facility_id=dept.facility_id)

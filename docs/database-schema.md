@@ -206,6 +206,7 @@ do not merge out of order.**
 | 0085 | abha_profile_token_kind | ALTER patients: abha_profile_token_kind | Which login family issued the profile X-token: `abha` opens /v3/profile/account, `phr` opens /v3/phr/web/login/profile. Default `abha` is the true value for every earlier token. |
 | 0086 | catalogue_hindi_labels | ALTER facilities: name_hi; ALTER departments: name_hi; ALTER wards: name_hi; ALTER charge_master: description_hi | Optional Hindi catalogue labels; English remains the fallback. Widens the existing profile-token kind to varchar(50) for local schema parity. |
 | 0087 | appointment_service_hindi | ALTER appointment_services: name_hi | Optional Hindi appointment-service label; English remains the fallback. |
+| 0088 | abdm_frozen_delivery_jobs | ALTER abdm_jobs status CHECK | Adds `frozen` for historical jobs held during a service-ID cutover; the delivery worker and operator retry must not dispatch them. |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -1737,7 +1738,7 @@ staff APIs remain under `/api/v1/abdm/...`.
 facility_id UUID NOT NULL → facilities
 kind varchar(50) NOT NULL                        -- context_notify|hip_transfer|hip_notify|link_token|link_context|hiu_notify|hiu_consent|hiu_request|callback_ack|hiu_fetch
 target_id UUID NOT NULL                          -- kind-specific context/request ID
-status varchar(50) NOT NULL DEFAULT 'pending'     -- pending|leased|done|dead
+status varchar(50) NOT NULL DEFAULT 'pending'     -- pending|leased|done|dead|frozen
 attempts integer NOT NULL DEFAULT 0
 available_at timestamptz NOT NULL
 lease_token UUID · lease_until timestamptz

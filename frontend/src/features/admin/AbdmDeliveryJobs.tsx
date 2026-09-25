@@ -32,7 +32,7 @@ export function AbdmDeliveryJobs() {
   return <section className="surface-card space-y-4 p-5" aria-label={t("admin.abdm.jobs.title")}>
     <h2 className="text-xl font-semibold">{t("admin.abdm.jobs.title")}</h2>
     <p className="text-sm text-muted-foreground">{t("admin.abdm.jobs.hint")}</p>
-    <label className="flex items-center gap-3"><span>{t("admin.abdm.jobs.deliveryState")}</span><select className="rounded border border-border p-2" value={status} onChange={(event) => { setStatus(event.target.value); setOffset(0); }}>{["dead", "pending", "leased", "done"].map((value) => <option key={value}>{value}</option>)}</select></label>
+    <label className="flex items-center gap-3"><span>{t("admin.abdm.jobs.deliveryState")}</span><select className="rounded border border-border p-2" value={status} onChange={(event) => { setStatus(event.target.value); setOffset(0); }}>{["dead", "pending", "leased", "done", "frozen"].map((value) => <option key={value}>{value}</option>)}</select></label>
     {error && <p role="alert" className="text-danger">{error}</p>}
     {loading && <p role="status">{t("admin.abdm.jobs.loading")}</p>}
     {!loading && !error && !jobs.length && <p>{t("admin.abdm.jobs.emptyPage")}</p>}

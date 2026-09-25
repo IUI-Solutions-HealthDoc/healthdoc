@@ -48,7 +48,10 @@ class AbdmJob(Base, UUIDPk, Timestamps):
             "kind IN ('context_notify','hip_transfer','hip_notify','link_token','link_context','hiu_notify','hiu_consent','hiu_request','callback_ack','hiu_fetch')",
             name="abdm_job_kind",
         ),
-        CheckConstraint("status IN ('pending','leased','done','dead')", name="abdm_job_status"),
+        CheckConstraint(
+            "status IN ('pending','leased','done','dead','frozen')",
+            name="abdm_job_status",
+        ),
         CheckConstraint("attempts >= 0", name="abdm_job_attempts"),
         CheckConstraint(
             "(lease_token IS NULL) = (lease_until IS NULL)", name="abdm_job_lease_pair"
@@ -150,6 +153,50 @@ async def claim(
     row.attempts += 1
     await db.commit()
     return row
+
+
+async def freeze_pending_before(
+    db: AsyncSession,
+    *,
+    facility_id: uuid.UUID,
+    before: datetime,
+    expected_count: int,
+) -> int:
+    """Stage an exact, facility-scoped old-queue freeze in the caller's transaction.
+
+    A count mismatch aborts before changing any row. The worker only claims
+    pending/leased jobs, and the operator retry endpoint refuses frozen jobs.
+    The explicit cutoff prevents new service-ID work from joining this batch.
+    """
+    if before.tzinfo is None or before.utcoffset() is None:
+        raise ValueError("Cutover timestamp must include a UTC offset")
+    if expected_count < 1:
+        raise ValueError("Expected count must be positive")
+    rows = (
+        (
+            await db.execute(
+                select(AbdmJob)
+                .where(
+                    AbdmJob.facility_id == facility_id,
+                    AbdmJob.status == "pending",
+                    AbdmJob.created_at < before,
+                )
+                .order_by(AbdmJob.id)
+                .with_for_update()
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if len(rows) != expected_count:
+        raise ValueError(
+            f"Expected {expected_count} old pending jobs, found {len(rows)}; no jobs frozen"
+        )
+    for row in rows:
+        row.status = "frozen"
+        row.last_error = "Frozen at service-ID cutover; reconcile before delivery"
+    await db.flush()
+    return len(rows)
 
 
 async def finish(
