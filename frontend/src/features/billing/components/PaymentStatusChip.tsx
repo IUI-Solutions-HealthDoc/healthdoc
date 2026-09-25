@@ -1,9 +1,11 @@
 "use client";
 
 import { StatusChip } from "@/components/ui/StatusChip";
-import { PAYMENT_STATUS_LABELS } from "../constants";
+import { useLocale } from "@/lib/i18n";
+import { paymentStatusLabel } from "../lib/labels";
 import type { PaymentStatus } from "../types";
 
 export function PaymentStatusChip({ status }: { status: PaymentStatus }) {
-  return <StatusChip status={status} label={PAYMENT_STATUS_LABELS[status]} />;
+  const { t } = useLocale();
+  return <StatusChip status={status} label={paymentStatusLabel(t, status)} />;
 }

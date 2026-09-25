@@ -32,6 +32,7 @@ import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 
 import { toast } from "@/components/ui/toast";
+import { useLocale } from "@/lib/i18n";
 
 import {
   cancelOtCase,
@@ -44,6 +45,7 @@ import {
 import type { OtSchedule } from "../types";
 
 export function OtDashboard() {
+  const { t } = useLocale();
   const [schedules, setSchedules] = useState<OtSchedule[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [theatreTab, setTheatreTab] = useState<string>("ALL");
@@ -162,11 +164,11 @@ export function OtDashboard() {
         scheduled_start: new Date(newSchedule.scheduled_start).toISOString(),
         scheduled_end: new Date(newSchedule.scheduled_end).toISOString(),
       });
-      toast.success("OT Case scheduled successfully");
+      toast.success(t("ot.toast.scheduled"));
       setScheduleModalOpen(false);
       void loadSchedules();
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Failed to schedule OT case");
+      toast.error(e instanceof Error ? e.message : t("ot.toast.scheduleFailed"));
     }
   };
 
@@ -179,21 +181,21 @@ export function OtDashboard() {
         sign_out_confirmed: checklist.sign_out,
         notes: checklist.notes,
       });
-      toast.success("WHO Surgical Safety Checklist recorded");
+      toast.success(t("ot.toast.checklistRecorded"));
       setChecklistModalOpen(false);
       void loadSchedules();
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Failed to update safety checklist");
+      toast.error(e instanceof Error ? e.message : t("ot.toast.checklistFailed"));
     }
   };
 
   const handleStartCase = async (schedule: OtSchedule) => {
     try {
       await startOtCase(schedule.id);
-      toast.success(`Case started in ${schedule.theatre_number}`);
+      toast.success(t("ot.toast.started", { theatre: schedule.theatre_number }));
       void loadSchedules();
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Failed to start case");
+      toast.error(e instanceof Error ? e.message : t("ot.toast.startFailed"));
     }
   };
 
@@ -212,11 +214,11 @@ export function OtDashboard() {
         recovery_status: completeForm.recovery_status,
         notes: completeForm.notes,
       });
-      toast.success("Case completed and operative record committed");
+      toast.success(t("ot.toast.completed"));
       setCompleteModalOpen(false);
       void loadSchedules();
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Failed to complete surgery");
+      toast.error(e instanceof Error ? e.message : t("ot.toast.completeFailed"));
     }
   };
 
@@ -224,11 +226,11 @@ export function OtDashboard() {
     if (!activeSchedule || !cancelReason.trim()) return;
     try {
       await cancelOtCase(activeSchedule.id, cancelReason.trim());
-      toast.success("OT Case cancelled");
+      toast.success(t("ot.toast.cancelled"));
       setCancelModalOpen(false);
       void loadSchedules();
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Failed to cancel case");
+      toast.error(e instanceof Error ? e.message : t("ot.toast.cancelFailed"));
     }
   };
 
@@ -248,19 +250,19 @@ export function OtDashboard() {
         <Box>
           <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
             <LocalHospitalOutlinedIcon color="primary" sx={{ fontSize: 32 }} />
-            <Typography variant="h5" sx={{ fontWeight: 800 }}>
-              Operation Theatre (OT) & Surgical Safety
+            <Typography component="h1" variant="h5" sx={{ fontWeight: 800 }}>
+              {t("ot.title")}
             </Typography>
-            <Chip label="NABH SURGICAL SAFETY" color="primary" size="small" sx={{ fontWeight: 700 }} />
+            <Chip label={t("ot.chipSafety")} color="primary" size="small" sx={{ fontWeight: 700 }} />
           </Box>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-            Real-time theatre scheduling, WHO 3-Phase surgical safety checklists, and operative records.
+            {t("ot.subtitle")}
           </Typography>
         </Box>
 
         <Box sx={{ display: "flex", gap: 1.5 }}>
           <Button variant="outlined" startIcon={<RefreshIcon />} onClick={loadSchedules} disabled={loading}>
-            Refresh
+            {t("common.refresh")}
           </Button>
           <Button
             variant="contained"
@@ -268,7 +270,7 @@ export function OtDashboard() {
             onClick={() => setScheduleModalOpen(true)}
             sx={{ fontWeight: 700 }}
           >
-            Schedule Surgery
+            {t("ot.scheduleSurgery")}
           </Button>
         </Box>
       </Box>
@@ -285,7 +287,7 @@ export function OtDashboard() {
         <Card variant="outlined" sx={{ borderRadius: 2 }}>
           <CardContent sx={{ p: 2, "&:last-child": { pb: 2 } }}>
             <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
-              SCHEDULED TODAY
+              {t("ot.metric.scheduledToday")}
             </Typography>
             <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5, color: "#1565c0" }}>
               {schedules.filter((s) => s.status === "scheduled").length}
@@ -296,7 +298,7 @@ export function OtDashboard() {
         <Card variant="outlined" sx={{ borderRadius: 2 }}>
           <CardContent sx={{ p: 2, "&:last-child": { pb: 2 } }}>
             <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
-              IN PROGRESS
+              {t("ot.metric.inProgress")}
             </Typography>
             <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5, color: "#e65100" }}>
               {schedules.filter((s) => s.status === "in_progress").length}
@@ -307,7 +309,7 @@ export function OtDashboard() {
         <Card variant="outlined" sx={{ borderRadius: 2 }}>
           <CardContent sx={{ p: 2, "&:last-child": { pb: 2 } }}>
             <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
-              WHO SAFETY VERIFIED
+              {t("ot.metric.whoVerified")}
             </Typography>
             <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5, color: "#2e7d32" }}>
               {schedules.filter((s) => s.surgical_safety_confirmed).length}
@@ -318,7 +320,7 @@ export function OtDashboard() {
         <Card variant="outlined" sx={{ borderRadius: 2 }}>
           <CardContent sx={{ p: 2, "&:last-child": { pb: 2 } }}>
             <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
-              COMPLETED CASES
+              {t("ot.metric.completed")}
             </Typography>
             <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5, color: "text.primary" }}>
               {schedules.filter((s) => s.status === "completed").length}
@@ -330,10 +332,10 @@ export function OtDashboard() {
       {/* Theatre Selection Tabs */}
       <Box sx={{ borderBottom: 1, borderColor: "divider", mb: 2 }}>
         <Tabs value={theatreTab} onChange={(_, v) => setTheatreTab(v)}>
-          <Tab label="All Theatres" value="ALL" sx={{ fontWeight: 700 }} />
-          <Tab label="OT-1 (Main Laparoscopic)" value="OT-1" sx={{ fontWeight: 700 }} />
-          <Tab label="OT-2 (Orthopaedic)" value="OT-2" sx={{ fontWeight: 700 }} />
-          <Tab label="Minor OT" value="Minor-OT" sx={{ fontWeight: 700 }} />
+          <Tab label={t("ot.tab.allTheatres")} value="ALL" sx={{ fontWeight: 700 }} />
+          <Tab label={t("ot.tab.ot1Main")} value="OT-1" sx={{ fontWeight: 700 }} />
+          <Tab label={t("ot.tab.ot2Ortho")} value="OT-2" sx={{ fontWeight: 700 }} />
+          <Tab label={t("ot.tab.minorOt")} value="Minor-OT" sx={{ fontWeight: 700 }} />
         </Tabs>
       </Box>
 
@@ -342,12 +344,12 @@ export function OtDashboard() {
         <Table>
           <TableHead sx={{ bgcolor: "action.hover" }}>
             <TableRow>
-              <TableCell sx={{ fontWeight: 700 }}>Theatre & Time</TableCell>
-              <TableCell sx={{ fontWeight: 700 }}>Patient</TableCell>
-              <TableCell sx={{ fontWeight: 700 }}>Procedure</TableCell>
-              <TableCell sx={{ fontWeight: 700 }}>WHO Safety Checklist</TableCell>
-              <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
-              <TableCell align="right" sx={{ fontWeight: 700 }}>Actions</TableCell>
+              <TableCell sx={{ fontWeight: 700 }}>{t("ot.col.theatreTime")}</TableCell>
+              <TableCell sx={{ fontWeight: 700 }}>{t("ot.col.patient")}</TableCell>
+              <TableCell sx={{ fontWeight: 700 }}>{t("ot.col.procedure")}</TableCell>
+              <TableCell sx={{ fontWeight: 700 }}>{t("ot.col.whoSafety")}</TableCell>
+              <TableCell sx={{ fontWeight: 700 }}>{t("ot.col.status")}</TableCell>
+              <TableCell align="right" sx={{ fontWeight: 700 }}>{t("ot.col.actions")}</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -375,14 +377,14 @@ export function OtDashboard() {
                     {sch.surgical_safety_confirmed ? (
                       <Chip
                         icon={<CheckIcon fontSize="small" />}
-                        label="3-Phase Verified"
+                        label={t("ot.checklist.verified")}
                         size="small"
                         color="success"
                         sx={{ fontWeight: 700 }}
                       />
                     ) : (
                       <Chip
-                        label="Checklist Pending"
+                        label={t("ot.checklist.pending")}
                         size="small"
                         color="warning"
                         variant="outlined"
@@ -392,10 +394,10 @@ export function OtDashboard() {
                   </TableCell>
 
                   <TableCell>
-                    {sch.status === "in_progress" && <Chip label="IN PROGRESS" size="small" color="warning" sx={{ fontWeight: 700 }} />}
-                    {sch.status === "scheduled" && <Chip label="SCHEDULED" size="small" color="info" sx={{ fontWeight: 700 }} />}
-                    {sch.status === "completed" && <Chip label="COMPLETED" size="small" color="success" sx={{ fontWeight: 700 }} />}
-                    {sch.status === "cancelled" && <Chip label="CANCELLED" size="small" color="default" sx={{ fontWeight: 700 }} />}
+                    {sch.status === "in_progress" && <Chip label={t("ot.status.inProgress")} size="small" color="warning" sx={{ fontWeight: 700 }} />}
+                    {sch.status === "scheduled" && <Chip label={t("ot.status.scheduled")} size="small" color="info" sx={{ fontWeight: 700 }} />}
+                    {sch.status === "completed" && <Chip label={t("ot.status.completed")} size="small" color="success" sx={{ fontWeight: 700 }} />}
+                    {sch.status === "cancelled" && <Chip label={t("ot.status.cancelled")} size="small" color="default" sx={{ fontWeight: 700 }} />}
                   </TableCell>
 
                   <TableCell align="right">
@@ -415,7 +417,7 @@ export function OtDashboard() {
                           setChecklistModalOpen(true);
                         }}
                       >
-                        WHO Checklist
+                        {t("ot.action.whoChecklist")}
                       </Button>
 
                       {sch.status === "scheduled" && (
@@ -426,7 +428,7 @@ export function OtDashboard() {
                           startIcon={<PlayArrowIcon />}
                           onClick={() => handleStartCase(sch)}
                         >
-                          Start
+                          {t("ot.action.start")}
                         </Button>
                       )}
 
@@ -441,7 +443,7 @@ export function OtDashboard() {
                             setCompleteModalOpen(true);
                           }}
                         >
-                          Complete
+                          {t("ot.action.complete")}
                         </Button>
                       )}
 
@@ -454,7 +456,7 @@ export function OtDashboard() {
                             setCancelModalOpen(true);
                           }}
                         >
-                          Cancel
+                          {t("ot.action.cancel")}
                         </Button>
                       )}
                     </Box>
@@ -506,7 +508,7 @@ export function OtDashboard() {
           />
         </DialogContent>
         <DialogActions sx={{ p: 2 }}>
-          <Button onClick={() => setScheduleModalOpen(false)}>Cancel</Button>
+          <Button onClick={() => setScheduleModalOpen(false)}>{t("common.cancel")}</Button>
           <Button variant="contained" onClick={handleCreateSchedule} sx={{ fontWeight: 700 }}>
             Confirm Booking
           </Button>
@@ -516,11 +518,14 @@ export function OtDashboard() {
       {/* WHO Surgical Safety Checklist Modal */}
       <Dialog open={checklistModalOpen} onClose={() => setChecklistModalOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle sx={{ fontWeight: 800 }}>
-          WHO Surgical Safety Checklist Sign-off
+          {t("ot.checklist.modalTitle")}
         </DialogTitle>
         <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 1 }}>
           <Typography variant="body2" color="text.secondary">
-            Case: {activeSchedule?.procedure_name} ({activeSchedule?.theatre_number})
+            {t("ot.checklist.caseLabel", {
+              procedure: activeSchedule?.procedure_name ?? "",
+              theatre: activeSchedule?.theatre_number ?? "",
+            })}
           </Typography>
 
           <Box sx={{ p: 1.5, bgcolor: "#e3f2fd", borderRadius: 1.5, border: "1px solid #bbdefb" }}>
@@ -566,7 +571,7 @@ export function OtDashboard() {
           </Box>
 
           <TextField
-            label="Verification Notes & Team Observations"
+            label={t("ot.checklist.notesLabel")}
             multiline
             rows={2}
             value={checklist.notes}
@@ -575,9 +580,9 @@ export function OtDashboard() {
           />
         </DialogContent>
         <DialogActions sx={{ p: 2 }}>
-          <Button onClick={() => setChecklistModalOpen(false)}>Cancel</Button>
+          <Button onClick={() => setChecklistModalOpen(false)}>{t("common.cancel")}</Button>
           <Button variant="contained" color="success" onClick={handleUpdateChecklist} sx={{ fontWeight: 700 }}>
-            Sign & Verify Checklist
+            {t("ot.checklist.signAndVerify")}
           </Button>
         </DialogActions>
       </Dialog>
@@ -653,7 +658,7 @@ export function OtDashboard() {
           />
         </DialogContent>
         <DialogActions sx={{ p: 2 }}>
-          <Button onClick={() => setCompleteModalOpen(false)}>Cancel</Button>
+          <Button onClick={() => setCompleteModalOpen(false)}>{t("common.cancel")}</Button>
           <Button variant="contained" color="success" onClick={handleCompleteCase} sx={{ fontWeight: 700 }}>
             Commit Operative Record
           </Button>
@@ -676,7 +681,7 @@ export function OtDashboard() {
           />
         </DialogContent>
         <DialogActions sx={{ p: 2 }}>
-          <Button onClick={() => setCancelModalOpen(false)}>Back</Button>
+          <Button onClick={() => setCancelModalOpen(false)}>{t("common.back")}</Button>
           <Button variant="contained" color="error" onClick={handleCancelCase} sx={{ fontWeight: 700 }}>
             Confirm Cancellation
           </Button>

@@ -8,13 +8,13 @@ export default function WardSelector({
   selectedWard,
   onChange,
 }: WardSelectorProps) {
-  const { localizeField } = useLocale();
+  const { t, localizeField } = useLocale();
   const activeWards = wards.filter((ward) => ward.is_active);
 
   return (
     <section className="surface-card p-6">
       <label htmlFor="ward" className="mb-2 block text-sm font-semibold">
-        Ward
+        {t("ipd.ward")}
       </label>
 
       <select

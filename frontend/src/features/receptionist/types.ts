@@ -58,6 +58,7 @@ export interface VisitWithoutToken {
   thid: string | null;
   department_id: string | null;
   department_name: string | null;
+  department_name_hi?: string | null;
   visit_type: string;
   visit_date: string;
 }
@@ -231,6 +232,7 @@ export interface QueueOpeningOption {
   staff_name: string;
   department_id: string;
   department_name: string;
+  department_name_hi?: string | null;
   room_id: string | null;
   room_number: string | null;
   shift: string;
@@ -301,6 +303,7 @@ export interface StaleVisitCandidate {
   patient_uhid: string;
   department_id?: string | null;
   department_name?: string | null;
+  department_name_hi?: string | null;
   visit_date: string;
   current_status: string;
   live_token_id?: string | null;

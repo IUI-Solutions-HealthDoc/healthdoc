@@ -63,7 +63,7 @@ export function BillingDashboard() {
           {t("billing.title")}
         </Typography>
         <Typography sx={{ m: 0, mt: 0.5, fontSize: "0.875rem", color: meridian.textSecondary }}>
-          Build departmental charges, issue invoices, collect payments and print receipts.
+          {t("billing.subtitle")}
         </Typography>
       </Box>
 
@@ -109,6 +109,7 @@ function InvoiceWorkspace({ selectedId, refreshList }: {
   // All invoice-specific state shares this keyed lifetime: detail, editor,
   // preview, collection and reversal. A response may finish for the previous
   // invoice, but it cannot update the next invoice's workspace or dialogs.
+  const { t } = useLocale();
   const { user } = useAuth();
   const [refundBusy, setRefundBusy] = useState(false);
   const { invoice, setInvoice, loading: detailLoading, error: detailError, refresh } = useInvoiceDetail(selectedId);
@@ -150,7 +151,7 @@ function InvoiceWorkspace({ selectedId, refreshList }: {
           <Button onClick={() => void refresh()}>Retry invoice</Button>
         </Box>
       ) : detailLoading || !editor.draft || editor.draft.id !== selectedId ? (
-        <Typography sx={{ color: meridian.textSecondary }}>Loading invoice…</Typography>
+        <Typography sx={{ color: meridian.textSecondary }}>{t("billing.loadingInvoice")}</Typography>
       ) : (
         <>
           {!editor.canBuild ? (
@@ -217,7 +218,7 @@ function InvoiceWorkspace({ selectedId, refreshList }: {
                 onClick={() => void editor.build()}
                 sx={{ textTransform: "none", fontWeight: 600, borderRadius: "10px" }}
               >
-                Build charges
+                {t("billing.buildCharges")}
               </Button>
               <Button
                 variant="outlined"
@@ -225,7 +226,7 @@ function InvoiceWorkspace({ selectedId, refreshList }: {
                 onClick={() => editor.setPreviewOpen(true)}
                 sx={{ textTransform: "none", fontWeight: 600, borderRadius: "10px" }}
               >
-                Preview
+                {t("billing.preview")}
               </Button>
               <Button
                 variant="contained"
@@ -236,7 +237,7 @@ function InvoiceWorkspace({ selectedId, refreshList }: {
                 }}
                 sx={{ textTransform: "none", fontWeight: 600, borderRadius: "10px" }}
               >
-                Issue…
+                {t("billing.issue")}
               </Button>
             </Stack>
           ) : null}

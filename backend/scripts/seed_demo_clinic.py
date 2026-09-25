@@ -180,6 +180,14 @@ async def main() -> int:
                         name_hi="डेमो वार्ड")
             db.add(ward)
             await db.flush()
+        elif not (ward.name_hi or "").strip():
+            # Older demo / seed rows predate name_hi; HI locale would otherwise
+            # keep showing the English catalogue label forever.
+            if ward.name == "Demo Ward":
+                ward.name_hi = "डेमो वार्ड"
+            elif ward.name == "General Ward A":
+                ward.name_hi = "जनरल वार्ड ए"
+            await db.flush()
 
         beds = list((await db.execute(
             select(Bed).where(Bed.ward_id == ward.id))).scalars().all())

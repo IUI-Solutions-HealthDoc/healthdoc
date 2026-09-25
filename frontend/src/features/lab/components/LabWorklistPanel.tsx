@@ -31,16 +31,28 @@ import type {
 } from "@/features/lab/types";
 import { ApiError, formatDateTime } from "@/lib/api";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/AsyncState";
+import { useLocale, type MessageKey } from "@/lib/i18n";
 import { useAuth } from "@/providers/auth-provider";
 import StructuredResultForm from "./StructuredResultForm";
 
-const STATUS_FILTERS = [
-  { value: "all", label: "All" },
-  { value: "placed", label: "To collect" },
-  { value: "in_progress", label: "In progress" },
-  { value: "completed", label: "To verify" },
-  { value: "released", label: "Released" },
-] as const;
+const STATUS_FILTERS: { value: string; labelKey: MessageKey }[] = [
+  { value: "all", labelKey: "lab.filter.all" },
+  { value: "placed", labelKey: "lab.filter.toCollect" },
+  { value: "in_progress", labelKey: "lab.filter.inProgress" },
+  { value: "completed", labelKey: "lab.filter.toVerify" },
+  { value: "released", labelKey: "lab.filter.released" },
+];
+
+const WORKLIST_COLUMNS: MessageKey[] = [
+  "lab.col.accession",
+  "lab.col.test",
+  "lab.col.sample",
+  "lab.col.barcode",
+  "lab.col.specimen",
+  "lab.col.status",
+  "lab.col.ordered",
+  "lab.col.actions",
+];
 
 const PAGE_SIZE = 20;
 
@@ -110,6 +122,7 @@ function ResultHistory({ items }: { items: LabResult[] }) {
 }
 
 export function LabWorklistPanel() {
+  const { t } = useLocale();
   const { user } = useAuth();
   const canManageResults = user?.role === "lab_tech";
   const [rows, setRows] = useState<LabOrderItem[] | null>(null);
@@ -164,9 +177,9 @@ export function LabWorklistPanel() {
         setHistory([]);
       }
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Failed to load lab worklist");
+      setError(reason instanceof ApiError ? reason.message : t("lab.errLoadWorklist"));
     }
-  }, [page, selectedId, statusFilter]);
+  }, [page, selectedId, statusFilter, t]);
 
   useEffect(() => {
     void load();
@@ -193,7 +206,7 @@ export function LabWorklistPanel() {
       if (reason instanceof ApiError && reason.code === 404) {
         setHistory([]);
       } else {
-        setError(reason instanceof Error ? reason.message : "Could not load result history");
+        setError(reason instanceof Error ? reason.message : t("lab.errLoadHistory"));
       }
     }
   }
@@ -245,7 +258,7 @@ export function LabWorklistPanel() {
       updateRow(updated);
       setMessage("Sample collected. Result entry is now available.");
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Sample collection failed");
+      setError(reason instanceof ApiError ? reason.message : t("lab.errSampleCollection"));
     } finally {
       setBusy(false);
     }
@@ -346,7 +359,7 @@ export function LabWorklistPanel() {
         "Preliminary result saved. A different lab professional must verify and release it.",
       );
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Result entry failed");
+      setError(reason instanceof ApiError ? reason.message : t("lab.errResultEntry"));
     } finally {
       setBusy(false);
     }
@@ -367,7 +380,7 @@ export function LabWorklistPanel() {
       if (reason instanceof ApiError && reason.code === 403) {
         setError("Maker–checker blocked this action. Sign in as a different lab professional.");
       } else {
-        setError(reason instanceof ApiError ? reason.message : "Verification failed");
+        setError(reason instanceof ApiError ? reason.message : t("lab.errVerification"));
       }
     } finally {
       setBusy(false);
@@ -407,7 +420,7 @@ export function LabWorklistPanel() {
       await loadHistory({ ...selected, status: "released" });
       void load();
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Amendment failed");
+      setError(reason instanceof ApiError ? reason.message : t("lab.errAmendment"));
     } finally {
       setBusy(false);
     }
@@ -420,7 +433,7 @@ export function LabWorklistPanel() {
           {rows === null ? "Loading live orders…" : `${total} order${total === 1 ? "" : "s"}`}
         </p>
         <button type="button" className="text-sm underline" onClick={() => void load()}>
-          Refresh
+          {t("common.refresh")}
         </button>
       </div>
 
@@ -434,12 +447,12 @@ export function LabWorklistPanel() {
               statusFilter === filter.value ? "border-primary text-primary" : "border-border"
             }`}
           >
-            {filter.label}
+            {t(filter.labelKey)}
           </button>
         ))}
       </div>
 
-      {rows === null && !error ? <LoadingState label="Loading live lab orders" /> : null}
+      {rows === null && !error ? <LoadingState label={t("lab.loadingOrders")} /> : null}
       {error ? <ErrorState message={error} onRetry={() => void load()} /> : null}
       {message ? (
         <p role="status" className="rounded-md bg-success-muted p-3 text-sm text-success">
@@ -448,7 +461,7 @@ export function LabWorklistPanel() {
       ) : null}
 
       {rows?.length === 0 ? (
-        <EmptyState title="Worklist clear" description="No lab orders match this filter." />
+        <EmptyState title={t("lab.emptyTitle")} description={t("lab.emptyDescription")} />
       ) : null}
 
       {rows && rows.length > 0 ? (
@@ -459,18 +472,9 @@ export function LabWorklistPanel() {
                 <caption className="sr-only">Live laboratory worklist</caption>
                 <thead className="bg-muted">
                   <tr>
-                    {[
-                      "Accession",
-                      "Test",
-                      "Sample",
-                      "Barcode",
-                      "Specimen",
-                      "Status",
-                      "Ordered",
-                      "Actions",
-                    ].map((label) => (
-                      <th key={label} scope="col" className="px-4 py-3 text-left">
-                        {label}
+                    {WORKLIST_COLUMNS.map((labelKey) => (
+                      <th key={labelKey} scope="col" className="px-4 py-3 text-left">
+                        {t(labelKey)}
                       </th>
                     ))}
                   </tr>
@@ -481,7 +485,7 @@ export function LabWorklistPanel() {
                       <td className="px-4 py-3 font-mono">{row.accession_number}</td>
                       <td className="px-4 py-3 font-medium">{row.test_name}</td>
                       <td className="px-4 py-3">{row.sample_type}</td>
-                      <td className="px-4 py-3">{row.barcode ?? "Not collected"}</td>
+                      <td className="px-4 py-3">{row.barcode ?? t("lab.notCollected")}</td>
                       <td className="px-4 py-3">
                         <SpecimenStatusChip status={row.specimen_status} />
                       </td>
@@ -491,7 +495,7 @@ export function LabWorklistPanel() {
                       <td className="px-4 py-3">{formatDateTime(row.created_at)}</td>
                       <td className="px-4 py-3 text-right">
                         <button type="button" className="underline" onClick={() => selectRow(row)}>
-                          Open
+                          {t("common.open")}
                         </button>
                       </td>
                     </tr>
@@ -509,7 +513,7 @@ export function LabWorklistPanel() {
                 className="rounded-md border border-border px-3 py-1 disabled:opacity-40"
                 onClick={() => setPage((current) => Math.max(1, current - 1))}
               >
-                Previous
+                {t("common.previous")}
               </button>
               <span className="text-muted-foreground">
                 Page {page} of {totalPages}
@@ -520,7 +524,7 @@ export function LabWorklistPanel() {
                 className="rounded-md border border-border px-3 py-1 disabled:opacity-40"
                 onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
               >
-                Next
+                {t("common.next")}
               </button>
             </div>
           ) : null}
@@ -597,7 +601,7 @@ export function LabWorklistPanel() {
                   onClick={() => void handleReceiveSpecimen()}
                   className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-emerald-700 disabled:opacity-50"
                 >
-                  Receive at Bench
+                  {t("lab.receiveAtBench")}
                 </button>
                 <button
                   type="button"
@@ -605,7 +609,7 @@ export function LabWorklistPanel() {
                   onClick={() => setRejectModalOpen(true)}
                   className="rounded-md border border-red-300 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 shadow-xs hover:bg-red-100 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300 disabled:opacity-50"
                 >
-                  Reject Specimen
+                  {t("lab.rejectSpecimen")}
                 </button>
               </div>
             )}
@@ -644,7 +648,7 @@ export function LabWorklistPanel() {
                 onClick={() => void collectSample()}
                 className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
               >
-                {busy ? "Saving…" : "Confirm sample collection"}
+                {busy ? t("lab.statusSaving") : t("lab.confirmSampleCollection")}
               </button>
             </div>
           ) : null}
@@ -694,7 +698,7 @@ export function LabWorklistPanel() {
                       setError(
                         reason instanceof ApiError
                           ? reason.message
-                          : "Result entry failed",
+                          : t("lab.errResultEntry"),
                       );
                     } finally {
                       setBusy(false);
@@ -736,7 +740,7 @@ export function LabWorklistPanel() {
                     onClick={() => void enterResult()}
                     className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
                   >
-                    {busy ? "Saving…" : "Save preliminary result"}
+                    {busy ? t("lab.statusSaving") : t("lab.savePreliminaryResult")}
                   </button>
                 </>
               )}
@@ -756,7 +760,7 @@ export function LabWorklistPanel() {
                 onClick={() => void verifyResult()}
                 className="rounded-md bg-primary px-4 py-2 font-medium text-primary-foreground disabled:opacity-50"
               >
-                {busy ? "Verifying…" : "Verify and release"}
+                {busy ? t("lab.statusVerifying") : t("lab.verifyAndRelease")}
               </button>
             </div>
           ) : null}
@@ -804,7 +808,7 @@ export function LabWorklistPanel() {
                     onClick={() => void submitAmendment()}
                     className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
                   >
-                    {busy ? "Saving…" : "Submit amendment"}
+                    {busy ? t("lab.statusSaving") : t("lab.submitAmendment")}
                   </button>
                 </div>
               ) : null}
@@ -825,7 +829,7 @@ export function LabWorklistPanel() {
           <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl">
             <div className="flex items-center justify-between border-b border-border pb-3">
               <h3 className="font-semibold text-base text-foreground flex items-center gap-2 text-red-600 dark:text-red-400">
-                <AlertCircle size={18} /> Reject Laboratory Specimen
+                <AlertCircle size={18} /> {t("lab.rejectSpecimenTitle")}
               </h3>
               <button
                 type="button"
@@ -872,7 +876,7 @@ export function LabWorklistPanel() {
                 onClick={() => setRejectModalOpen(false)}
                 className="rounded-lg border border-border px-4 py-2 text-xs font-medium text-foreground hover:bg-muted"
               >
-                Cancel
+                {t("common.cancel")}
               </button>
               <button
                 type="button"
@@ -880,7 +884,7 @@ export function LabWorklistPanel() {
                 onClick={() => void handleRejectSpecimen()}
                 className="rounded-lg bg-red-600 px-4 py-2 text-xs font-semibold text-white shadow-xs hover:bg-red-700 disabled:opacity-50"
               >
-                {busy ? "Rejecting..." : "Confirm Rejection"}
+                {busy ? t("lab.statusRejecting") : t("lab.confirmRejection")}
               </button>
             </div>
           </div>

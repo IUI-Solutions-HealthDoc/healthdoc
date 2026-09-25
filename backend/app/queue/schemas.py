@@ -58,6 +58,7 @@ class VisitWithoutTokenOut(BaseModel):
     thid: str | None = None
     department_id: uuid.UUID | None = None
     department_name: str | None = None
+    department_name_hi: str | None = None
     visit_type: str
     visit_date: datetime
 
@@ -107,6 +108,7 @@ class QueueOpeningOptionOut(BaseModel):
     staff_name: str
     department_id: uuid.UUID
     department_name: str
+    department_name_hi: str | None = None
     room_id: uuid.UUID | None
     room_number: str | None
     shift: str
@@ -141,6 +143,7 @@ class DoctorWorklistItemOut(QueueTokenOut):
     provider_user_id: uuid.UUID
     provider_name: str
     department: str
+    department_hi: str | None = None
 
 
 class DoctorWorklistOut(BaseModel):
@@ -266,6 +269,7 @@ class StaleVisitCandidateOut(BaseModel):
     patient_uhid: str
     department_id: uuid.UUID | None = None
     department_name: str | None = None
+    department_name_hi: str | None = None
     visit_date: datetime
     current_status: str
     live_token_id: uuid.UUID | None = None

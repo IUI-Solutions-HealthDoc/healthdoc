@@ -14,6 +14,7 @@ import FormActions from "@/components/forms/FormActions";
 import { AddHandoverFormProps } from "./AddHandoverForm.types";
 import { DEFAULT_VALUES, SHIFTS } from "./constants";
 import { addHandoverSchema, AddHandoverSchema } from "./validation";
+import { useLocale } from "@/lib/i18n";
 
 export default function AddHandoverForm({
   admissionId,
@@ -21,6 +22,7 @@ export default function AddHandoverForm({
   recipientOptions = [],
   onSubmit,
 }: AddHandoverFormProps) {
+  const { t } = useLocale();
   const [useManualUuid, setUseManualUuid] = useState(recipientOptions.length === 0);
 
   const {
@@ -50,11 +52,11 @@ export default function AddHandoverForm({
 
   const pickerOptions = useMemo(
     () => [
-      { value: "", label: "Select receiving nurse…" },
+      { value: "", label: t("nurse.handoverSelectNurse") },
       ...recipientOptions,
-      { value: "__manual__", label: "Enter user UUID manually…" },
+      { value: "__manual__", label: t("nurse.handoverManualUuid") },
     ],
-    [recipientOptions],
+    [recipientOptions, t],
   );
 
   const submitHandler = async (data: AddHandoverSchema) => {
@@ -71,16 +73,13 @@ export default function AddHandoverForm({
   };
 
   return (
-    <FormSection
-      title="Patient Handover"
-      description="Record the SBAR handover for the selected patient."
-    >
+    <FormSection title={t("nurse.handoverTitle")} description={t("nurse.handoverDescription")}>
       {/* Enabled now that POST /nursing/handover-notes exists. It was inert,
           and said so, for as long as the table had no writer. */}
       <form onSubmit={handleSubmit(submitHandler)} className="space-y-6" noValidate>
         <div className="grid gap-5 md:grid-cols-2">
           <SelectField
-            label="Shift"
+            label={t("nurse.handoverShift")}
             options={SHIFTS.map((shift) => ({
               label: shift.charAt(0).toUpperCase() + shift.slice(1),
               value: shift,
@@ -92,7 +91,7 @@ export default function AddHandoverForm({
           {recipientOptions.length > 0 && !useManualUuid ? (
             <div className="space-y-2">
               <SelectField
-                label="Handed over to"
+                label={t("nurse.handoverHandedTo")}
                 options={pickerOptions}
                 registration={register("handed_over_to", {
                   onChange: (event) => {
@@ -112,7 +111,7 @@ export default function AddHandoverForm({
           ) : (
             <div className="space-y-2">
               <TextField
-                label="Handed over to (user UUID)"
+                label={t("nurse.handoverUuidLabel")}
                 placeholder="Receiving nurse users.id"
                 registration={register("handed_over_to")}
                 error={errors.handed_over_to}
@@ -122,7 +121,7 @@ export default function AddHandoverForm({
         </div>
 
         <TextAreaField
-          label="Situation"
+          label={t("nurse.handoverSituation")}
           placeholder="Current situation / reason for handover..."
           rows={3}
           registration={register("situation")}
@@ -130,7 +129,7 @@ export default function AddHandoverForm({
         />
 
         <TextAreaField
-          label="Background"
+          label={t("nurse.handoverBackground")}
           placeholder="Relevant patient background / history..."
           rows={3}
           registration={register("background")}
@@ -138,7 +137,7 @@ export default function AddHandoverForm({
         />
 
         <TextAreaField
-          label="Assessment"
+          label={t("nurse.handoverAssessment")}
           placeholder="Current clinical assessment..."
           rows={3}
           registration={register("assessment")}
@@ -146,7 +145,7 @@ export default function AddHandoverForm({
         />
 
         <TextAreaField
-          label="Recommendation"
+          label={t("nurse.handoverRecommendation")}
           placeholder="Recommended next steps / things to watch..."
           rows={3}
           registration={register("recommendation")}
@@ -155,8 +154,8 @@ export default function AddHandoverForm({
 
         <FormActions
           isSubmitting={isSubmitting}
-          submitLabel="Complete Handover"
-          resetLabel="Reset"
+          submitLabel={t("nurse.completeHandover")}
+          resetLabel={t("common.reset")}
           onReset={handleReset}
         />
       </form>

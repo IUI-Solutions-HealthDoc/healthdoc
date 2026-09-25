@@ -3,6 +3,7 @@
 import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 
+import { PageHeading } from "@/components/common/PageHeading";
 import { BillingMisPanel, EdCensusPanel, MisDashboard, ReceptionistTrackerPanel } from "@/features/reports";
 import { ROLES } from "@/config/roles";
 import { useAuth } from "@/providers/auth-provider";
@@ -24,6 +25,7 @@ export default function Page() {
   return (
     <Box sx={{ mx: "auto", maxWidth: 1280, px: { xs: 2, md: 3 }, py: 3 }}>
       <Stack spacing={3}>
+        <PageHeading titleKey="reports.title" />
         <ReceptionistTrackerPanel />
         <EdCensusPanel />
         {CLINICAL_KPI_ROLES.includes(role) ? <MisDashboard /> : null}

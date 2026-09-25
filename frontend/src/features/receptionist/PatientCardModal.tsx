@@ -8,6 +8,7 @@ import { Printer, AlertTriangle } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import { PatientAvatar } from "@/components/ui/PatientAvatar";
 import { useCurrentUser } from "@/features/session/useCurrentUser";
+import { useLocale } from "@/lib/i18n";
 import { deriveAgeFromDob } from "./patientValidation";
 
 import "./patient-card-print.css";
@@ -31,11 +32,15 @@ interface PatientCardModalProps {
 
 export function PatientCardModal({ open, onClose, patient }: PatientCardModalProps) {
   const { user: currentUser } = useCurrentUser();
+  const { localizeField } = useLocale();
   const printButtonRef = useRef<HTMLButtonElement>(null);
 
   const identifier = patient.uhid || patient.thid || "";
   const isEmergencyThid = Boolean(patient.thid && !patient.uhid);
-  const facilityName = currentUser?.facility?.name || "HealthDoc Hospital";
+  const facilityName = localizeField(
+    currentUser?.facility?.name || "HealthDoc Hospital",
+    currentUser?.facility?.name_hi,
+  );
 
   const derivedAge = patient.dob ? deriveAgeFromDob(patient.dob)?.displayText : null;
   const ageDisplay = derivedAge || (patient.age_years !== null && patient.age_years !== undefined ? `${patient.age_years}y` : "");

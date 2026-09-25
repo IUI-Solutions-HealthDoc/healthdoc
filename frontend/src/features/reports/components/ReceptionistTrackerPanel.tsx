@@ -10,10 +10,13 @@ import Chip from "@mui/material/Chip";
 import IconButton from "@mui/material/IconButton";
 import Typography from "@mui/material/Typography";
 
+import { useLocale } from "@/lib/i18n";
+
 import { getReceptionistSummary } from "../api";
 import type { ReceptionistSummary } from "../types";
 
 export function ReceptionistTrackerPanel() {
+  const { t } = useLocale();
   const [summary, setSummary] = useState<ReceptionistSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -26,7 +29,7 @@ export function ReceptionistTrackerPanel() {
       setSummary(data);
     } catch {
       setSummary(null);
-      setError("Reception data could not be loaded. Retry to see current figures.");
+      setError(t("reports.reception.errLoad"));
     } finally {
       setLoading(false);
     }
@@ -61,9 +64,9 @@ export function ReceptionistTrackerPanel() {
         <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
           <PeopleAltOutlinedIcon color="primary" />
           <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-            Receptionist Queue & Wait-Time Tracker
+            {t("reports.reception.title")}
           </Typography>
-          <Chip label="LIVE TODAY" size="small" color="success" sx={{ height: 20, fontSize: "0.7rem", fontWeight: 700 }} />
+          <Chip label={t("reports.reception.liveToday")} size="small" color="success" sx={{ height: 20, fontSize: "0.7rem", fontWeight: 700 }} />
         </Box>
         <IconButton size="small" onClick={loadData} disabled={loading}>
           <RefreshIcon fontSize="small" />
@@ -81,7 +84,7 @@ export function ReceptionistTrackerPanel() {
         >
           <Box sx={{ p: 1.5, borderRadius: 1.5, bgcolor: "action.hover", textAlign: "center" }}>
             <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
-              TOTAL REGISTERED
+              {t("reports.reception.totalRegistered")}
             </Typography>
             <Typography variant="h5" color="text.primary" sx={{ mt: 0.5, fontWeight: 800 }}>
               {summary?.total_registered ?? "—"}
@@ -90,7 +93,7 @@ export function ReceptionistTrackerPanel() {
 
           <Box sx={{ p: 1.5, borderRadius: 1.5, bgcolor: "#fff3e0", textAlign: "center", border: "1px solid #ffe0b2" }}>
             <Typography variant="caption" sx={{ color: "#e65100", fontWeight: 600 }}>
-              WAITING IN QUEUE
+              {t("reports.reception.waiting")}
             </Typography>
             <Typography variant="h5" sx={{ mt: 0.5, color: "#e65100", fontWeight: 800 }}>
               {summary?.waiting ?? "—"}
@@ -99,7 +102,7 @@ export function ReceptionistTrackerPanel() {
 
           <Box sx={{ p: 1.5, borderRadius: 1.5, bgcolor: "#e3f2fd", textAlign: "center", border: "1px solid #bbdefb" }}>
             <Typography variant="caption" sx={{ color: "#1565c0", fontWeight: 600 }}>
-              IN CONSULTATION
+              {t("reports.reception.inConsultation")}
             </Typography>
             <Typography variant="h5" sx={{ mt: 0.5, color: "#1565c0", fontWeight: 800 }}>
               {summary?.in_consultation ?? "—"}
@@ -108,7 +111,7 @@ export function ReceptionistTrackerPanel() {
 
           <Box sx={{ p: 1.5, borderRadius: 1.5, bgcolor: "#e8f5e9", textAlign: "center", border: "1px solid #c8e6c9" }}>
             <Typography variant="caption" sx={{ color: "#2e7d32", fontWeight: 600 }}>
-              COMPLETED
+              {t("reports.reception.completed")}
             </Typography>
             <Typography variant="h5" sx={{ mt: 0.5, color: "#2e7d32", fontWeight: 800 }}>
               {summary?.completed ?? "—"}
@@ -117,10 +120,12 @@ export function ReceptionistTrackerPanel() {
 
           <Box sx={{ p: 1.5, borderRadius: 1.5, bgcolor: "action.selected", textAlign: "center", border: "1px solid", borderColor: "divider" }}>
             <Typography variant="caption" color="primary" sx={{ fontWeight: 600 }}>
-              AVG WAIT DURATION
+              {t("reports.reception.avgWait")}
             </Typography>
             <Typography variant="h5" color="primary" sx={{ mt: 0.5, fontWeight: 800 }}>
-              {summary?.average_wait_minutes != null ? `${summary.average_wait_minutes} min` : "—"}
+              {summary?.average_wait_minutes != null
+                ? `${summary.average_wait_minutes}${t("reports.reception.minSuffix")}`
+                : "—"}
             </Typography>
           </Box>
         </Box>

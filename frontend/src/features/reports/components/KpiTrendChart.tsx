@@ -16,6 +16,7 @@ import {
 import type { NameType, Payload, ValueType } from "recharts/types/component/DefaultTooltipContent";
 
 import { ChartWrapper } from "@/components/ui/ChartWrapper";
+import { useLocale } from "@/lib/i18n";
 import { kpiLabel, kpiUnit } from "@/lib/kpi";
 import { meridian } from "@/styles/theme";
 
@@ -115,6 +116,7 @@ export function KpiTrendChart({
   description,
   mode = "auto",
 }: Props) {
+  const { t } = useLocale();
   const uid = useId().replace(/:/g, "");
   const useArea = mode === "area" || (mode === "auto" && codes.length === 1);
 
@@ -137,8 +139,8 @@ export function KpiTrendChart({
       empty={
         !loading && data.length === 0
           ? {
-              title: "No snapshots in this period",
-              description: "Try another time filter — KPI rows are stored per day in kpi_snapshots.",
+              title: t("reports.kpi.chart.noSnapshotsTitle"),
+              description: t("reports.kpi.chart.noSnapshotsDesc"),
             }
           : false
       }

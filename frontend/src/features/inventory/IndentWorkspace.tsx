@@ -20,6 +20,7 @@ import { searchMedicines } from "@/features/pharmacy/api";
 import type { MedicineSearchResult } from "@/features/pharmacy/types";
 import { useCurrentUser } from "@/features/session/useCurrentUser";
 import { ApiError } from "@/lib/api";
+import { useLocale } from "@/lib/i18n";
 
 import { createIndent, decideIndent, issueIndent, listIndents } from "./api";
 import type { IndentListRow } from "./types";
@@ -31,6 +32,7 @@ interface DraftLine {
 }
 
 export function IndentWorkspace() {
+  const { t, localizeField } = useLocale();
   const { user } = useCurrentUser();
   const roles = user?.roles ?? [];
   const isHod = roles.includes("hod");
@@ -53,7 +55,7 @@ export function IndentWorkspace() {
       setDepartments(depts.items);
       setError(null);
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Could not load indents");
+      setError(reason instanceof ApiError ? reason.message : t("inventory.err.loadIndents"));
     }
   }, []);
 
@@ -95,7 +97,7 @@ export function IndentWorkspace() {
       setLines([]);
       await reload();
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Could not raise the indent");
+      setError(reason instanceof ApiError ? reason.message : t("inventory.err.raiseIndent"));
     } finally {
       setBusy(false);
     }
@@ -126,6 +128,11 @@ export function IndentWorkspace() {
     return rows;
   }, [isHod, rows]);
 
+  const departmentById = useMemo(
+    () => new Map(departments.map((dept) => [dept.id, dept])),
+    [departments],
+  );
+
   return (
     <div className="space-y-8">
       {error ? (
@@ -139,23 +146,20 @@ export function IndentWorkspace() {
 
       {canRaise ? (
       <section className="rounded border border-gray-200 p-4">
-        <h3 className="text-base font-semibold">Raise an indent</h3>
-        <p className="mt-1 text-sm text-gray-600">
-          A request from a department to the store. It needs the department head&apos;s
-          approval before pharmacy can issue against it.
-        </p>
+        <h3 className="text-base font-semibold">{t("inventory.indent.raiseTitle")}</h3>
+        <p className="mt-1 text-sm text-gray-600">{t("inventory.indent.raiseHint")}</p>
 
         <label className="mt-4 block text-sm">
-          <span className="block text-gray-700">Requesting department</span>
+          <span className="block text-gray-700">{t("inventory.indent.requestingDepartment")}</span>
           <select
             className="mt-1 w-full rounded border border-gray-300 p-2 sm:max-w-sm"
             value={departmentId}
             onChange={(event) => setDepartmentId(event.target.value)}
           >
-            <option value="">Select…</option>
+            <option value="">{t("common.selectEllipsis")}</option>
             {departments.map((dept) => (
               <option key={dept.id} value={dept.id}>
-                {dept.name}
+                {localizeField(dept.name, dept.name_hi)}
               </option>
             ))}
           </select>
@@ -164,7 +168,7 @@ export function IndentWorkspace() {
         <div className="mt-4">
           <input
             className="w-full rounded border border-gray-300 p-2 text-sm sm:max-w-sm"
-            placeholder="Search medicines to add…"
+            placeholder={t("inventory.indent.searchMedicinesPlaceholder")}
             value={term}
             onChange={(event) => setTerm(event.target.value)}
           />
@@ -209,7 +213,7 @@ export function IndentWorkspace() {
                   type="number"
                   min="0"
                   step="0.01"
-                  placeholder="Qty"
+                  placeholder={t("inventory.po.qtyPlaceholder")}
                   className="w-28 rounded border border-gray-300 p-1"
                   value={line.quantity_requested}
                   onChange={(event) =>
@@ -227,7 +231,7 @@ export function IndentWorkspace() {
                     setLines((current) => current.filter((_, i) => i !== index))
                   }
                 >
-                  remove
+                  {t("common.remove")}
                 </button>
               </li>
             ))}
@@ -244,8 +248,8 @@ export function IndentWorkspace() {
         {!departmentId || lines.length === 0 ? (
           <p className="mt-5 text-sm text-muted-foreground">
             {!departmentId
-              ? "Choose the requesting department to continue."
-              : "Search for an item above and select it to add a line."}
+              ? t("inventory.indent.chooseDepartment")
+              : t("inventory.indent.addLineHint")}
           </p>
         ) : null}
 
@@ -255,18 +259,20 @@ export function IndentWorkspace() {
           onClick={() => void submit()}
           className="mt-3 rounded bg-blue-700 px-4 py-2 text-sm text-white disabled:bg-gray-300"
         >
-          Raise indent
+          {t("inventory.indent.raiseButton")}
         </button>
       </section>
       ) : null}
 
       <section>
-        <h3 className="text-base font-semibold">{isHod ? "Pending approvals" : "Indents"}</h3>
+        <h3 className="text-base font-semibold">
+          {isHod ? t("inventory.indent.pendingApprovals") : t("inventory.indent.listTitle")}
+        </h3>
         {visibleRows === null ? (
-          <p className="mt-2 text-sm text-gray-600">Loading…</p>
+          <p className="mt-2 text-sm text-gray-600">{t("common.loading")}</p>
         ) : visibleRows.length === 0 ? (
           <p className="mt-2 text-sm text-gray-600">
-            {isHod ? "No indents awaiting your approval." : "No indents raised."}
+            {isHod ? t("inventory.indent.emptyHod") : t("inventory.indent.empty")}
           </p>
         ) : (
           <ul className="mt-3 space-y-2">
@@ -274,13 +280,26 @@ export function IndentWorkspace() {
               <li key={row.id} className="rounded border border-gray-200 p-3 text-sm">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
-                    <span className="font-medium">{row.department_name}</span>
+                    <span className="font-medium">
+                      {(() => {
+                        const dept = departmentById.get(row.department_id);
+                        return dept
+                          ? localizeField(dept.name, dept.name_hi)
+                          : localizeField(row.department_name, row.department_name_hi);
+                      })()}
+                    </span>
                     <span className="text-gray-600">
                       {" "}
-                      · {row.line_count} line{row.line_count === 1 ? "" : "s"}
+                      ·{" "}
+                      {row.line_count === 1
+                        ? t("inventory.indent.lineCount", { count: row.line_count })
+                        : t("inventory.indent.lineCountPlural", { count: row.line_count })}
                     </span>
                     {row.approved_by_name ? (
-                      <span className="text-gray-600"> · approved by {row.approved_by_name}</span>
+                      <span className="text-gray-600">
+                        {" "}
+                        · {t("inventory.indent.approvedBy", { name: row.approved_by_name })}
+                      </span>
                     ) : null}
                   </div>
                   <span
@@ -307,12 +326,12 @@ export function IndentWorkspace() {
                         onClick={() =>
                           void act(
                             () => decideIndent(row.id, { approve: true, reason: null }),
-                            "Could not approve the indent",
+                            t("inventory.err.approveIndent"),
                           )
                         }
                         className="rounded bg-blue-700 px-3 py-1 text-xs text-white disabled:bg-gray-300"
                       >
-                        Approve
+                        {t("common.approve")}
                       </button>
                       <button
                         type="button"
@@ -320,18 +339,16 @@ export function IndentWorkspace() {
                         onClick={() =>
                           void act(
                             () => decideIndent(row.id, { approve: false, reason: null }),
-                            "Could not reject the indent",
+                            t("inventory.err.rejectIndent"),
                           )
                         }
                         className="rounded border border-gray-300 px-3 py-1 text-xs disabled:opacity-50"
                       >
-                        Reject
+                        {t("common.reject")}
                       </button>
                     </div>
                   ) : (
-                    <p className="mt-2 text-xs text-gray-600">
-                      Waiting on the department head. Only an HOD can approve an indent.
-                    </p>
+                    <p className="mt-2 text-xs text-gray-600">{t("inventory.indent.waitingHod")}</p>
                   )
                 ) : null}
 
@@ -340,11 +357,11 @@ export function IndentWorkspace() {
                     type="button"
                     disabled={busy}
                     onClick={() =>
-                      void act(() => issueIndent(row.id), "Could not issue the indent")
+                      void act(() => issueIndent(row.id), t("inventory.err.issueIndent"))
                     }
                     className="mt-2 rounded bg-blue-700 px-3 py-1 text-xs text-white disabled:bg-gray-300"
                   >
-                    Issue stock
+                    {t("inventory.indent.issueStock")}
                   </button>
                 ) : null}
               </li>

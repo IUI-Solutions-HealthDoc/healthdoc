@@ -8,8 +8,14 @@ import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 
 import { StatusChip } from "@/components/ui/StatusChip";
+import { useLocale } from "@/lib/i18n";
 import { meridian } from "@/styles/theme";
-import { CONSENT_CHANNEL_LABELS, CONSENT_STATUS_LABELS, PURPOSE_LABELS } from "../constants";
+import {
+  CONSENT_STATUSES,
+  consentChannelLabel,
+  consentPurposeLabel,
+  consentStatusLabel,
+} from "../i18nLabels";
 import { formatDate } from "../lib/formatters";
 import type { ConsentRecord, ConsentStatus } from "../types";
 
@@ -34,6 +40,7 @@ export function ConsentListPanel({
   onStatusChange,
   onSelect,
 }: Props) {
+  const { t } = useLocale();
   return (
     <Box
       sx={{
@@ -49,7 +56,7 @@ export function ConsentListPanel({
     >
       <Box sx={{ px: 2.5, pt: 2.25, pb: 1.75 }}>
         <Typography sx={{ m: 0, fontSize: "1.0625rem", fontWeight: 700, color: meridian.textPrimary }}>
-          Consent records
+          {t("consent.records")}
         </Typography>
         <Typography sx={{ m: 0, mt: 0.4, fontSize: "0.8125rem", color: meridian.textSecondary }}>
           Open a record to review its decision and expiry.
@@ -59,21 +66,21 @@ export function ConsentListPanel({
       <Stack spacing={1.25} sx={{ px: 2.5, pb: 2 }}>
         <TextField
           size="small"
-          placeholder="Search UHID, name, purpose…"
+          placeholder={t("consent.searchPlaceholder")}
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}
         />
         <TextField
           select
           size="small"
-          label="Status"
+          label={t("common.status")}
           value={status}
           onChange={(e) => onStatusChange(e.target.value as ConsentStatus | "all")}
         >
-          <MenuItem value="all">All</MenuItem>
-          {(Object.keys(CONSENT_STATUS_LABELS) as ConsentStatus[]).map((s) => (
+          <MenuItem value="all">{t("common.all")}</MenuItem>
+          {CONSENT_STATUSES.map((s) => (
             <MenuItem key={s} value={s}>
-              {CONSENT_STATUS_LABELS[s]}
+              {consentStatusLabel(t, s)}
             </MenuItem>
           ))}
         </TextField>
@@ -82,11 +89,11 @@ export function ConsentListPanel({
       <Box sx={{ flex: 1, overflow: "auto", borderTop: `1px solid rgb(0 31 84 / 0.08)` }}>
         {loading ? (
           <Typography sx={{ p: 2.5, color: meridian.textSecondary, fontSize: "0.875rem" }}>
-            Loading…
+            {t("common.loading")}
           </Typography>
         ) : rows.length === 0 ? (
           <Typography sx={{ p: 2.5, color: meridian.textSecondary, fontSize: "0.875rem" }}>
-            No consent records match.
+            {t("consent.noRecords")}
           </Typography>
         ) : (
           rows.map((row) => {
@@ -112,14 +119,14 @@ export function ConsentListPanel({
                   <Typography sx={{ fontWeight: 700, fontSize: "0.875rem", color: meridian.textPrimary }}>
                     {row.patient?.name ?? row.patient_id}
                   </Typography>
-                  <StatusChip status={row.status} label={CONSENT_STATUS_LABELS[row.status]} />
+                  <StatusChip status={row.status} label={consentStatusLabel(t, row.status)} />
                 </Stack>
                 <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary }}>
-                  {row.purpose_label ?? (row.purpose_code ? (PURPOSE_LABELS[row.purpose_code] ?? row.purpose_code.replaceAll("_", " ").replace(/\b\w/g, (l) => l.toUpperCase())) : "Unknown / Unavailable")} · {CONSENT_CHANNEL_LABELS[row.channel as keyof typeof CONSENT_CHANNEL_LABELS] ?? row.channel} · {row.id}
+                  {consentPurposeLabel(t, row.purpose_code, row.purpose_label)} · {consentChannelLabel(t, row.channel)} · {row.id}
                 </Typography>
                 <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary }}>
-                  {row.patient?.uhid} · granted {formatDate(row.granted_at)}
-                  {row.expires_at ? ` · expires ${formatDate(row.expires_at)}` : " · no expiry"}
+                  {row.patient?.uhid} · {t("consent.granted")} {formatDate(row.granted_at)}
+                  {row.expires_at ? ` · ${t("consent.expires")} ${formatDate(row.expires_at)}` : ` · ${t("consent.noExpiry")}`}
                 </Typography>
               </Button>
             );

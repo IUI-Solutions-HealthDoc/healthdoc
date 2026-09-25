@@ -8,8 +8,10 @@ import { PatientSearch } from "@/features/receptionist/PatientSearch";
 import { StartVisit } from "@/features/receptionist/StartVisit";
 import { PatientCardModal } from "@/features/receptionist/PatientCardModal";
 import type { PatientSearchResult } from "@/features/receptionist/types";
+import { useLocale } from "@/lib/i18n";
 
 export default function Page() {
+  const { t } = useLocale();
   const [selected, setSelected] = useState<PatientSearchResult | null>(null);
   const [showCard, setShowCard] = useState(false);
 
@@ -20,15 +22,15 @@ export default function Page() {
         subtitleKey="receptionist.patientSearchSubtitle"
       />
 
-      <PatientSearch onSelect={setSelected} selectLabel="Start visit" />
+      <PatientSearch onSelect={setSelected} selectLabel={t("common.startVisit")} />
 
       {selected ? (
         <div className="space-y-4">
           <div className="surface-card flex flex-wrap items-center justify-between gap-3 border border-success/30 bg-success-muted p-4">
             <div>
-              <p className="font-medium">Selected patient</p>
+              <p className="font-medium">{t("common.selectedPatient")}</p>
               <p className="text-sm text-muted-foreground">
-                {selected.full_name} · {selected.uhid ?? selected.thid ?? "UHID pending"}
+                {selected.full_name} · {selected.uhid ?? selected.thid ?? t("patient.uhidPending")}
               </p>
             </div>
             <div className="flex items-center gap-3">
@@ -38,10 +40,10 @@ export default function Page() {
                 className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-semibold hover:bg-muted"
               >
                 <Printer size={14} />
-                Print Card
+                {t("card.print")}
               </button>
               <button type="button" className="text-sm underline" onClick={() => setSelected(null)}>
-                Change patient
+                {t("common.changePatient")}
               </button>
             </div>
           </div>

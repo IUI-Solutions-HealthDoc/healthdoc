@@ -17,10 +17,11 @@ import { ApiError } from "@/lib/api";
 import { useLocale } from "@/lib/i18n";
 
 export default function Page() {
-  const { localizeField } = useLocale();
+  const { localizeField, t } = useLocale();
   const [departments, setDepartments] = useState<Department[] | null>(null);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [name, setName] = useState("");
+  const [nameHi, setNameHi] = useState("");
   const [code, setCode] = useState("");
   const [roomDepartment, setRoomDepartment] = useState("");
   const [roomNumber, setRoomNumber] = useState("");
@@ -43,9 +44,9 @@ export default function Page() {
       setRoomDepartment((current) => current || departmentResponse.items[0]?.id || "");
       setError(null);
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Could not load departments");
+      setError(reason instanceof ApiError ? reason.message : t("admin.departments.errLoad"));
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void load();
@@ -67,9 +68,10 @@ export default function Page() {
     setError(null);
     setDepartmentFormError(null);
     try {
-      const created = await createDepartment(nextName, nextCode);
+      const created = await createDepartment(nextName, nextCode, nameHi.trim() || null);
       setDepartments((current) => [...(current ?? []), created]);
       setName("");
+      setNameHi("");
       setCode("");
       setRoomDepartment((current) => current || created.id);
       setMessage("Department created in your facility.");
@@ -133,7 +135,7 @@ export default function Page() {
         <Link href="/admin" className="mb-3 inline-block text-sm font-medium text-primary underline">
           ← Back to administration
         </Link>
-        <h1 className="text-3xl font-semibold">Departments and rooms</h1>
+        <h1 className="text-3xl font-semibold">{t("admin.departmentsTitle")}</h1>
         <p className="mt-2 text-sm text-muted-foreground">
           All records and mutations are restricted to the signed-in administrator’s facility.
         </p>
@@ -157,7 +159,7 @@ export default function Page() {
           className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
           aria-expanded={showDepartmentForm}
         >
-          {showDepartmentForm ? "Cancel department" : "Create department"}
+          {showDepartmentForm ? t("admin.departments.cancelDepartment") : t("admin.departments.createDepartment")}
         </button>
         <button
           type="button"
@@ -166,7 +168,7 @@ export default function Page() {
           aria-expanded={showRoomForm}
           disabled={!departments?.some((department) => department.is_active)}
         >
-          {showRoomForm ? "Cancel room" : "Create room"}
+          {showRoomForm ? t("admin.departments.cancelRoom") : t("admin.departments.createRoom")}
         </button>
       </div>
 
@@ -174,9 +176,9 @@ export default function Page() {
         <div className="grid gap-6 lg:grid-cols-2">
         {showDepartmentForm ? (
           <form onSubmit={addDepartment} className="surface-card space-y-4 p-5">
-          <h2 className="text-lg font-medium">Create department</h2>
+          <h2 className="text-lg font-medium">{t("admin.departments.createDepartment")}</h2>
           <label className="block space-y-1 text-sm">
-            <span className="text-muted-foreground">Name</span>
+            <span className="text-muted-foreground">{t("field.name")}</span>
             <input
               required
               className="w-full rounded-md border border-border px-3 py-2"
@@ -186,6 +188,18 @@ export default function Page() {
                 setDepartmentFormError(null);
               }}
               minLength={2}
+            />
+          </label>
+          <label className="block space-y-1 text-sm">
+            <span className="text-muted-foreground">{t("admin.departments.nameHi")}</span>
+            <input
+              className="w-full rounded-md border border-border px-3 py-2"
+              value={nameHi}
+              onChange={(event) => {
+                setNameHi(event.target.value);
+                setDepartmentFormError(null);
+              }}
+              placeholder={t("admin.departments.nameHiHint")}
             />
           </label>
           <label className="block space-y-1 text-sm">
@@ -211,14 +225,14 @@ export default function Page() {
             disabled={busy}
             className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
           >
-            Create department
+            {t("admin.departments.createDepartment")}
           </button>
         </form>
         ) : null}
 
         {showRoomForm ? (
           <form onSubmit={addRoom} className="surface-card space-y-4 p-5">
-          <h2 className="text-lg font-medium">Create room</h2>
+          <h2 className="text-lg font-medium">{t("admin.departments.createRoom")}</h2>
           <label className="block space-y-1 text-sm">
             <span className="text-muted-foreground">Department</span>
             <select
@@ -258,14 +272,14 @@ export default function Page() {
             disabled={busy || !roomDepartment}
             className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
           >
-            Create room
+            {t("admin.departments.createRoom")}
           </button>
         </form>
         ) : null}
         </div>
       ) : null}
 
-      {departments === null ? <p className="text-sm text-muted-foreground">Loading…</p> : null}
+      {departments === null ? <p className="text-sm text-muted-foreground">{t("admin.departments.loading")}</p> : null}
       <div className="surface-card overflow-hidden">
         <div className="border-b border-border px-5 py-4">
           <h2 className="text-lg font-medium">Configured departments</h2>
@@ -317,7 +331,7 @@ export default function Page() {
                   ))}
                 </ul>
               ) : (
-                <p className="mt-4 text-sm text-muted-foreground">No rooms configured.</p>
+                <p className="mt-4 text-sm text-muted-foreground">{t("admin.departments.noRooms")}</p>
               )}
             </section>
           );

@@ -1,5 +1,5 @@
 import { ShieldCheck, Activity, Award, Lock } from "lucide-react";
-import { HealthDocBrand } from "@/components/common/HealthDocBrand";
+import { AuthBrandHeader } from "@/components/common/AuthBrandHeader";
 
 export default function AuthLayout({
   children,
@@ -15,10 +15,9 @@ export default function AuthLayout({
         <div className="pointer-events-none absolute -bottom-20 -right-20 h-96 w-96 rounded-full bg-cyan-500/10 blur-3xl" />
 
         <div className="relative z-10">
-          <HealthDocBrand
+          <AuthBrandHeader
             size={52}
             preload
-            subtitle="Hospital Information Management System"
             nameClassName="text-2xl font-bold tracking-wide text-white"
             className="text-white"
           />

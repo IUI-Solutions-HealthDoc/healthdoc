@@ -162,7 +162,16 @@ test("late consent transition cannot show success in a different patient's works
       "@/components/ui/StatusChip": { StatusChip: "StatusChip" },
       "@/components/ui/toast": { toast: { success: (...args) => toasts.push(args), error: (...args) => toasts.push(args) } },
       "../api/consent": { transitionConsentStatus: () => new Promise((r) => { resolve = r; }) },
-      "../constants": { CONSENT_CHANNEL_LABELS: {}, CONSENT_STATUS_LABELS: {}, PURPOSE_LABELS: {} },
+      "@/lib/i18n": {
+        useLocale: () => ({
+          t: (key) => (key === "consent.approve" ? "Approve" : key),
+        }),
+      },
+      "../i18nLabels": {
+        consentStatusLabel: () => "status",
+        consentChannelLabel: () => "channel",
+        consentPurposeLabel: () => "purpose",
+      },
       "../lib/formatters": { formatDate: () => "", formatDateTime: () => "" },
       "./ConsentAccessHistory": { ConsentAccessHistory: "ConsentAccessHistory" },
     });

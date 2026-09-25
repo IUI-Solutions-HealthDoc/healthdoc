@@ -21,6 +21,7 @@ import { useCallback, useEffect, useState } from "react";
 import { searchMedicines } from "@/features/pharmacy/api";
 import type { BatchAvailability, MedicineSearchResult } from "@/features/pharmacy/types";
 import { ApiError } from "@/lib/api";
+import { useLocale } from "@/lib/i18n";
 
 import {
   cancelStockTransfer,
@@ -49,6 +50,7 @@ function statusTone(status: StockTransferStatus): string {
 }
 
 export function StockTransferWorkspace() {
+  const { t } = useLocale();
   const [locations, setLocations] = useState<StockLocation[]>([]);
   const [transfers, setTransfers] = useState<StockTransfer[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -71,7 +73,7 @@ export function StockTransferWorkspace() {
       setTransfers(transferList);
       setError(null);
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Could not load transfers");
+      setError(reason instanceof ApiError ? reason.message : t("inventory.err.loadTransfers"));
     }
   }, []);
 
@@ -149,7 +151,7 @@ export function StockTransferWorkspace() {
       setLines([]);
       await reload();
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Could not create the transfer");
+      setError(reason instanceof ApiError ? reason.message : t("inventory.err.createTransfer"));
     } finally {
       setBusy(false);
     }
@@ -176,22 +178,18 @@ export function StockTransferWorkspace() {
       ) : null}
 
       <section className="rounded border border-gray-200 p-4">
-        <h3 className="text-base font-semibold">Move stock between locations</h3>
-        <p className="mt-1 text-sm text-gray-600">
-          Dispatch and receipt are recorded separately. Between them the stock is
-          in transit and counted at neither end — which is the only way a
-          consignment that never arrives shows up as missing.
-        </p>
+        <h3 className="text-base font-semibold">{t("inventory.transfer.moveTitle")}</h3>
+        <p className="mt-1 text-sm text-gray-600">{t("inventory.transfer.moveHint")}</p>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <label className="text-sm">
-            <span className="block text-gray-700">From</span>
+            <span className="block text-gray-700">{t("inventory.transfer.from")}</span>
             <select
               className="mt-1 w-full rounded border border-gray-300 p-2"
               value={fromId}
               onChange={(e) => setFromId(e.target.value)}
             >
-              <option value="">Select…</option>
+              <option value="">{t("common.selectEllipsis")}</option>
               {locations.map((l) => (
                 <option key={l.id} value={l.id}>
                   {l.name} ({l.location_type})
@@ -200,13 +198,13 @@ export function StockTransferWorkspace() {
             </select>
           </label>
           <label className="text-sm">
-            <span className="block text-gray-700">To</span>
+            <span className="block text-gray-700">{t("inventory.transfer.to")}</span>
             <select
               className="mt-1 w-full rounded border border-gray-300 p-2"
               value={toId}
               onChange={(e) => setToId(e.target.value)}
             >
-              <option value="">Select…</option>
+              <option value="">{t("common.selectEllipsis")}</option>
               {locations
                 // A transfer to the same location is a no-op that would still
                 // write two ledger rows. Excluded rather than validated after.
@@ -223,7 +221,7 @@ export function StockTransferWorkspace() {
         <div className="mt-4">
           <input
             className="w-full rounded border border-gray-300 p-2 text-sm sm:max-w-sm"
-            placeholder="Search items to move…"
+            placeholder={t("inventory.transfer.searchPlaceholder")}
             value={term}
             onChange={(e) => setTerm(e.target.value)}
           />
@@ -239,7 +237,10 @@ export function StockTransferWorkspace() {
                     {m.name}
                     <span className="text-gray-500">
                       {" "}
-                      · {m.batches.length} batch{m.batches.length === 1 ? "" : "es"}
+                      ·{" "}
+                      {m.batches.length === 1
+                        ? t("inventory.transfer.batchCount", { count: m.batches.length })
+                        : t("inventory.transfer.batchCountPlural", { count: m.batches.length })}
                     </span>
                   </button>
                 </li>
@@ -249,12 +250,11 @@ export function StockTransferWorkspace() {
 
           {picking ? (
             <div className="mt-2 max-w-sm rounded border border-gray-200 p-2 text-sm">
-              <p className="font-medium">{picking.name} — choose a batch</p>
+              <p className="font-medium">
+                {t("inventory.transfer.chooseBatch", { name: picking.name })}
+              </p>
               {picking.batches.length === 0 ? (
-                <p className="mt-1 text-amber-800">
-                  No batches with stock on hand. Search returns only batches
-                  holding a positive quantity, so there is nothing here to move.
-                </p>
+                <p className="mt-1 text-amber-800">{t("inventory.transfer.noBatches")}</p>
               ) : (
                 <ul className="mt-1">
                   {picking.batches.map((b) => (
@@ -275,7 +275,7 @@ export function StockTransferWorkspace() {
                 className="mt-1 text-xs text-blue-700 underline"
                 onClick={() => setPicking(null)}
               >
-                cancel
+                {t("common.cancel")}
               </button>
             </div>
           ) : null}
@@ -293,7 +293,7 @@ export function StockTransferWorkspace() {
                       <span className="text-gray-600">· batch {line.batch_number}</span>
                     </span>
                     <input
-                      type="number" min="0" step="0.01" placeholder="Qty"
+                      type="number" min="0" step="0.01" placeholder={t("inventory.po.qtyPlaceholder")}
                       className={`w-24 rounded border p-1 ${
                         over ? "border-red-400" : "border-gray-300"
                       }`}
@@ -309,14 +309,12 @@ export function StockTransferWorkspace() {
                       className="text-xs text-blue-700 underline"
                       onClick={() => setLines((cur) => cur.filter((_, i) => i !== index))}
                     >
-                      remove
+                      {t("common.remove")}
                     </button>
                   </div>
                   {over ? (
                     <p className="mt-1 text-xs text-red-700">
-                      Only {line.available} on hand in this batch. The database
-                      refuses a negative balance, so this would be rejected on
-                      dispatch.
+                      {t("inventory.transfer.overdrawn", { available: line.available })}
                     </p>
                   ) : null}
                 </li>
@@ -331,73 +329,82 @@ export function StockTransferWorkspace() {
           onClick={() => void submit()}
           className="mt-5 rounded bg-blue-700 px-4 py-2 text-sm text-white disabled:bg-gray-300"
         >
-          Create transfer
+          {t("inventory.transfer.create")}
         </button>
       </section>
 
       <section>
-        <h3 className="text-base font-semibold">Transfers</h3>
+        <h3 className="text-base font-semibold">{t("inventory.transfer.listTitle")}</h3>
         {transfers === null ? (
-          <p className="mt-2 text-sm text-gray-600">Loading…</p>
+          <p className="mt-2 text-sm text-gray-600">{t("common.loading")}</p>
         ) : transfers.length === 0 ? (
-          <p className="mt-2 text-sm text-gray-600">No transfers recorded.</p>
+          <p className="mt-2 text-sm text-gray-600">{t("inventory.transfer.empty")}</p>
         ) : (
           <ul className="mt-3 space-y-2">
-            {transfers.map((t) => (
-              <li key={t.id} className="rounded border border-gray-200 p-3 text-sm">
+            {transfers.map((transfer) => (
+              <li key={transfer.id} className="rounded border border-gray-200 p-3 text-sm">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span>
-                    <span className="font-medium">{t.from_location_name}</span>
+                    <span className="font-medium">{transfer.from_location_name}</span>
                     {" → "}
-                    <span className="font-medium">{t.to_location_name}</span>
-                    <span className="text-gray-600"> · {t.items.length} line
-                      {t.items.length === 1 ? "" : "s"}</span>
+                    <span className="font-medium">{transfer.to_location_name}</span>
+                    <span className="text-gray-600">
+                      {" "}
+                      ·{" "}
+                      {transfer.items.length === 1
+                        ? t("inventory.indent.lineCount", { count: transfer.items.length })
+                        : t("inventory.indent.lineCountPlural", { count: transfer.items.length })}
+                    </span>
                   </span>
-                  <span className={`rounded px-2 py-0.5 text-xs ${statusTone(t.status)}`}>
-                    {t.status}
+                  <span className={`rounded px-2 py-0.5 text-xs ${statusTone(transfer.status)}`}>
+                    {transfer.status}
                   </span>
                 </div>
 
                 <ul className="mt-1 text-gray-600">
-                  {t.items.map((item) => (
+                  {transfer.items.map((item) => (
                     <li key={item.id}>
                       {item.item_name} · batch {item.batch_number} · {item.quantity}
                     </li>
                   ))}
                 </ul>
 
-                {t.status === "dispatched" ? (
-                  <p className="mt-2 text-xs text-amber-900">
-                    In transit — counted at neither location until received.
-                  </p>
+                {transfer.status === "dispatched" ? (
+                  <p className="mt-2 text-xs text-amber-900">{t("inventory.transfer.inTransit")}</p>
                 ) : null}
 
                 <div className="mt-2 flex flex-wrap gap-2">
-                  {t.status === "draft" ? (
+                  {transfer.status === "draft" ? (
                     <>
                       <button
                         type="button" disabled={busy}
-                        onClick={() => void act(() => dispatchStockTransfer(t.id), "Could not dispatch")}
+                        onClick={() =>
+                          void act(() => dispatchStockTransfer(transfer.id), t("inventory.err.dispatch"))
+                        }
                         className="rounded bg-blue-700 px-3 py-1 text-xs text-white disabled:bg-gray-300"
                       >
-                        Dispatch
+                        {t("inventory.transfer.dispatch")}
                       </button>
                       <button
                         type="button" disabled={busy}
-                        onClick={() => void act(() => cancelStockTransfer(t.id), "Could not cancel")}
+                        onClick={() =>
+                          void act(() => cancelStockTransfer(transfer.id), t("inventory.err.cancelTransfer"))
+                        }
                         className="rounded border border-gray-300 px-3 py-1 text-xs disabled:opacity-50"
                       >
-                        Cancel
+                        {t("common.cancel")}
                       </button>
                     </>
                   ) : null}
-                  {t.status === "dispatched" ? (
+                  {transfer.status === "dispatched" ? (
                     <button
                       type="button" disabled={busy}
-                      onClick={() => void act(() => receiveStockTransfer(t.id), "Could not receive")}
+                      onClick={() =>
+                        void act(() => receiveStockTransfer(transfer.id), t("inventory.err.receive"))
+                      }
                       className="rounded bg-blue-700 px-3 py-1 text-xs text-white disabled:bg-gray-300"
                     >
-                      Confirm receipt
+                      {t("inventory.transfer.confirmReceipt")}
                     </button>
                   ) : null}
                 </div>

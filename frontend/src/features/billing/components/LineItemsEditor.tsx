@@ -10,9 +10,10 @@ import Typography from "@mui/material/Typography";
 import DeleteOutlinedIcon from "@mui/icons-material/DeleteOutlined";
 
 import { DataTable, type DataTableColumn } from "@/components/tables/DataTable";
+import { useLocale } from "@/lib/i18n";
 import { meridian } from "@/styles/theme";
-import { CHARGE_CATEGORY_LABELS } from "../constants";
 import { formatINR } from "../lib/formatters";
+import { chargeCategoryLabel } from "../lib/labels";
 import { fromMoney } from "../lib/money";
 import type { AddInvoiceItemInput, InvoiceItem } from "../types";
 import { AddInvoiceItemModal } from "./AddInvoiceItemModal";
@@ -39,18 +40,19 @@ export function LineItemsEditor({
   onPatch,
   onRemove,
 }: Props) {
+  const { t } = useLocale();
   const [addOpen, setAddOpen] = useState(false);
 
   const columns: DataTableColumn<InvoiceItem>[] = [
     {
       key: "charge_category",
-      label: "Category",
+      label: t("billing.lineItems.col.category"),
       width: "14%",
-      render: (row) => CHARGE_CATEGORY_LABELS[row.charge_category],
+      render: (row) => chargeCategoryLabel(t, row.charge_category),
     },
     {
       key: "description",
-      label: "Description",
+      label: t("billing.lineItems.col.description"),
       render: (row) =>
         canEdit ? (
           <TextField
@@ -69,7 +71,7 @@ export function LineItemsEditor({
     },
     {
       key: "quantity",
-      label: "Qty",
+      label: t("billing.lineItems.col.qty"),
       width: 100,
       align: "right",
       render: (row) =>
@@ -93,7 +95,7 @@ export function LineItemsEditor({
     },
     {
       key: "unit_price",
-      label: "Unit price",
+      label: t("billing.lineItems.col.unitPrice"),
       width: 120,
       align: "right",
       render: (row) =>
@@ -117,7 +119,7 @@ export function LineItemsEditor({
     },
     {
       key: "amount",
-      label: "Amount",
+      label: t("billing.lineItems.col.amount"),
       width: 120,
       align: "right",
       render: (row) => (
@@ -135,7 +137,7 @@ export function LineItemsEditor({
         canEdit ? (
           <IconButton
             size="small"
-            aria-label="Remove line"
+            aria-label={t("billing.lineItems.removeAria")}
             disabled={busy}
             onClick={() => void onRemove(row.id)}
             sx={{ color: meridian.danger }}
@@ -176,10 +178,10 @@ export function LineItemsEditor({
               color: meridian.textPrimary,
             }}
           >
-            Line items
+            {t("billing.lineItems.title")}
           </Typography>
           <Typography sx={{ m: 0, mt: 0.4, fontSize: "0.8125rem", color: meridian.textSecondary }}>
-            invoice_items · amount = quantity × unit_price
+            {t("billing.lineItems.hint")}
           </Typography>
         </Box>
         {canEdit ? (
@@ -190,7 +192,7 @@ export function LineItemsEditor({
             onClick={() => setAddOpen(true)}
             sx={{ textTransform: "none", fontWeight: 600, borderRadius: "10px" }}
           >
-            Add item
+            {t("billing.lineItems.addItem")}
           </Button>
         ) : null}
       </Stack>
@@ -199,7 +201,7 @@ export function LineItemsEditor({
         columns={columns}
         rows={items}
         getRowId={(row) => row.id}
-        emptyMessage="No line items."
+        emptyMessage={t("billing.noLineItems")}
       />
 
       <AddInvoiceItemModal

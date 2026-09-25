@@ -29,13 +29,15 @@ import type {
 import { searchPatients } from "@/features/receptionist/api";
 import type { PatientSearchResult } from "@/features/receptionist/types";
 import { ApiError, formatDateTime } from "@/lib/api";
+import { useLocale, type MessageKey } from "@/lib/i18n";
 
 function DispositionBadge({ disposition }: { disposition: string }) {
+  const { t } = useLocale();
   if (disposition === "resalable") {
     return (
       <span className="inline-flex items-center gap-1 rounded-full bg-success-muted px-2.5 py-0.5 text-xs font-medium text-success">
         <CheckCircle2 className="h-3 w-3" />
-        Resalable (Restocked)
+        {t("pharmacy.returns.badge.resalable")}
       </span>
     );
   }
@@ -43,19 +45,30 @@ function DispositionBadge({ disposition }: { disposition: string }) {
     return (
       <span className="inline-flex items-center gap-1 rounded-full bg-warning-muted px-2.5 py-0.5 text-xs font-medium text-warning">
         <ShieldAlert className="h-3 w-3" />
-        Quarantine (Isolated)
+        {t("pharmacy.returns.badge.quarantine")}
       </span>
     );
   }
   return (
     <span className="inline-flex items-center gap-1 rounded-full bg-danger-muted px-2.5 py-0.5 text-xs font-medium text-danger">
       <AlertTriangle className="h-3 w-3" />
-      {disposition.charAt(0).toUpperCase() + disposition.slice(1)} (Scrapped)
+      {t("pharmacy.returns.badge.scrapped", {
+        disposition: disposition.charAt(0).toUpperCase() + disposition.slice(1),
+      })}
     </span>
   );
 }
 
+const DISPOSITION_FILTERS: { id: string; labelKey: MessageKey }[] = [
+  { id: "all", labelKey: "pharmacy.returns.disposition.all" },
+  { id: "resalable", labelKey: "pharmacy.returns.disposition.resalable" },
+  { id: "quarantine", labelKey: "pharmacy.returns.disposition.quarantine" },
+  { id: "damaged", labelKey: "pharmacy.returns.disposition.damaged" },
+  { id: "expired", labelKey: "pharmacy.returns.disposition.expired" },
+];
+
 function PharmacyReturnsContent() {
+  const { t } = useLocale();
   const [returns, setReturns] = useState<PharmacyReturn[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -90,7 +103,7 @@ function PharmacyReturnsContent() {
       });
       setReturns(res.items);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Failed to load returns");
+      setError(e instanceof ApiError ? e.message : t("pharmacy.errLoadReturns"));
       setReturns([]);
     } finally {
       setLoading(false);
@@ -204,7 +217,7 @@ function PharmacyReturnsContent() {
       resetForm();
       await loadReturns();
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : "Failed to record return.");
+      setFormError(err instanceof Error ? err.message : t("pharmacy.errRecordReturn"));
     } finally {
       setSubmitting(false);
     }
@@ -242,9 +255,7 @@ function PharmacyReturnsContent() {
             <RotateCcw className="h-6 w-6 text-primary" />
             <PageHeading titleKey="pharmacy.returnsTitle" titleClassName="text-2xl font-bold tracking-tight" />
           </div>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Process patient & ward medication returns. Restock resalable items or isolate quarantine/scrap from active inventory.
-          </p>
+          <p className="mt-1 text-sm text-muted-foreground">{t("pharmacy.returns.subtitle")}</p>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -252,7 +263,7 @@ function PharmacyReturnsContent() {
             onClick={() => void loadReturns()}
             className="rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium hover:bg-muted"
           >
-            Refresh
+            {t("common.refresh")}
           </button>
           <button
             type="button"
@@ -263,7 +274,7 @@ function PharmacyReturnsContent() {
             className="flex items-center gap-1.5 rounded-md bg-primary px-3.5 py-1.5 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90"
           >
             <Plus className="h-4 w-4" />
-            Process Return
+            {t("pharmacy.returns.processReturn")}
           </button>
         </div>
       </div>
@@ -271,26 +282,26 @@ function PharmacyReturnsContent() {
       {/* Metrics Row */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
         <div className="rounded-lg border border-border bg-card p-4">
-          <p className="text-xs font-medium text-muted-foreground uppercase">Total Returns</p>
+          <p className="text-xs font-medium text-muted-foreground uppercase">{t("pharmacy.returns.totalReturns")}</p>
           <p className="mt-1 text-2xl font-bold">{metrics.total}</p>
         </div>
         <div className="rounded-lg border border-border bg-card p-4">
           <div className="flex items-center justify-between">
-            <p className="text-xs font-medium text-muted-foreground uppercase">Restocked</p>
+            <p className="text-xs font-medium text-muted-foreground uppercase">{t("pharmacy.returns.restocked")}</p>
             <CheckCircle2 className="h-4 w-4 text-success" />
           </div>
           <p className="mt-1 text-2xl font-bold text-success">{metrics.resalable}</p>
         </div>
         <div className="rounded-lg border border-border bg-card p-4">
           <div className="flex items-center justify-between">
-            <p className="text-xs font-medium text-muted-foreground uppercase">Quarantined</p>
+            <p className="text-xs font-medium text-muted-foreground uppercase">{t("pharmacy.returns.quarantined")}</p>
             <ShieldAlert className="h-4 w-4 text-warning" />
           </div>
           <p className="mt-1 text-2xl font-bold text-warning">{metrics.quarantine}</p>
         </div>
         <div className="rounded-lg border border-border bg-card p-4">
           <div className="flex items-center justify-between">
-            <p className="text-xs font-medium text-muted-foreground uppercase">Scrapped / Expired</p>
+            <p className="text-xs font-medium text-muted-foreground uppercase">{t("pharmacy.returns.scrappedExpired")}</p>
             <AlertTriangle className="h-4 w-4 text-danger" />
           </div>
           <p className="mt-1 text-2xl font-bold text-danger">{metrics.scrap}</p>
@@ -301,15 +312,9 @@ function PharmacyReturnsContent() {
       <div className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
           <Filter className="h-4 w-4 text-muted-foreground" />
-          <span className="text-xs font-medium text-muted-foreground">Filter by Disposition:</span>
+          <span className="text-xs font-medium text-muted-foreground">{t("pharmacy.returns.filterByDisposition")}</span>
           <div className="flex flex-wrap gap-1">
-            {[
-              { id: "all", label: "All" },
-              { id: "resalable", label: "Resalable" },
-              { id: "quarantine", label: "Quarantine" },
-              { id: "damaged", label: "Damaged" },
-              { id: "expired", label: "Expired" },
-            ].map((f) => (
+            {DISPOSITION_FILTERS.map((f) => (
               <button
                 key={f.id}
                 type="button"
@@ -320,7 +325,7 @@ function PharmacyReturnsContent() {
                     : "bg-muted text-muted-foreground hover:text-foreground"
                 }`}
               >
-                {f.label}
+                {t(f.labelKey)}
               </button>
             ))}
           </div>
@@ -330,7 +335,7 @@ function PharmacyReturnsContent() {
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <input
             type="text"
-            placeholder="Search item, batch, reason…"
+            placeholder={t("pharmacy.returns.searchPlaceholder")}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full rounded-md border border-input bg-background pl-8 pr-3 py-1.5 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
@@ -341,25 +346,25 @@ function PharmacyReturnsContent() {
       {/* Returns Table */}
       <div className="rounded-lg border border-border bg-card overflow-hidden">
         {loading ? (
-          <div className="p-8 text-center text-sm text-muted-foreground">Loading returns history…</div>
+          <div className="p-8 text-center text-sm text-muted-foreground">{t("pharmacy.returns.loading")}</div>
         ) : error ? (
           <div className="p-8 text-center text-sm text-danger">{error}</div>
         ) : filteredReturns.length === 0 ? (
           <div className="p-8 text-center text-sm text-muted-foreground">
-            No pharmacy returns found for the selected criteria.
+            {t("pharmacy.returns.empty")}
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead className="border-b border-border bg-muted/50 text-xs font-medium text-muted-foreground">
                 <tr>
-                  <th className="px-4 py-3">Date & Time</th>
-                  <th className="px-4 py-3">Medicine / Item</th>
-                  <th className="px-4 py-3">Batch</th>
-                  <th className="px-4 py-3">Qty</th>
-                  <th className="px-4 py-3">Disposition</th>
-                  <th className="px-4 py-3">Return Reason</th>
-                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">{t("pharmacy.returns.col.dateTime")}</th>
+                  <th className="px-4 py-3">{t("pharmacy.returns.col.medicine")}</th>
+                  <th className="px-4 py-3">{t("pharmacy.returns.col.batch")}</th>
+                  <th className="px-4 py-3">{t("pharmacy.returns.col.qty")}</th>
+                  <th className="px-4 py-3">{t("pharmacy.returns.col.disposition")}</th>
+                  <th className="px-4 py-3">{t("pharmacy.returns.col.reason")}</th>
+                  <th className="px-4 py-3">{t("pharmacy.returns.col.status")}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -415,11 +420,9 @@ function PharmacyReturnsContent() {
 
             <div className="flex items-center gap-2">
               <RotateCcw className="h-5 w-5 text-primary" />
-              <h2 className="text-lg font-semibold">Process Medicine Return</h2>
+              <h2 className="text-lg font-semibold">{t("pharmacy.returns.modal.title")}</h2>
             </div>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Record medication returned by patient or ward. Items marked resalable return to stock; quarantined or damaged items are isolated.
-            </p>
+            <p className="mt-1 text-xs text-muted-foreground">{t("pharmacy.returns.modal.hint")}</p>
 
             {formError && (
               <div className="mt-4 rounded-md border border-danger/20 bg-danger-muted p-2.5 text-xs text-danger">
@@ -431,13 +434,13 @@ function PharmacyReturnsContent() {
               {/* Patient Selection */}
               <div>
                 <label className="block text-xs font-medium text-foreground">
-                  Patient <span className="text-danger">*</span>
+                  {t("common.patient")} <span className="text-danger">*</span>
                 </label>
                 <div className="relative mt-1">
                   <User className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                   <input
                     type="text"
-                    placeholder="Search patient name or UHID…"
+                    placeholder={t("pharmacy.returns.modal.patientSearch")}
                     value={patientSearch}
                     onChange={(e) => {
                       setPatientSearch(e.target.value);
@@ -456,7 +459,9 @@ function PharmacyReturnsContent() {
                           className="w-full text-left px-2 py-1.5 hover:bg-muted rounded text-foreground flex justify-between"
                         >
                           <span className="font-medium">{p.full_name}</span>
-                          <span className="text-muted-foreground font-mono">{p.uhid ?? "No UHID"}</span>
+                          <span className="text-muted-foreground font-mono">
+                            {p.uhid ?? t("pharmacy.returns.noUhid")}
+                          </span>
                         </button>
                       ))}
                     </div>
@@ -464,7 +469,10 @@ function PharmacyReturnsContent() {
                 </div>
                 {selectedPatient && (
                   <p className="mt-1 text-[11px] text-success">
-                    Selected: {selectedPatient.full_name} (UHID: {selectedPatient.uhid ?? "N/A"})
+                    {t("pharmacy.returns.modal.selectedPatient", {
+                      name: selectedPatient.full_name,
+                      uhid: selectedPatient.uhid ?? "N/A",
+                    })}
                   </p>
                 )}
               </div>
@@ -472,13 +480,13 @@ function PharmacyReturnsContent() {
               {/* Medicine Selection */}
               <div>
                 <label className="block text-xs font-medium text-foreground">
-                  Medicine / Item <span className="text-danger">*</span>
+                  {t("pharmacy.returns.col.medicine")} <span className="text-danger">*</span>
                 </label>
                 <div className="relative mt-1">
                   <Package className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                   <input
                     type="text"
-                    placeholder="Search medicine brand or generic name…"
+                    placeholder={t("pharmacy.returns.modal.medicineSearch")}
                     value={medicineSearch}
                     onChange={(e) => {
                       setMedicineSearch(e.target.value);
@@ -507,7 +515,10 @@ function PharmacyReturnsContent() {
                 </div>
                 {selectedMedicine && (
                   <p className="mt-1 text-[11px] text-success">
-                    Selected: {selectedMedicine.name} ({selectedMedicine.form ?? "Medicine"})
+                    {t("pharmacy.returns.modal.selectedMedicine", {
+                      name: selectedMedicine.name,
+                      form: selectedMedicine.form ?? "Medicine",
+                    })}
                   </p>
                 )}
               </div>
@@ -515,13 +526,15 @@ function PharmacyReturnsContent() {
               {/* Batch selection */}
               {selectedMedicine && selectedMedicine.batches && selectedMedicine.batches.length > 0 && (
                 <div>
-                  <label className="block text-xs font-medium text-foreground">Batch</label>
+                  <label className="block text-xs font-medium text-foreground">
+                    {t("pharmacy.returns.col.batch")}
+                  </label>
                   <select
                     value={selectedBatchId}
                     onChange={(e) => setSelectedBatchId(e.target.value)}
                     className="mt-1 w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
                   >
-                    <option value="">No batch / Unspecified</option>
+                    <option value="">{t("pharmacy.returns.modal.noBatch")}</option>
                     {selectedMedicine.batches.map((b) => (
                       <option key={b.batch_id} value={b.batch_id}>
                         Batch {b.batch_number} (Exp: {b.expiry_date}, Qty: {b.quantity})
@@ -534,7 +547,7 @@ function PharmacyReturnsContent() {
               {/* Quantity */}
               <div>
                 <label className="block text-xs font-medium text-foreground">
-                  Returned Quantity <span className="text-danger">*</span>
+                  {t("pharmacy.returns.modal.returnedQty")} <span className="text-danger">*</span>
                 </label>
                 <input
                   type="number"
@@ -550,7 +563,7 @@ function PharmacyReturnsContent() {
               {/* Disposition */}
               <div>
                 <label className="block text-xs font-medium text-foreground">
-                  Disposition <span className="text-danger">*</span>
+                  {t("pharmacy.returns.col.disposition")} <span className="text-danger">*</span>
                 </label>
                 <div className="mt-1 grid grid-cols-2 gap-2 text-xs">
                   <label
@@ -570,8 +583,10 @@ function PharmacyReturnsContent() {
                     />
                     <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
                     <div>
-                      <p className="font-semibold">Resalable</p>
-                      <p className="text-[10px] opacity-80">Restock to inventory</p>
+                      <p className="font-semibold">{t("pharmacy.returns.disposition.resalable")}</p>
+                      <p className="text-[10px] opacity-80">
+                        {t("pharmacy.returns.disposition.restockHint")}
+                      </p>
                     </div>
                   </label>
 
@@ -592,8 +607,10 @@ function PharmacyReturnsContent() {
                     />
                     <ShieldAlert className="h-4 w-4 flex-shrink-0" />
                     <div>
-                      <p className="font-semibold">Quarantine</p>
-                      <p className="text-[10px] opacity-80">Isolate for inspection</p>
+                      <p className="font-semibold">{t("pharmacy.returns.disposition.quarantine")}</p>
+                      <p className="text-[10px] opacity-80">
+                        {t("pharmacy.returns.disposition.quarantineHint")}
+                      </p>
                     </div>
                   </label>
 
@@ -614,8 +631,10 @@ function PharmacyReturnsContent() {
                     />
                     <AlertTriangle className="h-4 w-4 flex-shrink-0" />
                     <div>
-                      <p className="font-semibold">Damaged</p>
-                      <p className="text-[10px] opacity-80">Isolate for scrap</p>
+                      <p className="font-semibold">{t("pharmacy.returns.disposition.damaged")}</p>
+                      <p className="text-[10px] opacity-80">
+                        {t("pharmacy.returns.disposition.damagedHint")}
+                      </p>
                     </div>
                   </label>
 
@@ -636,8 +655,10 @@ function PharmacyReturnsContent() {
                     />
                     <AlertTriangle className="h-4 w-4 flex-shrink-0" />
                     <div>
-                      <p className="font-semibold">Expired</p>
-                      <p className="text-[10px] opacity-80">Isolate for disposal</p>
+                      <p className="font-semibold">{t("pharmacy.returns.disposition.expired")}</p>
+                      <p className="text-[10px] opacity-80">
+                        {t("pharmacy.returns.disposition.expiredHint")}
+                      </p>
                     </div>
                   </label>
                 </div>
@@ -646,11 +667,11 @@ function PharmacyReturnsContent() {
               {/* Reason */}
               <div>
                 <label className="block text-xs font-medium text-foreground">
-                  Reason for Return <span className="text-danger">*</span>
+                  {t("pharmacy.returns.modal.reasonLabel")} <span className="text-danger">*</span>
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g., Patient discharged early, adverse reaction, broken seal"
+                  placeholder={t("pharmacy.returns.modal.reasonPlaceholder")}
                   value={reason}
                   onChange={(e) => setReason(e.target.value)}
                   className="mt-1 w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
@@ -666,14 +687,16 @@ function PharmacyReturnsContent() {
                   disabled={submitting}
                   className="rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted"
                 >
-                  Cancel
+                  {t("common.cancel")}
                 </button>
                 <button
                   type="submit"
                   disabled={submitting}
                   className="rounded-md bg-primary px-4 py-1.5 text-xs font-medium text-primary-foreground shadow hover:bg-primary/90 disabled:opacity-50"
                 >
-                  {submitting ? "Processing…" : "Confirm Return"}
+                  {submitting
+                    ? t("pharmacy.returns.modal.processing")
+                    : t("pharmacy.returns.modal.confirmReturn")}
                 </button>
               </div>
             </form>

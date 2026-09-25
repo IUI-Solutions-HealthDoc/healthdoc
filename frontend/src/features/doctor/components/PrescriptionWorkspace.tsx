@@ -18,6 +18,7 @@ import { PrescriptionItemRow } from "./PrescriptionItemRow";
 import { PrescriptionPrintView } from "./PrescriptionPrintView";
 import { SafetyBanner } from "./SafetyBanner";
 import { ALLERGY_OVERRIDE_REASON_MIN } from "../constants";
+import { useLocale } from "@/lib/i18n";
 
 import "../prescription-print.css";
 
@@ -49,20 +50,25 @@ export function PrescriptionWorkspace({ context, encounter }: PrescriptionWorksp
   } = usePrescription(encounter, context);
 
   const [pickOpen, setPickOpen] = React.useState(false);
+  const { t, localizeField } = useLocale();
+  const facilityName = localizeField(
+    currentUser?.facility.name ?? "",
+    currentUser?.facility.name_hi,
+  );
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
       <Box sx={{ ...doctorPanelSx, display: "flex", flexDirection: "column", gap: 2 }}>
         <Stack direction="row" spacing={2} sx={{ alignItems: "flex-start", justifyContent: "space-between" }}>
           <Box>
-            <Typography sx={{ fontSize: "1.0625rem", fontWeight: 700 }}>Prescription</Typography>
+            <Typography sx={{ fontSize: "1.0625rem", fontWeight: 700 }}>{t("doctor.prescription")}</Typography>
             <Typography sx={{ fontSize: "0.8125rem", color: meridian.textSecondary, mt: 0.25 }}>
               {context.patient_name} · {formatAgeSex(context.age_years, context.sex)} · UHID {context.uhid} · Token{" "}
               {context.token_display}
             </Typography>
           </Box>
           <Button variant="outlined" size="small" sx={doctorButtonSx} onClick={() => setPickOpen(true)}>
-            + Add medicine
+            {t("doctor.addMedicine")}
           </Button>
         </Stack>
 
@@ -70,7 +76,7 @@ export function PrescriptionWorkspace({ context, encounter }: PrescriptionWorksp
 
         {needsOverride && !hasBlocking && (
           <TextField
-            label="Reason for prescribing despite the allergy"
+            label={t("doctor.allergyOverrideLabel")}
             value={overrideReason}
             onChange={(e) => setOverrideReason(e.target.value)}
             multiline
@@ -79,15 +85,17 @@ export function PrescriptionWorkspace({ context, encounter }: PrescriptionWorksp
             error={!overrideOk && overrideReason.length > 0}
             helperText={
               overrideOk
-                ? "Recorded against the prescription and read during review."
-                : `${ALLERGY_OVERRIDE_REASON_MIN - overrideReason.trim().length} more characters required.`
+                ? t("doctor.allergyOverrideOk")
+                : t("doctor.allergyOverrideChars", {
+                    count: ALLERGY_OVERRIDE_REASON_MIN - overrideReason.trim().length,
+                  })
             }
           />
         )}
 
         {items.length === 0 ? (
           <Typography sx={{ fontSize: "0.8125rem", color: meridian.textSecondary }}>
-            No medicines added yet. Use “Add medicine” to start the prescription.
+            {t("doctor.noMedicinesYet")}
           </Typography>
         ) : (
           <Stack spacing={1.5}>
@@ -103,7 +111,7 @@ export function PrescriptionWorkspace({ context, encounter }: PrescriptionWorksp
         )}
 
         <TextField
-          label="Prescription notes (optional)"
+          label={t("doctor.prescriptionNotesOptional")}
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           multiline
@@ -124,11 +132,13 @@ export function PrescriptionWorkspace({ context, encounter }: PrescriptionWorksp
       >
         <Stack direction="row" spacing={2} sx={{ alignItems: "center", justifyContent: "space-between" }}>
           <Typography sx={{ fontSize: "0.8125rem", color: hasBlocking ? meridian.danger : meridian.textSecondary }}>
-            {items.length} medicine{items.length === 1 ? "" : "s"}
+            {items.length === 1
+              ? t("doctor.medicineCount", { count: items.length })
+              : t("doctor.medicineCountPlural", { count: items.length })}
             {hasBlocking
-              ? " · anaphylaxis alert cannot be overridden"
+              ? t("doctor.anaphylaxisBlock")
               : !overrideOk
-                ? " · a reason is required for the allergy alert"
+                ? t("doctor.allergyReasonRequired")
                 : ""}
           </Typography>
           <Stack direction="row" spacing={1.5}>
@@ -138,7 +148,7 @@ export function PrescriptionWorkspace({ context, encounter }: PrescriptionWorksp
               disabled={items.length === 0 || !currentUser?.facility.name}
               onClick={() => window.print()}
             >
-              Print / PDF
+              {t("doctor.printPdf")}
             </Button>
             <Button
               variant="contained"
@@ -146,7 +156,7 @@ export function PrescriptionWorkspace({ context, encounter }: PrescriptionWorksp
               disabled={items.length === 0 || saving || hasBlocking || !overrideOk}
               onClick={save}
             >
-              {saving ? "Saving…" : "Save prescription"}
+              {saving ? t("doctor.statusSaving") : t("doctor.savePrescription")}
             </Button>
           </Stack>
         </Stack>
@@ -154,7 +164,7 @@ export function PrescriptionWorkspace({ context, encounter }: PrescriptionWorksp
 
       <MedicineSearchModal open={pickOpen} onClose={() => setPickOpen(false)} onPick={addMedicine} />
       <PrescriptionPrintView
-        facilityName={currentUser?.facility.name ?? ""}
+        facilityName={facilityName}
         context={context}
         items={items}
         notes={notes}

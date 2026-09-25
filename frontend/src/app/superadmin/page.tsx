@@ -10,7 +10,7 @@ import {
 } from "@/features/platform/api";
 
 export default function Page() {
-  const { localizeField } = useLocale();
+  const { localizeField, t } = useLocale();
   const [facilities, setFacilities] = useState<PlatformFacility[]>([]);
   const [total, setTotal] = useState(0);
   const [query, setQuery] = useState("");
@@ -28,11 +28,11 @@ export default function Page() {
       setTotal(response.total);
       setPage(1);
     } catch (reason) {
-      setError(getUserFacingError(reason, "Could not load platform facilities."));
+      setError(getUserFacingError(reason, t("superadmin.errLoadFacilities")));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void load();
@@ -63,7 +63,7 @@ export default function Page() {
         }}
       >
         <label className="flex-1 space-y-1 text-sm">
-          <span className="text-muted-foreground">Search facility name, code or HFR ID</span>
+          <span className="text-muted-foreground">{t("superadmin.searchPlaceholder")}</span>
           <input
             className="w-full rounded-md border border-border px-3 py-2"
             value={query}
@@ -76,7 +76,7 @@ export default function Page() {
           disabled={loading}
           className="self-end rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
         >
-          Search
+          {t("common.search")}
         </button>
       </form>
 
@@ -92,9 +92,9 @@ export default function Page() {
           <p className="mt-1 text-sm text-muted-foreground">{total} total</p>
         </div>
         {loading ? (
-          <p className="p-5 text-sm text-muted-foreground">Loading facilities…</p>
+          <p className="p-5 text-sm text-muted-foreground">{t("superadmin.loadingFacilities")}</p>
         ) : paginatedFacilities.length === 0 ? (
-          <p className="p-5 text-sm text-muted-foreground">No facilities match this search.</p>
+          <p className="p-5 text-sm text-muted-foreground">{t("superadmin.noSearchMatch")}</p>
         ) : (
           <>
             <ul className="divide-y divide-border">

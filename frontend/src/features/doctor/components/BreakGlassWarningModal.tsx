@@ -8,6 +8,7 @@ import Typography from "@mui/material/Typography";
 
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
+import { useLocale } from "@/lib/i18n";
 import { meridian } from "@/styles/theme";
 import { BREAK_GLASS_JUSTIFICATION_MIN } from "../constants";
 import { doctorButtonSx } from "../panelSx";
@@ -32,6 +33,7 @@ export function BreakGlassWarningModal({
   onClose,
   onConfirm,
 }: BreakGlassWarningModalProps) {
+  const { t } = useLocale();
   const [justification, setJustification] = React.useState("");
   const [error, setError] = React.useState<string | null>(null);
 
@@ -57,13 +59,13 @@ export function BreakGlassWarningModal({
     <Modal
       open={open}
       onClose={onClose}
-      title="Emergency access (break-glass)"
+      title={t("doctor.breakGlassModalTitle")}
       size="sm"
       disableClose={busy}
       actions={
         <>
           <Button variant="outlined" sx={doctorButtonSx} disabled={busy} onClick={onClose}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button
             variant="contained"
@@ -73,7 +75,7 @@ export function BreakGlassWarningModal({
             disabled={!justificationReady}
             onClick={() => void submit()}
           >
-            Open emergency access
+            {t("doctor.breakGlassOpenAccess")}
           </Button>
         </>
       }
@@ -98,17 +100,15 @@ export function BreakGlassWarningModal({
               mb: 0.5,
             }}
           >
-            This is an emergency override
+            {t("doctor.breakGlassEmergencyOverride")}
           </Typography>
           <Typography sx={{ fontSize: "0.8125rem", color: meridian.textPrimary, lineHeight: 1.55 }}>
-            You are about to open <strong>{patientName}</strong>&apos;s record without active
-            consent. Your identity, reason and record access are logged; the grant expires after
-            two hours and remains available for compliance review.
+            {t("doctor.breakGlassConfirmBody", { patientName })}
           </Typography>
         </Box>
 
         <TextField
-          label="Why do you need this record now?"
+          label={t("doctor.breakGlassJustificationLabel")}
           value={justification}
           onChange={(event) => {
             setError(null);
@@ -123,8 +123,10 @@ export function BreakGlassWarningModal({
           helperText={
             error ??
             (justificationReady
-              ? "Stored with the grant and read during compliance review."
-              : `${remaining} more character${remaining === 1 ? "" : "s"} required.`)
+              ? t("doctor.breakGlassJustificationStored")
+              : remaining === 1
+                ? t("doctor.breakGlassCharsRequired", { count: remaining })
+                : t("doctor.breakGlassCharsRequiredPlural", { count: remaining }))
           }
         />
       </Stack>

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api, ApiError, newIdempotencyKey } from "@/lib/api";
+import { useLocale } from "@/lib/i18n";
 import type { MedicationRecord, MedicationStatus } from "@/components/tables/EMARTable";
 
 export interface PrescriptionOption {
@@ -32,6 +33,7 @@ export default function MedicationAdministrationModal({
   prescriptionItems = [],
   correctionRecord = null,
 }: MedicationAdministrationModalProps) {
+  const { t } = useLocale();
   const isCorrection = Boolean(correctionRecord);
 
   const [prescriptionItemId, setPrescriptionItemId] = useState<string>("");
@@ -131,7 +133,7 @@ export default function MedicationAdministrationModal({
           setError(err.message);
         }
       } else {
-        setError(err instanceof Error ? err.message : "Failed to record medication administration");
+        setError(err instanceof Error ? err.message : t("nurse.medicationModal.errRecord"));
       }
     } finally {
       setSubmitting(false);
@@ -151,7 +153,9 @@ export default function MedicationAdministrationModal({
         <div className="flex items-center justify-between border-b border-border pb-3">
           <div>
             <h2 className="text-lg font-semibold">
-              {isCorrection ? "Correct Medication Dose" : "Record Medication Administration"}
+              {isCorrection
+                ? t("nurse.medicationModal.correctTitle")
+                : t("nurse.medicationModal.recordTitle")}
             </h2>
             <p className="text-xs text-muted-foreground">
               {isCorrection
@@ -333,7 +337,7 @@ export default function MedicationAdministrationModal({
               disabled={submitting}
               className="rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-muted"
             >
-              Cancel
+              {t("common.cancel")}
             </button>
             <button
               type="submit"
@@ -341,10 +345,10 @@ export default function MedicationAdministrationModal({
               className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary/90 disabled:opacity-50"
             >
               {submitting
-                ? "Recording..."
+                ? t("nurse.medicationModal.recording")
                 : isCorrection
-                ? "Submit Dose Correction"
-                : "Record Administration"}
+                  ? t("nurse.medicationModal.correctionSubmit")
+                  : t("nurse.medicationModal.recordSubmit")}
             </button>
           </div>
         </form>

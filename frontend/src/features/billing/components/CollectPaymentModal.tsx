@@ -9,7 +9,8 @@ import Typography from "@mui/material/Typography";
 
 import { Modal } from "@/components/ui/Modal";
 import { meridian } from "@/styles/theme";
-import { PAYMENT_MODE_LABELS } from "../constants";
+import { useLocale } from "@/lib/i18n";
+import { PAYMENT_MODES, paymentModeLabel } from "../lib/labels";
 import { extractValidationErrors } from "../lib/errors";
 import { toMoney } from "../lib/money";
 import type { CollectPaymentInput, PaymentMode } from "../types";
@@ -22,8 +23,6 @@ type Props = {
   onSubmit: (body: CollectPaymentInput) => Promise<void> | void;
 };
 
-const MODES = Object.keys(PAYMENT_MODE_LABELS) as PaymentMode[];
-
 export function CollectPaymentModal({
   open,
   balanceDue,
@@ -31,6 +30,7 @@ export function CollectPaymentModal({
   onClose,
   onSubmit,
 }: Props) {
+  const { t } = useLocale();
   const [amount, setAmount] = useState(balanceDue);
   const [mode, setMode] = useState<PaymentMode>("cash");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -78,13 +78,13 @@ export function CollectPaymentModal({
     <Modal
       open={open}
       onClose={onClose}
-      title="Collect payment"
+      title={t("billing.collectPayment")}
       size="sm"
       loading={busy}
       actions={
         <>
           <Button onClick={onClose} sx={{ textTransform: "none" }} disabled={busy}>
-            Cancel
+            {t("billing.collect.cancel")}
           </Button>
           <Button
             variant="contained"
@@ -92,7 +92,7 @@ export function CollectPaymentModal({
             disabled={busy}
             sx={{ textTransform: "none", fontWeight: 600, borderRadius: "10px" }}
           >
-            Collect
+            {t("billing.collect.submit")}
           </Button>
         </>
       }
@@ -116,7 +116,7 @@ export function CollectPaymentModal({
         ) : null}
         <TextField
           type="number"
-          label="Amount (₹)"
+          label={t("billing.collect.amountLabel")}
           size="small"
           value={amount}
           error={Boolean(fieldErrors.amount)}
@@ -132,7 +132,7 @@ export function CollectPaymentModal({
         />
         <TextField
           select
-          label="Mode"
+          label={t("billing.collect.modeLabel")}
           size="small"
           value={mode}
           error={Boolean(fieldErrors.mode)}
@@ -145,9 +145,9 @@ export function CollectPaymentModal({
           }}
           fullWidth
         >
-          {MODES.map((m) => (
+          {PAYMENT_MODES.map((m) => (
             <MenuItem key={m} value={m}>
-              {PAYMENT_MODE_LABELS[m]}
+              {paymentModeLabel(t, m)}
             </MenuItem>
           ))}
         </TextField>

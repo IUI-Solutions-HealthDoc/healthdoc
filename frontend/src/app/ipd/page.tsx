@@ -278,9 +278,9 @@ export default function IpdPage() {
 
           {pendingAdmissions.length === 0 ? (
             <div className="surface-card p-10 text-center">
-              <p className="text-base font-semibold text-slate-700">No Pending Admissions</p>
+              <p className="text-base font-semibold text-slate-700">{t("ipd.noPendingAdmissionsTitle")}</p>
               <p className="mt-1 text-sm text-muted-foreground">
-                All doctor-ordered inpatient dispositions have been assigned to beds.
+                {t("ipd.noPendingAdmissionsBody")}
               </p>
             </div>
           ) : (
@@ -320,7 +320,14 @@ export default function IpdPage() {
                       <div className="mt-3 space-y-1.5 text-xs">
                         {item.recommended_ward_name && (
                           <p className="text-slate-700">
-                            <strong className="text-slate-900">Rec Ward:</strong> {item.recommended_ward_name}
+                            <strong className="text-slate-900">{t("ipd.recommendedWard")}:</strong>{" "}
+                            {localizeField(item.recommended_ward_name, item.recommended_ward_name_hi)}
+                          </p>
+                        )}
+                        {item.recommended_department_name && (
+                          <p className="text-slate-700">
+                            <strong className="text-slate-900">{t("receptionist.department")}:</strong>{" "}
+                            {localizeField(item.recommended_department_name, item.recommended_department_name_hi)}
                           </p>
                         )}
                         {item.doctor_name && (

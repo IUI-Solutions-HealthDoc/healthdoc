@@ -31,9 +31,9 @@ export default function Page() {
       />
 
       <section className="space-y-4">
-        <h2 className="text-lg font-medium">1. Search for an existing record</h2>
+        <h2 className="text-lg font-medium">{t("patient.searchExistingSection")}</h2>
         <PatientSearch
-          selectLabel="Use this patient"
+          selectLabel={t("common.useThisPatient")}
           onSelect={(patient) => {
             setSelected(patient);
             setConfirmedNew(false);
@@ -43,13 +43,13 @@ export default function Page() {
           <div className="space-y-4">
             <div className="surface-card flex flex-wrap items-center justify-between gap-3 border border-success/30 bg-success-muted p-4">
               <div>
-                <p className="font-medium">Using existing patient record</p>
+                <p className="font-medium">{t("patient.usingExisting")}</p>
                 <p className="text-sm text-muted-foreground">
-                  {selected.full_name} · {selected.uhid ?? "UHID pending"}
+                  {selected.full_name} · {selected.uhid ?? t("patient.uhidPending")}
                 </p>
               </div>
               <button type="button" className="text-sm underline" onClick={() => setSelected(null)}>
-                Choose another patient
+                {t("patient.chooseAnother")}
               </button>
             </div>
             <AbhaIdentityPanel patient={selected} />
@@ -66,13 +66,12 @@ export default function Page() {
       </section>
 
       <section className="space-y-4">
-        <h2 className="text-lg font-medium">2. Register a new patient</h2>
+        <h2 className="text-lg font-medium">{t("patient.registerNewSection")}</h2>
 
         {!confirmedNew && !selected ? (
           <div className="surface-card space-y-3 p-6">
             <p className="text-sm text-muted-foreground">
-              Only continue if the search above returned no match for this
-              person.
+              {t("patient.registerOnlyIfNoMatch")}
             </p>
             <button
               type="button"

@@ -7,6 +7,7 @@ import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 
+import { useLocale } from "@/lib/i18n";
 import { meridian } from "@/styles/theme";
 import { adminPanelSx } from "../panelSx";
 import type { User } from "../types";
@@ -33,6 +34,7 @@ export function UserListPanel({
   onActiveFilterChange,
   onSelect,
 }: Props) {
+  const { t } = useLocale();
   const filterValue =
     activeFilter === null ? "all" : activeFilter ? "active" : "inactive";
 
@@ -70,7 +72,7 @@ export function UserListPanel({
             letterSpacing: "-0.02em",
           }}
         >
-          Staff Directory
+          {t("admin.users.staffDirectory")}
         </Typography>
         <Typography sx={{ m: 0, mt: 0.4, fontSize: "0.8125rem", color: meridian.textSecondary }}>
           Search and manage staff profiles for this facility ({users.length} total).
@@ -80,34 +82,34 @@ export function UserListPanel({
       <Stack spacing={1.25} sx={{ px: 2.5, pb: 2 }}>
         <TextField
           size="small"
-          placeholder="Search username, name, employee ID…"
+          placeholder={t("admin.users.searchPlaceholder")}
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}
         />
         <TextField
           select
           size="small"
-          label="Status"
+          label={t("common.status")}
           value={filterValue}
           onChange={(e) => {
             const v = e.target.value;
             onActiveFilterChange(v === "all" ? null : v === "active");
           }}
         >
-          <MenuItem value="all">All</MenuItem>
-          <MenuItem value="active">Active</MenuItem>
-          <MenuItem value="inactive">Inactive</MenuItem>
+          <MenuItem value="all">{t("common.all")}</MenuItem>
+          <MenuItem value="active">{t("admin.users.active")}</MenuItem>
+          <MenuItem value="inactive">{t("admin.users.inactive")}</MenuItem>
         </TextField>
       </Stack>
 
       <Box sx={{ flex: 1, overflowY: "auto", borderTop: `1px solid ${meridian.border}`, maxHeight: 460 }}>
         {loading ? (
           <Typography sx={{ p: 2.5, fontSize: "0.875rem", color: meridian.textSecondary }}>
-            Loading staff profiles…
+            {t("common.loading")}
           </Typography>
         ) : paginatedUsers.length === 0 ? (
           <Typography sx={{ p: 2.5, fontSize: "0.875rem", color: meridian.textSecondary }}>
-            No users found.
+            {t("admin.users.noUsersFound")}
           </Typography>
         ) : (
           paginatedUsers.map((u) => {
