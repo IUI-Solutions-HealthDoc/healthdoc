@@ -742,7 +742,9 @@ async def create_tariff(
     payload: TariffCreate,
     current_db_user: CurrentDbUser,
     idempotency_key: str | None = Header(None, alias="Idempotency-Key", max_length=255),
-    db: AsyncSession = Depends(get_db),
+    # The write and idempotent reply must commit before the 201 is sent;
+    # request-scoped teardown can otherwise race the immediate catalogue read.
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(require_roles(*_TARIFF_ADMIN_ROLES)),
 ) -> TariffOut:
     """A price change is a NEW ROW, never an edit.
@@ -800,7 +802,8 @@ async def deactivate_tariff(
     tariff_id: uuid.UUID,
     current_db_user: CurrentDbUser,
     idempotency_key: str | None = Header(None, alias="Idempotency-Key", max_length=255),
-    db: AsyncSession = Depends(get_db),
+    # Keep the 204 behind the same durable-commit boundary as tariff creation.
+    db: AsyncSession = Depends(get_db, scope="function"),
     user: AuthUser = Depends(require_roles(*_TARIFF_ADMIN_ROLES)),
 ) -> None:
     """The row is kept: invoice_items.charge_master_id points at it, and a line
