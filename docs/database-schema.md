@@ -203,6 +203,7 @@ do not merge out of order.**
 | 0082 | scan_share_checkin_timestamp | scan_share_tickets | Adds checked_in_at; historical unknown times remain null. |
 | 0083 | abha_profile_token | ALTER patients: abha_profile_token_encrypted, abha_profile_token_key_version | Enrolment/login profile X-token, stored apart from the HIP linking token. Both-or-neither CHECK. No backfill. |
 | 0084 | program_review_interval | ALTER care_programs: review_interval_days | Optional first-review interval. Null schedules nothing; there is no 30-day default. |
+| 0085 | abha_profile_token_kind | ALTER patients: abha_profile_token_kind | Which login family issued the profile X-token: `abha` opens /v3/profile/account, `phr` opens /v3/phr/web/login/profile. Default `abha` is the true value for every earlier token. |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -542,6 +543,7 @@ abha_linked_at  timestamptz NULL                 -- added by 0030; when ABHA was
                                                  -- a blob with no key version cannot be decrypted.
 abha_profile_token_encrypted bytea NULL          -- 0083: enrolment/login X-token. Not a HIP link token.
 abha_profile_token_key_version smallint NULL     -- 0083; both-or-neither with the profile blob.
+abha_profile_token_kind varchar(50) NOT NULL DEFAULT 'abha'  -- 0085: AbhaProfileTokenKind enum; which login issued the token
 identity_path   varchar(50) NOT NULL             -- IdentityPath enum (ADR 0001)
 identity_status varchar(50) NOT NULL DEFAULT 'verified'  -- IdentityStatus enum
 status          varchar(50) NOT NULL DEFAULT 'active'    -- PatientStatus: active|merged|deceased
