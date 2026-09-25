@@ -5,6 +5,7 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 import { ModuleCapabilityGate } from "@/components/common/ModuleCapabilityGate";
+import { PageHeading } from "@/components/common/PageHeading";
 import {
   createDispense,
   getPrescription,
@@ -19,6 +20,7 @@ import type {
   PrescriptionItem,
 } from "@/features/pharmacy/types";
 import { ApiError, formatDateTime, newIdempotencyKey } from "@/lib/api";
+import { useLocale } from "@/lib/i18n";
 
 interface LineDraft {
   quantity: string;
@@ -44,13 +46,19 @@ const emptyLine = (): LineDraft => ({
   interactionOverrideReason: "",
 });
 
-function MedicineLabel({ medicine }: { medicine: MedicineSearchResult }) {
+function MedicineLabel({
+  medicine,
+  availableLabel,
+}: {
+  medicine: MedicineSearchResult;
+  availableLabel: string;
+}) {
   return (
     <>
       {medicine.name}
       {medicine.strength ? ` ${medicine.strength}` : ""}
       {medicine.form ? ` · ${medicine.form}` : ""}
-      {` (${medicine.total_available_quantity} available)`}
+      {` (${medicine.total_available_quantity} ${availableLabel})`}
     </>
   );
 }
@@ -64,6 +72,7 @@ function DispenseLine({
   draft: LineDraft;
   onChange: (patch: Partial<LineDraft>) => void;
 }) {
+  const { t } = useLocale();
   const [prescribedStock, setPrescribedStock] = useState<MedicineSearchResult | null>(null);
   const [stockLoading, setStockLoading] = useState(false);
   const [substitutes, setSubstitutes] = useState<MedicineSearchResult[]>([]);
@@ -124,20 +133,24 @@ function DispenseLine({
         {item.dosage ? ` · ${item.dosage}` : ""}
       </legend>
       <p className="text-sm text-muted-foreground">
-        {[item.frequency, item.duration_days ? `${item.duration_days} days` : null, item.route]
+        {[
+          item.frequency,
+          item.duration_days ? t("pharmacy.dispense.daysUnit", { count: item.duration_days }) : null,
+          item.route,
+        ]
           .filter(Boolean)
-          .join(" · ") || "No dosing details recorded"}
+          .join(" · ") || t("pharmacy.dispense.noDosingDetails")}
         {item.instructions ? ` — ${item.instructions}` : ""}
       </p>
 
       {!item.medicine_item_id && (
         <p role="alert" className="text-sm text-danger">
-          This prescription line is not linked to an inventory medicine and cannot be dispensed.
+          {t("pharmacy.dispense.notLinked")}
         </p>
       )}
 
       <label className="block max-w-xs space-y-1 text-sm">
-        <span className="text-muted-foreground">Quantity to dispense</span>
+        <span className="text-muted-foreground">{t("pharmacy.dispense.quantityLabel")}</span>
         <input
           type="number"
           min="0"
@@ -145,13 +158,10 @@ function DispenseLine({
           className="w-full rounded-md border border-border px-3 py-2"
           value={draft.quantity}
           onChange={(event) => onChange({ quantity: event.target.value })}
-          placeholder="Enter quantity"
+          placeholder={t("pharmacy.dispense.quantityPlaceholder")}
         />
       </label>
-      <p className="text-xs text-muted-foreground">
-        The prescription stores dose and duration, but no calculated issue quantity. Confirm the
-        authorized quantity before submitting.
-      </p>
+      <p className="text-xs text-muted-foreground">{t("pharmacy.dispense.quantityHint")}</p>
 
       <div className="flex flex-wrap gap-5 text-sm">
         <label className="flex items-center gap-2">
@@ -161,7 +171,7 @@ function DispenseLine({
             disabled={draft.substitute}
             onChange={(event) => onChange({ manualBatch: event.target.checked, batchId: "" })}
           />
-          Pin a batch manually
+          {t("pharmacy.dispense.pinBatch")}
         </label>
         <label className="flex items-center gap-2">
           <input
@@ -176,28 +186,32 @@ function DispenseLine({
               })
             }
           />
-          Request a substitute
+          {t("pharmacy.dispense.requestSubstitute")}
         </label>
       </div>
 
       {!draft.substitute && (
         <div className="rounded-md border border-border p-3 text-sm">
           {stockLoading ? (
-            <p className="text-muted-foreground">Checking live stock…</p>
+            <p className="text-muted-foreground">{t("pharmacy.dispense.checkingStock")}</p>
           ) : prescribedStock ? (
             <>
               <p>
-                Live stock: <MedicineLabel medicine={prescribedStock} />
+                {t("pharmacy.dispense.liveStock")}{" "}
+                <MedicineLabel
+                  medicine={prescribedStock}
+                  availableLabel={t("pharmacy.dispense.availableSuffix")}
+                />
               </p>
               {draft.manualBatch ? (
                 <label className="mt-3 block space-y-1">
-                  <span className="text-muted-foreground">Batch (server FEFO order)</span>
+                  <span className="text-muted-foreground">{t("pharmacy.dispense.batchFefo")}</span>
                   <select
                     className="w-full rounded-md border border-border px-3 py-2"
                     value={draft.batchId}
                     onChange={(event) => onChange({ batchId: event.target.value })}
                   >
-                    <option value="">Select batch</option>
+                    <option value="">{t("pharmacy.dispense.selectBatch")}</option>
                     {prescribedStock.batches.map((batch) => (
                       <option key={batch.batch_id} value={batch.batch_id}>
                         {batch.batch_number} · exp {batch.expiry_date} · {batch.quantity} available
@@ -206,66 +220,66 @@ function DispenseLine({
                   </select>
                 </label>
               ) : (
-                <p className="mt-2 text-muted-foreground">
-                  The server will allocate non-expired stock across batches using FEFO.
-                </p>
+                <p className="mt-2 text-muted-foreground">{t("pharmacy.dispense.fefoHint")}</p>
               )}
             </>
           ) : (
-            <p className="text-warning">No live stock was found for this inventory item.</p>
+            <p className="text-warning">{t("pharmacy.dispense.noStockFound")}</p>
           )}
         </div>
       )}
 
       {draft.substitute && (
         <div className="space-y-3 rounded-md border border-warning bg-warning-muted p-4 text-sm">
-          <p className="font-medium">Doctor approval is required before substitute stock moves.</p>
+          <p className="font-medium">{t("pharmacy.dispense.substituteApproval")}</p>
           <label className="block space-y-1">
-            <span>Search substitute medicine</span>
+            <span>{t("pharmacy.dispense.searchSubstitute")}</span>
             <input
               className="w-full rounded-md border border-border bg-white px-3 py-2"
               value={draft.substituteTerm}
               onChange={(event) =>
                 onChange({ substituteTerm: event.target.value, substituteItemId: "" })
               }
-              placeholder="At least two characters"
+              placeholder={t("pharmacy.dispense.substituteMinChars")}
             />
           </label>
           {substitutes.length > 0 && (
             <label className="block space-y-1">
-              <span>Substitute</span>
+              <span>{t("pharmacy.dispense.substituteLabel")}</span>
               <select
                 className="w-full rounded-md border border-border bg-white px-3 py-2"
                 value={draft.substituteItemId}
                 onChange={(event) => onChange({ substituteItemId: event.target.value })}
               >
-                <option value="">Select medicine</option>
+                <option value="">{t("pharmacy.dispense.selectMedicine")}</option>
                 {substitutes.map((medicine) => (
                   <option key={medicine.item_id} value={medicine.item_id}>
-                    {medicine.name} {medicine.strength ?? ""} · {medicine.total_available_quantity}
-                    {" available"}
+                    {medicine.name} {medicine.strength ?? ""} · {medicine.total_available_quantity}{" "}
+                    {t("pharmacy.dispense.availableSuffix")}
                   </option>
                 ))}
               </select>
             </label>
           )}
           <label className="block space-y-1">
-            <span>Clinical substitution reason</span>
+            <span>{t("pharmacy.dispense.substituteReason")}</span>
             <textarea
               className="min-h-20 w-full rounded-md border border-border bg-white px-3 py-2"
               value={draft.substituteReason}
               onChange={(event) => onChange({ substituteReason: event.target.value })}
-              placeholder="Required for the ordering doctor’s audit trail"
+              placeholder={t("pharmacy.dispense.substituteReasonPlaceholder")}
             />
           </label>
         </div>
       )}
 
       <details className="text-sm">
-        <summary className="cursor-pointer font-medium">Clinical override reasons</summary>
+        <summary className="cursor-pointer font-medium">
+          {t("pharmacy.dispense.overrideSummary")}
+        </summary>
         <div className="mt-3 grid gap-3 md:grid-cols-2">
           <label className="space-y-1">
-            <span className="text-muted-foreground">Allergy override (minimum 20 characters)</span>
+            <span className="text-muted-foreground">{t("pharmacy.dispense.allergyOverride")}</span>
             <textarea
               className="min-h-20 w-full rounded-md border border-border px-3 py-2"
               value={draft.allergyOverrideReason}
@@ -274,7 +288,7 @@ function DispenseLine({
           </label>
           <label className="space-y-1">
             <span className="text-muted-foreground">
-              Interaction override (minimum 20 characters)
+              {t("pharmacy.dispense.interactionOverride")}
             </span>
             <textarea
               className="min-h-20 w-full rounded-md border border-border px-3 py-2"
@@ -289,23 +303,32 @@ function DispenseLine({
 }
 
 function ResultCard({ result }: { result: DispenseResult }) {
+  const { t } = useLocale();
   return (
     <section className="surface-card space-y-3 border border-success p-5" aria-live="polite">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-lg font-medium">Dispense recorded</h2>
+        <h2 className="text-lg font-medium">{t("pharmacy.dispense.recordedTitle")}</h2>
         <span className="rounded-full bg-success-muted px-3 py-1 text-sm text-success">
           {result.status.replaceAll("_", " ")}
         </span>
       </div>
       <p className="text-sm text-muted-foreground">
-        Version {result.version} · {formatDateTime(result.created_at)}
+        {t("pharmacy.dispense.versionAt", {
+          version: result.version,
+          datetime: formatDateTime(result.created_at),
+        })}
       </p>
       <ul className="space-y-2 text-sm">
         {result.items.map((item) => (
           <li key={item.prescription_item_id} className="rounded-md border border-border p-3">
-            Requested {item.quantity_prescribed ?? "—"}; dispensed {item.quantity_dispensed}.
+            {t("pharmacy.dispense.requestedDispensed", {
+              requested: item.quantity_prescribed ?? "—",
+              dispensed: item.quantity_dispensed,
+            })}
             {item.approval_status === "pending" ? (
-              <strong className="ml-2 text-warning">Waiting for ordering-doctor approval.</strong>
+              <strong className="ml-2 text-warning">
+                {t("pharmacy.dispense.pendingDoctorApproval")}
+              </strong>
             ) : null}
             {item.batches.length > 0 ? (
               <span className="mt-1 block text-muted-foreground">
@@ -322,6 +345,7 @@ function ResultCard({ result }: { result: DispenseResult }) {
 }
 
 function Dispense() {
+  const { t } = useLocale();
   const prescriptionId = useSearchParams().get("prescription") ?? "";
   const [prescription, setPrescription] = useState<PrescriptionDetail | null>(null);
   const [drafts, setDrafts] = useState<Record<string, LineDraft>>({});
@@ -425,16 +449,16 @@ function Dispense() {
     return (
       <div className="space-y-8">
         <section className="surface-card p-6">
-          <h1 className="text-2xl font-semibold">Dispense</h1>
+          <PageHeading titleKey="pharmacy.dispenseTitle" />
           <p className="mt-2 text-sm text-muted-foreground">
-            Open a live prescription from the queue before stock can be issued.
+            {t("pharmacy.dispenseSelectPrescription")}
           </p>
           <Link href="/pharmacy/prescription-queue" className="mt-4 inline-block underline">
-            Open prescription queue
+            {t("pharmacy.openPrescriptionQueue")}
           </Link>
         </section>
         <section className="space-y-4">
-          <h2 className="text-lg font-medium">Expiry tracker</h2>
+          <h2 className="text-lg font-medium">{t("pharmacy.expiryTracker")}</h2>
           <ExpiryTracker />
         </section>
       </div>
@@ -444,14 +468,9 @@ function Dispense() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold">Dispense prescription</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {loading ? "Loading live prescription…" : prescriptionId}
-          </p>
-        </div>
+        <PageHeading titleKey="pharmacy.dispenseTitle" />
         <Link href="/pharmacy/prescription-queue" className="text-sm underline">
-          Back to queue
+          {t("pharmacy.backToQueue")}
         </Link>
       </div>
 
@@ -465,10 +484,14 @@ function Dispense() {
         <>
           <section className="surface-card p-4 text-sm">
             <p>
-              <span className="text-muted-foreground">Patient ID:</span>{" "}
+              <span className="text-muted-foreground">{t("pharmacy.dispense.patientId")}</span>{" "}
               <span className="font-mono">{prescription.patient_id}</span>
             </p>
-            {prescription.notes ? <p className="mt-2">Notes: {prescription.notes}</p> : null}
+            {prescription.notes ? (
+              <p className="mt-2">
+                {t("pharmacy.dispense.notes")} {prescription.notes}
+              </p>
+            ) : null}
           </section>
 
           <div className="space-y-4">
@@ -491,9 +514,9 @@ function Dispense() {
                 onChange={(event) => setAllowPartial(event.target.checked)}
               />
               <span>
-                <strong>Allow partial fulfillment.</strong>
+                <strong>{t("pharmacy.dispense.allowPartial")}</strong>
                 <span className="mt-1 block text-muted-foreground">
-                  If stock is short, issue available quantities and record the remainder as partial.
+                  {t("pharmacy.dispense.allowPartialHint")}
                 </span>
               </span>
             </label>
@@ -504,8 +527,10 @@ function Dispense() {
               className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
             >
               {submitting
-                ? "Recording…"
-                : `Record dispense (${selectedCount} item${selectedCount === 1 ? "" : "s"})`}
+                ? t("pharmacy.recording")
+                : selectedCount === 1
+                  ? t("pharmacy.recordDispenseOne")
+                  : t("pharmacy.recordDispenseMany", { count: selectedCount })}
             </button>
           </section>
         </>
@@ -516,10 +541,15 @@ function Dispense() {
   );
 }
 
+function DispenseLoadingFallback() {
+  const { t } = useLocale();
+  return <p className="text-sm text-muted-foreground">{t("common.loading")}</p>;
+}
+
 export default function Page() {
   return (
     <ModuleCapabilityGate module="pharmacy">
-      <Suspense fallback={<p className="text-sm text-muted-foreground">Loading…</p>}>
+      <Suspense fallback={<DispenseLoadingFallback />}>
         <Dispense />
       </Suspense>
     </ModuleCapabilityGate>

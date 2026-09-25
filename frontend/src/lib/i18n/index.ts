@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 
+import { en, type MessageKey } from "./messages/en";
+import { hi } from "./messages/hi";
+
 export type SupportedLocale = "en" | "hi";
 
 export interface LocaleOption {
@@ -15,51 +18,9 @@ export const SUPPORTED_LOCALES: LocaleOption[] = [
   { code: "hi", label: "Hindi", nativeLabel: "हिंदी" },
 ];
 
-const TRANSLATIONS: Record<SupportedLocale, Record<string, string>> = {
-  en: {
-    "nav.registration": "Register patient",
-    "nav.search": "Patient search",
-    "nav.queue": "Queue",
-    "nav.appointments": "Appointments",
-    "nav.billing": "Billing",
-    "nav.consent": "Consent",
-    "nav.nurse": "Nurse Desk",
-    "nav.doctor": "Consultations",
-    "nav.admin": "Administration",
-    "nav.reports": "Reports",
-    "nav.logout": "Sign out",
-    "counter.label": "Counter",
-    "counter.select": "Select Counter",
-    "card.print": "Print Card",
-    "common.search": "Search",
-    "common.clear": "Clear",
-    "common.save": "Save",
-    "common.cancel": "Cancel",
-    "common.startVisit": "Start visit",
-    "common.online": "Clinical System Online",
-  },
-  hi: {
-    "nav.registration": "मरीज़ पंजीकरण",
-    "nav.search": "मरीज़ खोजें",
-    "nav.queue": "कतार प्रबंधन",
-    "nav.appointments": "अपॉइंटमेंट",
-    "nav.billing": "बिलिंग",
-    "nav.consent": "सहमति",
-    "nav.nurse": "नर्सिंग डेस्क",
-    "nav.doctor": "परामर्श",
-    "nav.admin": "प्रशासन",
-    "nav.reports": "रिपोर्ट्स",
-    "nav.logout": "साइन आउट",
-    "counter.label": "काउंटर",
-    "counter.select": "काउंटर चुनें",
-    "card.print": "कार्ड प्रिंट करें",
-    "common.search": "खोजें",
-    "common.clear": "साफ़ करें",
-    "common.save": "सहेजें",
-    "common.cancel": "रद्द करें",
-    "common.startVisit": "विज़िट शुरू करें",
-    "common.online": "चिकित्सा प्रणाली ऑनलाइन",
-  },
+const CATALOGUES: Record<SupportedLocale, Record<MessageKey, string>> = {
+  en,
+  hi,
 };
 
 const STORAGE_KEY = "healthdoc_locale";
@@ -104,6 +65,33 @@ function getServerSnapshot(): SupportedLocale {
   return "en";
 }
 
+/**
+ * Resolve a bilingual master-data field. English remains the source of truth;
+ * Hindi is shown when the active locale is `hi` and a non-empty value exists.
+ */
+export function localizeField(
+  enValue: string,
+  hiValue: string | null | undefined,
+  locale: SupportedLocale = currentLocale,
+): string {
+  if (locale === "hi" && hiValue && hiValue.trim()) return hiValue.trim();
+  return enValue;
+}
+
+export function translate(
+  key: MessageKey,
+  locale: SupportedLocale = currentLocale,
+  vars?: Record<string, string | number>,
+): string {
+  let text: string = CATALOGUES[locale][key] ?? CATALOGUES.en[key] ?? key;
+  if (vars) {
+    for (const [name, value] of Object.entries(vars)) {
+      text = text.replaceAll(`{${name}}`, String(value));
+    }
+  }
+  return text;
+}
+
 export function useLocale() {
   const locale = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
@@ -117,8 +105,15 @@ export function useLocale() {
   }, []);
 
   const t = useCallback(
-    (key: string, fallback?: string): string => {
-      return TRANSLATIONS[locale]?.[key] ?? fallback ?? key;
+    (key: MessageKey, vars?: Record<string, string | number>): string => {
+      return translate(key, locale, vars);
+    },
+    [locale],
+  );
+
+  const lf = useCallback(
+    (enValue: string, hiValue?: string | null): string => {
+      return localizeField(enValue, hiValue, locale);
     },
     [locale],
   );
@@ -127,6 +122,9 @@ export function useLocale() {
     locale,
     setLocale,
     t,
+    localizeField: lf,
     locales: SUPPORTED_LOCALES,
   };
 }
+
+export type { MessageKey };

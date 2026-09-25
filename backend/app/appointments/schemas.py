@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class AppointmentServiceCreate(BaseModel):
     name: str = Field(..., min_length=2, max_length=100)
+    name_hi: str | None = Field(default=None, max_length=100)
     duration_minutes: int = Field(default=15, ge=5, le=240)
     department_id: uuid.UUID | None = None
     description: str | None = None
@@ -21,6 +22,7 @@ class AppointmentServiceOut(BaseModel):
     facility_id: uuid.UUID
     department_id: uuid.UUID | None = None
     name: str
+    name_hi: str | None = None
     duration_minutes: int
     is_active: bool
     description: str | None = None
@@ -93,3 +95,4 @@ class AppointmentOut(BaseModel):
     patient_uhid: str | None = None
     doctor_name: str | None = None
     department_name: str | None = None
+    department_name_hi: str | None = None

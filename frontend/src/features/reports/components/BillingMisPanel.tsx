@@ -5,6 +5,7 @@ import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 
+import { useLocale } from "@/lib/i18n";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { DataTable, type DataTableColumn } from "@/components/tables/DataTable";
 import { meridian } from "@/styles/theme";
@@ -30,6 +31,7 @@ import type {
  * value committed for a period that has ended and must not move when reopened.
  */
 export function BillingMisPanel() {
+  const { t } = useLocale();
   const [revenue, setRevenue] = useState<DailyRevenueResponse | null>(null);
   const [pending, setPending] = useState<PendingInvoicesResponse | null>(null);
   const [schemes, setSchemes] = useState<SchemeBreakdownResponse | null>(null);
@@ -52,7 +54,7 @@ export function BillingMisPanel() {
         setError(null);
       })
       .catch((e: unknown) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : "MIS load failed");
+        if (!cancelled) setError(e instanceof Error ? e.message : t("reports.billingMis.errLoad"));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -63,17 +65,17 @@ export function BillingMisPanel() {
   }, []);
 
   const schemeColumns: DataTableColumn<SchemeBreakdownLine>[] = [
-    { key: "scheme_code", label: "Scheme", render: (r) => r.scheme_code },
-    { key: "invoice_count", label: "Invoices", render: (r) => String(r.invoice_count) },
+    { key: "scheme_code", label: t("reports.billingMis.col.scheme"), render: (r) => r.scheme_code },
+    { key: "invoice_count", label: t("reports.billingMis.col.invoices"), render: (r) => String(r.invoice_count) },
     {
       key: "net_billed",
-      label: "Net billed",
+      label: t("reports.billingMis.col.netBilled"),
       align: "right",
       render: (r) => formatINR(fromMoney(r.net_billed)),
     },
     {
       key: "collected_total",
-      label: "Collected",
+      label: t("reports.billingMis.col.collected"),
       align: "right",
       render: (r) => formatINR(fromMoney(r.collected_total)),
     },
@@ -92,13 +94,13 @@ export function BillingMisPanel() {
             color: meridian.textSecondary,
           }}
         >
-          Billing MIS · /billing/mis/*
+          {t("reports.billingMis.eyebrow")}
         </Typography>
         <Typography sx={{ m: 0, mt: 0.5, fontSize: "1.125rem", fontWeight: 700 }}>
-          Revenue &amp; receivables
+          {t("reports.billingMis.title")}
         </Typography>
         <Typography sx={{ m: 0, mt: 0.5, fontSize: "0.8125rem", color: meridian.textSecondary }}>
-          Billing activity for the selected business-date range.
+          {t("reports.billingMis.subtitle")}
         </Typography>
       </Box>
 
@@ -114,19 +116,19 @@ export function BillingMisPanel() {
         }}
       >
         <MetricCard
-          label="Net revenue (window)"
+          label={t("reports.billingMis.netRevenue")}
           value={
             revenue ? formatINR(fromMoney(revenue.total_net_revenue)) : "—"
           }
           loading={loading}
         />
         <MetricCard
-          label="Pending invoices"
+          label={t("reports.billingMis.pendingInvoices")}
           value={pending ? String(pending.count) : "—"}
           loading={loading}
         />
         <MetricCard
-          label="Balance due"
+          label={t("reports.billingMis.balanceDue")}
           value={
             pending ? formatINR(fromMoney(pending.total_balance_due)) : "—"
           }
@@ -136,13 +138,13 @@ export function BillingMisPanel() {
 
       <Stack spacing={1}>
         <Typography sx={{ fontWeight: 600, fontSize: "0.9375rem" }}>
-          Scheme breakdown
+          {t("reports.billingMis.schemeBreakdown")}
         </Typography>
         <DataTable
           columns={schemeColumns}
           rows={schemes?.lines ?? []}
           getRowId={(r) => r.scheme_code}
-          emptyMessage={loading ? "Loading…" : "No scheme rows in window."}
+          emptyMessage={loading ? t("reports.billingMis.loading") : t("reports.billingMis.emptySchemes")}
         />
       </Stack>
     </Box>

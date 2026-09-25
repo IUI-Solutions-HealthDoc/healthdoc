@@ -2,11 +2,13 @@
 
 import { useState } from "react";
 
+import { PageHeading } from "@/components/common/PageHeading";
 import { PatientSearch } from "@/features/receptionist/PatientSearch";
 import { AbhaIdentityPanel } from "@/features/receptionist/AbhaIdentityPanel";
 import { RegistrationForm } from "@/features/receptionist/RegistrationForm";
 import { StartVisit } from "@/features/receptionist/StartVisit";
 import type { PatientSearchResult } from "@/features/receptionist/types";
+import { useLocale } from "@/lib/i18n";
 
 /**
  * Registration (#170).
@@ -19,20 +21,19 @@ import type { PatientSearchResult } from "@/features/receptionist/types";
 export default function Page() {
   const [confirmedNew, setConfirmedNew] = useState(false);
   const [selected, setSelected] = useState<PatientSearchResult | null>(null);
+  const { t } = useLocale();
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-semibold">Register patient</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Check whether this patient already has a record before creating one.
-        </p>
-      </div>
+      <PageHeading
+        titleKey="receptionist.registrationTitle"
+        subtitleKey="receptionist.registrationSubtitle"
+      />
 
       <section className="space-y-4">
-        <h2 className="text-lg font-medium">1. Search for an existing record</h2>
+        <h2 className="text-lg font-medium">{t("patient.searchExistingSection")}</h2>
         <PatientSearch
-          selectLabel="Use this patient"
+          selectLabel={t("common.useThisPatient")}
           onSelect={(patient) => {
             setSelected(patient);
             setConfirmedNew(false);
@@ -42,13 +43,13 @@ export default function Page() {
           <div className="space-y-4">
             <div className="surface-card flex flex-wrap items-center justify-between gap-3 border border-success/30 bg-success-muted p-4">
               <div>
-                <p className="font-medium">Using existing patient record</p>
+                <p className="font-medium">{t("patient.usingExisting")}</p>
                 <p className="text-sm text-muted-foreground">
-                  {selected.full_name} · {selected.uhid ?? "UHID pending"}
+                  {selected.full_name} · {selected.uhid ?? t("patient.uhidPending")}
                 </p>
               </div>
               <button type="button" className="text-sm underline" onClick={() => setSelected(null)}>
-                Choose another patient
+                {t("patient.chooseAnother")}
               </button>
             </div>
             <AbhaIdentityPanel patient={selected} />
@@ -65,20 +66,19 @@ export default function Page() {
       </section>
 
       <section className="space-y-4">
-        <h2 className="text-lg font-medium">2. Register a new patient</h2>
+        <h2 className="text-lg font-medium">{t("patient.registerNewSection")}</h2>
 
         {!confirmedNew && !selected ? (
           <div className="surface-card space-y-3 p-6">
             <p className="text-sm text-muted-foreground">
-              Only continue if the search above returned no match for this
-              person.
+              {t("patient.registerOnlyIfNoMatch")}
             </p>
             <button
               type="button"
               onClick={() => setConfirmedNew(true)}
               className="rounded-md border border-border px-4 py-2 text-sm font-medium"
             >
-              No existing record — register new
+              {t("receptionist.registerNew")}
             </button>
           </div>
         ) : confirmedNew ? (

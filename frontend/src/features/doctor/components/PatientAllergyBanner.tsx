@@ -5,6 +5,7 @@ import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 
+import { useLocale } from "@/lib/i18n";
 import { meridian } from "@/styles/theme";
 import { listAllergies } from "../api";
 import type { Allergy } from "../types";
@@ -20,6 +21,7 @@ import type { Allergy } from "../types";
  * cannot be matched automatically and silence would read as "checked and clear".
  */
 export function PatientAllergyBanner({ patientId }: { patientId: string }) {
+  const { t } = useLocale();
   const [allergies, setAllergies] = React.useState<Allergy[]>([]);
   const [loaded, setLoaded] = React.useState(false);
 
@@ -37,7 +39,7 @@ export function PatientAllergyBanner({ patientId }: { patientId: string }) {
         if (!alive) return;
         // A failed allergy read must be loud. Showing nothing would let the
         // clinician assume the patient has no allergies.
-        setError(e instanceof Error ? e.message : "Could not load allergies");
+        setError(e instanceof Error ? e.message : t("doctor.errLoadAllergies"));
         setLoaded(true);
       });
     return () => {
@@ -59,7 +61,7 @@ export function PatientAllergyBanner({ patientId }: { patientId: string }) {
         }}
       >
         <Typography sx={{ fontSize: "0.8125rem", color: meridian.textSecondary }}>
-          Loading allergies…
+          {t("doctor.loadingAllergies")}
         </Typography>
       </Box>
     );
@@ -77,8 +79,7 @@ export function PatientAllergyBanner({ patientId }: { patientId: string }) {
         }}
       >
         <Typography sx={{ fontSize: "0.8125rem", color: meridian.textPrimary }}>
-          <strong>Allergies could not be loaded.</strong> Do not treat this as
-          &ldquo;no allergies&rdquo; — confirm with the patient before prescribing. ({error})
+          <strong>{t("doctor.allergyLoadFailedBanner")}</strong> ({error})
         </Typography>
       </Box>
     );

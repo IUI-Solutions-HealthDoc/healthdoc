@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { toast } from "@/components/ui/toast";
+import { useLocale } from "@/lib/i18n";
 import { checkAllergies, createPrescription } from "../api";
 import { ALLERGY_OVERRIDE_REASON_MIN, FREQUENCIES_WITHOUT_DURATION } from "../constants";
 import type {
@@ -32,6 +33,7 @@ function itemFromMedicine(m: Medicine): DraftPrescriptionItem {
 }
 
 export function usePrescription(encounter: ActiveEncounter, context: EncounterContext) {
+  const { t } = useLocale();
   const [items, setItems] = useState<DraftPrescriptionItem[]>([]);
   const [notes, setNotes] = useState("");
   const [alerts, setAlerts] = useState<AllergyAlert[]>([]);
@@ -99,12 +101,12 @@ export function usePrescription(encounter: ActiveEncounter, context: EncounterCo
 
   const save = useCallback(async () => {
     if (items.length === 0) {
-      toast.error("Add at least one medicine");
+      toast.error(t("doctor.toast.addMedicineRequired"));
       return;
     }
     const incomplete = items.find((i) => i.dosage.trim() === "");
     if (incomplete) {
-      toast.error(`Enter a dosage for ${incomplete.medicine_name}`);
+      toast.error(t("doctor.toast.enterDosageFor", { name: incomplete.medicine_name }));
       return;
     }
     setSaving(true);
@@ -129,13 +131,13 @@ export function usePrescription(encounter: ActiveEncounter, context: EncounterCo
         })),
       });
       // Real write — POST /orders/prescriptions. No localOnly() suffix.
-      toast.success("Prescription saved");
+      toast.success(t("doctor.toast.prescriptionSaved"));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to save prescription");
+      toast.error(e instanceof Error ? e.message : t("doctor.toast.savePrescriptionFailed"));
     } finally {
       setSaving(false);
     }
-  }, [alerts, encounter, items, notes, overrideReason]);
+  }, [alerts, encounter, items, notes, overrideReason, t]);
 
   return {
     items,

@@ -11,17 +11,26 @@ import Typography from "@mui/material/Typography";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { SearchAutocomplete } from "@/components/ui/SearchAutocomplete";
+import { useLocale } from "@/lib/i18n";
+import type { MessageKey } from "@/lib/i18n";
 import { meridian } from "@/styles/theme";
 import { DIAGNOSIS_TYPE_OPTIONS } from "../constants";
 import { useDiagnoses } from "../hooks/useDiagnoses";
 import { doctorPanelSx, doctorButtonSx } from "../panelSx";
-import type { ActiveEncounter, DiagnosisType, IcdConcept } from "../types";
+import type { ActiveEncounter, DiagnosisType, IcdConcept, IcdVersion } from "../types";
 
 export interface DiagnosesPanelProps {
   encounter: ActiveEncounter;
 }
 
+const DIAGNOSIS_TYPE_KEYS: Record<DiagnosisType, MessageKey> = {
+  provisional: "doctor.diagnosisType.provisional",
+  final: "doctor.diagnosisType.final",
+  differential: "doctor.diagnosisType.differential",
+};
+
 export function DiagnosesPanel({ encounter }: DiagnosesPanelProps) {
+  const { t } = useLocale();
   const { rows, options, loading, search, addConcept, updateRow, setPrimary, removeRow, saving, save } =
     useDiagnoses(encounter);
   const [pick, setPick] = React.useState<IcdConcept | null>(null);
@@ -46,36 +55,35 @@ export function DiagnosesPanel({ encounter }: DiagnosesPanelProps) {
     void search(q, system);
   };
 
-  const formatSystemBadge = (ver: string, code: string) => {
-    if (ver === "snomed") return `SNOMED CT · ${code}`;
-    if (ver === "icd10") return `ICD-10 · ${code}`;
-    return `ICD-11 · ${code}`;
+  const formatSystemBadge = (ver: IcdVersion | string, code: string) => {
+    if (ver === "snomed") return t("doctor.diagnosisBadgeSnomed", { code });
+    if (ver === "icd10") return t("doctor.diagnosisBadgeIcd10", { code });
+    return t("doctor.diagnosisBadgeIcd11", { code });
   };
+
+  const systemFilters = [
+    { id: "all" as const, label: t("doctor.diagnosesSystemAll") },
+    { id: "icd10" as const, label: "ICD-10" },
+    { id: "icd11" as const, label: "ICD-11" },
+    { id: "snomed" as const, label: "SNOMED CT" },
+  ];
 
   return (
     <Box sx={{ ...doctorPanelSx, display: "flex", flexDirection: "column", gap: 2 }}>
       <Stack direction="row" spacing={2} sx={{ alignItems: "flex-start", justifyContent: "space-between" }}>
         <Box>
-          <Typography sx={{ fontSize: "1.0625rem", fontWeight: 700 }}>Clinical Diagnoses & Problems</Typography>
+          <Typography sx={{ fontSize: "1.0625rem", fontWeight: 700 }}>{t("doctor.diagnosesTitle")}</Typography>
           <Typography sx={{ fontSize: "0.8125rem", color: meridian.textSecondary, mt: 0.25 }}>
-            Multi-system terminology coding: ICD-11, ICD-10, and SNOMED CT
+            {t("doctor.diagnosesSubtitle")}
           </Typography>
         </Box>
         <Button variant="outlined" size="small" sx={doctorButtonSx} disabled={pendingCount === 0 || loading || saving} onClick={save}>
-          {saving ? "Saving…" : "Save diagnoses"}
+          {saving ? t("doctor.statusSaving") : t("doctor.diagnosesSave")}
         </Button>
       </Stack>
 
-      {/* System Filter Pills */}
       <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", gap: 0.75 }}>
-        {(
-          [
-            { id: "all", label: "All Systems" },
-            { id: "icd10", label: "ICD-10" },
-            { id: "icd11", label: "ICD-11" },
-            { id: "snomed", label: "SNOMED CT" },
-          ] as const
-        ).map((s) => (
+        {systemFilters.map((s) => (
           <Box
             key={s.id}
             component="button"
@@ -103,8 +111,8 @@ export function DiagnosesPanel({ encounter }: DiagnosesPanelProps) {
       </Stack>
 
       <SearchAutocomplete<IcdConcept>
-        label="Search clinical diagnosis / problem"
-        placeholder="Search disease, symptom, ICD or SNOMED code…"
+        label={t("doctor.diagnosesSearchLabel")}
+        placeholder={t("doctor.diagnosesSearchPlaceholder")}
         options={available}
         value={pick}
         onChange={(c) => {
@@ -119,11 +127,11 @@ export function DiagnosesPanel({ encounter }: DiagnosesPanelProps) {
 
       {loading ? (
         <Typography sx={{ fontSize: "0.8125rem", color: meridian.textSecondary }}>
-          Loading diagnoses…
+          {t("doctor.diagnosesLoading")}
         </Typography>
       ) : rows.length === 0 ? (
         <Typography sx={{ fontSize: "0.8125rem", color: meridian.textSecondary }}>
-          No diagnoses added yet.
+          {t("doctor.diagnosesEmpty")}
         </Typography>
       ) : (
         <Stack spacing={1.5}>
@@ -141,18 +149,18 @@ export function DiagnosesPanel({ encounter }: DiagnosesPanelProps) {
             >
               <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", gap: 1, alignItems: "center" }}>
                 <Badge variant="outline">{formatSystemBadge(r.icd_version, r.icd_code)}</Badge>
-                {r.is_primary && <Badge variant="default">Primary</Badge>}
-                {r.persisted && <Badge variant="secondary">Saved</Badge>}
+                {r.is_primary && <Badge variant="default">{t("doctor.diagnosisPrimaryBadge")}</Badge>}
+                {r.persisted && <Badge variant="secondary">{t("doctor.diagnosisSavedBadge")}</Badge>}
                 <Box sx={{ flex: 1 }} />
                 {!r.persisted && (
-                  <IconButton size="small" onClick={() => removeRow(r.tempId)} aria-label="Remove diagnosis">
+                  <IconButton size="small" onClick={() => removeRow(r.tempId)} aria-label={t("doctor.diagnosisRemoveA11y")}>
                     ×
                   </IconButton>
                 )}
               </Stack>
 
               <TextField
-                label="Diagnosis text"
+                label={t("doctor.diagnosisText")}
                 value={r.diagnosis_text}
                 onChange={(e) => updateRow(r.tempId, { diagnosis_text: e.target.value })}
                 disabled={r.persisted}
@@ -163,7 +171,7 @@ export function DiagnosesPanel({ encounter }: DiagnosesPanelProps) {
               <Stack direction="row" spacing={1.5} sx={{ flexWrap: "wrap", gap: 1.5 }}>
                 <TextField
                   select
-                  label="Type"
+                  label={t("doctor.diagnosisTypeLabel")}
                   value={r.diagnosis_type}
                   onChange={(e) => updateRow(r.tempId, { diagnosis_type: e.target.value as DiagnosisType })}
                   disabled={r.persisted}
@@ -172,7 +180,7 @@ export function DiagnosesPanel({ encounter }: DiagnosesPanelProps) {
                 >
                   {DIAGNOSIS_TYPE_OPTIONS.map((o) => (
                     <MenuItem key={o.value} value={o.value}>
-                      {o.label}
+                      {t(DIAGNOSIS_TYPE_KEYS[o.value])}
                     </MenuItem>
                   ))}
                 </TextField>
@@ -183,7 +191,7 @@ export function DiagnosesPanel({ encounter }: DiagnosesPanelProps) {
                   disabled={r.persisted || r.is_primary || persistedPrimary}
                   onClick={() => setPrimary(r.tempId)}
                 >
-                  {r.is_primary ? "Primary diagnosis" : "Set as primary"}
+                  {r.is_primary ? t("doctor.diagnosisPrimaryLabel") : t("doctor.diagnosisSetPrimary")}
                 </Button>
               </Stack>
             </Box>

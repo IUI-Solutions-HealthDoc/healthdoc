@@ -10,6 +10,7 @@ import MenuItem from "@mui/material/MenuItem";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { toast } from "@/components/ui/toast";
+import { useLocale } from "@/lib/i18n";
 import { meridian } from "@/styles/theme";
 import { doctorPanelSx, doctorButtonSx } from "../panelSx";
 import {
@@ -27,6 +28,7 @@ export interface SpecialtyEncounterPanelProps {
 }
 
 export function SpecialtyEncounterPanel({ encounter }: SpecialtyEncounterPanelProps) {
+  const { t } = useLocale();
   const [templates, setTemplates] = React.useState<SpecialtyTemplate[]>([]);
   const [selectedType, setSelectedType] = React.useState<string>("pediatric");
   const [formData, setFormData] = React.useState<Record<string, unknown>>({});
@@ -52,7 +54,7 @@ export function SpecialtyEncounterPanel({ encounter }: SpecialtyEncounterPanelPr
       })
       .catch((err) => {
         if (!cancelled) {
-          toast.error(err instanceof Error ? err.message : "Failed to load specialty templates");
+          toast.error(err instanceof Error ? err.message : t("doctor.toast.loadSpecialtyTemplatesFailed"));
         }
       })
       .finally(() => {
@@ -62,7 +64,7 @@ export function SpecialtyEncounterPanel({ encounter }: SpecialtyEncounterPanelPr
     return () => {
       cancelled = true;
     };
-  }, [encounter.id]);
+  }, [encounter.id, t]);
 
   const activeTemplate = templates.find((t) => t.specialty_type === selectedType);
 
@@ -78,9 +80,13 @@ export function SpecialtyEncounterPanel({ encounter }: SpecialtyEncounterPanelPr
     try {
       const record = await saveEncounterSpecialty(encounter.id, selectedType, formData);
       setSavedRecord(record);
-      toast.success(`${activeTemplate?.title ?? "Specialty"} assessment saved`);
+      toast.success(
+        t("doctor.toast.specialtyAssessmentSaved", {
+          title: activeTemplate?.title ?? "Specialty",
+        }),
+      );
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to save specialty assessment");
+      toast.error(err instanceof Error ? err.message : t("doctor.toast.saveSpecialtyAssessmentFailed"));
     } finally {
       setSaving(false);
     }
@@ -100,16 +106,14 @@ export function SpecialtyEncounterPanel({ encounter }: SpecialtyEncounterPanelPr
     <Box sx={{ ...doctorPanelSx, display: "flex", flexDirection: "column", gap: 2 }}>
       <Stack direction="row" spacing={2} sx={{ alignItems: "flex-start", justifyContent: "space-between" }}>
         <Box>
-          <Typography sx={{ fontSize: "1.0625rem", fontWeight: 700 }}>
-            Specialty Clinical Examination
-          </Typography>
+          <Typography sx={{ fontSize: "1.0625rem", fontWeight: 700 }}>{t("doctor.specialtyTitle")}</Typography>
           <Typography sx={{ fontSize: "0.8125rem", color: meridian.textSecondary, mt: 0.25 }}>
-            Structured assessment templates for Pediatric, Cardiology, and Obstetrics encounters
+            {t("doctor.specialtySubtitle")}
           </Typography>
         </Box>
         <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
           {savedRecord && savedRecord.specialty_type === selectedType && (
-            <Badge variant="secondary">Saved</Badge>
+            <Badge variant="secondary">{t("doctor.diagnosisSavedBadge")}</Badge>
           )}
           <Button
             variant="contained"
@@ -118,7 +122,7 @@ export function SpecialtyEncounterPanel({ encounter }: SpecialtyEncounterPanelPr
             disabled={loading || saving}
             onClick={() => void handleSave()}
           >
-            {saving ? "Saving…" : "Save assessment"}
+            {saving ? t("doctor.statusSaving") : t("doctor.specialtySaveAssessment")}
           </Button>
         </Stack>
       </Stack>
@@ -126,9 +130,9 @@ export function SpecialtyEncounterPanel({ encounter }: SpecialtyEncounterPanelPr
       {/* Specialty Switcher Tabs */}
       <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", gap: 1 }}>
         {[
-          { id: "pediatric", label: "Pediatrics & Child Health", icon: "🧸" },
-          { id: "cardiology", label: "Cardiology & Vascular", icon: "❤️" },
-          { id: "obstetrics", label: "Obstetrics & Antenatal", icon: "🤰" },
+          { id: "pediatric", label: t("doctor.specialtyPediatric"), icon: "🧸" },
+          { id: "cardiology", label: t("doctor.specialtyCardiology"), icon: "❤️" },
+          { id: "obstetrics", label: t("doctor.specialtyObstetrics"), icon: "🤰" },
         ].map((spec) => {
           const isSelected = selectedType === spec.id;
           return (
@@ -165,7 +169,7 @@ export function SpecialtyEncounterPanel({ encounter }: SpecialtyEncounterPanelPr
 
       {loading ? (
         <Typography sx={{ fontSize: "0.8125rem", color: meridian.textSecondary }}>
-          Loading specialty template…
+          {t("doctor.specialtyLoadingTemplate")}
         </Typography>
       ) : activeTemplate ? (
         <Box
@@ -208,7 +212,7 @@ export function SpecialtyEncounterPanel({ encounter }: SpecialtyEncounterPanelPr
                     fullWidth
                     helperText={field.help_text}
                   >
-                    <MenuItem value="">— Select —</MenuItem>
+                    <MenuItem value="">{t("doctor.specialtySelectOption")}</MenuItem>
                     {field.options.map((opt: { label: string; value: string }) => (
                       <MenuItem key={opt.value} value={opt.value}>
                         {opt.label}

@@ -8,6 +8,7 @@ import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 
+import { useLocale } from "@/lib/i18n";
 import { meridian } from "@/styles/theme";
 import {
   COMMON_AUDIT_ACTIONS,
@@ -53,6 +54,7 @@ export function AuditLogListPanel({
   onToChange,
   onSelect,
 }: Props) {
+  const { t } = useLocale();
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 10;
 
@@ -87,17 +89,17 @@ export function AuditLogListPanel({
             color: meridian.textPrimary,
           }}
         >
-          Audit logs
+          {t("audit.list.title")}
         </Typography>
         <Typography sx={{ m: 0, mt: 0.4, fontSize: "0.8125rem", color: meridian.textSecondary }}>
-          Search and filter activity recorded for this facility ({rows.length} total entries).
+          {t("audit.list.subtitle", { count: rows.length })}
         </Typography>
       </Box>
 
       <Stack spacing={1.25} sx={{ px: 2.5, pb: 2 }}>
         <TextField
           size="small"
-          placeholder="Search user, patient, resource…"
+          placeholder={t("audit.list.searchPlaceholder")}
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}
         />
@@ -105,12 +107,12 @@ export function AuditLogListPanel({
           <TextField
             select
             size="small"
-            label="Action"
+            label={t("audit.list.action")}
             value={action}
             onChange={(e) => onActionChange(e.target.value)}
             fullWidth
           >
-            <MenuItem value="all">All</MenuItem>
+            <MenuItem value="all">{t("common.all")}</MenuItem>
             {COMMON_AUDIT_ACTIONS.map((a) => (
               <MenuItem key={a} value={a}>
                 {a}
@@ -121,12 +123,12 @@ export function AuditLogListPanel({
           <TextField
             select
             size="small"
-            label="Resource"
+            label={t("audit.list.resource")}
             value={resourceType}
             onChange={(e) => onResourceTypeChange(e.target.value)}
             fullWidth
           >
-            <MenuItem value="all">All</MenuItem>
+            <MenuItem value="all">{t("common.all")}</MenuItem>
             {/* Served by GET /audit/resource-types, so the options are exactly
                 the types this facility has rows for. The previous hand-kept
                 list offered six, three of which matched nothing, while hiding
@@ -145,7 +147,7 @@ export function AuditLogListPanel({
             <TextField
               size="small"
               type="date"
-              label="From"
+              label={t("audit.list.from")}
               value={from ?? ""}
               onChange={(e) => onFromChange(e.target.value)}
               slotProps={{ inputLabel: { shrink: true } }}
@@ -154,7 +156,7 @@ export function AuditLogListPanel({
             <TextField
               size="small"
               type="date"
-              label="To"
+              label={t("audit.list.to")}
               value={to ?? ""}
               onChange={(e) => onToChange(e.target.value)}
               slotProps={{ inputLabel: { shrink: true } }}
@@ -167,11 +169,11 @@ export function AuditLogListPanel({
       <Box sx={{ flex: 1, overflow: "auto", borderTop: `1px solid rgb(0 31 84 / 0.08)` }}>
         {loading ? (
           <Typography sx={{ p: 2.5, color: meridian.textSecondary, fontSize: "0.875rem" }}>
-            Loading…
+            {t("common.loading")}
           </Typography>
         ) : rows.length === 0 ? (
           <Typography sx={{ p: 2.5, color: meridian.textSecondary, fontSize: "0.875rem" }}>
-            No audit entries match.
+            {t("audit.list.noEntries")}
           </Typography>
         ) : (
           paginatedRows.map((row) => {
@@ -205,7 +207,7 @@ export function AuditLogListPanel({
                   {row.user_display ?? row.user_id ?? "—"} · {formatDateTime(row.created_at)}
                 </Typography>
                 <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary }}>
-                  {row.patient_display ?? row.patient_id ?? "No patient"} · {row.id}
+                  {row.patient_display ?? row.patient_id ?? t("audit.list.noPatient")} · {row.id}
                 </Typography>
               </Button>
             );
@@ -227,7 +229,7 @@ export function AuditLogListPanel({
           }}
         >
           <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary, fontWeight: 500 }}>
-            Page {currentPage} of {totalPages}
+            {t("audit.list.pageOf", { current: currentPage, total: totalPages })}
           </Typography>
           <Stack direction="row" spacing={1}>
             <button
@@ -246,7 +248,7 @@ export function AuditLogListPanel({
                 opacity: currentPage <= 1 ? 0.5 : 1,
               }}
             >
-              Prev
+              {t("common.previous")}
             </button>
             <button
               type="button"
@@ -264,7 +266,7 @@ export function AuditLogListPanel({
                 opacity: currentPage >= totalPages ? 0.5 : 1,
               }}
             >
-              Next
+              {t("common.next")}
             </button>
           </Stack>
         </Box>

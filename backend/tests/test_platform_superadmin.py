@@ -48,6 +48,10 @@ async def test_platform_lists_only_facility_metadata(db) -> None:
         "id",
         "code",
         "name",
+        # The optional Hindi display name is facility catalogue metadata, not
+        # a patient, staff or clinical field. Superadmin's bilingual facility
+        # list uses it and still receives no cross-facility clinical payload.
+        "name_hi",
         "state_code",
         "district",
         "facility_type",

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { i18nStub } from "./helpers/i18n-stub.mjs";
 import ts from "typescript";
 
 // Execute the real role boundary and child rendering. This is not a browser test.
@@ -8,6 +9,7 @@ function harness() {
   const calls = [];
   let auth, result = { rows: [], loading: false, error: null, refresh() {} };
   const dependencies = {
+    "@/lib/i18n": i18nStub,
     "react/jsx-runtime": {
       jsx: (type, props, key) => ({ type, props, key }),
       jsxs: (type, props, key) => ({ type, props, key }),
@@ -16,6 +18,7 @@ function harness() {
     "@mui/material/Typography": { default: "text" },
     "@/providers/auth-provider": { useAuth: () => auth },
     "../constants": { ACCESS_CHANNEL_LABELS: {} },
+    "../i18nLabels": { accessChannelLabels: () => ({}) },
     "../hooks/useDataAccessLogs": { useDataAccessLogs: (id) => { calls.push(id); return result; } },
     "./DataAccessLogPanel": { DataAccessLogPanel: "ledger" },
   };

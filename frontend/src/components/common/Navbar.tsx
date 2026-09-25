@@ -1,12 +1,29 @@
 import { useEffect, useState } from "react";
 import { Menu, LogOut, User, Languages, AlertTriangle } from "lucide-react";
-import { REALM_ROLE_LABELS } from "@/features/admin/constants";
 import { useAuth } from "@/providers/auth-provider";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, type MessageKey } from "@/lib/i18n";
 import { useDeskCounter } from "@/features/receptionist/useDeskCounter";
 import { HealthDocBrand } from "./HealthDocBrand";
 import { listCriticalAlerts } from "@/features/lab/api";
 import { CriticalAlertsModal } from "@/features/lab/components/CriticalAlertsModal";
+import type { Role } from "@/config/roles";
+
+const ROLE_KEYS: Partial<Record<Role, MessageKey>> = {
+  receptionist: "role.receptionist",
+  doctor: "role.doctor",
+  nurse: "role.nurse",
+  lab_tech: "role.lab_tech",
+  radiology_tech: "role.radiology_tech",
+  pharmacist: "role.pharmacist",
+  emergency: "role.emergency",
+  supervisor: "role.supervisor",
+  billing: "role.billing",
+  admin: "role.admin",
+  hod: "role.hod",
+  auditor: "role.auditor",
+  patient: "role.patient",
+  superadmin: "role.superadmin",
+};
 
 interface NavbarProps {
   open: boolean;
@@ -46,9 +63,9 @@ export default function Navbar({ open, setOpen }: NavbarProps) {
     }
   }, [canSeeAlerts]);
 
-  const roleLabel = user?.role
-    ? (REALM_ROLE_LABELS[user.role] ?? user.role)
-    : "Unassigned";
+  const roleLabel = user?.role && ROLE_KEYS[user.role]
+    ? t(ROLE_KEYS[user.role]!)
+    : t("common.unassigned");
 
   return (
     <header
@@ -62,7 +79,7 @@ export default function Navbar({ open, setOpen }: NavbarProps) {
           type="button"
           onClick={() => setOpen((prev) => !prev)}
           className="rounded-lg p-2 text-foreground/80 transition-colors hover:bg-muted hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
-          aria-label="Toggle menu"
+          aria-label={t("nav.toggleMenu")}
           aria-controls="workspace-sidebar"
           aria-expanded={open}
         >
@@ -93,7 +110,7 @@ export default function Navbar({ open, setOpen }: NavbarProps) {
               value={counter}
               onChange={(e) => setDeskCounter(e.target.value)}
               className="bg-transparent font-semibold text-foreground focus:outline-none cursor-pointer"
-              aria-label="Select desk counter"
+              aria-label={t("nav.selectCounter")}
             >
               {availableCounters.map((c) => (
                 <option key={c} value={c} className="bg-card text-foreground">
@@ -114,7 +131,7 @@ export default function Navbar({ open, setOpen }: NavbarProps) {
                 ? "bg-primary text-white shadow-xs"
                 : "text-muted-foreground hover:text-foreground"
             }`}
-            aria-label="Switch language to English"
+            aria-label={t("nav.switchToEnglish")}
           >
             English
           </button>
@@ -126,7 +143,7 @@ export default function Navbar({ open, setOpen }: NavbarProps) {
                 ? "bg-primary text-white shadow-xs"
                 : "text-muted-foreground hover:text-foreground"
             }`}
-            aria-label="Switch language to Hindi"
+            aria-label={t("nav.switchToHindi")}
           >
             हिंदी
           </button>
@@ -157,14 +174,16 @@ export default function Navbar({ open, setOpen }: NavbarProps) {
                 ? "border border-red-300 bg-red-500/10 text-red-600 hover:bg-red-500/20 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300 animate-pulse"
                 : "border border-border/80 bg-muted/40 text-muted-foreground hover:text-foreground"
             }`}
-            title="Critical Panic Lab Alerts"
-            aria-label={`Critical alerts: ${unackAlertCount} pending`}
+            title={t("nav.criticalAlertsTitle")}
+            aria-label={t("nav.criticalAlertsTitle")}
           >
             <AlertTriangle size={14} className={unackAlertCount > 0 ? "text-red-600 dark:text-red-400" : "text-muted-foreground"} />
             <span>
               {unackAlertCount > 0
-                ? `${unackAlertCount} Panic Alert${unackAlertCount > 1 ? "s" : ""}`
-                : "Lab Alerts"}
+                ? t(unackAlertCount > 1 ? "nav.panicAlerts_plural" : "nav.panicAlerts", {
+                    count: unackAlertCount,
+                  })
+                : t("nav.labAlerts")}
             </span>
           </button>
         )}
@@ -173,7 +192,7 @@ export default function Navbar({ open, setOpen }: NavbarProps) {
           type="button"
           onClick={() => void logout()}
           className="flex h-9 w-9 items-center justify-center rounded-full border border-border/80 text-muted-foreground transition-all hover:border-red-200 hover:bg-red-50 hover:text-red-600 focus:outline-none focus:ring-2 focus:ring-red-200 dark:hover:bg-red-950/30"
-          aria-label="Sign out"
+          aria-label={t("nav.logout")}
           title={t("nav.logout")}
         >
           <LogOut size={16} />

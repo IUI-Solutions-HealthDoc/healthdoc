@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 
 import {
   createEmergencyVisit,
@@ -22,7 +22,9 @@ import {
   type EmergencyTriageStatus,
   type EmergencyDisposition,
 } from "@/features/emergency/api";
+import { PageHeading } from "@/components/common/PageHeading";
 import { ApiError, formatDateTime } from "@/lib/api";
+import { useLocale } from "@/lib/i18n";
 
 const initial: EmergencyPatientInput = {
   full_name: "",
@@ -31,30 +33,34 @@ const initial: EmergencyPatientInput = {
   mobile: "",
 };
 
-const ACUITY_STYLES: Record<EmergencyAcuity, { label: string; badge: string; border: string }> = {
-  resuscitation: {
-    label: "P1 Resuscitation (Immediate)",
-    badge: "bg-red-600 text-white font-bold",
-    border: "border-l-4 border-red-600",
-  },
-  emergent: {
-    label: "P2 Emergent (<15m)",
-    badge: "bg-orange-500 text-white font-bold",
-    border: "border-l-4 border-orange-500",
-  },
-  urgent: {
-    label: "P3 Urgent (<60m)",
-    badge: "bg-amber-400 text-slate-900 font-semibold",
-    border: "border-l-4 border-amber-400",
-  },
-  non_urgent: {
-    label: "P4 Non-urgent (Routine)",
-    badge: "bg-emerald-600 text-white font-medium",
-    border: "border-l-4 border-emerald-600",
-  },
-};
-
 export default function Page() {
+  const { t } = useLocale();
+  const acuityStyles = useMemo(
+    (): Record<EmergencyAcuity, { label: string; badge: string; border: string }> => ({
+      resuscitation: {
+        label: t("emergency.acuityBadgeP1"),
+        badge: "bg-red-600 text-white font-bold",
+        border: "border-l-4 border-red-600",
+      },
+      emergent: {
+        label: t("emergency.acuityBadgeP2"),
+        badge: "bg-orange-500 text-white font-bold",
+        border: "border-l-4 border-orange-500",
+      },
+      urgent: {
+        label: t("emergency.acuityBadgeP3"),
+        badge: "bg-amber-400 text-slate-900 font-semibold",
+        border: "border-l-4 border-amber-400",
+      },
+      non_urgent: {
+        label: t("emergency.acuityBadgeP4"),
+        badge: "bg-emerald-600 text-white font-medium",
+        border: "border-l-4 border-emerald-600",
+      },
+    }),
+    [t],
+  );
+
   const [activeTab, setActiveTab] = useState<"board" | "registration">("board");
 
   // Registration states
@@ -105,11 +111,11 @@ export default function Page() {
       setTriages(triageRows);
       setMetrics(metricsData);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to load triage board");
+      setError(err instanceof ApiError ? err.message : t("emergency.errLoadBoard"));
     } finally {
       setBoardLoading(false);
     }
-  }, []);
+  }, [t]);
 
   async function loadWorklist() {
     setWorklistLoading(true);
@@ -142,7 +148,7 @@ export default function Page() {
       setCreated(patient);
       setForm(initial);
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Emergency registration failed");
+      setError(reason instanceof ApiError ? reason.message : t("emergency.errRegistrationFailed"));
     } finally {
       setBusy(false);
     }
@@ -158,7 +164,7 @@ export default function Page() {
       void loadWorklist();
       void loadBoardData();
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Failed to create emergency visit");
+      setError(reason instanceof ApiError ? reason.message : t("emergency.errCreateVisit"));
     } finally {
       setVisitBusy(false);
     }
@@ -177,7 +183,7 @@ export default function Page() {
     e.preventDefault();
     if (!triageTargetArrival) return;
     if (!triageComplaint.trim()) {
-      setError("Chief complaint is required for triage.");
+      setError(t("emergency.errChiefComplaintRequired"));
       return;
     }
 
@@ -196,7 +202,7 @@ export default function Page() {
       void loadBoardData();
       void loadWorklist();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to save triage assessment");
+      setError(err instanceof ApiError ? err.message : t("emergency.errSaveTriage"));
     } finally {
       setTriageSubmitting(false);
     }
@@ -213,7 +219,7 @@ export default function Page() {
     e.preventDefault();
     if (!retriageTarget) return;
     if (!retriageReason.trim() || retriageReason.trim().length < 10) {
-      setError("Re-triage justification must be at least 10 characters.");
+      setError(t("emergency.errRetriageMinChars"));
       return;
     }
 
@@ -224,7 +230,7 @@ export default function Page() {
       setRetriageModalOpen(false);
       void loadBoardData();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to re-triage patient");
+      setError(err instanceof ApiError ? err.message : t("emergency.errRetriage"));
     } finally {
       setRetriageSubmitting(false);
     }
@@ -238,7 +244,7 @@ export default function Page() {
       });
       void loadBoardData();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to record clinician seen timestamp");
+      setError(err instanceof ApiError ? err.message : t("emergency.errMarkSeen"));
     }
   }
 
@@ -270,7 +276,7 @@ export default function Page() {
       setDispositionModalOpen(false);
       void loadBoardData();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to record disposition");
+      setError(err instanceof ApiError ? err.message : t("emergency.errDisposition"));
     } finally {
       setDispositionSubmitting(false);
     }
@@ -280,12 +286,7 @@ export default function Page() {
     <div className="space-y-6">
       {/* Header & Tabs */}
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Emergency registration & arrivals</h1>
-          <p className="text-sm text-muted-foreground">
-            Acuity Triage Tracking Board, Door-to-Clinician Intervals, and Fast-Track THID Registration.
-          </p>
-        </div>
+        <PageHeading titleKey="emergency.title" titleClassName="text-2xl font-bold tracking-tight" />
 
         <div className="flex items-center gap-2">
           <button
@@ -297,7 +298,7 @@ export default function Page() {
                 : "bg-muted text-foreground hover:bg-muted/80"
             }`}
           >
-            Triage Tracking Board
+            {t("emergency.tabBoard")}
           </button>
           <button
             type="button"
@@ -308,7 +309,7 @@ export default function Page() {
                 : "bg-muted text-foreground hover:bg-muted/80"
             }`}
           >
-            Emergency registration
+            {t("emergency.tabRegistration")}
           </button>
         </div>
       </div>
@@ -323,41 +324,41 @@ export default function Page() {
       {metrics && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <div className="surface-card p-4 rounded-lg border border-border">
-            <span className="text-xs text-muted-foreground uppercase font-semibold">Active Census</span>
+            <span className="text-xs text-muted-foreground uppercase font-semibold">{t("emergency.metricActiveCensus")}</span>
             <div className="mt-1 text-2xl font-bold text-foreground">{metrics.active_census}</div>
             <div className="text-xs text-muted-foreground mt-0.5">
-              Waiting: {metrics.waiting_count} · In Tx: {metrics.in_treatment_count}
+              {t("emergency.metricWaitingInTx", { waiting: metrics.waiting_count, inTx: metrics.in_treatment_count })}
             </div>
           </div>
 
           <div className="surface-card p-4 rounded-lg border border-border">
-            <span className="text-xs text-muted-foreground uppercase font-semibold">High Acuity (P1/P2)</span>
+            <span className="text-xs text-muted-foreground uppercase font-semibold">{t("emergency.metricHighAcuity")}</span>
             <div className="mt-1 text-2xl font-bold text-danger">
               {metrics.resuscitation_count + metrics.emergent_count}
             </div>
             <div className="text-xs text-muted-foreground mt-0.5">
-              P1: {metrics.resuscitation_count} · P2: {metrics.emergent_count}
+              {t("emergency.metricP1P2", { p1: metrics.resuscitation_count, p2: metrics.emergent_count })}
             </div>
           </div>
 
           <div className="surface-card p-4 rounded-lg border border-border">
-            <span className="text-xs text-muted-foreground uppercase font-semibold">Door-to-Clinician</span>
+            <span className="text-xs text-muted-foreground uppercase font-semibold">{t("emergency.metricDoorToClinician")}</span>
             <div className="mt-1 text-2xl font-bold text-foreground">
               {metrics.avg_door_to_clinician_minutes !== null
                 ? `${metrics.avg_door_to_clinician_minutes}m`
                 : "—"}
             </div>
-            <div className="text-xs text-muted-foreground mt-0.5">Facility average</div>
+            <div className="text-xs text-muted-foreground mt-0.5">{t("emergency.metricFacilityAverage")}</div>
           </div>
 
           <div className="surface-card p-4 rounded-lg border border-border">
-            <span className="text-xs text-muted-foreground uppercase font-semibold">LWBS Rate</span>
+            <span className="text-xs text-muted-foreground uppercase font-semibold">{t("emergency.metricLwbsRate")}</span>
             <div className="mt-1 text-2xl font-bold text-foreground">
               {metrics.active_census + metrics.lwbs_count > 0
                 ? ((metrics.lwbs_count / (metrics.active_census + metrics.lwbs_count)) * 100).toFixed(1)
                 : "0.0"}%
             </div>
-            <div className="text-xs text-muted-foreground mt-0.5">{metrics.lwbs_count} left without being seen</div>
+            <div className="text-xs text-muted-foreground mt-0.5">{t("emergency.metricLwbsCount", { count: metrics.lwbs_count })}</div>
           </div>
         </div>
       )}
@@ -367,10 +368,8 @@ export default function Page() {
         <section className="space-y-4">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-lg font-semibold">Active Triage Board</h2>
-              <p className="text-xs text-muted-foreground">
-                Live patient acuity status, bay allocations, and clinical intervals.
-              </p>
+              <h2 className="text-lg font-semibold">{t("emergency.boardTitle")}</h2>
+              <p className="text-xs text-muted-foreground">{t("emergency.boardSubtitle")}</p>
             </div>
             <button
               type="button"
@@ -378,13 +377,13 @@ export default function Page() {
               disabled={boardLoading}
               className="text-xs text-primary underline hover:text-primary/80"
             >
-              {boardLoading ? "Refreshing board…" : "Refresh board"}
+              {boardLoading ? t("emergency.refreshingBoard") : t("emergency.refreshBoard")}
             </button>
           </div>
 
           {triages.length === 0 ? (
             <div className="surface-card p-8 text-center text-sm text-muted-foreground">
-              {boardLoading ? "Loading triage board…" : "No active triaged patients in the Emergency Department."}
+              {boardLoading ? t("emergency.loadingBoard") : t("emergency.boardEmpty")}
             </div>
           ) : (
             <div className="surface-card overflow-hidden rounded-lg border border-border">
@@ -392,98 +391,96 @@ export default function Page() {
                 <table className="min-w-full border-collapse text-sm">
                   <thead className="bg-muted">
                     <tr>
-                      <th className="px-4 py-3 text-left">Acuity</th>
-                      <th className="px-4 py-3 text-left">Patient & Complaint</th>
-                      <th className="px-4 py-3 text-left">Bay / Clinician</th>
-                      <th className="px-4 py-3 text-left">Status</th>
-                      <th className="px-4 py-3 text-left">Door-to-Clinician</th>
-                      <th className="px-4 py-3 text-right">Actions</th>
+                      <th className="px-4 py-3 text-left">{t("emergency.colAcuity")}</th>
+                      <th className="px-4 py-3 text-left">{t("emergency.colPatientComplaint")}</th>
+                      <th className="px-4 py-3 text-left">{t("emergency.colBayClinician")}</th>
+                      <th className="px-4 py-3 text-left">{t("emergency.colStatus")}</th>
+                      <th className="px-4 py-3 text-left">{t("emergency.colDoorToClinician")}</th>
+                      <th className="px-4 py-3 text-right">{t("emergency.colActions")}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
-                    {triages.map((t) => {
-                      const acuityInfo = ACUITY_STYLES[t.acuity_level] ?? ACUITY_STYLES.urgent;
+                    {triages.map((tr) => {
+                      const acuityInfo = acuityStyles[tr.acuity_level] ?? acuityStyles.urgent;
                       return (
-                        <tr key={t.id} className={`hover:bg-muted/20 transition-colors ${acuityInfo.border}`}>
+                        <tr key={tr.id} className={`hover:bg-muted/20 transition-colors ${acuityInfo.border}`}>
                           <td className="px-4 py-3">
                             <span className={`inline-block rounded-full px-2.5 py-1 text-xs ${acuityInfo.badge}`}>
-                              {t.acuity_level.toUpperCase()}
+                              {tr.acuity_level.toUpperCase()}
                             </span>
                             <div className="text-[10px] text-muted-foreground mt-1">
-                              Triaged {formatDateTime(t.triaged_at)}
+                              {t("emergency.triagedAt", { time: formatDateTime(tr.triaged_at) })}
                             </div>
                           </td>
 
                           <td className="px-4 py-3">
-                            <div className="font-semibold text-foreground">
-                              {t.chief_complaint}
-                            </div>
-                            {t.triage_notes && (
-                              <p className="text-xs text-muted-foreground mt-0.5 max-w-sm">
-                                {t.triage_notes}
-                              </p>
+                            <div className="font-semibold text-foreground">{tr.chief_complaint}</div>
+                            {tr.triage_notes && (
+                              <p className="text-xs text-muted-foreground mt-0.5 max-w-sm">{tr.triage_notes}</p>
                             )}
                             <div className="text-[11px] text-muted-foreground mt-1 font-mono">
-                              Patient: {t.patient_id.slice(0, 8)}… · Visit: {t.visit_id.slice(0, 8)}…
+                              Patient: {tr.patient_id.slice(0, 8)}… · Visit: {tr.visit_id.slice(0, 8)}…
                             </div>
                           </td>
 
                           <td className="px-4 py-3">
                             <div className="font-medium">
-                              Bay: {t.assigned_bay || "Unassigned"}
+                              {t("emergency.bay", { bay: tr.assigned_bay || t("common.unassigned") })}
                             </div>
                             <div className="text-xs text-muted-foreground mt-0.5">
-                              {t.assigned_doctor_id ? `Doctor: ${t.assigned_doctor_id.slice(0, 8)}…` : "No doctor assigned"}
+                              {tr.assigned_doctor_id
+                                ? `Doctor: ${tr.assigned_doctor_id.slice(0, 8)}…`
+                                : t("emergency.noDoctorAssigned")}
                             </div>
                           </td>
 
                           <td className="px-4 py-3">
                             <span className="capitalize rounded bg-muted px-2 py-0.5 text-xs font-medium">
-                              {t.status.replace("_", " ")}
+                              {tr.status.replace("_", " ")}
                             </span>
-                            {t.disposition && (
+                            {tr.disposition && (
                               <div className="text-xs font-semibold text-primary mt-1 capitalize">
-                                Disp: {t.disposition}
+                                Disp: {tr.disposition}
                               </div>
                             )}
                           </td>
 
                           <td className="px-4 py-3">
-                            {t.clinician_seen_at ? (
+                            {tr.clinician_seen_at ? (
                               <span className="inline-flex items-center gap-1 text-emerald-600 font-medium text-xs">
-                                ✓ Seen in {t.door_to_clinician_minutes ?? 0}m
+                                {t("emergency.seenIn", { minutes: tr.door_to_clinician_minutes ?? 0 })}
                               </span>
                             ) : (
                               <span className="inline-flex items-center gap-1 text-amber-600 font-medium text-xs">
-                                ⏱ Waiting for clinician
+                                {t("emergency.waitingForClinician")}
                               </span>
                             )}
                           </td>
 
                           <td className="px-4 py-3 text-right">
                             <div className="flex items-center justify-end gap-2 flex-wrap">
-                              {!t.clinician_seen_at && t.status === "waiting" && (
+                              {!tr.clinician_seen_at && tr.status === "waiting" && (
                                 <button
                                   type="button"
-                                  onClick={() => void handleMarkSeen(t)}
+                                  onClick={() => void handleMarkSeen(tr)}
                                   className="rounded bg-emerald-600 text-white px-2 py-1 text-xs font-medium hover:bg-emerald-700"
                                 >
-                                  Mark Seen
+                                  {t("emergency.markSeen")}
                                 </button>
                               )}
                               <button
                                 type="button"
-                                onClick={() => handleOpenRetriage(t)}
+                                onClick={() => handleOpenRetriage(tr)}
                                 className="rounded border border-border bg-background px-2 py-1 text-xs font-medium hover:bg-muted"
                               >
-                                Re-Triage
+                                {t("emergency.reTriage")}
                               </button>
                               <button
                                 type="button"
-                                onClick={() => handleOpenDisposition(t)}
+                                onClick={() => handleOpenDisposition(tr)}
                                 className="rounded border border-border bg-background px-2 py-1 text-xs font-medium hover:bg-muted"
                               >
-                                Disposition
+                                {t("emergency.disposition")}
                               </button>
                             </div>
                           </td>
@@ -502,16 +499,14 @@ export default function Page() {
       {activeTab === "registration" && (
         <div className="mx-auto max-w-3xl space-y-8">
           <div>
-            <h2 className="text-xl font-semibold">Emergency Registration & Fast-Track THID</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Issue a temporary hospital identity (THID) immediately for unscheduled arrivals.
-            </p>
+            <h2 className="text-xl font-semibold">{t("emergency.registrationTitle")}</h2>
+            <p className="mt-1 text-sm text-muted-foreground">{t("emergency.registrationSubtitle")}</p>
           </div>
 
           {created ? (
             <section className="surface-card border border-success p-6 space-y-4" aria-live="polite">
               <div>
-                <p className="text-sm text-muted-foreground">Temporary identity issued</p>
+                <p className="text-sm text-muted-foreground">{t("emergency.thidIssued")}</p>
                 <p className="mt-1 font-mono text-2xl font-semibold text-primary">{created.thid}</p>
                 <p className="mt-1 font-medium">
                   {created.full_name} · estimated age {created.age_years} · {created.sex}
@@ -523,10 +518,10 @@ export default function Page() {
 
               {createdVisit ? (
                 <div className="rounded-md border border-success/30 bg-success-muted p-4 space-y-2">
-                  <p className="font-semibold text-success">Emergency visit {createdVisit.visit_number} active</p>
-                  <p className="text-xs text-muted-foreground">
-                    Patient is registered and ready for triage and emergency consultation.
+                  <p className="font-semibold text-success">
+                    {t("emergency.visitActive", { visitNumber: createdVisit.visit_number })}
                   </p>
+                  <p className="text-xs text-muted-foreground">{t("emergency.readyForTriage")}</p>
                   <div className="pt-2 flex items-center gap-3">
                     <button
                       type="button"
@@ -537,7 +532,7 @@ export default function Page() {
                       }}
                       className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary/90"
                     >
-                      Go to Triage Board
+                      {t("emergency.goToBoard")}
                     </button>
                   </div>
                 </div>
@@ -549,7 +544,7 @@ export default function Page() {
                     disabled={visitBusy}
                     className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary/90 disabled:opacity-50"
                   >
-                    {visitBusy ? "Starting emergency visit…" : "Start Emergency Visit"}
+                    {visitBusy ? t("emergency.startingVisit") : t("emergency.startVisit")}
                   </button>
                 </div>
               )}
@@ -563,14 +558,14 @@ export default function Page() {
                     setCreatedVisit(null);
                   }}
                 >
-                  Register another patient
+                  {t("emergency.registerAnother")}
                 </button>
               </div>
             </section>
           ) : (
             <form onSubmit={submitRegistration} className="surface-card space-y-5 p-6">
               <label className="block space-y-1 text-sm">
-                <span className="text-muted-foreground">Name (leave blank if unknown)</span>
+                <span className="text-muted-foreground">{t("emergency.nameOptional")}</span>
                 <input
                   className="w-full rounded-md border border-border px-3 py-2 text-foreground bg-background"
                   value={form.full_name ?? ""}
@@ -579,7 +574,7 @@ export default function Page() {
               </label>
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="block space-y-1 text-sm">
-                  <span className="text-muted-foreground">Sex</span>
+                  <span className="text-muted-foreground">{t("field.sex")}</span>
                   <select
                     className="w-full rounded-md border border-border px-3 py-2 text-foreground bg-background"
                     value={form.sex}
@@ -590,14 +585,14 @@ export default function Page() {
                       }))
                     }
                   >
-                    <option value="unknown">Unknown</option>
-                    <option value="female">Female</option>
-                    <option value="male">Male</option>
-                    <option value="other">Other</option>
+                    <option value="unknown">{t("emergency.sexUnknown")}</option>
+                    <option value="female">{t("emergency.sexFemale")}</option>
+                    <option value="male">{t("emergency.sexMale")}</option>
+                    <option value="other">{t("emergency.sexOther")}</option>
                   </select>
                 </label>
                 <label className="block space-y-1 text-sm">
-                  <span className="text-muted-foreground">Estimated age (years)</span>
+                  <span className="text-muted-foreground">{t("emergency.estimatedAge")}</span>
                   <input
                     type="number"
                     min="0"
@@ -612,7 +607,7 @@ export default function Page() {
                 </label>
               </div>
               <label className="block space-y-1 text-sm">
-                <span className="text-muted-foreground">Mobile (optional)</span>
+                <span className="text-muted-foreground">{t("emergency.mobileOptional")}</span>
                 <input
                   type="tel"
                   className="w-full rounded-md border border-border px-3 py-2 text-foreground bg-background"
@@ -625,7 +620,7 @@ export default function Page() {
                 disabled={busy}
                 className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
               >
-                {busy ? "Issuing THID…" : "Register and issue THID"}
+                {busy ? t("emergency.issuingThid") : t("emergency.registerThid")}
               </button>
             </form>
           )}
@@ -633,10 +628,8 @@ export default function Page() {
           <section className="space-y-4 pt-4 border-t border-border">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="text-lg font-semibold">Active Emergency Arrivals</h3>
-                <p className="text-xs text-muted-foreground">
-                  Un-triaged or active emergency visits awaiting clinical action
-                </p>
+                <h3 className="text-lg font-semibold">{t("emergency.arrivalsTitle")}</h3>
+                <p className="text-xs text-muted-foreground">{t("emergency.arrivalsSubtitle")}</p>
               </div>
               <button
                 type="button"
@@ -644,13 +637,13 @@ export default function Page() {
                 disabled={worklistLoading}
                 className="text-xs text-primary underline hover:text-primary/80"
               >
-                {worklistLoading ? "Refreshing…" : "Refresh arrivals"}
+                {worklistLoading ? t("emergency.refreshingArrivals") : t("emergency.refreshArrivals")}
               </button>
             </div>
 
             {worklist.length === 0 ? (
               <div className="surface-card p-6 text-center text-sm text-muted-foreground">
-                {worklistLoading ? "Loading arrivals…" : "No active emergency arrivals."}
+                {worklistLoading ? t("emergency.loadingArrivals") : t("emergency.noArrivals")}
               </div>
             ) : (
               <div className="surface-card overflow-hidden divide-y divide-border">
@@ -676,13 +669,13 @@ export default function Page() {
                         onClick={() => handleOpenTriage(item)}
                         className="rounded-md bg-amber-600 text-white px-3 py-1.5 text-xs font-medium hover:bg-amber-700"
                       >
-                        Triage Patient
+                        {t("emergency.triagePatient")}
                       </button>
                       <Link
                         href={`/doctor/consultation?visit_id=${item.visit_id}`}
                         className="rounded-md bg-primary text-white px-3 py-1.5 text-xs font-medium hover:bg-primary/90"
                       >
-                        Consultation
+                        {t("emergency.consultation")}
                       </Link>
                     </div>
                   </div>
@@ -699,7 +692,7 @@ export default function Page() {
           <div className="surface-card w-full max-w-lg rounded-lg border border-border bg-card p-6 shadow-xl space-y-4">
             <div className="flex items-center justify-between border-b border-border pb-3">
               <div>
-                <h3 className="text-lg font-semibold">Triage Patient Assessment</h3>
+                <h3 className="text-lg font-semibold">{t("emergency.triageModalTitle")}</h3>
                 <p className="text-xs text-muted-foreground">
                   {triageTargetArrival.full_name} ({triageTargetArrival.thid ?? triageTargetArrival.uhid ?? "Arrival"})
                 </p>
@@ -709,25 +702,25 @@ export default function Page() {
 
             <form onSubmit={handleSubmitTriage} className="space-y-4 text-sm">
               <label className="block space-y-1">
-                <span className="font-medium text-foreground">Acuity Level</span>
+                <span className="font-medium text-foreground">{t("emergency.acuityLevel")}</span>
                 <select
                   className="w-full rounded-md border border-border bg-background px-3 py-2 text-foreground"
                   value={triageAcuity}
                   onChange={(e) => setTriageAcuity(e.target.value as EmergencyAcuity)}
                 >
-                  <option value="resuscitation">Priority 1 — Resuscitation (Immediate life threat)</option>
-                  <option value="emergent">Priority 2 — Emergent (Care within 15 mins)</option>
-                  <option value="urgent">Priority 3 — Urgent (Care within 60 mins)</option>
-                  <option value="non_urgent">Priority 4 — Non-urgent (Routine)</option>
+                  <option value="resuscitation">{t("emergency.acuityP1")}</option>
+                  <option value="emergent">{t("emergency.acuityP2")}</option>
+                  <option value="urgent">{t("emergency.acuityP3")}</option>
+                  <option value="non_urgent">{t("emergency.acuityP4")}</option>
                 </select>
               </label>
 
               <label className="block space-y-1">
-                <span className="font-medium text-foreground">Chief Complaint (Required)</span>
+                <span className="font-medium text-foreground">{t("emergency.chiefComplaint")}</span>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Severe chest pain, dyspnea, acute head trauma"
+                  placeholder={t("emergency.placeholderChiefComplaint")}
                   className="w-full rounded-md border border-border bg-background px-3 py-2 text-foreground"
                   value={triageComplaint}
                   onChange={(e) => setTriageComplaint(e.target.value)}
@@ -736,10 +729,10 @@ export default function Page() {
 
               <div className="grid grid-cols-2 gap-4">
                 <label className="block space-y-1">
-                  <span className="font-medium text-foreground">Assigned Bay</span>
+                  <span className="font-medium text-foreground">{t("emergency.assignedBay")}</span>
                   <input
                     type="text"
-                    placeholder="e.g. Resus-1, Bay 3"
+                    placeholder={t("emergency.placeholderBay")}
                     className="w-full rounded-md border border-border bg-background px-3 py-2 text-foreground"
                     value={triageBay}
                     onChange={(e) => setTriageBay(e.target.value)}
@@ -748,10 +741,10 @@ export default function Page() {
               </div>
 
               <label className="block space-y-1">
-                <span className="font-medium text-foreground">Triage Notes (Optional)</span>
+                <span className="font-medium text-foreground">{t("emergency.triageNotesOptional")}</span>
                 <textarea
                   rows={3}
-                  placeholder="Primary survey findings, initial vitals, airway/breathing status..."
+                  placeholder={t("emergency.placeholderTriageNotes")}
                   className="w-full rounded-md border border-border bg-background px-3 py-2 text-foreground"
                   value={triageNotes}
                   onChange={(e) => setTriageNotes(e.target.value)}
@@ -764,14 +757,14 @@ export default function Page() {
                   onClick={() => setTriageModalOpen(false)}
                   className="rounded-md border border-border px-4 py-2 hover:bg-muted"
                 >
-                  Cancel
+                  {t("common.cancel")}
                 </button>
                 <button
                   type="submit"
                   disabled={triageSubmitting}
                   className="rounded-md bg-primary px-4 py-2 text-white hover:bg-primary/90 disabled:opacity-50"
                 >
-                  {triageSubmitting ? "Saving Triage…" : "Save Triage Assessment"}
+                  {triageSubmitting ? t("emergency.savingTriage") : t("emergency.saveTriage")}
                 </button>
               </div>
             </form>
@@ -785,9 +778,10 @@ export default function Page() {
           <div className="surface-card w-full max-w-lg rounded-lg border border-border bg-card p-6 shadow-xl space-y-4">
             <div className="flex items-center justify-between border-b border-border pb-3">
               <div>
-                <h3 className="text-lg font-semibold">Re-Triage Patient</h3>
+                <h3 className="text-lg font-semibold">{t("emergency.retriageTitle")}</h3>
                 <p className="text-xs text-muted-foreground">
-                  Current Acuity: <span className="font-semibold uppercase">{retriageTarget.acuity_level}</span>
+                  {t("emergency.currentAcuity")}{" "}
+                  <span className="font-semibold uppercase">{retriageTarget.acuity_level}</span>
                 </p>
               </div>
               <button type="button" onClick={() => setRetriageModalOpen(false)} className="text-muted-foreground hover:text-foreground">✕</button>
@@ -795,34 +789,32 @@ export default function Page() {
 
             <form onSubmit={handleSubmitRetriage} className="space-y-4 text-sm">
               <label className="block space-y-1">
-                <span className="font-medium text-foreground">New Acuity Level</span>
+                <span className="font-medium text-foreground">{t("emergency.newAcuityLevel")}</span>
                 <select
                   className="w-full rounded-md border border-border bg-background px-3 py-2 text-foreground"
                   value={retriageAcuity}
                   onChange={(e) => setRetriageAcuity(e.target.value as EmergencyAcuity)}
                 >
-                  <option value="resuscitation">Priority 1 — Resuscitation (Immediate)</option>
-                  <option value="emergent">Priority 2 — Emergent (&lt;15 mins)</option>
-                  <option value="urgent">Priority 3 — Urgent (&lt;60 mins)</option>
-                  <option value="non_urgent">Priority 4 — Non-urgent (Routine)</option>
+                  <option value="resuscitation">{t("emergency.acuityP1")}</option>
+                  <option value="emergent">{t("emergency.acuityP2")}</option>
+                  <option value="urgent">{t("emergency.acuityP3")}</option>
+                  <option value="non_urgent">{t("emergency.acuityP4")}</option>
                 </select>
               </label>
 
               <label className="block space-y-1">
-                <span className="font-medium text-danger">
-                  Clinical Justification for Acuity Change (Required, min 10 chars)
-                </span>
+                <span className="font-medium text-danger">{t("emergency.retriageJustification")}</span>
                 <textarea
                   rows={3}
                   required
                   minLength={10}
-                  placeholder="Document physiological deterioration, improvement, altered vitals, or changing clinical signs..."
+                  placeholder={t("emergency.placeholderRetriageJustification")}
                   className="w-full rounded-md border border-border bg-background px-3 py-2 text-foreground"
                   value={retriageReason}
                   onChange={(e) => setRetriageReason(e.target.value)}
                 />
                 <span className="text-[11px] text-muted-foreground">
-                  {retriageReason.length}/10 minimum characters
+                  {t("emergency.retriageMinChars", { count: retriageReason.length })}
                 </span>
               </label>
 
@@ -832,14 +824,14 @@ export default function Page() {
                   onClick={() => setRetriageModalOpen(false)}
                   className="rounded-md border border-border px-4 py-2 hover:bg-muted"
                 >
-                  Cancel
+                  {t("common.cancel")}
                 </button>
                 <button
                   type="submit"
                   disabled={retriageSubmitting}
                   className="rounded-md bg-primary px-4 py-2 text-white hover:bg-primary/90 disabled:opacity-50"
                 >
-                  {retriageSubmitting ? "Updating Acuity…" : "Confirm Re-Triage"}
+                  {retriageSubmitting ? t("emergency.updatingAcuity") : t("emergency.confirmRetriage")}
                 </button>
               </div>
             </form>
@@ -853,32 +845,32 @@ export default function Page() {
           <div className="surface-card w-full max-w-lg rounded-lg border border-border bg-card p-6 shadow-xl space-y-4">
             <div className="flex items-center justify-between border-b border-border pb-3">
               <div>
-                <h3 className="text-lg font-semibold">Emergency Disposition</h3>
-                <p className="text-xs text-muted-foreground">Final outcome and transfer of care</p>
+                <h3 className="text-lg font-semibold">{t("emergency.dispositionModalTitle")}</h3>
+                <p className="text-xs text-muted-foreground">{t("emergency.dispositionModalSubtitle")}</p>
               </div>
               <button type="button" onClick={() => setDispositionModalOpen(false)} className="text-muted-foreground hover:text-foreground">✕</button>
             </div>
 
             <form onSubmit={handleSubmitDisposition} className="space-y-4 text-sm">
               <label className="block space-y-1">
-                <span className="font-medium text-foreground">Disposition Decision</span>
+                <span className="font-medium text-foreground">{t("emergency.dispositionDecision")}</span>
                 <select
                   className="w-full rounded-md border border-border bg-background px-3 py-2 text-foreground"
                   value={dispositionType}
                   onChange={(e) => setDispositionType(e.target.value as EmergencyDisposition)}
                 >
-                  <option value="discharge">Discharge Home</option>
-                  <option value="admit">Admit to Inpatient Ward / ICU</option>
-                  <option value="transfer">Transfer to Higher Center</option>
-                  <option value="lwbs">Left Without Being Seen (LWBS)</option>
+                  <option value="discharge">{t("emergency.dispDischargeHome")}</option>
+                  <option value="admit">{t("emergency.dispAdmit")}</option>
+                  <option value="transfer">{t("emergency.dispTransfer")}</option>
+                  <option value="lwbs">{t("emergency.dispLwbs")}</option>
                 </select>
               </label>
 
               <label className="block space-y-1">
-                <span className="font-medium text-foreground">Disposition Notes</span>
+                <span className="font-medium text-foreground">{t("emergency.dispositionNotes")}</span>
                 <textarea
                   rows={3}
-                  placeholder="Clinical condition upon departure, destination ward, discharge instructions, or transfer details..."
+                  placeholder={t("emergency.placeholderDispositionNotes")}
                   className="w-full rounded-md border border-border bg-background px-3 py-2 text-foreground"
                   value={dispositionNotes}
                   onChange={(e) => setDispositionNotes(e.target.value)}
@@ -891,14 +883,14 @@ export default function Page() {
                   onClick={() => setDispositionModalOpen(false)}
                   className="rounded-md border border-border px-4 py-2 hover:bg-muted"
                 >
-                  Cancel
+                  {t("common.cancel")}
                 </button>
                 <button
                   type="submit"
                   disabled={dispositionSubmitting}
                   className="rounded-md bg-primary px-4 py-2 text-white hover:bg-primary/90 disabled:opacity-50"
                 >
-                  {dispositionSubmitting ? "Recording…" : "Finalize Disposition"}
+                  {dispositionSubmitting ? t("emergency.recording") : t("emergency.finalizeDisposition")}
                 </button>
               </div>
             </form>

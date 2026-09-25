@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useLocale } from "@/lib/i18n";
 import { reportIncident } from "@/features/nurse/api/nursing";
 import { INCIDENT_TYPES, SEVERITIES } from "./constants";
 import { IncidentType, IncidentSeverity, IncidentReportFormProps } from "./IncidentReportForm.types";
@@ -10,6 +11,7 @@ export default function IncidentReportForm({
   wardId,
   onSuccess,
 }: IncidentReportFormProps) {
+  const { t } = useLocale();
   const [incidentType, setIncidentType] = useState<IncidentType | "">("");
   const [severity, setSeverity] = useState<IncidentSeverity | "">("");
   const [occurredAt, setOccurredAt] = useState("");
@@ -50,7 +52,7 @@ export default function IncidentReportForm({
       setImmediateAction("");
       onSuccess?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to file incident report");
+      setError(err instanceof Error ? err.message : t("nurse.incident.errFile"));
     } finally {
       setSubmitting(false);
     }
@@ -141,7 +143,7 @@ export default function IncidentReportForm({
         disabled={submitting}
         className="rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
       >
-        {submitting ? "Submitting..." : "Submit Report"}
+        {submitting ? t("nurse.incident.submitting") : t("nurse.incident.submitReport")}
       </button>
     </form>
   );

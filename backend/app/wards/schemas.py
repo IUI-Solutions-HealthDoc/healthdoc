@@ -8,6 +8,7 @@ from pydantic import BaseModel
 class WardOut(BaseModel):
     id: uuid.UUID
     name: str
+    name_hi: str | None = None
     department_id: uuid.UUID | None
     facility_id: uuid.UUID
     is_active: bool

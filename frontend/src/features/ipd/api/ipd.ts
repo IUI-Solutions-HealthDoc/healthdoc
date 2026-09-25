@@ -125,8 +125,10 @@ export interface PendingAdmissionItem {
   priority: "routine" | "urgent" | "emergency";
   recommended_ward_id?: string | null;
   recommended_ward_name?: string | null;
+  recommended_ward_name_hi?: string | null;
   recommended_department_id?: string | null;
   recommended_department_name?: string | null;
+  recommended_department_name_hi?: string | null;
   reason?: string | null;
   doctor_id?: string | null;
   doctor_name?: string | null;
@@ -140,6 +142,7 @@ export interface PendingDischargeItem {
   patient_uhid: string;
   ward_id: string;
   ward_name: string;
+  ward_name_hi?: string | null;
   bed_id: string;
   bed_number: string;
   admitted_at: string;
@@ -241,6 +244,7 @@ export interface AdmissionChart {
     status: string;
     ward_id: string;
     ward_name: string;
+    ward_name_hi?: string | null;
     bed_id: string;
     bed_number: string;
     reason?: string | null;

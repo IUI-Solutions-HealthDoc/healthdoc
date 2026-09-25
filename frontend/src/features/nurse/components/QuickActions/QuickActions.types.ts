@@ -1,6 +1,8 @@
+import type { MessageKey } from "@/lib/i18n";
+
 export interface QuickAction {
   id: string;
-  label: string;
+  labelKey: MessageKey;
   icon: string;
   color: string;
 }

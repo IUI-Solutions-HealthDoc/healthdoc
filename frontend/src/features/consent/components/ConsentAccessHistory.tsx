@@ -3,8 +3,9 @@
 import Button from "@mui/material/Button";
 import Typography from "@mui/material/Typography";
 
+import { useLocale } from "@/lib/i18n";
 import { useAuth } from "@/providers/auth-provider";
-import { ACCESS_CHANNEL_LABELS } from "../constants";
+import { accessChannelLabels } from "../i18nLabels";
 import { useDataAccessLogs } from "../hooks/useDataAccessLogs";
 import { DataAccessLogPanel } from "./DataAccessLogPanel";
 
@@ -20,6 +21,7 @@ export function ConsentAccessHistory({ consentId }: { consentId: string }) {
 }
 
 function AuthorizedAccessHistory({ consentId }: { consentId: string }) {
+  const { t } = useLocale();
   const access = useDataAccessLogs(consentId);
   if (access.error) {
     return <div>
@@ -27,5 +29,11 @@ function AuthorizedAccessHistory({ consentId }: { consentId: string }) {
       <Button onClick={() => void access.refresh()}>Retry access history</Button>
     </div>;
   }
-  return <DataAccessLogPanel rows={access.rows} loading={access.loading} channels={ACCESS_CHANNEL_LABELS} />;
+  return (
+    <DataAccessLogPanel
+      rows={access.rows}
+      loading={access.loading}
+      channels={accessChannelLabels(t)}
+    />
+  );
 }

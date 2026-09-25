@@ -14,6 +14,7 @@ import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 
 import { Button } from "@/components/ui/Button";
+import { useLocale } from "@/lib/i18n";
 import { meridian } from "@/styles/theme";
 import {
   getAdmissionChecklist,
@@ -30,6 +31,7 @@ export function AdmissionChecklistPanel({
   admissionId,
   onUpdate,
 }: AdmissionChecklistPanelProps) {
+  const { t } = useLocale();
   const [tasks, setTasks] = React.useState<AdmissionChecklistTask[]>([]);
   const [loading, setLoading] = React.useState<boolean>(true);
   const [error, setError] = React.useState<string | null>(null);
@@ -46,7 +48,7 @@ export function AdmissionChecklistPanel({
       const data = await getAdmissionChecklist(admissionId);
       setTasks(data || []);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to load admission checklist");
+      setError(err instanceof Error ? err.message : t("ipd.checklist.errLoad"));
     } finally {
       setLoading(false);
     }
@@ -66,7 +68,7 @@ export function AdmissionChecklistPanel({
       await loadChecklist();
       onUpdate?.();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to update task");
+      setError(err instanceof Error ? err.message : t("ipd.checklist.errUpdate"));
     } finally {
       setUpdatingTaskId(null);
     }
@@ -82,7 +84,7 @@ export function AdmissionChecklistPanel({
   const handleConfirmSkip = async () => {
     if (!selectedTask) return;
     if (!skipReason.trim()) {
-      setSkipReasonError("Mandatory clinical justification is required to skip a safety step.");
+      setSkipReasonError(t("ipd.checklist.skipReasonRequired"));
       return;
     }
     setUpdatingTaskId(selectedTask.id);
@@ -95,7 +97,7 @@ export function AdmissionChecklistPanel({
       await loadChecklist();
       onUpdate?.();
     } catch (err: unknown) {
-      setSkipReasonError(err instanceof Error ? err.message : "Failed to skip task");
+      setSkipReasonError(err instanceof Error ? err.message : t("ipd.checklist.errSkip"));
     } finally {
       setUpdatingTaskId(null);
     }
@@ -119,18 +121,18 @@ export function AdmissionChecklistPanel({
       <Stack direction="row" spacing={2} sx={{ alignItems: "center", justifyContent: "space-between", mb: 2 }}>
         <Box>
           <Typography sx={{ fontSize: "1.0625rem", fontWeight: 700 }}>
-            Admission Nursing Checklist (HD-16)
+            {t("ipd.checklist.title")}
           </Typography>
           <Typography sx={{ fontSize: "0.8125rem", color: meridian.textSecondary, mt: 0.25 }}>
-            Standard patient onboarding safety verification and clinical baseline checklist.
+            {t("ipd.checklist.subtitle")}
           </Typography>
         </Box>
         <Box sx={{ textAlign: "right" }}>
           <Typography sx={{ fontSize: "0.875rem", fontWeight: 700, color: progressPercent === 100 ? "#16a34a" : "#0284c7" }}>
-            {completedCount} completed · {skippedCount} skipped / {totalCount}
+            {t("ipd.checklist.progress", { completed: completedCount, skipped: skippedCount, total: totalCount })}
           </Typography>
           <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary }}>
-            {progressPercent}% reconciled
+            {t("ipd.checklist.reconciled", { percent: progressPercent })}
           </Typography>
         </Box>
       </Stack>
@@ -159,11 +161,11 @@ export function AdmissionChecklistPanel({
 
       {loading ? (
         <Typography sx={{ fontSize: "0.875rem", color: meridian.textSecondary, py: 2, textAlign: "center" }}>
-          Loading checklist tasks...
+          {t("ipd.checklist.loading")}
         </Typography>
       ) : tasks.length === 0 ? (
         <Typography sx={{ fontSize: "0.875rem", color: meridian.textSecondary, py: 2, textAlign: "center" }}>
-          No checklist tasks initialized for this admission.
+          {t("ipd.checklist.empty")}
         </Typography>
       ) : (
         <Stack spacing={1.5}>
@@ -195,7 +197,7 @@ export function AdmissionChecklistPanel({
                       {task.is_mandatory && (
                         <Chip
                           size="small"
-                          label="Mandatory"
+                          label={t("ipd.checklist.mandatory")}
                           sx={{
                             height: 20,
                             fontSize: "0.6875rem",
@@ -219,15 +221,23 @@ export function AdmissionChecklistPanel({
 
                     {isCompleted && task.completed_by_name && (
                       <Typography sx={{ fontSize: "0.75rem", color: "#166534" }}>
-                        Completed by {task.completed_by_name} at{" "}
-                        {task.completed_at ? new Date(task.completed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ""}
+                        {t("ipd.checklist.completedBy", {
+                          name: task.completed_by_name,
+                          time:
+                            task.completed_at
+                              ? new Date(task.completed_at).toLocaleTimeString([], {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })
+                              : "",
+                        })}
                       </Typography>
                     )}
 
                     {isSkipped && (
                       <Box sx={{ mt: 0.5 }}>
                         <Typography sx={{ fontSize: "0.75rem", fontWeight: 600, color: "#64748b" }}>
-                          Skipped Justification:
+                          {t("ipd.checklist.skipJustification")}
                         </Typography>
                         <Typography sx={{ fontSize: "0.8125rem", color: "#334155", fontStyle: "italic" }}>
                           &ldquo;{task.skipped_reason}&rdquo;
@@ -252,7 +262,7 @@ export function AdmissionChecklistPanel({
                             px: 1.5,
                           }}
                         >
-                          Complete
+                          {t("ipd.checklist.complete")}
                         </Button>
                         <Button
                           variant="outlined"
@@ -267,13 +277,13 @@ export function AdmissionChecklistPanel({
                             px: 1.5,
                           }}
                         >
-                          Skip
+                          {t("ipd.checklist.skip")}
                         </Button>
                       </>
                     ) : (
                       <Chip
                         size="small"
-                        label={isCompleted ? "Completed" : "Skipped"}
+                        label={isCompleted ? t("ipd.checklist.statusCompleted") : t("ipd.checklist.statusSkipped")}
                         color={isCompleted ? "success" : "default"}
                         sx={{ fontWeight: 600 }}
                       />
@@ -289,18 +299,18 @@ export function AdmissionChecklistPanel({
       {/* Skip Justification Modal */}
       <Dialog open={skipDialogOpen} onClose={() => setSkipDialogOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle sx={{ fontWeight: 700 }}>
-          Clinical Justification for Skipping Task
+          {t("ipd.checklist.skipDialogTitle")}
         </DialogTitle>
         <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 1 }}>
           <Typography sx={{ fontSize: "0.875rem", color: meridian.textSecondary }}>
-            Skipping &ldquo;<strong>{selectedTask?.title}</strong>&rdquo; requires an explicit clinical rationale for hospital quality assurance and audit compliance.
+            {t("ipd.checklist.skipDialogBody", { title: selectedTask?.title ?? "" })}
           </Typography>
           <TextField
             autoFocus
             fullWidth
             multiline
             rows={3}
-            label="Mandatory Clinical Justification / Reason"
+            label={t("ipd.checklist.skipReasonLabel")}
             placeholder="e.g. Patient arriving in active seizure; baseline vitals deferred for immediate resuscitation"
             value={skipReason}
             onChange={(e) => {
@@ -313,7 +323,7 @@ export function AdmissionChecklistPanel({
         </DialogContent>
         <DialogActions sx={{ p: 2 }}>
           <Button variant="outlined" onClick={() => setSkipDialogOpen(false)}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button
             variant="contained"
@@ -321,7 +331,7 @@ export function AdmissionChecklistPanel({
             disabled={updatingTaskId !== null}
             onClick={handleConfirmSkip}
           >
-            Confirm Skip
+            {t("ipd.checklist.confirmSkip")}
           </Button>
         </DialogActions>
       </Dialog>

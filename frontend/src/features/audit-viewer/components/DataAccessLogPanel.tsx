@@ -9,6 +9,7 @@ import Typography from "@mui/material/Typography";
 
 import { DataTable, type DataTableColumn } from "@/components/tables/DataTable";
 import { StatusChip } from "@/components/ui/StatusChip";
+import { useLocale } from "@/lib/i18n";
 import { meridian } from "@/styles/theme";
 import { ACCESS_CHANNEL_LABELS } from "../constants";
 import { formatDateTime } from "../lib/formatters";
@@ -31,6 +32,7 @@ export function DataAccessLogPanel({
   onQueryChange,
   onAccessChannelChange,
 }: Props) {
+  const { t } = useLocale();
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
 
@@ -111,7 +113,7 @@ export function DataAccessLogPanel({
       <Stack direction={{ xs: "column", sm: "row" }} spacing={1.25} sx={{ px: 2.5, pb: 2 }}>
         <TextField
           size="small"
-          placeholder="Search patient, user, purpose…"
+          placeholder={t("audit.dataAccess.searchPlaceholder")}
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}
           fullWidth
@@ -140,7 +142,7 @@ export function DataAccessLogPanel({
         rows={paginatedRows}
         getRowId={(r) => r.id}
         loading={loading}
-        emptyMessage="No data access events."
+        emptyMessage={t("audit.dataAccess.empty")}
         page={page}
         rowsPerPage={rowsPerPage}
         totalCount={rows.length}

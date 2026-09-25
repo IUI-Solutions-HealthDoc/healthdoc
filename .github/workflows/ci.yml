@@ -167,10 +167,12 @@ jobs:
       # quietly stops being verified.
       - name: Start MinIO
         run: |
+          docker build -f ../infra/minio/Dockerfile.source \
+            -t healthdoc-minio-source:2025-09-07 ../infra/minio
           docker run -d --name minio -p 9000:9000 \
             -e MINIO_ROOT_USER=healthdoc \
             -e MINIO_ROOT_PASSWORD=healthdoc-test-secret \
-            quay.io/minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e server /data
+            healthdoc-minio-source:2025-09-07 server /data
           for i in $(seq 1 30); do
             if curl -sf http://localhost:9000/minio/health/live >/dev/null; then
               echo "MinIO ready after ${i} attempt(s)"; exit 0
@@ -246,7 +248,7 @@ jobs:
   # now covers every staff role seeded by `make setup`, not only nursing.
   nurse-auth-e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

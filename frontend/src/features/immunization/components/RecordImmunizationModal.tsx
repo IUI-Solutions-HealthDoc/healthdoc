@@ -4,6 +4,7 @@ import { useState } from "react";
 import { AlertCircle, CheckCircle, X } from "lucide-react";
 import { recordImmunization } from "../api";
 import { useClinicalWrite } from "@/lib/useClinicalWrite";
+import { useLocale } from "@/lib/i18n";
 import type { Vaccine } from "../types";
 
 interface RecordImmunizationModalProps {
@@ -21,6 +22,7 @@ export function RecordImmunizationModal({
   catalogue,
   onSuccess,
 }: RecordImmunizationModalProps) {
+  const { t } = useLocale();
   const [selectedVaccineId, setSelectedVaccineId] = useState<string>(
     catalogue[0]?.id || ""
   );
@@ -57,15 +59,15 @@ export function RecordImmunizationModal({
     setError(null);
 
     if (!catalogue.some((v) => v.id === selectedVaccineId)) {
-      setError("Please select a vaccine.");
+      setError(t("immunization.record.errSelectVaccine"));
       return;
     }
     if (!expiryDate || expiryDate < administeredDate.slice(0, 10)) {
-      setError("Expiry date is required and must not precede administration.");
+      setError(t("immunization.record.errExpiry"));
       return;
     }
     if (!batchNumber.trim()) {
-      setError("Batch/Lot number is required for vaccine traceability.");
+      setError(t("immunization.record.errBatch"));
       return;
     }
 
@@ -87,7 +89,9 @@ export function RecordImmunizationModal({
       onSuccess();
       onClose();
     } catch (err: unknown) {
-      if (write.isCurrent()) setError(err instanceof Error ? err.message : "Failed to record immunization dose.");
+      if (write.isCurrent()) {
+        setError(err instanceof Error ? err.message : t("immunization.record.errFailed"));
+      }
     } finally {
       if (write.isCurrent()) setIsSubmitting(false);
     }
@@ -98,13 +102,14 @@ export function RecordImmunizationModal({
       <div className="w-full max-w-lg rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
         <div className="flex items-center justify-between pb-4 border-b border-border">
           <div>
-            <h3 className="text-lg font-bold text-card-foreground">Record Vaccine Administration</h3>
-            <p className="text-xs text-muted-foreground">Administer dose with batch and cold-chain traceability</p>
+            <h3 className="text-lg font-bold text-card-foreground">{t("immunization.record.title")}</h3>
+            <p className="text-xs text-muted-foreground">{t("immunization.record.subtitle")}</p>
           </div>
           <button
             onClick={onClose}
             disabled={isSubmitting || write.retryPending}
             className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+            aria-label={t("common.close")}
           >
             <X className="h-5 w-5" />
           </button>
@@ -121,7 +126,7 @@ export function RecordImmunizationModal({
           <fieldset disabled={isSubmitting || write.retryPending} className="space-y-4">
           <div>
             <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
-              Vaccine
+              {t("immunization.record.vaccine")}
             </label>
             <select
               value={selectedVaccineId}
@@ -130,7 +135,11 @@ export function RecordImmunizationModal({
             >
               {catalogue.map((v) => (
                 <option key={v.id} value={v.id}>
-                  {v.name} ({v.code}) — {v.standard_doses} dose(s)
+                  {t("immunization.record.vaccineOption", {
+                    name: v.name,
+                    code: v.code,
+                    doses: v.standard_doses,
+                  })}
                 </option>
               ))}
             </select>
@@ -139,7 +148,7 @@ export function RecordImmunizationModal({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
-                Dose Number
+                {t("immunization.record.doseNumber")}
               </label>
               <input
                 type="number"
@@ -153,7 +162,7 @@ export function RecordImmunizationModal({
             </div>
             <div>
               <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
-                Date Administered
+                {t("immunization.record.dateAdministered")}
               </label>
               <input
                 type="datetime-local"
@@ -168,11 +177,11 @@ export function RecordImmunizationModal({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
-                Batch / Lot Number *
+                {t("immunization.record.batchLot")}
               </label>
               <input
                 type="text"
-                placeholder="e.g. BATCH-2026-X4"
+                placeholder={t("immunization.record.batchPlaceholder")}
                 value={batchNumber}
                 onChange={(e) => setBatchNumber(e.target.value)}
                 className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
@@ -181,7 +190,7 @@ export function RecordImmunizationModal({
             </div>
             <div>
               <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
-                Expiry Date
+                {t("immunization.record.expiryDate")}
               </label>
               <input
                 type="date"
@@ -196,25 +205,25 @@ export function RecordImmunizationModal({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
-                Route
+                {t("immunization.record.route")}
               </label>
               <input
                 type="text"
                 value={route}
                 onChange={(e) => setRoute(e.target.value)}
-                placeholder="e.g. Intramuscular"
+                placeholder={t("immunization.record.routePlaceholder")}
                 className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
               />
             </div>
             <div>
               <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
-                Anatomical Site
+                {t("immunization.record.anatomicalSite")}
               </label>
               <input
                 type="text"
                 value={site}
                 onChange={(e) => setSite(e.target.value)}
-                placeholder="e.g. Left Deltoid"
+                placeholder={t("immunization.record.sitePlaceholder")}
                 className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
               />
             </div>
@@ -222,11 +231,11 @@ export function RecordImmunizationModal({
 
           <div>
             <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
-              Manufacturer
+              {t("immunization.record.manufacturer")}
             </label>
             <input
               type="text"
-              placeholder="e.g. Serum Institute / Bharat Biotech"
+              placeholder={t("immunization.record.manufacturerPlaceholder")}
               value={manufacturer}
               onChange={(e) => setManufacturer(e.target.value)}
               className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
@@ -235,11 +244,11 @@ export function RecordImmunizationModal({
 
           <div>
             <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
-              Adverse Reactions / Observations (Optional)
+              {t("immunization.record.adverseReactions")}
             </label>
             <textarea
               rows={2}
-              placeholder="Record any immediate adverse events or nil"
+              placeholder={t("immunization.record.adversePlaceholder")}
               value={adverseReaction}
               onChange={(e) => setAdverseReaction(e.target.value)}
               className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
@@ -254,7 +263,7 @@ export function RecordImmunizationModal({
               disabled={isSubmitting || write.retryPending}
               className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-muted transition-colors"
             >
-              Cancel
+              {t("common.cancel")}
             </button>
             <button
               type="submit"
@@ -262,7 +271,11 @@ export function RecordImmunizationModal({
               className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
             >
               <CheckCircle className="h-4 w-4" />
-              {isSubmitting ? "Recording..." : write.retryPending ? "Retry unchanged save" : "Save Record"}
+              {isSubmitting
+                ? t("immunization.record.recording")
+                : write.retryPending
+                  ? t("forms.renderer.retrySave")
+                  : t("immunization.record.saveRecord")}
             </button>
           </div>
         </form>

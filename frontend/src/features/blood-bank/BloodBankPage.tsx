@@ -6,9 +6,11 @@ import { fetchBloodDonors, fetchBloodUnits } from "./api";
 import { BloodCrossmatchModal } from "./components/BloodCrossmatchModal";
 import { BloodDonorRegistry } from "./components/BloodDonorRegistry";
 import { BloodInventoryGrid } from "./components/BloodInventoryGrid";
+import { useLocale } from "@/lib/i18n";
 import type { BloodDonor, BloodUnit } from "./types";
 
 export function BloodBankPage() {
+  const { t } = useLocale();
   const [activeTab, setActiveTab] = useState<"inventory" | "donors">("inventory");
   const [units, setUnits] = useState<BloodUnit[]>([]);
   const [donors, setDonors] = useState<BloodDonor[]>([]);
@@ -50,10 +52,10 @@ export function BloodBankPage() {
         <div>
           <h1 className="text-2xl font-black tracking-tight text-foreground flex items-center gap-2">
             <Droplets className="h-7 w-7 text-rose-500" />
-            Blood Bank & Transfusion Services
+            {t("bloodBank.title")}
           </h1>
           <p className="text-xs text-muted-foreground mt-1">
-            Donor screening, component inventory, crossmatching & controlled release slips (HD-29)
+            {t("bloodBank.subtitle")}
           </p>
         </div>
 
@@ -68,7 +70,7 @@ export function BloodBankPage() {
             }`}
           >
             <Package className="h-3.5 w-3.5 text-rose-500" />
-            Unit Inventory ({loaded ? units.length : "—"})
+            {t("bloodBank.tab.inventory", { count: loaded ? units.length : "—" })}
           </button>
           <button
             onClick={() => setActiveTab("donors")}
@@ -79,7 +81,7 @@ export function BloodBankPage() {
             }`}
           >
             <Heart className="h-3.5 w-3.5 text-rose-500" />
-            Donor Registry ({loaded ? donors.length : "—"})
+            {t("bloodBank.tab.donors", { count: loaded ? donors.length : "—" })}
           </button>
         </div>
       </div>
@@ -87,7 +89,7 @@ export function BloodBankPage() {
       {loading ? (
         <div className="flex items-center justify-center p-16 text-muted-foreground">
           <RefreshCw className="h-6 w-6 animate-spin mr-2" />
-          <span>Loading blood bank data...</span>
+          <span>{t("bloodBank.loading")}</span>
         </div>
       ) : loadError && !loaded ? (
         <div role="alert" className="rounded-2xl border border-destructive/30 bg-destructive/10 p-8 text-center text-sm text-destructive space-y-3">

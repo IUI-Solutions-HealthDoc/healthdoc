@@ -1,0 +1,20 @@
+# The public MinIO container registries no longer serve our pinned release.
+# Build the *same* source revision already used by local HealthDoc storage;
+# changing this ref is a storage upgrade and requires a separate rehearsal.
+FROM golang:1.24-bookworm AS build
+ARG MINIO_REF=07c3a429bfed433e49018cb0f78a52145d4bedeb
+ENV CGO_ENABLED=0
+RUN go install -ldflags="-s -w \
+    -X github.com/minio/minio/cmd.Version=2025-09-07T16:13:09Z \
+    -X github.com/minio/minio/cmd.ReleaseTag=RELEASE.2025-09-07T16-13-09Z \
+    -X github.com/minio/minio/cmd.CommitID=${MINIO_REF} \
+    -X github.com/minio/minio/cmd.ShortCommitID=07c3a429bfed \
+    -X github.com/minio/minio/cmd.CopyrightYear=2025" \
+    github.com/minio/minio@${MINIO_REF}
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=build /go/bin/minio /usr/local/bin/minio
+EXPOSE 9000 9001
+ENTRYPOINT ["/usr/local/bin/minio"]

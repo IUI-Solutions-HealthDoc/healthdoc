@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
+import { i18nStub } from "./i18n-stub.mjs";
 
 export function compile(url, dependencies) {
   const code = ts.transpileModule(readFileSync(url, "utf8"), { compilerOptions: {
@@ -8,6 +9,7 @@ export function compile(url, dependencies) {
   } }).outputText;
   const exports = {};
   new Function("require", "exports", code)((name) => {
+    if (name === "@/lib/i18n" && !(name in dependencies)) return i18nStub;
     assert.ok(name in dependencies, `Unexpected dependency ${name}`);
     return dependencies[name];
   }, exports);

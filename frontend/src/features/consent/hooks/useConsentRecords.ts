@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { translate } from "@/lib/i18n";
+
 import { listConsentRecords } from "../api";
 import type { ConsentListFilters, ConsentRecord, ConsentStatus } from "../types";
 
@@ -40,7 +42,7 @@ export function useConsentRecords(initial: ConsentListFilters = { status: "all" 
     } catch (e) {
       if (reqId === activeReqRef.current && contextRef.current === context) {
         setRows([]);
-        setError(e instanceof Error ? e.message : "Failed to load consents");
+        setError(e instanceof Error ? e.message : translate("consent.loadListFailed"));
       }
     } finally {
       if (reqId === activeReqRef.current && contextRef.current === context) {

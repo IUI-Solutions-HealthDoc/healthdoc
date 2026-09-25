@@ -6,6 +6,7 @@ import Tab from "@mui/material/Tab";
 import Tabs from "@mui/material/Tabs";
 import Typography from "@mui/material/Typography";
 
+import { useLocale } from "@/lib/i18n";
 import { ExportButton } from "@/components/ui/ExportButton";
 import { toast } from "@/components/ui/toast";
 import { meridian } from "@/styles/theme";
@@ -28,6 +29,7 @@ import { IntegrityArchivePanel } from "./IntegrityArchivePanel";
 type TabKey = "audit" | "data_access" | "files" | "integrity";
 
 export function AuditTrailDashboard() {
+  const { t } = useLocale();
   const [tab, setTab] = useState<TabKey>("audit");
   const [selected, setSelected] = useState<{ id: string; created_at: string } | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -83,8 +85,8 @@ export function AuditTrailDashboard() {
           (logs.filters.action && logs.filters.action !== "all") || logs.filters.query?.trim();
         toast.success(
           clientOnly
-            ? "Audit CSV downloaded — server filters only; Action/Search are not applied to the file"
-            : "Audit CSV downloaded",
+            ? t("audit.export.auditDownloadedFilterNote")
+            : t("audit.export.auditDownloaded"),
         );
         return;
       }
@@ -100,13 +102,13 @@ export function AuditTrailDashboard() {
         // Never hand over a headers-only file and call it a success. An empty
         // evidence export that reports "downloaded" is how an inspection gets
         // nothing and nobody notices.
-        toast.error("Nothing to export on this tab with the current filters");
+        toast.error(t("audit.export.nothingToExport"));
         return;
       }
       download(toCsv(rows), name);
-      toast.success(`${rows.length} row(s) exported`);
+      toast.success(t("audit.export.rowsExported", { count: rows.length }));
     } catch (reason) {
-      toast.error(reason instanceof Error ? reason.message : "Export failed");
+      toast.error(reason instanceof Error ? reason.message : t("audit.export.failed"));
     } finally {
       setExporting(false);
     }
@@ -126,22 +128,19 @@ export function AuditTrailDashboard() {
               color: meridian.textPrimary,
             }}
           >
-            Audit trail
-          </Typography>
-          <Typography sx={{ m: 0, mt: 0.5, fontSize: "0.875rem", color: meridian.textSecondary }}>
-            Facility-scoped audit, data-access, file-access and integrity records from the live APIs.
+            {t("audit.title")}
           </Typography>
         </Box>
         <ExportButton
           formats={["csv"]}
           label={
             tab === "audit"
-              ? "Export audit CSV"
+              ? t("audit.export.auditCsv")
               : tab === "data_access"
-                ? "Export access log CSV"
+                ? t("audit.export.accessCsv")
                 : tab === "files"
-                  ? "Export file access CSV"
-                  : "Export integrity CSV"
+                  ? t("audit.export.fileCsv")
+                  : t("audit.export.integrityCsv")
           }
           loading={exporting}
           onExport={handleExport}
@@ -170,7 +169,7 @@ export function AuditTrailDashboard() {
             the trail cannot be edited — but it has to be stated in a way the
             reader can act on. The trigger name belongs in the schema docs. */}
         <span>
-          Audit records cannot be edited or deleted, including by administrators.
+          {t("audit.readOnlyBanner")}
         </span>
       </Box>
 
@@ -182,10 +181,10 @@ export function AuditTrailDashboard() {
           "& .MuiTab-root": { textTransform: "none", fontWeight: 600, minHeight: 40 },
         }}
       >
-        <Tab value="audit" label="Audit logs" />
-        <Tab value="data_access" label="Access log" />
-        <Tab value="files" label="File access" />
-        <Tab value="integrity" label="Integrity" />
+        <Tab value="audit" label={t("audit.tab.auditLogs")} />
+        <Tab value="data_access" label={t("audit.tab.accessLog")} />
+        <Tab value="files" label={t("audit.tab.fileAccess")} />
+        <Tab value="integrity" label={t("audit.tab.integrity")} />
       </Tabs>
 
       {tab === "audit" ? (

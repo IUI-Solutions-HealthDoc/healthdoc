@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { ModuleCapabilityGate } from "@/components/common/ModuleCapabilityGate";
+import { PageHeading } from "@/components/common/PageHeading";
+import { useLocale } from "@/lib/i18n";
 import {
   decideSubstitution,
   listPendingSubstitutions,
@@ -11,6 +13,7 @@ import type { PendingSubstitution } from "@/features/pharmacy/types";
 import { ApiError, formatDateTime } from "@/lib/api";
 
 function Approvals() {
+  const { t } = useLocale();
   const [items, setItems] = useState<PendingSubstitution[] | null>(null);
   const [reasons, setReasons] = useState<Record<string, string>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -23,9 +26,9 @@ function Approvals() {
       setItems(response.items);
       setError(null);
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Could not load approvals");
+      setError(reason instanceof ApiError ? reason.message : t("doctor.pharmacyApprovals.errLoad"));
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void load();
@@ -58,15 +61,9 @@ function Approvals() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-baseline justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold">Pharmacy substitution approvals</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Only substitutions from prescriptions you ordered appear here. Approval issues live
-            stock using server-side FEFO.
-          </p>
-        </div>
+        <PageHeading titleKey="doctor.pharmacyApprovalsTitle" />
         <button type="button" className="text-sm underline" onClick={() => void load()}>
-          Refresh
+          {t("common.refresh")}
         </button>
       </div>
 
@@ -81,10 +78,12 @@ function Approvals() {
         </p>
       ) : null}
 
-      {items === null ? <p className="text-sm text-muted-foreground">Loading…</p> : null}
+      {items === null ? (
+        <p className="text-sm text-muted-foreground">{t("common.loading")}</p>
+      ) : null}
       {items?.length === 0 ? (
         <section className="surface-card p-6 text-sm text-muted-foreground">
-          No substitutions are waiting for your decision.
+          {t("doctor.pharmacyApprovals.noPending")}
         </section>
       ) : null}
 

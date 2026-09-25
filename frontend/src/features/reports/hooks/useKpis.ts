@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { translate } from "@/lib/i18n";
+
 import { listKpis } from "../api";
 import type { KpiPeriod, KpiSnapshot } from "../types";
 
@@ -16,7 +18,7 @@ export function useKpis(initialPeriod: KpiPeriod = "7d") {
   const refresh = useCallback(async () => {
     if (period === "custom" && (!customFrom || !customTo)) return;
     if (period === "custom" && customFrom > customTo) {
-      setError("The From date must be on or before the To date.");
+      setError(translate("reports.kpi.errCustomRange"));
       setItems([]);
       setLoading(false);
       return;
@@ -27,7 +29,7 @@ export function useKpis(initialPeriod: KpiPeriod = "7d") {
       const res = await listKpis(period, customFrom || undefined, customTo || undefined);
       setItems(res.items);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load KPIs");
+      setError(e instanceof Error ? e.message : translate("reports.kpi.errLoad"));
     } finally {
       setLoading(false);
     }

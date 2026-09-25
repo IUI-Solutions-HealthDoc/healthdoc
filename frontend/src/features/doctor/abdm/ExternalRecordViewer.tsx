@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getUserFacingError } from "@/lib/api";
+import { useLocale } from "@/lib/i18n";
 import { loadRecord } from "./api";
 import { EmbeddedPdfPreview } from "./EmbeddedPdfPreview";
 import { embeddedPdfs, type EmbeddedPdf } from "./pdfAttachments";
@@ -22,6 +23,7 @@ export function ExternalRecordViewer({ id, close }: { id: string; close: () => v
 }
 
 function ExternalRecordBody({ id, close }: { id: string; close: () => void }) {
+  const { t } = useLocale();
   const [bundle, setBundle] = useState<Record<string, unknown> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedPdf, setSelectedPdf] = useState<number | null>(null);
@@ -38,7 +40,9 @@ function ExternalRecordBody({ id, close }: { id: string; close: () => void }) {
         const data = await loadRecord(id, controller.signal);
         if (!disposed && !controller.signal.aborted) { setBundle(data); setError(null); }
       } catch (reason) {
-        if (!disposed && !controller.signal.aborted) setError(getUserFacingError(reason, "External record access could not be verified."));
+        if (!disposed && !controller.signal.aborted) {
+          setError(getUserFacingError(reason, t("doctor.abdm.errRecordAccess")));
+        }
       }
     }
     const onVisibility = () => { void refresh(); };
@@ -47,17 +51,22 @@ function ExternalRecordBody({ id, close }: { id: string; close: () => void }) {
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("blur", onVisibility);
     return () => { disposed = true; current?.abort(); window.clearInterval(timer); document.removeEventListener("visibilitychange", onVisibility); window.removeEventListener("blur", onVisibility); };
-  }, [id]);
+  }, [id, t]);
   const entries = Array.isArray(bundle?.entry) ? bundle.entry : [];
   let attachments: EmbeddedPdf[] = [];
   let attachmentError = false;
   try { attachments = bundle ? embeddedPdfs(bundle) : []; } catch { attachmentError = true; }
   return <section className="surface-card space-y-4 p-5" aria-label="External clinical record">
-    <div className="flex justify-between gap-4"><h2 className="text-xl font-semibold">External clinical record</h2><button type="button" className="underline" onClick={close}>Close record</button></div>
-    <p className="text-sm text-muted-foreground">Read-only record received from another HIP. It has not been imported into this patient’s local chart. Access is rechecked every 15 seconds. Embedded PDFs can be previewed; external links are never opened.</p>
+    <div className="flex justify-between gap-4">
+      <h2 className="text-xl font-semibold">{t("doctor.abdm.externalRecordTitle")}</h2>
+      <button type="button" className="underline" onClick={close}>
+        {t("doctor.abdm.closeRecord")}
+      </button>
+    </div>
+    <p className="text-sm text-muted-foreground">{t("doctor.abdm.externalRecordIntro")}</p>
     {error && <p role="alert" className="text-danger">{error}</p>}
-    {!bundle && !error && <p role="status">Checking consent and loading record…</p>}
-    {attachmentError && <p role="alert">The PDF attachments could not be safely displayed.</p>}
+    {!bundle && !error && <p role="status">{t("doctor.abdm.checkingConsent")}</p>}
+    {attachmentError && <p role="alert">{t("doctor.abdm.errPdfAttachments")}</p>}
     {attachments.map((pdf, index) => <div key={index} className="space-y-3 rounded border p-3">
       <button type="button" className="underline" onClick={() => setSelectedPdf(selectedPdf === index ? null : index)}>{selectedPdf === index ? "Close PDF preview" : `Preview ${pdf.title}`}</button>
       {selectedPdf === index && <EmbeddedPdfPreview key={`${id}:${index}`} data={pdf.data} title={pdf.title} />}

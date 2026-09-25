@@ -13,18 +13,20 @@ import { useCallback, useEffect, useState } from "react";
 import { listDepartments } from "@/features/admin/api/departments";
 import type { Department } from "@/features/admin/api/departments";
 import { ApiError } from "@/lib/api";
+import { useLocale, type MessageKey } from "@/lib/i18n";
 
 import { createMaintenanceLog, listMaintenanceLogs } from "./api";
 import type { MaintenanceLog, MaintenanceType } from "./types";
 
-const TYPES: Array<{ value: MaintenanceType; label: string }> = [
-  { value: "preventive", label: "Preventive" },
-  { value: "breakdown", label: "Breakdown" },
-  { value: "calibration", label: "Calibration" },
-  { value: "qa_check", label: "QA check" },
-];
+const TYPE_KEYS: Record<MaintenanceType, MessageKey> = {
+  preventive: "maintenance.type.preventive",
+  breakdown: "maintenance.type.breakdown",
+  calibration: "maintenance.type.calibration",
+  qa_check: "maintenance.type.qa_check",
+};
 
 export function MaintenanceLogPanel() {
+  const { t, localizeField } = useLocale();
   const [logs, setLogs] = useState<MaintenanceLog[] | null>(null);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -49,9 +51,9 @@ export function MaintenanceLogPanel() {
       setDepartments(deptResult.items);
       setError(null);
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Could not load maintenance logs");
+      setError(reason instanceof ApiError ? reason.message : t("maintenance.loadFailed"));
     }
-  }, [filter]);
+  }, [filter, t]);
 
   useEffect(() => {
     void load();
@@ -80,14 +82,16 @@ export function MaintenanceLogPanel() {
       setNotes("");
       await load();
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Could not record the service");
+      setError(reason instanceof ApiError ? reason.message : t("maintenance.recordFailed"));
     } finally {
       setBusy(false);
     }
   };
 
-  const departmentName = (id: string) =>
-    departments.find((d) => d.id === id)?.name ?? id;
+  const departmentName = (id: string) => {
+    const dept = departments.find((d) => d.id === id);
+    return dept ? localizeField(dept.name, dept.name_hi) : id;
+  };
 
   return (
     <div className="space-y-6">
@@ -98,10 +102,10 @@ export function MaintenanceLogPanel() {
       ) : null}
 
       <div className="rounded border border-border p-4">
-        <h3 className="text-base font-semibold">Record equipment service</h3>
+        <h3 className="text-base font-semibold">{t("maintenance.recordServiceTitle")}</h3>
         <div className="mt-3 grid gap-3 sm:grid-cols-3">
           <label className="text-sm">
-            <span className="block text-muted-foreground">Machine</span>
+            <span className="block text-muted-foreground">{t("maintenance.machine")}</span>
             <input
               className="mt-1 w-full rounded border border-gray-300 p-2"
               placeholder="XR-01"
@@ -110,36 +114,36 @@ export function MaintenanceLogPanel() {
             />
           </label>
           <label className="text-sm">
-            <span className="block text-muted-foreground">Department</span>
+            <span className="block text-muted-foreground">{t("maintenance.department")}</span>
             <select
               className="mt-1 w-full rounded border border-gray-300 p-2"
               value={departmentId}
               onChange={(e) => setDepartmentId(e.target.value)}
             >
-              <option value="">Select…</option>
+              <option value="">{t("common.selectEllipsis")}</option>
               {departments.map((d) => (
                 <option key={d.id} value={d.id}>
-                  {d.name}
+                  {localizeField(d.name, d.name_hi)}
                 </option>
               ))}
             </select>
           </label>
           <label className="text-sm">
-            <span className="block text-muted-foreground">Type</span>
+            <span className="block text-muted-foreground">{t("maintenance.type")}</span>
             <select
               className="mt-1 w-full rounded border border-gray-300 p-2"
               value={type}
               onChange={(e) => setType(e.target.value as MaintenanceType)}
             >
-              {TYPES.map((t) => (
-                <option key={t.value} value={t.value}>
-                  {t.label}
+              {(Object.keys(TYPE_KEYS) as MaintenanceType[]).map((value) => (
+                <option key={value} value={value}>
+                  {t(TYPE_KEYS[value])}
                 </option>
               ))}
             </select>
           </label>
           <label className="text-sm">
-            <span className="block text-muted-foreground">Performed at</span>
+            <span className="block text-muted-foreground">{t("maintenance.performedAt")}</span>
             <input
               type="datetime-local"
               className="mt-1 w-full rounded border border-gray-300 p-2"
@@ -148,7 +152,7 @@ export function MaintenanceLogPanel() {
             />
           </label>
           <label className="text-sm">
-            <span className="block text-muted-foreground">Vendor</span>
+            <span className="block text-muted-foreground">{t("maintenance.vendor")}</span>
             <input
               className="mt-1 w-full rounded border border-gray-300 p-2"
               value={vendor}
@@ -156,19 +160,19 @@ export function MaintenanceLogPanel() {
             />
           </label>
           <label className="text-sm">
-            <span className="block text-muted-foreground">Downtime (minutes)</span>
+            <span className="block text-muted-foreground">{t("maintenance.downtimeMinutes")}</span>
             <input
               type="number"
               min="0"
               className="mt-1 w-full rounded border border-gray-300 p-2"
-              placeholder="leave blank if not recorded"
+              placeholder={t("maintenance.downtimePlaceholder")}
               value={downtime}
               onChange={(e) => setDowntime(e.target.value)}
             />
           </label>
         </div>
         <label className="mt-3 block text-sm">
-          <span className="block text-muted-foreground">Notes</span>
+          <span className="block text-muted-foreground">{t("maintenance.notes")}</span>
           <textarea
             rows={2}
             className="mt-1 w-full rounded border border-gray-300 p-2"
@@ -182,26 +186,26 @@ export function MaintenanceLogPanel() {
           onClick={() => void submit()}
           className="mt-4 rounded bg-blue-700 px-4 py-2 text-sm text-white disabled:bg-gray-300"
         >
-          Record service
+          {t("maintenance.recordService")}
         </button>
       </div>
 
       <div className="space-y-3">
         <div className="flex flex-wrap items-center gap-3">
-          <h3 className="text-base font-semibold">Service history</h3>
+          <h3 className="text-base font-semibold">{t("maintenance.serviceHistory")}</h3>
           <input
             className="rounded border border-gray-300 p-1 text-sm"
-            placeholder="Filter by machine…"
+            placeholder={t("maintenance.filterByMachine")}
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
           />
         </div>
 
         {logs === null ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
+          <p className="text-sm text-muted-foreground">{t("common.loading")}</p>
         ) : logs.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            {filter ? `No service recorded for "${filter}".` : "No service recorded."}
+            {filter ? t("maintenance.noServiceForMachine", { machine: filter }) : t("maintenance.noServiceRecorded")}
           </p>
         ) : (
           <ul className="space-y-2">
@@ -219,12 +223,10 @@ export function MaintenanceLogPanel() {
                   {log.performed_by_vendor ? ` · ${log.performed_by_vendor}` : ""}
                 </p>
                 <p className="mt-1 text-muted-foreground">
-                  Downtime:{" "}
-                  {/* Null is "not recorded". Rendering it as 0 would let a run
-                      of blanks read as a run of flawless uptime. */}
+                  {t("maintenance.downtimeLabel")}{" "}
                   {log.downtime_minutes === null
-                    ? "not recorded"
-                    : `${log.downtime_minutes} min`}
+                    ? t("maintenance.downtimeNotRecorded")
+                    : t("maintenance.downtimeMinutesValue", { minutes: log.downtime_minutes })}
                 </p>
                 {log.notes ? <p className="mt-1">{log.notes}</p> : null}
               </li>

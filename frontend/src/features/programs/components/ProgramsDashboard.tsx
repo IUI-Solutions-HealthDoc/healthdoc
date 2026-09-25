@@ -26,6 +26,7 @@ import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 
 import { toast } from "@/components/ui/toast";
+import { useLocale } from "@/lib/i18n";
 
 import {
   enrolPatient,
@@ -38,6 +39,7 @@ import {
 import type { CareProgram, ProgramEnrolment, ProgramTimeline } from "../types";
 
 export function ProgramsDashboard() {
+  const { t } = useLocale();
   const [programs, setPrograms] = useState<CareProgram[]>([]);
   const [enrolments, setEnrolments] = useState<ProgramEnrolment[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -175,11 +177,11 @@ export function ProgramsDashboard() {
           target_bp: enrolForm.target_bp,
         },
       });
-      toast.success("Patient enrolled into care program successfully");
+      toast.success(t("programs.toast.enrolled"));
       setEnrolModalOpen(false);
       void loadData();
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Failed to enrol patient");
+      toast.error(e instanceof Error ? e.message : t("programs.toast.enrolFailed"));
     }
   };
 
@@ -196,11 +198,11 @@ export function ProgramsDashboard() {
         },
         clinical_summary: visitForm.clinical_summary,
       });
-      toast.success("Follow-up visit and indicators recorded");
+      toast.success(t("programs.toast.visitRecorded"));
       setVisitModalOpen(false);
       void loadData();
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Failed to record visit");
+      toast.error(e instanceof Error ? e.message : t("programs.toast.visitFailed"));
     }
   };
 
@@ -246,11 +248,11 @@ export function ProgramsDashboard() {
         exit_date: new Date().toISOString().slice(0, 10),
         exit_reason: exitReason.trim(),
       });
-      toast.success("Patient discharged from program");
+      toast.success(t("programs.toast.discharged"));
       setExitModalOpen(false);
       void loadData();
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Failed to exit program");
+      toast.error(e instanceof Error ? e.message : t("programs.toast.exitFailed"));
     }
   };
 
@@ -270,19 +272,19 @@ export function ProgramsDashboard() {
         <Box>
           <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
             <MonitorHeartOutlinedIcon color="primary" sx={{ fontSize: 32 }} />
-            <Typography variant="h5" sx={{ fontWeight: 800 }}>
-              Longitudinal Care Programs & Registries
+            <Typography component="h1" variant="h5" sx={{ fontWeight: 800 }}>
+              {t("programs.title")}
             </Typography>
-            <Chip label="CHRONIC CARE & ANC" color="success" size="small" sx={{ fontWeight: 700 }} />
+            <Chip label={t("programs.chip")} color="success" size="small" sx={{ fontWeight: 700 }} />
           </Box>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-            Standardized registries for T2D, Hypertension, Maternal ANC, and CKD with clinical trajectory tracking.
+            {t("programs.subtitle")}
           </Typography>
         </Box>
 
         <Box sx={{ display: "flex", gap: 1.5 }}>
           <Button variant="outlined" startIcon={<RefreshIcon />} onClick={loadData} disabled={loading}>
-            Refresh
+            {t("common.refresh")}
           </Button>
           <Button
             variant="contained"
@@ -290,7 +292,7 @@ export function ProgramsDashboard() {
             onClick={() => setEnrolModalOpen(true)}
             sx={{ fontWeight: 700 }}
           >
-            Enrol Patient
+            {t("programs.enrolPatient")}
           </Button>
         </Box>
       </Box>
@@ -307,7 +309,7 @@ export function ProgramsDashboard() {
         <Card variant="outlined" sx={{ borderRadius: 2 }}>
           <CardContent sx={{ p: 2, "&:last-child": { pb: 2 } }}>
             <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
-              ACTIVE ENROLMENTS
+              {t("programs.metric.active")}
             </Typography>
             <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5, color: "#2e7d32" }}>
               {enrolments.filter((e) => e.status === "active").length}
@@ -318,7 +320,7 @@ export function ProgramsDashboard() {
         <Card variant="outlined" sx={{ borderRadius: 2 }}>
           <CardContent sx={{ p: 2, "&:last-child": { pb: 2 } }}>
             <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
-              DIABETES COHORT
+              {t("programs.metric.diabetes")}
             </Typography>
             <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5, color: "#1565c0" }}>
               {enrolments.filter((e) => e.program_code === "DIABETES_T2").length}
@@ -329,7 +331,7 @@ export function ProgramsDashboard() {
         <Card variant="outlined" sx={{ borderRadius: 2 }}>
           <CardContent sx={{ p: 2, "&:last-child": { pb: 2 } }}>
             <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
-              HYPERTENSION COHORT
+              {t("programs.metric.hypertension")}
             </Typography>
             <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5, color: "#e65100" }}>
               {enrolments.filter((e) => e.program_code === "HYPERTENSION").length}
@@ -340,7 +342,7 @@ export function ProgramsDashboard() {
         <Card variant="outlined" sx={{ borderRadius: 2 }}>
           <CardContent sx={{ p: 2, "&:last-child": { pb: 2 } }}>
             <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
-              MATERNAL ANC COHORT
+              {t("programs.metric.anc")}
             </Typography>
             <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5, color: "#8e24aa" }}>
               {enrolments.filter((e) => e.program_code === "ANC_MATERNAL").length}
@@ -354,12 +356,12 @@ export function ProgramsDashboard() {
         <Table>
           <TableHead sx={{ bgcolor: "action.hover" }}>
             <TableRow>
-              <TableCell sx={{ fontWeight: 700 }}>Patient</TableCell>
-              <TableCell sx={{ fontWeight: 700 }}>Program Registry</TableCell>
-              <TableCell sx={{ fontWeight: 700 }}>Enrolment Date</TableCell>
-              <TableCell sx={{ fontWeight: 700 }}>Target Indicators</TableCell>
-              <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
-              <TableCell align="right" sx={{ fontWeight: 700 }}>Actions</TableCell>
+              <TableCell sx={{ fontWeight: 700 }}>{t("programs.col.patient")}</TableCell>
+              <TableCell sx={{ fontWeight: 700 }}>{t("programs.col.programRegistry")}</TableCell>
+              <TableCell sx={{ fontWeight: 700 }}>{t("programs.col.enrolmentDate")}</TableCell>
+              <TableCell sx={{ fontWeight: 700 }}>{t("programs.col.targetIndicators")}</TableCell>
+              <TableCell sx={{ fontWeight: 700 }}>{t("programs.col.status")}</TableCell>
+              <TableCell align="right" sx={{ fontWeight: 700 }}>{t("programs.col.actions")}</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -393,13 +395,13 @@ export function ProgramsDashboard() {
                       ))}
                     </Box>
                   ) : (
-                    <Typography variant="caption" color="text.secondary">Standard Protocol</Typography>
+                    <Typography variant="caption" color="text.secondary">{t("programs.standardProtocol")}</Typography>
                   )}
                 </TableCell>
 
                 <TableCell>
                   {enr.status === "active" ? (
-                    <Chip label="ACTIVE" color="success" size="small" sx={{ fontWeight: 700 }} />
+                    <Chip label={t("programs.status.activeChip")} color="success" size="small" sx={{ fontWeight: 700 }} />
                   ) : (
                     <Chip label={enr.status.toUpperCase()} size="small" />
                   )}
@@ -417,7 +419,7 @@ export function ProgramsDashboard() {
                           setVisitModalOpen(true);
                         }}
                       >
-                        Record Visit
+                        {t("programs.action.recordVisit")}
                       </Button>
                     )}
 
@@ -427,7 +429,7 @@ export function ProgramsDashboard() {
                       startIcon={<HistoryIcon />}
                       onClick={() => handleOpenTimeline(enr)}
                     >
-                      Trajectory
+                      {t("programs.action.trajectory")}
                     </Button>
 
                     {enr.status === "active" && (
@@ -439,7 +441,7 @@ export function ProgramsDashboard() {
                           setExitModalOpen(true);
                         }}
                       >
-                        Exit
+                        {t("programs.action.exit")}
                       </Button>
                     )}
                   </Box>
@@ -483,7 +485,7 @@ export function ProgramsDashboard() {
           />
         </DialogContent>
         <DialogActions sx={{ p: 2 }}>
-          <Button onClick={() => setEnrolModalOpen(false)}>Cancel</Button>
+          <Button onClick={() => setEnrolModalOpen(false)}>{t("common.cancel")}</Button>
           <Button variant="contained" onClick={handleEnrol} sx={{ fontWeight: 700 }}>
             Confirm Enrolment
           </Button>
@@ -544,7 +546,7 @@ export function ProgramsDashboard() {
           />
         </DialogContent>
         <DialogActions sx={{ p: 2 }}>
-          <Button onClick={() => setVisitModalOpen(false)}>Cancel</Button>
+          <Button onClick={() => setVisitModalOpen(false)}>{t("common.cancel")}</Button>
           <Button variant="contained" color="success" onClick={handleRecordVisit} sx={{ fontWeight: 700 }}>
             Commit Visit Metrics
           </Button>
@@ -586,7 +588,7 @@ export function ProgramsDashboard() {
                 )}
 
                 <Typography variant="body2" color="text.primary">
-                  {v.clinical_summary || "No clinical narrative recorded."}
+                  {v.clinical_summary || t("programs.noClinicalNarrative")}
                 </Typography>
               </Card>
             ))}
@@ -613,7 +615,7 @@ export function ProgramsDashboard() {
           />
         </DialogContent>
         <DialogActions sx={{ p: 2 }}>
-          <Button onClick={() => setExitModalOpen(false)}>Cancel</Button>
+          <Button onClick={() => setExitModalOpen(false)}>{t("common.cancel")}</Button>
           <Button variant="contained" color="error" onClick={handleExit} sx={{ fontWeight: 700 }}>
             Confirm Exit
           </Button>

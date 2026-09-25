@@ -11,6 +11,7 @@ test("rendered auth banner does not imply certification or configured optional s
     new URL("../src/app/(auth)/layout.tsx", import.meta.url),
     {
       ...runtime,
+      "@/components/common/AuthBrandHeader": { AuthBrandHeader: "brand" },
       "lucide-react": { ShieldCheck: "icon", Activity: "icon", Award: "icon", Lock: "icon" },
       "@/components/common/HealthDocBrand": { HealthDocBrand: "brand" },
     },

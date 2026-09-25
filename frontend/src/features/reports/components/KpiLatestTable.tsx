@@ -8,6 +8,7 @@ import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import Typography from "@mui/material/Typography";
 
+import { useLocale, type MessageKey } from "@/lib/i18n";
 import { meridian } from "@/styles/theme";
 import { kpiLabel, kpiUnit } from "@/lib/kpi";
 import type { KpiSnapshot } from "@/types/kpi";
@@ -21,7 +22,16 @@ type Props = {
   loading: boolean;
 };
 
+const COLUMN_KEYS: MessageKey[] = [
+  "reports.kpi.col.kpi",
+  "reports.kpi.col.period",
+  "reports.kpi.col.value",
+  "reports.kpi.col.numerator",
+  "reports.kpi.col.denominator",
+];
+
 export function KpiLatestTable({ latest, loading }: Props) {
+  const { t } = useLocale();
   return (
     <Box
       sx={{
@@ -43,19 +53,19 @@ export function KpiLatestTable({ latest, loading }: Props) {
             color: meridian.textPrimary,
           }}
         >
-          Latest snapshots
+          {t("reports.kpi.table.title")}
         </Typography>
         <Typography sx={{ m: 0, mt: 0.5, fontSize: "0.8125rem", color: meridian.textSecondary }}>
-          Current window · kpi_code, period, value, numerator / denominator
+          {t("reports.kpi.table.subtitle")}
         </Typography>
       </Box>
 
       <Table size="small" sx={{ "& th, & td": { borderColor: "rgb(0 31 84 / 0.08)" } }}>
         <TableHead>
           <TableRow sx={{ bgcolor: meridian.muted }}>
-            {["KPI", "Period", "Value", "Numerator", "Denominator"].map((h) => (
+            {COLUMN_KEYS.map((key) => (
               <TableCell
-                key={h}
+                key={key}
                 sx={{
                   fontWeight: 700,
                   fontSize: "0.6875rem",
@@ -65,7 +75,7 @@ export function KpiLatestTable({ latest, loading }: Props) {
                   py: 1.25,
                 }}
               >
-                {h}
+                {t(key)}
               </TableCell>
             ))}
           </TableRow>

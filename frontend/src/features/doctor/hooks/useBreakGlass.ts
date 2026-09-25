@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { toast } from "@/components/ui/toast";
 import { ApiError } from "@/lib/api";
+import { useLocale } from "@/lib/i18n";
 import { hasKeycloakMfaSession, stepUpWithKeycloak } from "@/lib/auth/keycloak";
 import {
   checkRecordAccess,
@@ -14,6 +15,7 @@ import type { RecordAccess } from "../types";
 
 /** Owns the server's consent-or-emergency-access decision for one patient. */
 export function useBreakGlass(patientId: string | null) {
+  const { t } = useLocale();
   const [access, setAccess] = useState<RecordAccess | null>(null);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -32,12 +34,12 @@ export function useBreakGlass(patientId: string | null) {
     try {
       setAccess(await checkRecordAccess(patientId));
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to check record access");
+      toast.error(error instanceof Error ? error.message : t("doctor.toast.checkRecordAccessFailed"));
       setAccess(null);
     } finally {
       setLoading(false);
     }
-  }, [patientId]);
+  }, [patientId, t]);
 
   useEffect(() => {
     setMfaVerified(hasKeycloakMfaSession());
@@ -60,7 +62,7 @@ export function useBreakGlass(patientId: string | null) {
       if (cancelled) return;
       setMsRemaining(Math.max(0, left));
       if (left <= 0) {
-        toast.error("Emergency access expired.");
+        toast.error(t("doctor.toast.emergencyAccessExpired"));
         void load();
       }
     };
@@ -71,7 +73,7 @@ export function useBreakGlass(patientId: string | null) {
       cancelled = true;
       clearInterval(id);
     };
-  }, [grant, load]);
+  }, [grant, load, t]);
 
   const beginStepUp = useCallback(async (): Promise<void> => {
     setStepUpError(null);
@@ -79,16 +81,16 @@ export function useBreakGlass(patientId: string | null) {
     try {
       await stepUpWithKeycloak(window.location.href);
     } catch (error) {
-      setStepUpError(error instanceof Error ? error.message : "Keycloak verification failed.");
+      setStepUpError(error instanceof Error ? error.message : t("doctor.toast.keycloakVerificationFailed"));
     } finally {
       setSubmitting(false);
     }
-  }, []);
+  }, [t]);
 
   const requestAccess = useCallback(
     async (justification: string): Promise<string | null> => {
-      if (!patientId) return "No patient selected.";
-      if (!mfaVerified) return "Verify your identity with Keycloak first.";
+      if (!patientId) return t("doctor.toast.noPatientSelected");
+      if (!mfaVerified) return t("doctor.toast.verifyKeycloakFirst");
       setSubmitting(true);
       try {
         const created = await requestBreakGlassGrant({
@@ -96,7 +98,7 @@ export function useBreakGlass(patientId: string | null) {
           justification,
         });
         setAccess({ patient_id: patientId, allowed: true, grant: created });
-        toast.success("Emergency access granted — this session is being recorded.");
+        toast.success(t("doctor.toast.emergencyAccessGranted"));
         return null;
       } catch (error) {
         if (
@@ -105,14 +107,14 @@ export function useBreakGlass(patientId: string | null) {
           (error.payload as { code?: string } | undefined)?.code === "mfa_required"
         ) {
           setMfaVerified(false);
-          return "Keycloak did not return OTP/MFA proof. Verify again or ask an administrator to enroll your authenticator.";
+          return t("doctor.toast.mfaProofMissing");
         }
-        return error instanceof Error ? error.message : "Could not open emergency access.";
+        return error instanceof Error ? error.message : t("doctor.toast.openEmergencyAccessFailed");
       } finally {
         setSubmitting(false);
       }
     },
-    [mfaVerified, patientId],
+    [mfaVerified, patientId, t],
   );
 
   const revoke = useCallback(async () => {
@@ -120,14 +122,14 @@ export function useBreakGlass(patientId: string | null) {
     setSubmitting(true);
     try {
       await revokeBreakGlassGrant(grant.id);
-      toast.success("Emergency access ended.");
+      toast.success(t("doctor.toast.emergencyAccessEnded"));
       await load();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to end emergency access");
+      toast.error(error instanceof Error ? error.message : t("doctor.toast.endEmergencyAccessFailed"));
     } finally {
       setSubmitting(false);
     }
-  }, [grant, load]);
+  }, [grant, load, t]);
 
   return {
     loading,
