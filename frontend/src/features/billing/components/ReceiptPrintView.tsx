@@ -7,7 +7,8 @@ import Typography from "@mui/material/Typography";
 
 import { Modal } from "@/components/ui/Modal";
 import { useCurrentUser } from "@/features/session/useCurrentUser";
-import { PAYMENT_MODE_LABELS } from "../constants";
+import { useLocale } from "@/lib/i18n";
+import { paymentModeLabel } from "../lib/labels";
 import { formatINR } from "../lib/formatters";
 import type { InvoiceWithItems, PaymentWithRefunds } from "../types";
 import { ImmutableReceipt } from "./ImmutableReceipt";
@@ -27,6 +28,7 @@ export function ReceiptPrintView({ open, payment, invoice, onClose, onPrint }: P
   // missing one, so it renders nothing rather than a placeholder while the
   // session loads.
   const { user: currentUser } = useCurrentUser();
+  const { localizeField, t } = useLocale();
 
   if (!payment || !invoice) return null;
 
@@ -55,11 +57,11 @@ export function ReceiptPrintView({ open, payment, invoice, onClose, onPrint }: P
       <Box id="receipt-print-root" className="receipt-print-root">
         <Stack spacing={0.5} sx={{ mb: 2, textAlign: "center" }}>
           <Typography sx={{ fontWeight: 700, fontSize: "1.125rem" }}>
-            {currentUser?.facility.name ?? ""}
+            {localizeField(currentUser?.facility.name ?? "", currentUser?.facility.name_hi)}
           </Typography>
           <Typography sx={{ fontSize: "0.875rem" }}>Payment receipt</Typography>
           <Typography sx={{ fontSize: "0.75rem" }}>
-            {PAYMENT_MODE_LABELS[payment.mode]} · {formatINR(payment.amount)}
+            {paymentModeLabel(t, payment.mode)} · {formatINR(payment.amount)}
           </Typography>
         </Stack>
         <ImmutableReceipt payment={payment} invoice={invoice} />

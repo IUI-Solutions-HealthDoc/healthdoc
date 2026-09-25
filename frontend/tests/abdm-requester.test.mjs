@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { compile, componentHarness, nodes, content, flush } from "./helpers/component-harness.mjs";
 import { userFacingApiError } from "../src/lib/api-error-policy.mjs";
+import { translate } from "./helpers/i18n-stub.mjs";
 
 const { validateUserProfile } = compile(new URL("../src/features/admin/validation.ts", import.meta.url), {});
 const staff = { full_name: "Synthetic Test Clinician", registration_number: "TEST-ONLY", registration_identifier_type: "REGNO1", registration_identifier_system: "https://registry.test" };
@@ -33,6 +34,7 @@ for (const ready of [false, undefined, true]) {
     const workspace = { patient_name: "Synthetic Patient", identity_verified: true, abha_address: "synthetic@sbx", requester_ready: ready, requests: [], next_offset: null };
     const ui = componentHarness((runtime) => compile(new URL("../src/features/doctor/abdm/AbdmWorkspace.tsx", import.meta.url), {
       ...runtime,
+      "@/components/common/PageHeading": { PageHeading: ({ titleKey }) => ({ type: "h1", props: { children: translate(titleKey) } }) },
       "@/features/receptionist/api": { searchPatients: async () => ({ items: [{ id: "synthetic-patient", full_name: "Synthetic Patient", uhid: "TEST-ONLY" }] }) },
       "@/lib/api": { getUserFacingError: (_, fallback) => fallback, newIdempotencyKey: () => "test-key" },
       "./api": { HI_TYPES: ["WellnessRecord"], loadWorkspace: async () => workspace, askConsent: async (...args) => { calls.push(args); }, askRecords: async () => assert.fail("Unexpected records request") },

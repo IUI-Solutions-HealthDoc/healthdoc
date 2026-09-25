@@ -176,8 +176,17 @@ async def main() -> int:
             select(Ward).where(Ward.facility_id == facility.id))).scalars().first()
         if ward is None:
             ward = Ward(id=uuid.uuid4(), facility_id=facility.id,
-                        department_id=None, name="Demo Ward")
+                        department_id=None, name="Demo Ward",
+                        name_hi="डेमो वार्ड")
             db.add(ward)
+            await db.flush()
+        elif not (ward.name_hi or "").strip():
+            # Older demo / seed rows predate name_hi; HI locale would otherwise
+            # keep showing the English catalogue label forever.
+            if ward.name == "Demo Ward":
+                ward.name_hi = "डेमो वार्ड"
+            elif ward.name == "General Ward A":
+                ward.name_hi = "जनरल वार्ड ए"
             await db.flush()
 
         beds = list((await db.execute(

@@ -5,9 +5,11 @@ import Chip from "@mui/material/Chip";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 
+import { useLocale } from "@/lib/i18n";
 import { meridian } from "@/styles/theme";
 
 import { PERIOD_OPTIONS } from "../constants";
+import { KPI_PERIOD_MESSAGE_KEYS } from "../lib/periodLabels";
 import type { CoreKpiCode, KpiPeriod } from "../types";
 import { kpiLabel } from "@/lib/kpi";
 
@@ -28,17 +30,14 @@ export function KpiSummaryBar({
   focusCode,
   onClearFocus,
 }: Props) {
-  const periodLabel =
-    PERIOD_OPTIONS.find((o) => o.value === period)?.label ?? period;
+  const { t } = useLocale();
+  const periodLabel = t(KPI_PERIOD_MESSAGE_KEYS[period]);
 
   const pills = [
     { key: "period", label: periodLabel },
     windowLabel ? { key: "window", label: windowLabel } : null,
-    { key: "days", label: `${dayCount} day${dayCount === 1 ? "" : "s"}` },
-    {
-      key: "rows",
-      label: `${snapshotCount} snapshot${snapshotCount === 1 ? "" : "s"}`,
-    },
+    { key: "days", label: t("reports.kpi.days", { count: dayCount }) },
+    { key: "rows", label: t("reports.kpi.snapshots", { count: snapshotCount }) },
   ].filter(Boolean) as { key: string; label: string }[];
 
   return (
@@ -68,7 +67,7 @@ export function KpiSummaryBar({
             color: meridian.textSecondary,
           }}
         >
-          Window
+          {t("reports.kpi.window")}
         </Typography>
         {pills.map((p) => (
           <Chip
@@ -92,13 +91,13 @@ export function KpiSummaryBar({
           size="small"
           color="primary"
           variant="outlined"
-          label={`Focus: ${kpiLabel(focusCode)}`}
+          label={t("reports.kpi.focus", { label: kpiLabel(focusCode) })}
           onDelete={onClearFocus}
           sx={{ fontWeight: 600 }}
         />
       ) : (
         <Typography sx={{ m: 0, fontSize: "0.75rem", color: meridian.textSecondary }}>
-          Showing both schema example KPIs
+          {t("reports.kpi.showingBoth")}
         </Typography>
       )}
     </Box>

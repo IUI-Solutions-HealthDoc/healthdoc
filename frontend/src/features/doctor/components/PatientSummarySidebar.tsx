@@ -14,6 +14,7 @@ import { getPatient, getPatientHistory, listAllergies } from "../api";
 import { formatAgeSex } from "../lib/formatters";
 import { doctorPanelSx } from "../panelSx";
 import type { Allergy, Patient, PatientHistoryEntry, QueueToken, QueueTokenStatus } from "../types";
+import { useLocale } from "@/lib/i18n";
 
 const CONSULTABLE: QueueTokenStatus[] = ["waiting", "called", "in_service", "recalled"];
 
@@ -36,6 +37,7 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
 
 /** Anaphylaxis reads differently from every other allergy, because it is. */
 function AllergyRow({ allergy }: { allergy: Allergy }) {
+  const { t } = useLocale();
   const absolute = allergy.severity === "anaphylaxis";
   return (
     <Box
@@ -59,7 +61,7 @@ function AllergyRow({ allergy }: { allergy: Allergy }) {
       >
         {allergy.severity}
         {allergy.reaction ? ` · ${allergy.reaction}` : ""}
-        {allergy.ingredient_code ? "" : " · not coded, cannot be auto-checked"}
+        {allergy.ingredient_code ? "" : t("doctor.allergyNotCoded")}
       </Typography>
     </Box>
   );
@@ -74,13 +76,14 @@ export interface PatientSummarySidebarProps {
  * three separate reads — a token carries token columns, not clinical facts.
  */
 export function PatientSummarySidebar({ token }: PatientSummarySidebarProps) {
+  const { t } = useLocale();
   if (!token) {
     return (
       <Box sx={doctorPanelSx}>
         <Typography
           sx={{ color: meridian.textSecondary, fontSize: "0.875rem", textAlign: "center", py: 2 }}
         >
-          Select a patient from the queue to see their summary.
+          {t("doctor.summarySelectPatient")}
         </Typography>
       </Box>
     );
@@ -94,6 +97,7 @@ export function PatientSummarySidebar({ token }: PatientSummarySidebarProps) {
 type ReadState<T> = { status: "loading" | "error" } | { status: "ready"; data: T };
 
 function PatientSummary({ token }: { token: QueueToken }) {
+  const { t } = useLocale();
   const [patientRead, setPatientRead] = React.useState<ReadState<Patient>>({ status: "loading" });
   const [historyRead, setHistoryRead] = React.useState<ReadState<PatientHistoryEntry[]>>({ status: "loading" });
   const [allergiesRead, setAllergiesRead] = React.useState<ReadState<Allergy[]>>({ status: "loading" });
@@ -150,29 +154,40 @@ function PatientSummary({ token }: { token: QueueToken }) {
       <Stack spacing={1.5}>
         {patientRead.status !== "ready" ? (
           <Typography role={patientRead.status === "error" ? "alert" : "status"} sx={{ fontSize: "0.8125rem", color: meridian.textSecondary }}>
-            {patientRead.status === "error" ? "Patient details unavailable. Showing queue details only." : "Loading patient details…"}
+            {patientRead.status === "error" ? t("doctor.summaryPatientUnavailable") : t("doctor.summaryLoadingPatient")}
           </Typography>
         ) : null}
-        <Field label="Token" value={token.token_display} />
+        <Field label={t("doctor.summaryToken")} value={token.token_display} />
         {/* A THID-only patient has no UHID yet — name the identifier being shown. */}
         <Field
-          label={patient?.uhid ? "UHID" : "THID"}
+          label={patient?.uhid ? t("field.uhid") : "THID"}
           value={patient?.uhid ?? patient?.thid ?? token.uhid}
         />
         <Field
-          label="Age / Sex"
+          label={t("doctor.summaryAgeSex")}
           value={formatAgeSex(patient?.age_years ?? token.age_years, patient?.sex ?? token.sex)}
         />
-        <Field label="Last Visit" value={historyRead.status === "loading" ? "Loading…" : historyRead.status === "error" ? "Unavailable" : lastVisit ? lastVisit.visit_date : "First visit"} />
+        <Field
+          label={t("doctor.summaryLastVisit")}
+          value={
+            historyRead.status === "loading"
+              ? t("common.loading")
+              : historyRead.status === "error"
+                ? t("doctor.summaryUnavailable")
+                : lastVisit
+                  ? lastVisit.visit_date
+                  : t("doctor.summaryFirstVisit")
+          }
+        />
       </Stack>
 
       <Divider />
 
       <Box>
-        <Typography sx={{ ...labelSx, mb: 1 }}>Known Allergies</Typography>
+        <Typography sx={{ ...labelSx, mb: 1 }}>{t("doctor.summaryKnownAllergies")}</Typography>
         {allergiesRead.status !== "ready" ? (
           <Typography role={allergiesRead.status === "error" ? "alert" : "status"} sx={{ fontSize: "0.8125rem", color: meridian.textSecondary }}>
-            {allergiesRead.status === "error" ? "Allergy status unavailable. Retry before relying on this summary." : "Loading allergies…"}
+            {allergiesRead.status === "error" ? t("doctor.summaryAllergiesUnavailable") : t("doctor.summaryLoadingAllergies")}
           </Typography>
         ) : allergies.length > 0 ? (
           <Stack spacing={0.75}>
@@ -182,16 +197,16 @@ function PatientSummary({ token }: { token: QueueToken }) {
           </Stack>
         ) : (
           <Typography sx={{ fontSize: "0.8125rem", color: meridian.textSecondary }}>
-            None recorded.
+            {t("doctor.summaryNoneRecorded")}
           </Typography>
         )}
       </Box>
 
       <Box>
-        <Typography sx={{ ...labelSx, mb: 1 }}>Previous Diagnoses</Typography>
+        <Typography sx={{ ...labelSx, mb: 1 }}>{t("doctor.summaryPreviousDiagnoses")}</Typography>
         {historyRead.status !== "ready" ? (
           <Typography role={historyRead.status === "error" ? "alert" : "status"} sx={{ fontSize: "0.8125rem", color: meridian.textSecondary }}>
-            {historyRead.status === "error" ? "Clinical history unavailable." : "Loading clinical history…"}
+            {historyRead.status === "error" ? t("doctor.summaryHistoryUnavailable") : t("doctor.summaryLoadingHistory")}
           </Typography>
         ) : history.some((visit) => visit.diagnoses.length > 0) ? (
           <Stack spacing={0.5}>
@@ -208,13 +223,13 @@ function PatientSummary({ token }: { token: QueueToken }) {
           </Stack>
         ) : (
           <Typography sx={{ fontSize: "0.8125rem", color: meridian.textSecondary }}>
-            None recorded.
+            {t("doctor.summaryNoneRecorded")}
           </Typography>
         )}
       </Box>
 
       {failed ? (
-        <Button onClick={retry} variant="outlined">Retry patient summary</Button>
+        <Button onClick={retry} variant="outlined">{t("doctor.summaryRetry")}</Button>
       ) : null}
 
       {canConsult ? (
@@ -227,7 +242,7 @@ function PatientSummary({ token }: { token: QueueToken }) {
             fullWidth
             sx={{ textTransform: "none", fontWeight: 600, borderRadius: "10px", py: 1.1 }}
           >
-            Start consultation
+            {t("doctor.startConsultation")}
           </Button>
         </>
       ) : null}

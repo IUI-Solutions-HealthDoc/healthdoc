@@ -14,6 +14,7 @@ import {
   addPatientMovementSchema,
   AddPatientMovementSchema,
 } from "./validation";
+import { useLocale } from "@/lib/i18n";
 
 export default function AddPatientMovementForm({
   admissionId,
@@ -22,6 +23,7 @@ export default function AddPatientMovementForm({
   isSubmitting = false,
   onSubmit,
 }: AddPatientMovementFormProps) {
+  const { localizeField } = useLocale();
   const {
     register,
     handleSubmit,
@@ -70,7 +72,7 @@ export default function AddPatientMovementForm({
           <SelectField
             label="Destination Ward"
             options={wards.map((ward) => ({
-              label: ward.name,
+              label: localizeField(ward.name, ward.name_hi),
               value: ward.id,
             }))}
             registration={register("to_ward_id", {

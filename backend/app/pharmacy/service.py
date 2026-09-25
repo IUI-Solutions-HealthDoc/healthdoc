@@ -2291,6 +2291,7 @@ async def list_indents(
         await db.execute(
             text("""
                 SELECT i.id, i.department_id, d.name AS department_name,
+                       d.name_hi AS department_name_hi,
                        i.status, i.approved_by, u.full_name AS approved_by_name,
                        COUNT(ii.id) AS line_count, i.created_at
                 FROM indents i
@@ -2299,7 +2300,7 @@ async def list_indents(
                 LEFT JOIN indent_items ii ON ii.indent_id = i.id
                 WHERE i.facility_id = :facility_id
                   AND (CAST(:status AS text) IS NULL OR i.status = CAST(:status AS text))
-                GROUP BY i.id, d.name, u.full_name
+                GROUP BY i.id, d.name, d.name_hi, u.full_name
                 ORDER BY i.created_at DESC
                 LIMIT 200
             """),

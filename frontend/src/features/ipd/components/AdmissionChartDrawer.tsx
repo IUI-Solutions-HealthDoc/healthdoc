@@ -16,6 +16,7 @@ import {
   type AdmissionChart,
 } from "@/features/ipd/api/ipd";
 import { AdmissionChecklistPanel } from "./AdmissionChecklistPanel";
+import { useLocale } from "@/lib/i18n";
 
 export interface AdmissionChartDrawerProps {
   admissionId: string | null;
@@ -28,6 +29,7 @@ export function AdmissionChartDrawer({
   open,
   onClose,
 }: AdmissionChartDrawerProps) {
+  const { t, localizeField } = useLocale();
   const [chart, setChart] = React.useState<AdmissionChart | null>(null);
   const [loading, setLoading] = React.useState<boolean>(false);
   const [tabIndex, setTabIndex] = React.useState<number>(0);
@@ -84,7 +86,7 @@ export function AdmissionChartDrawer({
           <Box>
             <Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
               <Typography sx={{ fontSize: "1.25rem", fontWeight: 700, color: "#ffffff" }}>
-                {chart?.patient.full_name || "Patient Chart"}
+                {chart?.patient.full_name || t("ipd.chartPatientChart")}
               </Typography>
               <Chip
                 size="small"
@@ -111,13 +113,13 @@ export function AdmissionChartDrawer({
 
         <Stack direction="row" spacing={3} sx={{ pt: 1, borderTop: "1px solid rgba(255,255,255,0.15)", fontSize: "0.8125rem" }}>
           <Box>
-            <Typography sx={{ fontSize: "0.6875rem", color: "#93c5fd" }}>WARD / BED</Typography>
+            <Typography sx={{ fontSize: "0.6875rem", color: "#93c5fd" }}>{t("ipd.chartWardBed")}</Typography>
             <Typography sx={{ fontWeight: 600 }}>
-              {chart?.admission.ward_name || "--"} / {chart?.admission.bed_number || "--"}
+              {localizeField(chart?.admission.ward_name || "--", chart?.admission.ward_name_hi)} / {chart?.admission.bed_number || "--"}
             </Typography>
           </Box>
           <Box>
-            <Typography sx={{ fontSize: "0.6875rem", color: "#93c5fd" }}>ADMISSION TIME</Typography>
+            <Typography sx={{ fontSize: "0.6875rem", color: "#93c5fd" }}>{t("ipd.chartAdmissionTime")}</Typography>
             <Typography sx={{ fontWeight: 600 }}>
               {chart?.admission.admitted_at
                 ? new Date(chart.admission.admitted_at).toLocaleString([], {
@@ -128,7 +130,7 @@ export function AdmissionChartDrawer({
             </Typography>
           </Box>
           <Box>
-            <Typography sx={{ fontSize: "0.6875rem", color: "#93c5fd" }}>CHECKLIST RECONCILED</Typography>
+            <Typography sx={{ fontSize: "0.6875rem", color: "#93c5fd" }}>{t("ipd.chartChecklistReconciled")}</Typography>
             <Typography sx={{ fontWeight: 600, color: "#4ade80" }}>
               {chart?.checklist_summary?.percent_complete ?? 0}%
             </Typography>
@@ -139,12 +141,12 @@ export function AdmissionChartDrawer({
       {/* Navigation Tabs */}
       <Box sx={{ borderBottom: 1, borderColor: "divider", backgroundColor: "#ffffff", px: 3 }}>
         <Tabs value={tabIndex} onChange={(_, val) => setTabIndex(val)}>
-          <Tab label="Overview" />
-          <Tab label="Checklist (HD-16)" />
-          <Tab label={`Vitals (${chart?.vitals.length || 0})`} />
-          <Tab label={`Allergies (${chart?.allergies.length || 0})`} />
-          <Tab label={`Diagnoses (${chart?.diagnoses.length || 0})`} />
-          <Tab label="Orders & Meds" />
+          <Tab label={t("ipd.chartTabOverview")} />
+          <Tab label={t("ipd.chartTabChecklist")} />
+          <Tab label={t("ipd.chartTabVitals", { count: chart?.vitals.length || 0 })} />
+          <Tab label={t("ipd.chartTabAllergies", { count: chart?.allergies.length || 0 })} />
+          <Tab label={t("ipd.chartTabDiagnoses", { count: chart?.diagnoses.length || 0 })} />
+          <Tab label={t("ipd.chartTabOrdersMeds")} />
         </Tabs>
       </Box>
 

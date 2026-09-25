@@ -7,6 +7,7 @@ import {
 } from "recharts";
 
 import { ChartWrapper } from "@/components/ui/ChartWrapper";
+import { useLocale } from "@/lib/i18n";
 import { kpiLabel, kpiUnit } from "@/lib/kpi";
 
 import { KPI_SERIES_COLORS } from "../constants";
@@ -20,6 +21,7 @@ type Props = {
 };
 
 export function KpiSparklineCard({ code, data, loading }: Props) {
+  const { t } = useLocale();
   const color = KPI_SERIES_COLORS[code];
   const last = data.length ? data[data.length - 1]?.[code] : undefined;
   const unit = kpiUnit(code);
@@ -30,14 +32,14 @@ export function KpiSparklineCard({ code, data, loading }: Props) {
       title={kpiLabel(code)}
       description={
         last != null
-          ? `Latest ${last}${unit ? ` ${unit}` : ""}`
-          : "No points in window"
+          ? t("reports.kpi.spark.latest", { value: String(last), unit: unit ? ` ${unit}` : "" })
+          : t("reports.kpi.spark.noPoints")
       }
       height={112}
       loading={loading}
       empty={
         !loading && data.length === 0
-          ? { title: "No data", description: "Empty window for this KPI." }
+          ? { title: t("reports.kpi.spark.noDataTitle"), description: t("reports.kpi.spark.noDataDesc") }
           : false
       }
       actions={

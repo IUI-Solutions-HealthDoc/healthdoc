@@ -4,6 +4,7 @@ import Box from "@mui/material/Box";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 
+import { useLocale } from "@/lib/i18n";
 import { meridian } from "@/styles/theme";
 import { doctorPanelSx } from "../panelSx";
 
@@ -13,18 +14,19 @@ export interface ChiefComplaintPanelProps {
 }
 
 export function ChiefComplaintPanel({ value, onChange }: ChiefComplaintPanelProps) {
+  const { t } = useLocale();
   return (
     <Box sx={{ ...doctorPanelSx, display: "flex", flexDirection: "column", gap: 1.5 }}>
       <Box>
-        <Typography sx={{ fontSize: "1.0625rem", fontWeight: 700 }}>Chief complaint</Typography>
+        <Typography sx={{ fontSize: "1.0625rem", fontWeight: 700 }}>{t("doctor.chiefComplaintTitle")}</Typography>
         <Typography sx={{ fontSize: "0.8125rem", color: meridian.textSecondary, mt: 0.25 }}>
-          Reason for today&apos;s visit, in the patient&apos;s words
+          {t("doctor.chiefComplaintSubtitle")}
         </Typography>
       </Box>
       <TextField
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder="e.g. Fever and sore throat for 3 days"
+        placeholder={t("doctor.chiefComplaintPlaceholder")}
         multiline
         minRows={2}
         fullWidth

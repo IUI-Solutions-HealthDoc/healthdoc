@@ -7,6 +7,8 @@ import type { MedicationRecord } from "@/components/tables/EMARTable";
 import MedicationAdministrationModal, {
   PrescriptionOption,
 } from "@/features/nurse/components/MedicationAdministrationModal";
+import { PageHeading } from "@/components/common/PageHeading";
+import { useLocale } from "@/lib/i18n";
 
 interface Admission {
   id: string;
@@ -32,6 +34,7 @@ interface AdmissionInfo {
   id: string;
   admitted_at: string | null;
   ward_name: string;
+  ward_name_hi?: string | null;
   bed_number: string;
   reason: string | null;
 }
@@ -43,6 +46,7 @@ interface AdmissionChart {
 }
 
 export default function Page() {
+  const { t, localizeField } = useLocale();
   const [admissions, setAdmissions] = useState<Admission[] | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [chart, setChart] = useState<AdmissionChart | null>(null);
@@ -64,13 +68,13 @@ export default function Page() {
       })
       .catch((reason: unknown) => {
         if (!cancelled) {
-          setError(reason instanceof ApiError ? reason.message : "Could not load admissions");
+          setError(reason instanceof ApiError ? reason.message : t("nurse.emar.errLoadAdmissions"));
         }
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [t]);
 
   const loadChartAndRecords = useCallback(async (admissionId: string) => {
     setError(null);
@@ -82,9 +86,9 @@ export default function Page() {
       setChart(chartRes);
       setRecords(emarRes);
     } catch (reason: unknown) {
-      setError(reason instanceof ApiError ? reason.message : "Could not load admission chart and eMAR");
+      setError(reason instanceof ApiError ? reason.message : t("nurse.emar.errLoadChart"));
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (!selected) return;
@@ -110,7 +114,7 @@ export default function Page() {
       });
       void loadChartAndRecords(selected);
     } catch (reason: unknown) {
-      setError(reason instanceof ApiError ? reason.message : "Failed to acknowledge administration");
+      setError(reason instanceof ApiError ? reason.message : t("nurse.emar.errAcknowledge"));
     }
   }
 
@@ -119,12 +123,7 @@ export default function Page() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold">eMAR</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Every dose given, held or refused for one admission, with dose identity safeguards and audit trail.
-          </p>
-        </div>
+        <PageHeading titleKey="nurse.emarTitle" />
 
         {selected && selectedAdmission && (
           <button
@@ -132,7 +131,7 @@ export default function Page() {
             onClick={handleOpenNewRecord}
             className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary/90 shadow-sm"
           >
-            + Record Dose
+            {t("nurse.emarRecordDose")}
           </button>
         )}
       </div>
@@ -145,13 +144,13 @@ export default function Page() {
 
       {admissions !== null && admissions.length === 0 && (
         <div className="surface-card p-6">
-          <p className="text-sm text-muted-foreground">No active admissions.</p>
+          <p className="text-sm text-muted-foreground">{t("nurse.emarNoAdmissions")}</p>
         </div>
       )}
 
       {admissions && admissions.length > 0 && (
         <label className="block max-w-md space-y-1 text-sm">
-          <span className="text-muted-foreground">Select Inpatient Admission</span>
+          <span className="text-muted-foreground">{t("nurse.emarSelectAdmission")}</span>
           <select
             className="w-full rounded-md border border-border bg-background px-3 py-2 text-foreground"
             value={selected ?? ""}
@@ -171,7 +170,7 @@ export default function Page() {
         <div className="surface-card rounded-lg border border-border p-4 bg-muted/20">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
             <div>
-              <span className="text-xs text-muted-foreground block">Patient</span>
+              <span className="text-xs text-muted-foreground block">{t("nurse.emarLabelPatient")}</span>
               <span className="font-semibold text-foreground text-base">
                 {chart.patient.full_name || "Unnamed patient"}
               </span>
@@ -181,7 +180,7 @@ export default function Page() {
             </div>
 
             <div>
-              <span className="text-xs text-muted-foreground block">Demographics</span>
+              <span className="text-xs text-muted-foreground block">{t("nurse.emarLabelDemographics")}</span>
               <span className="font-medium text-foreground">
                 {chart.patient.age_years ? `${chart.patient.age_years} yrs` : "Age unknown"} ·{" "}
                 {chart.patient.sex ? chart.patient.sex.toUpperCase() : "Unknown"}
@@ -194,9 +193,9 @@ export default function Page() {
             </div>
 
             <div>
-              <span className="text-xs text-muted-foreground block">Location</span>
+              <span className="text-xs text-muted-foreground block">{t("nurse.emarLabelLocation")}</span>
               <span className="font-medium text-foreground">
-                Ward: {chart.admission.ward_name || "General"}
+                {localizeField(chart.admission.ward_name || t("common.unassigned"), chart.admission.ward_name_hi)}
               </span>
               <div className="text-xs text-muted-foreground mt-0.5">
                 Bed: {chart.admission.bed_number || "—"}
@@ -204,7 +203,7 @@ export default function Page() {
             </div>
 
             <div>
-              <span className="text-xs text-muted-foreground block">Admission</span>
+              <span className="text-xs text-muted-foreground block">{t("nurse.emarLabelAdmission")}</span>
               <span className="font-medium text-foreground">
                 {chart.admission.admitted_at ? formatDateTime(chart.admission.admitted_at) : "—"}
               </span>
@@ -217,7 +216,7 @@ export default function Page() {
       )}
 
       {selected && records === null && !error && (
-        <p className="text-sm text-muted-foreground">Loading eMAR chart…</p>
+        <p className="text-sm text-muted-foreground">{t("nurse.emarLoadingChart")}</p>
       )}
 
       {records && (

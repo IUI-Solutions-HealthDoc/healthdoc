@@ -17,6 +17,7 @@ import Link from "next/link";
 import { toast } from "@/components/ui/toast";
 import { meridian } from "@/styles/theme";
 import { useCurrentUser } from "@/features/session/useCurrentUser";
+import { useLocale } from "@/lib/i18n";
 import { createUser } from "../api";
 import { REALM_ROLE_LABELS } from "../constants";
 import type { RealmRole, User } from "../types";
@@ -53,6 +54,7 @@ function SectionLabel({ children }: { children: ReactNode }) {
 
 export function CreateUserModal({ open, onClose, onCreated }: Props) {
   const { user: currentUser } = useCurrentUser();
+  const { localizeField } = useLocale();
   const [busy, setBusy] = useState(false);
   const [username, setUsername] = useState("");
   const [full_name, setFullName] = useState("");
@@ -407,7 +409,7 @@ export function CreateUserModal({ open, onClose, onCreated }: Props) {
           }}
         >
           {currentUser
-            ? `${currentUser.facility.name} · ${currentUser.facility.code}`
+            ? `${localizeField(currentUser.facility.name, currentUser.facility.name_hi)} · ${currentUser.facility.code}`
             : "Facility resolved from your account on submit"}
         </Typography>
       </DialogContent>

@@ -190,9 +190,9 @@ async def test_a_user_with_no_department_still_gets_a_response(db):
 
 async def test_the_department_payload_stays_narrow(db):
     """MeOut's own docstring says it is deliberately narrow because every screen
-    for every role reads it. The department is id, code and name — what a screen
-    needs to scope and label itself — and nothing about the department's staff,
-    rooms or configuration."""
+    for every role reads it. The department is id, code, English name and an
+    optional Hindi name — what a screen needs to scope and label itself — and
+    nothing about its staff, rooms or configuration."""
     facility, user = await _facility_and_user(db, ["hod"])
     department = await _department(db, facility.id)
     user.department_id = department.id
@@ -200,4 +200,5 @@ async def test_the_department_payload_stays_narrow(db):
 
     result = await me_router.get_me(_Caller(user.id, facility.id, ["hod"]), db=db)
 
-    assert set(result.department.model_dump()) == {"id", "code", "name"}
+    assert set(result.department.model_dump()) == {"id", "code", "name", "name_hi"}
+    assert result.department.name_hi is None

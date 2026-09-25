@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { ApiError, newIdempotencyKey } from "@/lib/api";
+import { useLocale } from "@/lib/i18n";
 
 import {
   downloadNhaAbhaCard,
@@ -56,6 +57,7 @@ export function AbhaIdentityPanel({ patient }: Props) {
 }
 
 function PatientAbhaIdentity({ patient }: Props) {
+  const { t } = useLocale();
   const [flow, setFlow] = useState<Flow>("existing");
   const [method, setMethod] = useState<Method>("abha-number");
   const [identifier, setIdentifier] = useState(patient.abha_number ?? "");
@@ -446,20 +448,22 @@ function PatientAbhaIdentity({ patient }: Props) {
   return (
     <section className="surface-card space-y-4 p-5">
       <div>
-        <h3 className="font-medium">ABHA identity</h3>
-        <p className="text-sm text-muted-foreground">Verify and link the identity for {patient.full_name}. The linking credential stays encrypted on the server.</p>
+        <h3 className="font-medium">{t("receptionist.abha.title")}</h3>
+        <p className="text-sm text-muted-foreground">
+          {t("receptionist.abha.verifyLinkIntro", { name: patient.full_name })}
+        </p>
       </div>
       <div className="flex flex-wrap gap-2" role="group" aria-label="ABHA identity flow">
-        <button type="button" onClick={() => changeFlow("existing")} aria-pressed={flow === "existing"} className={`rounded-md border px-3 py-2 text-sm ${flow === "existing" ? "border-primary bg-primary/10" : "border-border"}`}>Use existing ABHA</button>
-        <button type="button" onClick={() => changeFlow("new")} aria-pressed={flow === "new"} className={`rounded-md border px-3 py-2 text-sm ${flow === "new" ? "border-primary bg-primary/10" : "border-border"}`}>Create ABHA</button>
+        <button type="button" onClick={() => changeFlow("existing")} aria-pressed={flow === "existing"} className={`rounded-md border px-3 py-2 text-sm ${flow === "existing" ? "border-primary bg-primary/10" : "border-border"}`}>{t("receptionist.abha.useExisting")}</button>
+        <button type="button" onClick={() => changeFlow("new")} aria-pressed={flow === "new"} className={`rounded-md border px-3 py-2 text-sm ${flow === "new" ? "border-primary bg-primary/10" : "border-border"}`}>{t("receptionist.abha.create")}</button>
       </div>
 
       {flow === "existing" && !sessionId ? (
         <div className="flex flex-wrap gap-2" role="group" aria-label="Verification method">
-          <button type="button" onClick={() => changeMethod("abha-number")} aria-pressed={method === "abha-number"} className={`rounded-md border px-3 py-1.5 text-xs ${method === "abha-number" ? "border-primary bg-primary/10" : "border-border"}`}>OTP to ABHA-linked mobile</button>
-          <button type="button" onClick={() => changeMethod("aadhaar")} aria-pressed={method === "aadhaar"} className={`rounded-md border px-3 py-1.5 text-xs ${method === "aadhaar" ? "border-primary bg-primary/10" : "border-border"}`}>OTP through Aadhaar</button>
-          <button type="button" onClick={() => changeMethod("abha-address")} aria-pressed={method === "abha-address"} className={`rounded-md border px-3 py-1.5 text-xs ${method === "abha-address" ? "border-primary bg-primary/10" : "border-border"}`}>ABHA address</button>
-          <button type="button" onClick={() => changeMethod("mobile")} aria-pressed={method === "mobile"} className={`rounded-md border px-3 py-1.5 text-xs ${method === "mobile" ? "border-primary bg-primary/10" : "border-border"}`}>Communication mobile</button>
+          <button type="button" onClick={() => changeMethod("abha-number")} aria-pressed={method === "abha-number"} className={`rounded-md border px-3 py-1.5 text-xs ${method === "abha-number" ? "border-primary bg-primary/10" : "border-border"}`}>{t("receptionist.abha.methodAbhaMobile")}</button>
+          <button type="button" onClick={() => changeMethod("aadhaar")} aria-pressed={method === "aadhaar"} className={`rounded-md border px-3 py-1.5 text-xs ${method === "aadhaar" ? "border-primary bg-primary/10" : "border-border"}`}>{t("receptionist.abha.methodAadhaar")}</button>
+          <button type="button" onClick={() => changeMethod("abha-address")} aria-pressed={method === "abha-address"} className={`rounded-md border px-3 py-1.5 text-xs ${method === "abha-address" ? "border-primary bg-primary/10" : "border-border"}`}>{t("receptionist.abha.methodAddress")}</button>
+          <button type="button" onClick={() => changeMethod("mobile")} aria-pressed={method === "mobile"} className={`rounded-md border px-3 py-1.5 text-xs ${method === "mobile" ? "border-primary bg-primary/10" : "border-border"}`}>{t("receptionist.abha.methodMobile")}</button>
         </div>
       ) : null}
 
@@ -472,12 +476,20 @@ function PatientAbhaIdentity({ patient }: Props) {
               <span>{account.abha_number}{account.name ? ` · ${account.name}` : ""}</span>
             </label>
           ))}
-          <button type="button" disabled={busy || !selectedAccount} onClick={() => void chooseAccount()} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50">Link selected account</button>
+          <button type="button" disabled={busy || !selectedAccount} onClick={() => void chooseAccount()} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{t("receptionist.abha.linkSelectedAccount")}</button>
         </fieldset>
       ) : !sessionId ? (
         <div className="space-y-3">
           <label className="block space-y-1 text-sm">
-            <span className="text-muted-foreground">{usesAadhaar ? "Aadhaar number" : usesMobile ? "Communication mobile" : usesAddress ? "ABHA address" : "ABHA number"}</span>
+            <span className="text-muted-foreground">
+              {usesAadhaar
+                ? t("receptionist.abha.fieldAadhaar")
+                : usesMobile
+                  ? t("receptionist.abha.fieldMobile")
+                  : usesAddress
+                    ? t("receptionist.abha.fieldAddress")
+                    : t("receptionist.abha.fieldAbhaNumber")}
+            </span>
             <input
               value={identifier}
               onChange={(event) => setIdentifier(event.target.value)}
@@ -494,22 +506,22 @@ function PatientAbhaIdentity({ patient }: Props) {
               <span>{ENROLMENT_CONSENT_TEXT}</span>
             </label>
           ) : null}
-          <button type="button" disabled={busy || !identifierValid || (flow === "new" && !consentGranted)} onClick={() => void requestOtp()} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{busy ? "Requesting…" : "Send OTP"}</button>
+          <button type="button" disabled={busy || !identifierValid || (flow === "new" && !consentGranted)} onClick={() => void requestOtp()} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{busy ? t("receptionist.abha.requestingOtp") : t("receptionist.abha.sendOtp")}</button>
         </div>
       ) : enrolPhase === "mobile" ? (
         <div className="space-y-3">
           <p className="text-sm text-muted-foreground">Verify the communication mobile in this same enrolment. This is separate from a mobile number typed on the Aadhaar OTP.</p>
           <label className="block space-y-1 text-sm">
-            <span className="text-muted-foreground">Communication mobile</span>
+            <span className="text-muted-foreground">{t("receptionist.abha.fieldMobile")}</span>
             <input value={mobile} onChange={(event) => setMobile(event.target.value)} inputMode="tel" autoComplete="tel" aria-invalid={!mobileValid} className={`w-full rounded-md border px-3 py-2 ${mobileValid ? "border-border" : "border-danger"}`} />
           </label>
           <label className="block space-y-1 text-sm">
-            <span className="text-muted-foreground">Mobile OTP</span>
+            <span className="text-muted-foreground">{t("receptionist.abha.fieldMobileOtp")}</span>
             <input value={otp} onChange={(event) => setOtp(digitsOnly(event.target.value))} inputMode="numeric" autoComplete="one-time-code" maxLength={8} className="w-full rounded-md border border-border px-3 py-2" />
           </label>
           <div className="flex gap-3">
-            <button type="button" disabled={busy || mobileNormalised === null} onClick={() => void sendCommunicationOtp()} className="rounded-md border border-border px-3 py-2 text-sm">Send mobile OTP</button>
-            <button type="button" disabled={busy || !otpValid} onClick={() => void verifyCommunicationOtp()} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50">Verify mobile</button>
+            <button type="button" disabled={busy || mobileNormalised === null} onClick={() => void sendCommunicationOtp()} className="rounded-md border border-border px-3 py-2 text-sm">{t("receptionist.abha.sendMobileOtp")}</button>
+            <button type="button" disabled={busy || !otpValid} onClick={() => void verifyCommunicationOtp()} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{t("receptionist.abha.verifyMobile")}</button>
           </div>
         </div>
       ) : enrolPhase === "address" ? (
@@ -522,13 +534,13 @@ function PatientAbhaIdentity({ patient }: Props) {
               <span>{address}</span>
             </label>
           ))}
-          <button type="button" disabled={busy || !selectedAddress} onClick={() => void chooseAddress()} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50">Save ABHA address</button>
+          <button type="button" disabled={busy || !selectedAddress} onClick={() => void chooseAddress()} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{t("receptionist.abha.saveAbhaAddress")}</button>
         </fieldset>
       ) : (
         <div className="space-y-3">
           {maskedMobile ? <p className="text-sm text-muted-foreground">ABDM response: {maskedMobile}</p> : null}
           <label className="block space-y-1 text-sm">
-            <span className="text-muted-foreground">OTP</span>
+            <span className="text-muted-foreground">{t("receptionist.abha.fieldOtp")}</span>
             <input value={otp} onChange={(event) => setOtp(digitsOnly(event.target.value))} inputMode="numeric" autoComplete="one-time-code" maxLength={8} className="w-full rounded-md border border-border px-3 py-2" />
           </label>
           <p className="text-xs text-muted-foreground">
@@ -547,8 +559,8 @@ function PatientAbhaIdentity({ patient }: Props) {
             </label>
           ) : null}
           <div className="flex gap-3">
-            <button type="button" disabled={busy || !otpValid || !mobileValid} onClick={() => void verifyOtp()} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{busy ? "Verifying…" : "Verify and link"}</button>
-            <button type="button" disabled={busy} onClick={() => changeFlow(flow)} className="text-sm underline">Start again</button>
+            <button type="button" disabled={busy || !otpValid || !mobileValid} onClick={() => void verifyOtp()} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{busy ? t("receptionist.abha.verifying") : t("receptionist.abha.verifyAndLink")}</button>
+            <button type="button" disabled={busy} onClick={() => changeFlow(flow)} className="text-sm underline">{t("receptionist.abha.startAgain")}</button>
           </div>
         </div>
       )}

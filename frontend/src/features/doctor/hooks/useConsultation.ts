@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { toast } from "@/components/ui/toast";
 import { newIdempotencyKey } from "@/lib/api";
+import { useLocale } from "@/lib/i18n";
 import { draftFingerprint } from "@/lib/resilience.mjs";
 import { useUnsavedChanges } from "@/lib/useUnsavedChanges";
 import {
@@ -26,6 +27,7 @@ export type ConsultationStatus = "draft" | "saved" | "completed";
 
 /** Owns the one persisted encounter for this visit and restores it on reload. */
 export function useConsultation(context: EncounterContext) {
+  const { t } = useLocale();
   const [encounter, setEncounter] = useState<ActiveEncounter | null>(null);
   const [startedAt] = useState(() => new Date().toISOString());
   const [createKey] = useState(() => newIdempotencyKey());
@@ -96,7 +98,9 @@ export function useConsultation(context: EncounterContext) {
       })
       .catch((error: unknown) => {
         if (!cancelled) {
-          toast.error(error instanceof Error ? error.message : "Failed to restore consultation");
+          toast.error(
+            error instanceof Error ? error.message : t("doctor.toast.restoreConsultationFailed"),
+          );
         }
       })
       .finally(() => {
@@ -108,7 +112,7 @@ export function useConsultation(context: EncounterContext) {
     return () => {
       cancelled = true;
     };
-  }, [context.patient_id, context.visit_id]);
+  }, [context.patient_id, context.visit_id, t]);
 
   const patchSoap = useCallback(
     (patch: Partial<SoapNote>) => setSoap((previous) => ({ ...previous, ...patch })),
@@ -123,7 +127,7 @@ export function useConsultation(context: EncounterContext) {
 
   const saveEncounter = useCallback(async (quiet = false) => {
     if (chiefComplaint.trim() === "") {
-      if (!quiet) toast.error("Chief complaint is required to save the encounter");
+      if (!quiet) toast.error(t("doctor.toast.chiefComplaintRequired"));
       return false;
     }
     setSaving(true);
@@ -159,20 +163,18 @@ export function useConsultation(context: EncounterContext) {
       setStatus("saved");
       setLastSavedFingerprint(fingerprint);
       setAutoSaveStatus("saved");
-      if (!quiet) toast.success("Encounter saved");
+      if (!quiet) toast.success(t("doctor.toast.encounterSaved"));
       return true;
     } catch (error) {
       if (error instanceof StaleWriteError) {
         setConflict(error.serverCopy);
         setNoteStatus("failed");
-        toast.error(
-          "Someone else saved this encounter while you were editing. Reload before saving again — your note has NOT been stored.",
-        );
+        toast.error(t("doctor.toast.staleEncounterConflict"));
         setAutoSaveStatus("failed");
         return false;
       }
       setAutoSaveStatus("failed");
-      if (!quiet) toast.error(error instanceof Error ? error.message : "Failed to save encounter");
+      if (!quiet) toast.error(error instanceof Error ? error.message : t("doctor.toast.saveEncounterFailed"));
       return false;
     } finally {
       setSaving(false);
@@ -188,6 +190,7 @@ export function useConsultation(context: EncounterContext) {
     fingerprint,
     soap,
     startedAt,
+    t,
   ]);
 
   useEffect(() => {
@@ -208,13 +211,13 @@ export function useConsultation(context: EncounterContext) {
       const completed = await completeEncounter(encounter, new Date().toISOString());
       setEncounter(completed);
       setStatus("completed");
-      toast.success("Consultation completed");
+      toast.success(t("doctor.toast.consultationCompleted"));
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to complete consultation");
+      toast.error(error instanceof Error ? error.message : t("doctor.toast.completeConsultationFailed"));
     } finally {
       setCompleting(false);
     }
-  }, [encounter]);
+  }, [encounter, t]);
 
   return {
     encounter,

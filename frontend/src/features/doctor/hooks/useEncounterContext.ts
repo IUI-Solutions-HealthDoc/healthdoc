@@ -85,6 +85,7 @@ function toContext(token: QueueToken): EncounterContext | null {
     provider_user_id: token.provider_user_id,
     provider_name: token.provider_name,
     department: token.department,
+    department_hi: token.department_hi ?? null,
     token_display: token.token_display,
   };
 }

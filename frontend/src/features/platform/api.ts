@@ -4,6 +4,7 @@ export type PlatformFacility = {
   id: string;
   code: string;
   name: string;
+  name_hi?: string | null;
   state_code: string;
   district: string | null;
   facility_type: string | null;

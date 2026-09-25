@@ -22,6 +22,7 @@ import { SpecialtyEncounterPanel } from "./SpecialtyEncounterPanel";
 import { StaleWritePanel } from "./StaleWritePanel";
 import { VitalsPanel } from "./VitalsPanel";
 import { ClinicalDispositionPanel } from "@/features/ipd/components/ClinicalDispositionPanel";
+import { useLocale } from "@/lib/i18n";
 
 export interface ConsultationWorkspaceProps {
   context: EncounterContext;
@@ -56,6 +57,7 @@ export function ConsultationWorkspace({ context }: ConsultationWorkspaceProps) {
     autoSaveStatus,
     complete,
   } = useConsultation(context);
+  const { t } = useLocale();
 
   const ended = status === "completed";
 
@@ -81,9 +83,7 @@ export function ConsultationWorkspace({ context }: ConsultationWorkspaceProps) {
           <ClinicalDispositionPanel context={context} encounter={encounter} />
         </>
       ) : !ended ? (
-        <Alert severity="info">
-          Save the encounter before recording vitals, diagnoses, orders, or prescriptions.
-        </Alert>
+        <Alert severity="info">{t("doctor.saveBeforeChildren")}</Alert>
       ) : null}
 
       <Box
@@ -98,30 +98,34 @@ export function ConsultationWorkspace({ context }: ConsultationWorkspaceProps) {
       >
         <Stack direction="row" spacing={2} sx={{ alignItems: "center", justifyContent: "space-between" }}>
           <Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
-            <Typography sx={{ fontSize: "0.8125rem", color: meridian.textSecondary }}>Encounter</Typography>
+            <Typography sx={{ fontSize: "0.8125rem", color: meridian.textSecondary }}>{t("doctor.encounter")}</Typography>
             {ended ? (
-              <StatusChip status="completed" label="Completed" />
+              <StatusChip status="completed" label={t("doctor.statusCompleted")} />
             ) : saving || autoSaveStatus === "saving" ? (
-              <StatusChip status="pending" label="Saving…" />
+              <StatusChip status="pending" label={t("doctor.statusSaving")} />
             ) : autoSaveStatus === "failed" ? (
-              <StatusChip status="failed" label="Autosave failed" />
+              <StatusChip status="failed" label={t("doctor.statusAutosaveFailed")} />
             ) : dirty ? (
-              <StatusChip status="draft" label="Unsaved changes" />
+              <StatusChip status="draft" label={t("doctor.statusUnsavedChanges")} />
             ) : status === "saved" ? (
-              <StatusChip status="issued" label="Saved to server" />
+              <StatusChip status="issued" label={t("doctor.statusSavedToServer")} />
             ) : (
-              <StatusChip status="draft" label="Not saved" />
+              <StatusChip status="draft" label={t("doctor.statusNotSaved")} />
             )}
           </Stack>
           <Stack direction="row" spacing={1.5}>
             <Typography aria-live="polite" sx={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }}>
-              {saving ? "Saving consultation" : dirty ? "Consultation has unsaved changes" : "Consultation saved"}
+              {saving
+                ? t("doctor.a11ySavingConsultation")
+                : dirty
+                  ? t("doctor.a11yConsultationUnsaved")
+                  : t("doctor.a11yConsultationSaved")}
             </Typography>
             <Button variant="contained" sx={doctorButtonSx} disabled={loading || saving || ended} onClick={() => void saveEncounter()}>
-              {saving ? "Saving…" : "Save encounter"}
+              {saving ? t("doctor.statusSaving") : t("doctor.saveEncounter")}
             </Button>
             <Button variant="outlined" sx={doctorButtonSx} disabled={!canComplete || completing || ended} onClick={complete}>
-              {completing ? "Completing…" : "Complete consultation"}
+              {completing ? t("doctor.completing") : t("doctor.completeConsultation")}
             </Button>
           </Stack>
         </Stack>

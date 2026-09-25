@@ -5,15 +5,28 @@ import { Alert, Box, Button, Checkbox, FormControlLabel, Stack, Table, TableBody
   TableContainer, TableHead, TablePagination, TableRow, TextField, Typography } from "@mui/material";
 import { Modal } from "@/components/ui/Modal";
 import { formatMoney, newIdempotencyKey } from "@/lib/api";
+import { useLocale, type MessageKey } from "@/lib/i18n";
 import { useAuth } from "@/providers/auth-provider";
 import { meridian } from "@/styles/theme";
 import { deactivateTariff, listChargeMaster } from "../api/chargeMaster";
-import { CHARGE_CATEGORY_LABELS } from "../constants";
 import type { ChargeMaster } from "../types";
+import { chargeCategoryLabel } from "../lib/labels";
 import { TariffForm } from "./TariffForm";
+
+const TABLE_COLUMN_KEYS: MessageKey[] = [
+  "billing.tariff.colCodeDescription",
+  "billing.tariff.colCategory",
+  "billing.tariff.colUnitPrice",
+  "billing.tariff.colScheme",
+  "billing.tariff.colEffectiveFrom",
+  "billing.tariff.colThrough",
+  "billing.tariff.colState",
+  "billing.tariff.colActions",
+];
 
 export function TariffWorkspace() {
   const { user } = useAuth();
+  const { localizeField, t } = useLocale();
   const allowed = user?.role === "billing" || user?.role === "admin";
   const [includeRetired, setIncludeRetired] = useState(false);
   const [query, setQuery] = useState("");
@@ -37,9 +50,11 @@ export function TariffWorkspace() {
       const rows = await listChargeMaster({ active_only: !includeRetired });
       if (request === generation.current) setSnapshot({ history: includeRetired, rows });
     } catch (error) {
-      if (request === generation.current) setError(error instanceof Error ? error.message : "Could not load the tariff catalogue.");
+      if (request === generation.current) {
+        setError(error instanceof Error ? error.message : t("billing.tariff.loadFailed"));
+      }
     } finally { if (request === generation.current) setLoading(false); }
-  }, [allowed, includeRetired]);
+  }, [allowed, includeRetired, t]);
 
   useEffect(() => {
     const requests = generation;
@@ -59,56 +74,68 @@ export function TariffWorkspace() {
     saving.current = true; setBusy(true);
     try {
       await deactivateTariff(retire.row.id, retire.key);
-      setMessage(`Retired ${retire.row.charge_code} (${retire.row.effective_from}). History is retained.`);
+      setMessage(t("billing.tariff.retiredSuccess", {
+        code: retire.row.charge_code,
+        effectiveFrom: retire.row.effective_from,
+      }));
       setRetire(null); await reload();
-    } catch (error) { setRetireError(error instanceof Error ? error.message : "Could not retire the tariff."); }
+    } catch (error) {
+      setRetireError(error instanceof Error ? error.message : t("billing.tariff.retireFailed"));
+    }
     finally { saving.current = false; setBusy(false); }
   }
 
-  if (!allowed) return <Alert severity="error">Tariff maintenance is available to billing and facility administrators.</Alert>;
+  if (!allowed) {
+    return <Alert severity="error">{t("billing.tariff.accessDenied")}</Alert>;
+  }
 
   return <Stack spacing={2.5} sx={{ color: meridian.textPrimary }}>
-    <Typography component="h1" variant="h5" sx={{ fontWeight: 700 }}>Tariff catalogue</Typography>
-    <Typography>Maintain your facility’s approved effective-dated prices. Each revision creates a new version; existing posted invoice lines keep their recorded amounts.</Typography>
+    <Typography component="h1" variant="h5" sx={{ fontWeight: 700 }}>{t("billing.tariffsTitle")}</Typography>
+    <Typography>{t("billing.tariff.maintainIntro")}</Typography>
     {message && <Alert severity="success" onClose={() => setMessage(null)}>{message}</Alert>}
     <Stack direction="row" useFlexGap sx={{ flexWrap: "wrap", gap: 2, alignItems: "center" }}>
-      <TextField label="Search code, description or scheme" value={query} onChange={(e) => { setQuery(e.target.value); setPage(0); }} sx={{ minWidth: 280 }} />
-      <FormControlLabel label="Include retired tariffs" control={<Checkbox checked={includeRetired} onChange={(e) => { setIncludeRetired(e.target.checked); setPage(0); }} />} />
-      <Button onClick={() => void reload()} disabled={loading}>Reload catalogue</Button>
-      <Button variant="contained" onClick={() => { setMessage(null); setForm({ revision: null }); }}>New tariff</Button>
+      <TextField label={t("billing.tariff.searchLabel")} value={query} onChange={(e) => { setQuery(e.target.value); setPage(0); }} sx={{ minWidth: 280 }} />
+      <FormControlLabel label={t("billing.tariff.includeRetired")} control={<Checkbox checked={includeRetired} onChange={(e) => { setIncludeRetired(e.target.checked); setPage(0); }} />} />
+      <Button onClick={() => void reload()} disabled={loading}>{t("billing.tariff.reloadCatalogue")}</Button>
+      <Button variant="contained" onClick={() => { setMessage(null); setForm({ revision: null }); }}>{t("billing.tariff.newTariff")}</Button>
     </Stack>
-    <Typography variant="body2">Enabled means available for its effective-date range, not necessarily today. End dates are inclusive. Retiring a version removes it from future tariff lookups, including unbuilt historical charges.</Typography>
-    {error ? <Alert severity="error">{error} Use Reload catalogue to retry.</Alert> : loading || snapshot?.history !== includeRetired ?
-      <Typography role="status">Loading tariff catalogue…</Typography> : <Box sx={{ border: `1px solid ${meridian.border}`, borderRadius: 3, overflow: "hidden", backgroundColor: meridian.surface }}>
+    <Typography variant="body2">{t("billing.tariff.enabledHint")}</Typography>
+    {error ? <Alert severity="error">{error} {t("billing.tariff.reloadRetry")}</Alert> : loading || snapshot?.history !== includeRetired ?
+      <Typography role="status">{t("billing.tariff.loading")}</Typography> : <Box sx={{ border: `1px solid ${meridian.border}`, borderRadius: 3, overflow: "hidden", backgroundColor: meridian.surface }}>
         <TableContainer><Table size="small" aria-label="Tariff versions">
-          <TableHead><TableRow>{["Code / description", "Category", "Unit price", "Scheme", "Effective from", "Through (inclusive)", "State", "Actions"].map((label) => <TableCell key={label}>{label}</TableCell>)}</TableRow></TableHead>
+          <TableHead><TableRow>{TABLE_COLUMN_KEYS.map((key) => <TableCell key={key}>{t(key)}</TableCell>)}</TableRow></TableHead>
           <TableBody>{rows.slice(visiblePage * 15, visiblePage * 15 + 15).map((row) => <TableRow key={row.id}>
-            <TableCell><Typography sx={{ fontWeight: 600 }}>{row.charge_code}</Typography>{row.description}</TableCell>
-            <TableCell>{CHARGE_CATEGORY_LABELS[row.charge_category]}</TableCell>
+            <TableCell><Typography sx={{ fontWeight: 600 }}>{row.charge_code}</Typography>{localizeField(row.description, row.description_hi)}</TableCell>
+            <TableCell>{chargeCategoryLabel(t, row.charge_category)}</TableCell>
             <TableCell sx={{ whiteSpace: "nowrap" }}>{formatMoney(row.unit_price)}</TableCell>
-            <TableCell>{row.scheme_code ?? "General"}</TableCell>
+            <TableCell>{row.scheme_code ?? t("billing.tariff.schemeGeneral")}</TableCell>
             <TableCell sx={{ whiteSpace: "nowrap" }}>{row.effective_from}</TableCell>
-            <TableCell sx={{ whiteSpace: "nowrap" }}>{row.effective_to ?? "Open-ended"}</TableCell>
-            <TableCell>{row.is_active ? "Enabled" : "Retired"}</TableCell>
+            <TableCell sx={{ whiteSpace: "nowrap" }}>{row.effective_to ?? t("billing.tariff.openEnded")}</TableCell>
+            <TableCell>{row.is_active ? t("billing.tariff.stateEnabled") : t("billing.tariff.stateRetired")}</TableCell>
             <TableCell><Stack direction="row">
-              {row.is_active && !row.effective_to && <Button onClick={() => setForm({ revision: row })}>Revise</Button>}
-              {row.is_active && <Button color="error" onClick={() => { setRetireError(null); setRetire({ row, key: newIdempotencyKey() }); }}>Retire</Button>}
+              {row.is_active && !row.effective_to && <Button onClick={() => setForm({ revision: row })}>{t("billing.tariff.revise")}</Button>}
+              {row.is_active && <Button color="error" onClick={() => { setRetireError(null); setRetire({ row, key: newIdempotencyKey() }); }}>{t("billing.tariff.retire")}</Button>}
             </Stack></TableCell>
           </TableRow>)}</TableBody>
         </Table></TableContainer>
-        {rows.length === 0 && <Typography sx={{ p: 3 }}>No tariffs match these filters.</Typography>}
+        {rows.length === 0 && <Typography sx={{ p: 3 }}>{t("billing.tariff.noMatch")}</Typography>}
         <TablePagination component="div" count={rows.length} page={visiblePage} onPageChange={(_, next) => setPage(next)} rowsPerPage={15} rowsPerPageOptions={[15]} />
       </Box>}
     {form && <TariffForm revision={form.revision} onClose={() => { setForm(null); void reload(); }} onSaved={() => {
-      setForm(null); setMessage("Tariff version saved. The catalogue below is read back from the server."); void reload();
+      setForm(null); setMessage(t("billing.tariff.savedSuccess")); void reload();
     }} />}
-    <Modal open={!!retire} onClose={() => { if (!saving.current) { setRetire(null); void reload(); } }} title="Retire tariff" loading={busy}
-      actions={<><Button onClick={() => { setRetire(null); void reload(); }}>{retireError ? "Close and check catalogue" : "Cancel"}</Button>
-        {!retireError && <Button color="error" variant="contained" onClick={() => void confirmRetire()}>Confirm retirement</Button>}</>}>
+    <Modal open={!!retire} onClose={() => { if (!saving.current) { setRetire(null); void reload(); } }} title={t("billing.tariff.retireTitle")} loading={busy}
+      actions={<><Button onClick={() => { setRetire(null); void reload(); }}>{retireError ? t("billing.tariff.closeCheckCatalogue") : t("billing.common.cancel")}</Button>
+        {!retireError && <Button color="error" variant="contained" onClick={() => void confirmRetire()}>{t("billing.tariff.confirmRetirement")}</Button>}</>}>
       {retire && <Stack spacing={2}>
-        {retireError && <Alert severity="error">{retireError} Reload the catalogue before retrying; the request may have completed.</Alert>}
-        <Typography>{retire.row.charge_code} · {retire.row.scheme_code ?? "General"} · {formatMoney(retire.row.unit_price)} · From {retire.row.effective_from}</Typography>
-        <Alert severity="warning">This version will no longer be used for new charges, including unbuilt historical charges. Missing replacement tariffs can prevent registration or leave services unpriced. Existing posted lines and tariff history are retained. There is no reactivation action.</Alert>
+        {retireError && <Alert severity="error">{retireError} {t("billing.tariff.retireReloadHint")}</Alert>}
+        <Typography>{t("billing.tariff.retireSummary", {
+          code: retire.row.charge_code,
+          scheme: retire.row.scheme_code ?? t("billing.tariff.schemeGeneral"),
+          price: formatMoney(retire.row.unit_price),
+          effectiveFrom: retire.row.effective_from,
+        })}</Typography>
+        <Alert severity="warning">{t("billing.tariff.retireWarning")}</Alert>
       </Stack>}
     </Modal>
   </Stack>;

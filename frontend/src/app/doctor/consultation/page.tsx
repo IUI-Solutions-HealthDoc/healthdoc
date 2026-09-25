@@ -5,7 +5,9 @@ import Box from "@mui/material/Box";
 import CircularProgress from "@mui/material/CircularProgress";
 import Typography from "@mui/material/Typography";
 
+import { PageHeading } from "@/components/common/PageHeading";
 import { ConsultationWorkspace } from "@/features/doctor";
+import { useLocale } from "@/lib/i18n";
 import { getPatient, getQueueToken } from "@/features/doctor/api";
 import { doctorPageSx } from "@/features/doctor/panelSx";
 import type { EncounterContext } from "@/features/doctor/types";
@@ -31,6 +33,7 @@ interface VisitRecord {
  * after mount keeps the whole page a normal client tree.
  */
 export default function Page() {
+  const { t } = useLocale();
   const { user } = useAuth();
   const [context, setContext] = useState<EncounterContext | null>(null);
   const [message, setMessage] = useState<{ tone: "instruction" | "error"; text: string } | null>(null);
@@ -133,7 +136,7 @@ export default function Page() {
           }}
         >
           <Typography component="h1" sx={{ fontSize: "1.25rem", fontWeight: 700 }}>
-            {message.tone === "error" ? "Consultation unavailable" : "Start a consultation"}
+            {t("doctor.consultationTitle")}
           </Typography>
           <Typography sx={{ mt: 1, color: "text.secondary" }}>{message.text}</Typography>
         </Box>
@@ -142,7 +145,10 @@ export default function Page() {
           <CircularProgress size={28} />
         </Box>
       ) : (
-        <ConsultationWorkspace context={context} />
+        <>
+          <PageHeading titleKey="doctor.consultationTitle" className="mb-4 space-y-1" />
+          <ConsultationWorkspace context={context} />
+        </>
       )}
     </Box>
   );

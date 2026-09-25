@@ -27,11 +27,13 @@ import { searchMedicines } from "@/features/pharmacy/api";
 import type { BatchAvailability, MedicineSearchResult } from "@/features/pharmacy/types";
 import { useCurrentUser } from "@/features/session/useCurrentUser";
 import { ApiError } from "@/lib/api";
+import { useLocale } from "@/lib/i18n";
 
 import { createAdjustment, decideAdjustment, listAdjustmentCandidates, listAdjustments } from "./api";
 import type { AdjustmentListRow, ApproverCandidate } from "./types";
 
 export function AdjustmentWorkspace() {
+  const { t } = useLocale();
   const { user } = useCurrentUser();
   const [rows, setRows] = useState<AdjustmentListRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -54,7 +56,7 @@ export function AdjustmentWorkspace() {
       setRows(await listAdjustments());
       setError(null);
     } catch (reason_) {
-      setError(reason_ instanceof ApiError ? reason_.message : "Could not load adjustments");
+      setError(reason_ instanceof ApiError ? reason_.message : t("inventory.err.loadAdjustments"));
     }
   }, []);
 
@@ -105,7 +107,7 @@ export function AdjustmentWorkspace() {
           // like a colleague who does not work here.
           setApprovers([]);
           setApproverError(
-            reason instanceof ApiError ? reason.message : "Could not search staff",
+            reason instanceof ApiError ? reason.message : t("inventory.err.searchStaff"),
           );
         });
     }, 250);
@@ -151,7 +153,7 @@ export function AdjustmentWorkspace() {
       await reload();
     } catch (reason_) {
       setError(
-        reason_ instanceof ApiError ? reason_.message : "Could not propose the adjustment",
+        reason_ instanceof ApiError ? reason_.message : t("inventory.err.proposeAdjustment"),
       );
     } finally {
       setBusy(false);
@@ -164,7 +166,7 @@ export function AdjustmentWorkspace() {
       await decideAdjustment(id, { approve, reason: null });
       await reload();
     } catch (reason_) {
-      setError(reason_ instanceof ApiError ? reason_.message : "Could not record the decision");
+      setError(reason_ instanceof ApiError ? reason_.message : t("inventory.err.recordDecision"));
     } finally {
       setBusy(false);
     }
@@ -182,16 +184,12 @@ export function AdjustmentWorkspace() {
       ) : null}
 
       <section className="rounded border border-gray-200 p-4">
-        <h3 className="text-base font-semibold">Propose an adjustment</h3>
-        <p className="mt-1 text-sm text-gray-600">
-          Nothing changes when you submit. The adjustment is recorded as pending and
-          takes effect only once a second person, different from you and from the
-          approver you nominate, countersigns it.
-        </p>
+        <h3 className="text-base font-semibold">{t("inventory.adjustment.proposeTitle")}</h3>
+        <p className="mt-1 text-sm text-gray-600">{t("inventory.adjustment.proposeHint")}</p>
 
         <div className="mt-4 space-y-3">
           <div>
-            <span className="block text-sm text-gray-700">Item</span>
+            <span className="block text-sm text-gray-700">{t("inventory.col.item")}</span>
             {item ? (
               <div className="mt-1 flex items-center justify-between rounded bg-gray-50 p-2 text-sm">
                 <span>{item.name}</span>
@@ -203,14 +201,14 @@ export function AdjustmentWorkspace() {
                     setBatch(null);
                   }}
                 >
-                  change
+                  {t("common.change")}
                 </button>
               </div>
             ) : (
               <>
                 <input
                   className="mt-1 w-full rounded border border-gray-300 p-2"
-                  placeholder="Search medicines…"
+                  placeholder={t("inventory.grn.searchMedicinesPlaceholder")}
                   value={term}
                   onChange={(event) => setTerm(event.target.value)}
                 />
@@ -230,8 +228,12 @@ export function AdjustmentWorkspace() {
                           {match.name}
                           <span className="text-gray-500">
                             {" "}
-                            · {match.batches.length} batch
-                            {match.batches.length === 1 ? "" : "es"} in stock
+                            ·{" "}
+                            {match.batches.length === 1
+                              ? t("inventory.search.batchesInStock", { count: match.batches.length })
+                              : t("inventory.search.batchesInStockPlural", {
+                                  count: match.batches.length,
+                                })}
                           </span>
                         </button>
                       </li>
@@ -244,13 +246,9 @@ export function AdjustmentWorkspace() {
 
           {item ? (
             <div>
-              <span className="block text-sm text-gray-700">Batch</span>
+              <span className="block text-sm text-gray-700">{t("inventory.adjustment.batch")}</span>
               {item.batches.length === 0 ? (
-                <p className="mt-1 text-sm text-amber-800">
-                  No batches with stock on hand. Search only returns batches holding a
-                  positive quantity, so a batch that has already reached zero cannot be
-                  adjusted from this screen.
-                </p>
+                <p className="mt-1 text-sm text-amber-800">{t("inventory.adjustment.noBatches")}</p>
               ) : (
                 <select
                   className="mt-1 w-full rounded border border-gray-300 p-2 text-sm"
@@ -261,7 +259,7 @@ export function AdjustmentWorkspace() {
                     )
                   }
                 >
-                  <option value="">Select a batch…</option>
+                  <option value="">{t("inventory.adjustment.selectBatch")}</option>
                   {item.batches.map((b) => (
                     <option key={b.batch_id} value={b.batch_id}>
                       {b.batch_number} · expires {b.expiry_date} · {b.quantity} on hand
@@ -274,9 +272,7 @@ export function AdjustmentWorkspace() {
 
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="text-sm">
-              <span className="block text-gray-700">
-                Change (negative to write down)
-              </span>
+              <span className="block text-gray-700">{t("inventory.adjustment.changeLabel")}</span>
               <input
                 type="number"
                 step="0.01"
@@ -286,10 +282,10 @@ export function AdjustmentWorkspace() {
               />
             </label>
             <label className="text-sm">
-              <span className="block text-gray-700">Reason</span>
+              <span className="block text-gray-700">{t("inventory.adjustment.reason")}</span>
               <input
                 className="mt-1 w-full rounded border border-gray-300 p-2"
-                placeholder="Damaged in transit, count correction…"
+                placeholder={t("inventory.adjustment.reasonPlaceholder")}
                 value={reason}
                 onChange={(event) => setReason(event.target.value)}
               />
@@ -300,24 +296,19 @@ export function AdjustmentWorkspace() {
             <p
               className={`text-sm ${wouldGoNegative ? "text-red-700" : "text-gray-700"}`}
             >
-              {batch.quantity} on hand → <strong>{resultingQuantity}</strong> after this
-              adjustment.
-              {wouldGoNegative ? (
-                <>
-                  {" "}
-                  A batch cannot hold less than nothing — the database refuses it
-                  (quantity &gt;= 0), so this would be rejected on approval rather than
-                  now.
-                </>
-              ) : null}
+              {t("inventory.adjustment.resultPreview", {
+                onHand: batch.quantity,
+                after: String(resultingQuantity),
+              })}
+              {wouldGoNegative ? <> {t("inventory.adjustment.wouldGoNegative")}</> : null}
             </p>
           ) : null}
 
           <div>
-            <span className="block text-sm text-gray-700">First approver</span>
-            <p className="text-xs text-gray-600">
-              Someone other than you. You cannot approve your own adjustment.
-            </p>
+            <span className="block text-sm text-gray-700">
+              {t("inventory.adjustment.firstApprover")}
+            </span>
+            <p className="text-xs text-gray-600">{t("inventory.adjustment.firstApproverHint")}</p>
             {firstApprover ? (
               <div className="mt-1 flex items-center justify-between rounded bg-gray-50 p-2 text-sm">
                 <span>{firstApprover.full_name}</span>
@@ -326,14 +317,14 @@ export function AdjustmentWorkspace() {
                   className="text-xs text-blue-700 underline"
                   onClick={() => setFirstApprover(null)}
                 >
-                  change
+                  {t("common.change")}
                 </button>
               </div>
             ) : (
               <>
                 <input
                   className="mt-1 w-full rounded border border-gray-300 p-2"
-                  placeholder="Search staff…"
+                  placeholder={t("inventory.adjustment.searchStaffPlaceholder")}
                   value={approverTerm}
                   onChange={(event) => setApproverTerm(event.target.value)}
                 />
@@ -372,16 +363,16 @@ export function AdjustmentWorkspace() {
           onClick={() => void submit()}
           className="mt-5 rounded bg-blue-700 px-4 py-2 text-sm text-white disabled:bg-gray-300"
         >
-          Propose adjustment
+          {t("inventory.adjustment.proposeButton")}
         </button>
       </section>
 
       <section>
-        <h3 className="text-base font-semibold">Adjustments</h3>
+        <h3 className="text-base font-semibold">{t("inventory.adjustment.listTitle")}</h3>
         {rows === null ? (
-          <p className="mt-2 text-sm text-gray-600">Loading…</p>
+          <p className="mt-2 text-sm text-gray-600">{t("common.loading")}</p>
         ) : rows.length === 0 ? (
-          <p className="mt-2 text-sm text-gray-600">No adjustments recorded.</p>
+          <p className="mt-2 text-sm text-gray-600">{t("inventory.adjustment.empty")}</p>
         ) : (
           <ul className="mt-3 space-y-2">
             {rows.map((row) => {
@@ -415,26 +406,29 @@ export function AdjustmentWorkspace() {
                   </div>
 
                   <p className="mt-1">
-                    <strong className={isWriteDown ? "text-red-700" : "text-gray-900"}>
-                      {isWriteDown ? "" : "+"}
-                      {row.quantity_change}
-                    </strong>{" "}
-                    against {row.quantity_on_hand} on hand — {row.reason}
+                    {t("inventory.adjustment.summary", {
+                      change: `${isWriteDown ? "" : "+"}${row.quantity_change}`,
+                      onHand: row.quantity_on_hand,
+                      reason: row.reason,
+                    })}
                   </p>
 
                   <p className="mt-1 text-xs text-gray-600">
-                    Proposed by {row.created_by_name} · first approver{" "}
-                    {row.first_approver_name}
+                    {t("inventory.adjustment.proposedBy", {
+                      creator: row.created_by_name,
+                      first: row.first_approver_name,
+                    })}
                     {row.second_approver_name
-                      ? ` · countersigned by ${row.second_approver_name}`
-                      : " · awaiting a countersignature"}
+                      ? t("inventory.adjustment.countersignedBy", {
+                          name: row.second_approver_name,
+                        })
+                      : t("inventory.adjustment.awaitingCountersign")}
                   </p>
 
                   {row.status === "pending" ? (
                     currentUserAlreadyInChain ? (
                       <p className="mt-2 text-xs text-gray-600">
-                        You are already named on this adjustment, so you cannot be its
-                        second approver.
+                        {t("inventory.adjustment.cannotCountersign")}
                       </p>
                     ) : (
                       <div className="mt-2 flex gap-2">
@@ -444,7 +438,7 @@ export function AdjustmentWorkspace() {
                           onClick={() => void decide(row.id, true)}
                           className="rounded bg-blue-700 px-3 py-1 text-xs text-white disabled:bg-gray-300"
                         >
-                          Countersign
+                          {t("inventory.adjustment.countersign")}
                         </button>
                         <button
                           type="button"
@@ -452,7 +446,7 @@ export function AdjustmentWorkspace() {
                           onClick={() => void decide(row.id, false)}
                           className="rounded border border-gray-300 px-3 py-1 text-xs disabled:opacity-50"
                         >
-                          Reject
+                          {t("common.reject")}
                         </button>
                       </div>
                     )

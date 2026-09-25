@@ -12,6 +12,7 @@ export interface AppointmentService {
   facility_id: string;
   department_id?: string | null;
   name: string;
+  name_hi?: string | null;
   duration_minutes: number;
   is_active: boolean;
   description?: string | null;
@@ -19,6 +20,7 @@ export interface AppointmentService {
 
 export interface AppointmentServiceCreate {
   name: string;
+  name_hi?: string | null;
   duration_minutes: number;
   department_id?: string | null;
   description?: string | null;
@@ -50,6 +52,7 @@ export interface Appointment {
   patient_uhid?: string | null;
   doctor_name?: string | null;
   department_name?: string | null;
+  department_name_hi?: string | null;
 }
 
 export interface AppointmentCreate {

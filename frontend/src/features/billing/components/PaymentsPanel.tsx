@@ -6,8 +6,9 @@ import Button from "@mui/material/Button";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 
+import { useLocale } from "@/lib/i18n";
 import { meridian } from "@/styles/theme";
-import { PAYMENT_MODE_LABELS } from "../constants";
+import { paymentModeLabel } from "../lib/labels";
 import { formatINR } from "../lib/formatters";
 import { fromMoney, type Money } from "../lib/money";
 import type {
@@ -49,6 +50,7 @@ export function PaymentsPanel({
   onCollect,
   onRefund,
 }: Props) {
+  const { t } = useLocale();
   const [collectOpen, setCollectOpen] = useState(false);
   const [selected, setSelected] = useState<PaymentWithRefunds | null>(null);
   const [reverseTarget, setReverseTarget] = useState<PaymentWithRefunds | null>(null);
@@ -70,7 +72,7 @@ export function PaymentsPanel({
       >
         <Box>
           <Typography sx={{ m: 0, fontSize: "1.0625rem", fontWeight: 700, color: meridian.textPrimary }}>
-            Payments
+            {t("billing.paymentsTitle")}
           </Typography>
           <Typography sx={{ m: 0, mt: 0.4, fontSize: "0.8125rem", color: meridian.textSecondary }}>
             Receipts cannot be edited. Incorrect payments must be reversed with a reason.
@@ -84,7 +86,7 @@ export function PaymentsPanel({
             onClick={() => setCollectOpen(true)}
             sx={{ textTransform: "none", fontWeight: 600, borderRadius: "10px" }}
           >
-            Collect payment
+            {t("billing.collectPayment")}
           </Button>
         </Stack>
       </Stack>
@@ -97,7 +99,7 @@ export function PaymentsPanel({
         <Stat label="Net amount" value={formatINR(invoice.net_amount)} />
         <Stat label="Paid" value={formatINR(paidTotal)} />
         <Stat label="Refunded" value={formatINR(refundedTotal)} />
-        <Stat label="Balance due" value={formatINR(balanceDue)} emphasize />
+        <Stat label={t("billing.balanceDue")} value={formatINR(balanceDue)} emphasize />
       </Stack>
 
       {loading ? (
@@ -146,7 +148,7 @@ export function PaymentsPanel({
                       <PaymentStatusChip status={p.status} />
                     </Stack>
                     <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary }}>
-                      {formatINR(p.amount)} · {PAYMENT_MODE_LABELS[p.mode]} · {p.collected_by}
+                      {formatINR(p.amount)} · {paymentModeLabel(t, p.mode)} · {p.collected_by}
                     </Typography>
                   </Box>
                   <Stack direction="row" useFlexGap sx={{ gap: 1, flexWrap: "wrap" }}>

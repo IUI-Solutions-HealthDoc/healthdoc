@@ -3,30 +3,28 @@
 import { useState } from "react";
 
 import { ModuleCapabilityGate } from "@/components/common/ModuleCapabilityGate";
+import { PageHeading } from "@/components/common/PageHeading";
 import { LabMisPanel } from "@/features/lab/components/LabMisPanel";
 import { LabWorklistPanel } from "@/features/lab/components/LabWorklistPanel";
+import { useLocale, type MessageKey } from "@/lib/i18n";
 
 type LabTab = "worklist" | "mis";
 
+const LAB_TABS: { id: LabTab; labelKey: MessageKey }[] = [
+  { id: "worklist", labelKey: "lab.tab.worklist" },
+  { id: "mis", labelKey: "lab.tab.mis" },
+];
+
 function LabPageContent() {
+  const { t } = useLocale();
   const [tab, setTab] = useState<LabTab>("worklist");
 
   return (
     <div className="space-y-6 p-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Laboratory</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Sample collection, result entry, verification, amendments, and MIS.
-        </p>
-      </div>
+      <PageHeading titleKey="lab.title" subtitleKey="lab.subtitle" />
 
       <div className="flex gap-1 border-b border-border">
-        {(
-          [
-            { id: "worklist" as const, label: "Worklist" },
-            { id: "mis" as const, label: "MIS summary" },
-          ] as const
-        ).map((entry) => (
+        {LAB_TABS.map((entry) => (
           <button
             key={entry.id}
             type="button"
@@ -37,7 +35,7 @@ function LabPageContent() {
                 : "text-muted-foreground"
             }`}
           >
-            {entry.label}
+            {t(entry.labelKey)}
           </button>
         ))}
       </div>

@@ -298,6 +298,10 @@ class TariffCreate(BaseModel):
     charge_code: str = Field(..., min_length=1, max_length=30,
                              description="Stable across price changes, e.g. REGISTRATION, CBC.")
     description: str = Field(..., min_length=1)
+    description_hi: str | None = Field(
+        default=None,
+        description="Optional Hindi catalogue label; invoice line snapshots stay English.",
+    )
     charge_category: str = Field(..., description="registration | consultation | lab | radiology "
                                                   "| pharmacy | procedure | ipd_stay | blood | other")
     unit_price: Decimal = Field(..., ge=0, max_digits=12, decimal_places=2)
@@ -316,7 +320,7 @@ class TariffCreate(BaseModel):
             raise ValueError(f"charge_category must be one of: {sorted(ChargeCategory.values())}")
         return v
 
-    @field_validator("charge_code", "description", "scheme_code", mode="before")
+    @field_validator("charge_code", "description", "description_hi", "scheme_code", mode="before")
     @classmethod
     def _clean_tariff_text(cls, value, info):
         if not isinstance(value, str):
@@ -324,7 +328,9 @@ class TariffCreate(BaseModel):
         if any(ord(character) < 32 or ord(character) == 127 for character in value):
             raise ValueError("Control characters are not allowed")
         value = value.strip()
-        return None if info.field_name == "scheme_code" and not value else value
+        if info.field_name in ("scheme_code", "description_hi") and not value:
+            return None
+        return value
 
 
 class TariffOut(BaseModel):
@@ -334,6 +340,7 @@ class TariffOut(BaseModel):
     facility_id: UUID
     charge_code: str
     description: str
+    description_hi: str | None = None
     charge_category: str
     unit_price: Decimal
     scheme_code: str | None

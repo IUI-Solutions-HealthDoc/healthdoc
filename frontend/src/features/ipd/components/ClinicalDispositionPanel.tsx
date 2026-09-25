@@ -19,6 +19,7 @@ import {
   type ClinicalDisposition,
 } from "@/features/ipd/api/ipd";
 import type { Ward } from "@/features/nurse/components/WardSelector/WardSelector.types";
+import { useLocale } from "@/lib/i18n";
 
 export interface ClinicalDispositionPanelProps {
   context: EncounterContext;
@@ -29,6 +30,7 @@ export function ClinicalDispositionPanel({
   context,
   encounter,
 }: ClinicalDispositionPanelProps) {
+  const { t, localizeField } = useLocale();
   const [dispositionType, setDispositionType] = React.useState<
     "admit" | "discharge" | "transfer" | "follow_up"
   >("admit");
@@ -80,9 +82,7 @@ export function ClinicalDispositionPanel({
       });
       setSavedDisposition(disp);
       setSuccessMessage(
-        dispositionType === "admit"
-          ? "Inpatient admission order recorded. Patient has been queued to 'To Admit'."
-          : "Clinical disposition recorded successfully."
+        dispositionType === "admit" ? t("ipd.dispositionAdmitSuccess") : t("ipd.dispositionRecordedSuccess"),
       );
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to record clinical disposition";
@@ -96,11 +96,9 @@ export function ClinicalDispositionPanel({
     <Box sx={{ ...doctorPanelSx, display: "flex", flexDirection: "column", gap: 2.5 }}>
       <Stack direction="row" spacing={2} sx={{ alignItems: "flex-start", justifyContent: "space-between" }}>
         <Box>
-          <Typography sx={{ fontSize: "1.0625rem", fontWeight: 700 }}>
-            Clinical Disposition & Handover (HD-13)
-          </Typography>
+          <Typography sx={{ fontSize: "1.0625rem", fontWeight: 700 }}>{t("ipd.dispositionTitle")}</Typography>
           <Typography sx={{ fontSize: "0.8125rem", color: meridian.textSecondary, mt: 0.25 }}>
-            Direct the patient to IPD admission, safe discharge, inter-facility transfer, or outpatient follow-up.
+            {t("ipd.dispositionSubtitle")}
           </Typography>
         </Box>
         {savedDisposition && (
@@ -129,10 +127,10 @@ export function ClinicalDispositionPanel({
       <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", gap: 1 }}>
         {(
           [
-            { key: "admit", label: "Admit to Ward (IPD)" },
-            { key: "discharge", label: "Discharge / Home" },
-            { key: "transfer", label: "Transfer to Another Facility" },
-            { key: "follow_up", label: "Routine Follow-up Only" },
+            { key: "admit", label: t("ipd.dispositionAdmit") },
+            { key: "discharge", label: t("ipd.dispositionDischarge") },
+            { key: "transfer", label: t("ipd.dispositionTransfer") },
+            { key: "follow_up", label: t("ipd.dispositionFollowUp") },
           ] as const
         ).map((item) => {
           const isSelected = dispositionType === item.key;
@@ -173,15 +171,13 @@ export function ClinicalDispositionPanel({
         >
           {/* Priority selector */}
           <Box>
-            <Typography sx={{ fontSize: "0.8125rem", fontWeight: 600, mb: 1 }}>
-              Admission Priority
-            </Typography>
+            <Typography sx={{ fontSize: "0.8125rem", fontWeight: 600, mb: 1 }}>{t("ipd.admissionPriority")}</Typography>
             <Stack direction="row" spacing={1}>
               {(
                 [
-                  { key: "routine", label: "Routine", color: "#3b82f6" },
-                  { key: "urgent", label: "Urgent", color: "#f59e0b" },
-                  { key: "emergency", label: "Emergency / STAT", color: "#ef4444" },
+                  { key: "routine", label: t("ipd.priorityRoutine"), color: "#3b82f6" },
+                  { key: "urgent", label: t("ipd.priorityUrgent"), color: "#f59e0b" },
+                  { key: "emergency", label: t("ipd.priorityEmergency"), color: "#ef4444" },
                 ] as const
               ).map((p) => {
                 const isSelected = priority === p.key;
@@ -212,17 +208,17 @@ export function ClinicalDispositionPanel({
             select
             fullWidth
             size="small"
-            label="Recommended Ward"
+            label={t("ipd.recommendedWard")}
             value={recommendedWardId}
             onChange={(e) => setRecommendedWardId(e.target.value)}
-            helperText={loadingWards ? "Loading available wards..." : "Select the target nursing unit / ward"}
+            helperText={loadingWards ? t("ipd.loadingWards") : t("ipd.selectWardHelper")}
           >
             <MenuItem value="">
-              <em>-- Unassigned / Any Available Ward --</em>
+              <em>{t("ipd.unassignedWard")}</em>
             </MenuItem>
             {wards.map((ward) => (
               <MenuItem key={ward.id} value={ward.id}>
-                {ward.name}
+                {localizeField(ward.name, ward.name_hi)}
               </MenuItem>
             ))}
           </TextField>
@@ -231,7 +227,7 @@ export function ClinicalDispositionPanel({
           <TextField
             fullWidth
             size="small"
-            label="Admission Indication / Primary Reason"
+            label={t("ipd.admissionIndication")}
             placeholder="e.g. Acute severe asthma exacerbation; requires oxygen therapy and nebulization"
             value={reason}
             onChange={(e) => setReason(e.target.value)}
@@ -243,7 +239,7 @@ export function ClinicalDispositionPanel({
             multiline
             rows={2}
             size="small"
-            label="Clinical Handover Notes for Inpatient Nursing"
+            label={t("ipd.handoverNotesInpatient")}
             placeholder="e.g. Strict intake/output monitoring, fall precautions, check vitals q2h"
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
@@ -267,7 +263,7 @@ export function ClinicalDispositionPanel({
           <TextField
             fullWidth
             size="small"
-            label="Clinical Justification / Instructions"
+            label={t("ipd.clinicalJustification")}
             placeholder="e.g. Patient improved; continue oral medication and review in OPD after 7 days"
             value={reason}
             onChange={(e) => setReason(e.target.value)}
@@ -277,7 +273,7 @@ export function ClinicalDispositionPanel({
             multiline
             rows={2}
             size="small"
-            label="Additional Disposition Notes"
+            label={t("ipd.additionalDispositionNotes")}
             placeholder="e.g. Red flag symptoms discussed with patient and attendant"
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
@@ -293,7 +289,7 @@ export function ClinicalDispositionPanel({
           onClick={handleSubmit}
           sx={{ ...doctorButtonSx, minWidth: "160px" }}
         >
-          {saving ? "Recording..." : "Record Disposition"}
+          {saving ? t("ipd.recordingDisposition") : t("ipd.recordDisposition")}
         </Button>
       </Stack>
     </Box>

@@ -204,6 +204,8 @@ do not merge out of order.**
 | 0083 | abha_profile_token | ALTER patients: abha_profile_token_encrypted, abha_profile_token_key_version | Enrolment/login profile X-token, stored apart from the HIP linking token. Both-or-neither CHECK. No backfill. |
 | 0084 | program_review_interval | ALTER care_programs: review_interval_days | Optional first-review interval. Null schedules nothing; there is no 30-day default. |
 | 0085 | abha_profile_token_kind | ALTER patients: abha_profile_token_kind | Which login family issued the profile X-token: `abha` opens /v3/profile/account, `phr` opens /v3/phr/web/login/profile. Default `abha` is the true value for every earlier token. |
+| 0086 | catalogue_hindi_labels | ALTER facilities: name_hi; ALTER departments: name_hi; ALTER wards: name_hi; ALTER charge_master: description_hi | Optional Hindi catalogue labels; English remains the fallback. Widens the existing profile-token kind to varchar(50) for local schema parity. |
+| 0087 | appointment_service_hindi | ALTER appointment_services: name_hi | Optional Hindi appointment-service label; English remains the fallback. |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -300,6 +302,7 @@ version embeds it as an image.*
 ```
 code            varchar(20) UNIQUE NOT NULL      -- e.g. JPR001, used inside UHID
 name            text NOT NULL
+name_hi         text NULL                       -- optional Hindi label; 0086, English fallback
 state_code      varchar(5) NOT NULL              -- e.g. RJ
 district        text
 facility_type   varchar(50)                      -- phc | chc | district_hospital | medical_college
@@ -499,6 +502,7 @@ notification_channel varchar(50)
 **departments**
 ```
 name        text NOT NULL
+name_hi     text NULL                            -- optional Hindi label; 0086, English fallback
 code        varchar(20) NOT NULL                 -- used in token numbers, e.g. MED
 facility_id UUID NOT NULL → facilities
 is_active   boolean NOT NULL DEFAULT true
@@ -1138,7 +1142,7 @@ UNIQUE (facility_id, counter_type, counter_date)`; allocate with
 
 ### 0015 — wards, beds, admissions, discharges (B3)
 
-**wards** — `name text NOT NULL · department_id UUID NULL → departments · facility_id UUID NOT NULL → facilities · is_active bool`
+**wards** — `name text NOT NULL · name_hi text NULL · department_id UUID NULL → departments · facility_id UUID NOT NULL → facilities · is_active bool`
 **beds** — `ward_id UUID NOT NULL → wards · bed_number varchar(20) NOT NULL · status varchar(30) DEFAULT 'vacant' (BedStatus) · UNIQUE (ward_id, bed_number)`
 
 **admissions** `[Blame]` — (Aditya: no ward/room/bed varchars — real FKs)
@@ -1776,6 +1780,7 @@ or certification evidence by itself. See `abdm-callback-diagnostics-2026-09-14.m
 facility_id UUID NOT NULL REFERENCES facilities(id)
 department_id UUID NULL REFERENCES departments(id)
 name varchar(100) NOT NULL
+name_hi text NULL                                -- optional Hindi label; 0087, English fallback
 duration_minutes integer NOT NULL DEFAULT 15
 is_active boolean NOT NULL DEFAULT true
 description text NULL
@@ -2404,6 +2409,7 @@ enforced, making an overcharge a compliance breach rather than a pricing mistake
 facility_id     UUID NOT NULL → facilities
 charge_code     varchar(30) NOT NULL             -- stable across price changes
 description     text NOT NULL
+description_hi  text NULL                       -- optional Hindi label; 0086, English fallback
 charge_category varchar(50) NOT NULL             -- ChargeCategory enum (same as invoice_items)
 unit_price      numeric(12,2) NOT NULL CHECK (>= 0)
 scheme_code     varchar(30) NULL                 -- NULL = general tariff; 'PMJAY' = scheme rate

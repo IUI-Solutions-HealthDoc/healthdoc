@@ -17,6 +17,7 @@ import { AdmissionFormProps } from "./AdmissionForm.types";
 import { DEFAULT_VALUES } from "./constants";
 import { addAdmissionSchema, AddAdmissionSchema } from "./validation";
 import { getPendingAdmissions, type PendingAdmissionItem } from "@/features/ipd/api/ipd";
+import { useLocale } from "@/lib/i18n";
 
 export default function AdmissionForm({
   wards,
@@ -24,6 +25,7 @@ export default function AdmissionForm({
   isSubmitting = false,
   onSubmit,
 }: AdmissionFormProps) {
+  const { t, localizeField } = useLocale();
   const {
     register,
     handleSubmit,
@@ -89,18 +91,15 @@ export default function AdmissionForm({
   };
 
   return (
-    <FormSection
-      title="Admit Patient"
-      description="Create a new IPD admission for this patient."
-    >
+    <FormSection title={t("ipd.admitFormTitle")} description={t("ipd.admitFormDescription")}>
       {/* HD-14: 1-Click Admit from Doctor Ordered Disposition Queue */}
       {pendingList.length > 0 && (
         <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50/60 p-4">
           <div className="flex items-center justify-between mb-3">
             <h4 className="text-sm font-bold text-blue-950">
-              Quick Admit from &ldquo;To Admit&rdquo; Queue ({pendingList.length} waiting)
+              {t("ipd.quickAdmitQueue", { count: pendingList.length })}
             </h4>
-            <span className="text-xs text-blue-700">Click to auto-fill details</span>
+            <span className="text-xs text-blue-700">{t("ipd.clickAutofill")}</span>
           </div>
           <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
             {pendingList.map((item) => {
@@ -158,16 +157,19 @@ export default function AdmissionForm({
       <form onSubmit={handleSubmit(submitHandler)} className="space-y-6">
         <div className="grid gap-5 md:grid-cols-2">
           <TextField
-            label="Visit ID"
-            placeholder="Select from queue above or paste Visit UUID"
+            label={t("ipd.visitId")}
+            placeholder={t("ipd.visitIdPlaceholder")}
             registration={register("visit_id")}
             error={errors.visit_id}
           />
 
 
           <SelectField
-            label="Ward"
-            options={wards.map((ward) => ({ label: ward.name, value: ward.id }))}
+            label={t("ipd.ward")}
+            options={wards.map((ward) => ({
+              label: localizeField(ward.name, ward.name_hi),
+              value: ward.id,
+            }))}
             registration={register("ward_id", {
               onChange: () => setValue("bed_id", ""),
             })}
@@ -175,19 +177,17 @@ export default function AdmissionForm({
           />
 
           <DateTimeField
-            label="Admitted At"
+            label={t("ipd.admittedAt")}
             registration={register("admitted_at")}
             error={errors.admitted_at}
           />
         </div>
 
         <div>
-          <p className="mb-2 text-sm font-semibold">Bed</p>
+          <p className="mb-2 text-sm font-semibold">{t("ipd.bed")}</p>
 
           {!wardId ? (
-            <p className="text-sm text-muted-foreground">
-              Select a ward first.
-            </p>
+            <p className="text-sm text-muted-foreground">{t("ipd.selectWardFirst")}</p>
           ) : (
             <BedGrid
               beds={vacantBedsInWard}
@@ -202,8 +202,8 @@ export default function AdmissionForm({
         </div>
 
         <TextAreaField
-          label="Reason for Admission (optional)"
-          placeholder="Enter reason for admission..."
+          label={t("ipd.reasonAdmissionOptional")}
+          placeholder={t("ipd.reasonAdmissionPlaceholder")}
           rows={3}
           registration={register("reason")}
           error={errors.reason}
@@ -211,8 +211,8 @@ export default function AdmissionForm({
 
         <FormActions
           isSubmitting={isSubmitting}
-          submitLabel="Admit Patient"
-          resetLabel="Reset"
+          submitLabel={t("ipd.admitPatient")}
+          resetLabel={t("common.reset")}
           onReset={handleReset}
         />
       </form>

@@ -32,6 +32,7 @@ class AppointmentService(Base, UUIDPk, Timestamps):
         UUID(as_uuid=True), ForeignKey("departments.id", ondelete="RESTRICT"), nullable=True
     )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
+    name_hi: Mapped[str | None] = mapped_column(Text, nullable=True)
     duration_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=15)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)

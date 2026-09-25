@@ -29,79 +29,94 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-import { REALM_ROLE_LABELS } from "@/features/admin/constants";
 import { ROLES, type Role } from "@/config/roles";
 import { canRoleAccessPath } from "@/lib/auth/routes";
+import { useLocale, type MessageKey } from "@/lib/i18n";
 import { useAuth } from "@/providers/auth-provider";
 import { HealthDocBrand } from "./HealthDocBrand";
 
+type NavArea = "front_desk" | "clinical" | "diagnostics" | "finance" | "audit" | "admin" | "platform" | "patient";
+
 type NavItem = {
   href: string;
-  label: string;
+  labelKey: MessageKey;
   icon: LucideIcon;
-  area: "front_desk" | "clinical" | "diagnostics" | "finance" | "audit" | "admin" | "platform" | "patient";
+  area: NavArea;
   roles: readonly Role[];
 };
 
-const NAV_ITEMS: readonly NavItem[] = [
-  { href: "/superadmin", label: "Facilities", icon: Building2, area: "platform", roles: [ROLES.SUPERADMIN] },
-  // Head of department. Eight endpoints existed for this role with no route and
-  // no nav entry, so an HOD logged in and had nowhere to go.
-  { href: "/hod", label: "Department dashboard", icon: LayoutDashboard, area: "clinical", roles: [ROLES.HOD] },
-  { href: "/receptionist/registration", label: "Registration", icon: UserRound, area: "front_desk", roles: [ROLES.RECEPTIONIST] },
-  { href: "/receptionist/appointments", label: "Appointments", icon: Calendar, area: "front_desk", roles: [ROLES.RECEPTIONIST] },
-  { href: "/receptionist/patient-search", label: "Patient search", icon: Search, area: "front_desk", roles: [ROLES.RECEPTIONIST] },
-  { href: "/receptionist/queue", label: "Queue", icon: Users, area: "front_desk", roles: [ROLES.RECEPTIONIST] },
-  { href: "/doctor/dashboard", label: "Doctor queue", icon: Stethoscope, area: "clinical", roles: [ROLES.DOCTOR] },
-  { href: "/doctor/consultation", label: "Consultation", icon: ClipboardList, area: "clinical", roles: [ROLES.DOCTOR] },
-  { href: "/doctor/orders", label: "Orders", icon: FlaskConical, area: "clinical", roles: [ROLES.DOCTOR] },
-  { href: "/doctor/prescriptions", label: "Prescriptions", icon: Pill, area: "clinical", roles: [ROLES.DOCTOR] },
-  { href: "/doctor/results", label: "Results", icon: FileText, area: "clinical", roles: [ROLES.DOCTOR] },
-  { href: "/doctor/abdm", label: "ABDM external records", icon: FileText, area: "clinical", roles: [ROLES.DOCTOR] },
-  { href: "/doctor/pharmacy-approvals", label: "Pharmacy approvals", icon: Pill, area: "clinical", roles: [ROLES.DOCTOR] },
-  { href: "/nurse/ward-dashboard", label: "Ward dashboard", icon: Bed, area: "clinical", roles: [ROLES.NURSE] },
-  { href: "/nurse/emar", label: "eMAR", icon: ClipboardList, area: "clinical", roles: [ROLES.NURSE] },
-  { href: "/ipd", label: "IPD", icon: Building2, area: "clinical", roles: [ROLES.DOCTOR, ROLES.NURSE] },
-  { href: "/emergency", label: "Emergency", icon: Stethoscope, area: "clinical", roles: [ROLES.EMERGENCY] },
-  { href: "/supervisor/merges", label: "Identity merges", icon: Shield, area: "audit", roles: [ROLES.SUPERVISOR] },
-  { href: "/consent", label: "Consent", icon: FileText, area: "clinical", roles: [ROLES.RECEPTIONIST, ROLES.DOCTOR, ROLES.NURSE] },
-  { href: "/immunization", label: "Immunization", icon: Syringe, area: "clinical", roles: [ROLES.DOCTOR, ROLES.NURSE, ROLES.ADMIN] },
-  { href: "/forms", label: "Clinical Forms", icon: FileText, area: "clinical", roles: [ROLES.DOCTOR, ROLES.NURSE, ROLES.ADMIN] },
-  { href: "/lab", label: "Laboratory", icon: FlaskConical, area: "diagnostics", roles: [ROLES.LAB_TECH, ROLES.DOCTOR] },
-  { href: "/blood-bank", label: "Blood Bank", icon: Droplets, area: "diagnostics", roles: [ROLES.LAB_TECH, ROLES.DOCTOR, ROLES.ADMIN] },
-  { href: "/radiology", label: "Radiology", icon: Radio, area: "diagnostics", roles: [ROLES.RADIOLOGY_TECH, ROLES.DOCTOR] },
-  { href: "/pharmacy/prescription-queue", label: "Pharmacy queue", icon: Pill, area: "clinical", roles: [ROLES.PHARMACIST] },
-  { href: "/pharmacy/dispense", label: "Dispense", icon: Package, area: "clinical", roles: [ROLES.PHARMACIST] },
-  { href: "/pharmacy/returns", label: "Medicine returns", icon: RotateCcw, area: "clinical", roles: [ROLES.PHARMACIST] },
-  { href: "/inventory", label: "Inventory", icon: Package, area: "clinical", roles: [ROLES.PHARMACIST, ROLES.HOD] },
-  { href: "/billing", label: "Billing", icon: Receipt, area: "finance", roles: [ROLES.BILLING, ROLES.ADMIN] },
-  { href: "/billing/tariffs", label: "Tariff catalogue", icon: Receipt, area: "finance", roles: [ROLES.BILLING, ROLES.ADMIN] },
-  { href: "/reports", label: "Reports", icon: BarChart3, area: "finance", roles: [ROLES.SUPERVISOR, ROLES.BILLING, ROLES.ADMIN, ROLES.AUDITOR] },
-  { href: "/audit-viewer", label: "Audit trail", icon: Shield, area: "audit", roles: [ROLES.ADMIN, ROLES.AUDITOR] },
-  { href: "/patient-portal", label: "My health record", icon: UserRound, area: "patient", roles: [ROLES.PATIENT] },
-  { href: "/admin", label: "Admin overview", icon: LayoutDashboard, area: "admin", roles: [ROLES.ADMIN] },
-  { href: "/admin/users", label: "Users", icon: Users, area: "admin", roles: [ROLES.ADMIN] },
-  { href: "/admin/account-requests", label: "Account requests", icon: UserRound, area: "admin", roles: [ROLES.ADMIN] },
-  { href: "/admin/permissions", label: "Permissions", icon: Shield, area: "admin", roles: [ROLES.ADMIN] },
-  { href: "/admin/departments", label: "Departments & rooms", icon: Building2, area: "admin", roles: [ROLES.ADMIN] },
-  { href: "/admin/abdm-sync", label: "ABDM identity links", icon: Shield, area: "admin", roles: [ROLES.ADMIN] },
-  // DPDP obligations: the named DPO, the grievance register, consent managers.
-  // All three tables shipped in 0022a with nothing able to read or write them.
-  { href: "/admin/data-protection", label: "Data protection", icon: Shield, area: "admin", roles: [ROLES.ADMIN, ROLES.AUDITOR] },
-  { href: "/admin/maintenance", label: "Equipment maintenance", icon: Building2, area: "admin", roles: [ROLES.ADMIN, ROLES.LAB_TECH, ROLES.RADIOLOGY_TECH] },
-  { href: "/admin/integration", label: "Integration & Outbox DLQ", icon: Radio, area: "admin", roles: [ROLES.ADMIN] },
-];
-
-const AREA_LABELS: Record<NavItem["area"], string> = {
-  front_desk: "Front desk",
-  clinical: "Clinical",
-  diagnostics: "Diagnostics",
-  finance: "Finance / MIS",
-  audit: "Audit",
-  admin: "Facility admin",
-  platform: "Platform admin",
-  patient: "Patient portal",
+const AREA_KEYS: Record<NavArea, MessageKey> = {
+  front_desk: "area.front_desk",
+  clinical: "area.clinical",
+  diagnostics: "area.diagnostics",
+  finance: "area.finance",
+  audit: "area.audit",
+  admin: "area.admin",
+  platform: "area.platform",
+  patient: "area.patient",
 };
+
+const ROLE_KEYS: Partial<Record<Role, MessageKey>> = {
+  [ROLES.RECEPTIONIST]: "role.receptionist",
+  [ROLES.DOCTOR]: "role.doctor",
+  [ROLES.NURSE]: "role.nurse",
+  [ROLES.LAB_TECH]: "role.lab_tech",
+  [ROLES.RADIOLOGY_TECH]: "role.radiology_tech",
+  [ROLES.PHARMACIST]: "role.pharmacist",
+  [ROLES.EMERGENCY]: "role.emergency",
+  [ROLES.SUPERVISOR]: "role.supervisor",
+  [ROLES.BILLING]: "role.billing",
+  [ROLES.ADMIN]: "role.admin",
+  [ROLES.HOD]: "role.hod",
+  [ROLES.AUDITOR]: "role.auditor",
+  [ROLES.PATIENT]: "role.patient",
+  [ROLES.SUPERADMIN]: "role.superadmin",
+};
+
+const NAV_ITEMS: readonly NavItem[] = [
+  { href: "/superadmin", labelKey: "sidebar.facilities", icon: Building2, area: "platform", roles: [ROLES.SUPERADMIN] },
+  { href: "/hod", labelKey: "sidebar.hodDashboard", icon: LayoutDashboard, area: "clinical", roles: [ROLES.HOD] },
+  { href: "/receptionist/registration", labelKey: "sidebar.registration", icon: UserRound, area: "front_desk", roles: [ROLES.RECEPTIONIST] },
+  { href: "/receptionist/appointments", labelKey: "sidebar.appointments", icon: Calendar, area: "front_desk", roles: [ROLES.RECEPTIONIST] },
+  { href: "/receptionist/patient-search", labelKey: "sidebar.patientSearch", icon: Search, area: "front_desk", roles: [ROLES.RECEPTIONIST] },
+  { href: "/receptionist/queue", labelKey: "sidebar.queue", icon: Users, area: "front_desk", roles: [ROLES.RECEPTIONIST] },
+  { href: "/doctor/dashboard", labelKey: "sidebar.doctorQueue", icon: Stethoscope, area: "clinical", roles: [ROLES.DOCTOR] },
+  { href: "/doctor/consultation", labelKey: "sidebar.consultation", icon: ClipboardList, area: "clinical", roles: [ROLES.DOCTOR] },
+  { href: "/doctor/orders", labelKey: "sidebar.orders", icon: FlaskConical, area: "clinical", roles: [ROLES.DOCTOR] },
+  { href: "/doctor/prescriptions", labelKey: "sidebar.prescriptions", icon: Pill, area: "clinical", roles: [ROLES.DOCTOR] },
+  { href: "/doctor/results", labelKey: "sidebar.results", icon: FileText, area: "clinical", roles: [ROLES.DOCTOR] },
+  { href: "/doctor/abdm", labelKey: "sidebar.abdmRecords", icon: FileText, area: "clinical", roles: [ROLES.DOCTOR] },
+  { href: "/doctor/pharmacy-approvals", labelKey: "sidebar.pharmacyApprovals", icon: Pill, area: "clinical", roles: [ROLES.DOCTOR] },
+  { href: "/nurse/ward-dashboard", labelKey: "sidebar.wardDashboard", icon: Bed, area: "clinical", roles: [ROLES.NURSE] },
+  { href: "/nurse/emar", labelKey: "sidebar.emar", icon: ClipboardList, area: "clinical", roles: [ROLES.NURSE] },
+  { href: "/ipd", labelKey: "sidebar.ipd", icon: Building2, area: "clinical", roles: [ROLES.DOCTOR, ROLES.NURSE] },
+  { href: "/emergency", labelKey: "sidebar.emergency", icon: Stethoscope, area: "clinical", roles: [ROLES.EMERGENCY] },
+  { href: "/supervisor/merges", labelKey: "sidebar.identityMerges", icon: Shield, area: "audit", roles: [ROLES.SUPERVISOR] },
+  { href: "/consent", labelKey: "sidebar.consent", icon: FileText, area: "clinical", roles: [ROLES.RECEPTIONIST, ROLES.DOCTOR, ROLES.NURSE] },
+  { href: "/immunization", labelKey: "sidebar.immunization", icon: Syringe, area: "clinical", roles: [ROLES.DOCTOR, ROLES.NURSE, ROLES.ADMIN] },
+  { href: "/forms", labelKey: "sidebar.clinicalForms", icon: FileText, area: "clinical", roles: [ROLES.DOCTOR, ROLES.NURSE, ROLES.ADMIN] },
+  { href: "/lab", labelKey: "sidebar.laboratory", icon: FlaskConical, area: "diagnostics", roles: [ROLES.LAB_TECH, ROLES.DOCTOR] },
+  { href: "/blood-bank", labelKey: "sidebar.bloodBank", icon: Droplets, area: "diagnostics", roles: [ROLES.LAB_TECH, ROLES.DOCTOR, ROLES.ADMIN] },
+  { href: "/radiology", labelKey: "sidebar.radiology", icon: Radio, area: "diagnostics", roles: [ROLES.RADIOLOGY_TECH, ROLES.DOCTOR] },
+  { href: "/pharmacy/prescription-queue", labelKey: "sidebar.pharmacyQueue", icon: Pill, area: "clinical", roles: [ROLES.PHARMACIST] },
+  { href: "/pharmacy/dispense", labelKey: "sidebar.dispense", icon: Package, area: "clinical", roles: [ROLES.PHARMACIST] },
+  { href: "/pharmacy/returns", labelKey: "sidebar.medicineReturns", icon: RotateCcw, area: "clinical", roles: [ROLES.PHARMACIST] },
+  { href: "/inventory", labelKey: "sidebar.inventory", icon: Package, area: "clinical", roles: [ROLES.PHARMACIST, ROLES.HOD] },
+  { href: "/billing", labelKey: "sidebar.billing", icon: Receipt, area: "finance", roles: [ROLES.BILLING, ROLES.ADMIN] },
+  { href: "/billing/tariffs", labelKey: "sidebar.tariffCatalogue", icon: Receipt, area: "finance", roles: [ROLES.BILLING, ROLES.ADMIN] },
+  { href: "/reports", labelKey: "sidebar.reports", icon: BarChart3, area: "finance", roles: [ROLES.SUPERVISOR, ROLES.BILLING, ROLES.ADMIN, ROLES.AUDITOR] },
+  { href: "/audit-viewer", labelKey: "sidebar.auditTrail", icon: Shield, area: "audit", roles: [ROLES.ADMIN, ROLES.AUDITOR] },
+  { href: "/patient-portal", labelKey: "sidebar.myHealthRecord", icon: UserRound, area: "patient", roles: [ROLES.PATIENT] },
+  { href: "/admin", labelKey: "sidebar.adminOverview", icon: LayoutDashboard, area: "admin", roles: [ROLES.ADMIN] },
+  { href: "/admin/users", labelKey: "sidebar.users", icon: Users, area: "admin", roles: [ROLES.ADMIN] },
+  { href: "/admin/account-requests", labelKey: "sidebar.accountRequests", icon: UserRound, area: "admin", roles: [ROLES.ADMIN] },
+  { href: "/admin/permissions", labelKey: "sidebar.permissions", icon: Shield, area: "admin", roles: [ROLES.ADMIN] },
+  { href: "/admin/departments", labelKey: "sidebar.departmentsRooms", icon: Building2, area: "admin", roles: [ROLES.ADMIN] },
+  { href: "/admin/abdm-sync", labelKey: "sidebar.abdmIdentityLinks", icon: Shield, area: "admin", roles: [ROLES.ADMIN] },
+  { href: "/admin/data-protection", labelKey: "sidebar.dataProtection", icon: Shield, area: "admin", roles: [ROLES.ADMIN, ROLES.AUDITOR] },
+  { href: "/admin/maintenance", labelKey: "sidebar.equipmentMaintenance", icon: Building2, area: "admin", roles: [ROLES.ADMIN, ROLES.LAB_TECH, ROLES.RADIOLOGY_TECH] },
+  { href: "/admin/integration", labelKey: "sidebar.integrationDlq", icon: Radio, area: "admin", roles: [ROLES.ADMIN] },
+];
 
 interface SidebarProps {
   open: boolean;
@@ -112,10 +127,9 @@ export default function Sidebar({ open, setOpen }: SidebarProps) {
   const [query, setQuery] = useState("");
   const pathname = usePathname();
   const { user } = useAuth();
+  const { t } = useLocale();
   const role = user?.role ?? null;
-  const roleLabel = role
-    ? (REALM_ROLE_LABELS[role] ?? role)
-    : "Unassigned";
+  const roleLabel = role && ROLE_KEYS[role] ? t(ROLE_KEYS[role]!) : t("common.unassigned");
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -131,31 +145,30 @@ export default function Sidebar({ open, setOpen }: SidebarProps) {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return NAV_ITEMS.filter(
-      (item) =>
-        Boolean(role && item.roles.includes(role)) &&
-        canRoleAccessPath(role, item.href) &&
-        item.label.toLowerCase().includes(q),
-    );
-  }, [query, role]);
+    return NAV_ITEMS.filter((item) => {
+      if (!(role && item.roles.includes(role) && canRoleAccessPath(role, item.href))) return false;
+      if (!q) return true;
+      return t(item.labelKey).toLowerCase().includes(q);
+    });
+  }, [query, role, t]);
 
   const groups = useMemo(() => {
     const map = new Map<string, typeof filtered>();
     for (const item of filtered) {
-      const key = AREA_LABELS[item.area];
+      const key = t(AREA_KEYS[item.area]);
       const list = map.get(key) ?? [];
       list.push(item);
       map.set(key, list);
     }
     return [...map.entries()];
-  }, [filtered]);
+  }, [filtered, t]);
 
   return (
     <>
       {open && (
         <button
           type="button"
-          aria-label="Close navigation menu"
+          aria-label={t("sidebar.closeNav")}
           onClick={() => setOpen(false)}
           className="fixed inset-x-0 bottom-0 top-16 z-30 bg-black/40 md:hidden"
         />
@@ -163,7 +176,7 @@ export default function Sidebar({ open, setOpen }: SidebarProps) {
 
       <aside
         id="workspace-sidebar"
-        aria-label="Workspace navigation"
+        aria-label={t("sidebar.workspaceNav")}
         aria-hidden={!open}
         inert={!open}
         className={`fixed top-16 left-0 z-40 h-[calc(100vh-64px)] w-[260px] bg-card border-r border-border/80 shadow-md overflow-y-auto transition-transform duration-300 ease-in-out p-4 ${
@@ -178,7 +191,7 @@ export default function Sidebar({ open, setOpen }: SidebarProps) {
               nameClassName="text-base font-bold text-foreground"
             />
             <p className="text-[11px] font-medium text-foreground/80 mt-0.5">
-              Role: <span className="text-foreground font-semibold">{roleLabel}</span>
+              {t("common.role")}: <span className="text-foreground font-semibold">{roleLabel}</span>
             </p>
           </div>
 
@@ -186,7 +199,7 @@ export default function Sidebar({ open, setOpen }: SidebarProps) {
             onClick={() => setOpen(false)}
             className="flex h-8 w-8 items-center justify-center rounded-lg text-foreground/70 hover:bg-muted hover:text-foreground transition"
             type="button"
-            aria-label="Close sidebar"
+            aria-label={t("sidebar.closeSidebar")}
           >
             <X size={18} />
           </button>
@@ -201,14 +214,14 @@ export default function Sidebar({ open, setOpen }: SidebarProps) {
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search modules…"
+            placeholder={t("sidebar.searchModules")}
             className="w-full h-10 rounded-lg border border-border/80 bg-muted/40 pl-10 pr-3 text-xs font-medium outline-none focus:border-primary focus:bg-card focus:ring-2 focus:ring-primary/20 transition"
           />
         </div>
 
         <nav aria-label="HealthDoc modules" className="space-y-4">
           {groups.length === 0 ? (
-            <p className="px-2 text-xs text-foreground/70">No screens available for this role.</p>
+            <p className="px-2 text-xs text-foreground/70">{t("sidebar.noScreens")}</p>
           ) : (
             groups.map(([group, items]) => (
               <div key={group} className="space-y-1">
@@ -245,9 +258,7 @@ export default function Sidebar({ open, setOpen }: SidebarProps) {
                                 : "text-muted-foreground group-hover:text-primary"
                             }`}
                           />
-                          <span className="truncate">
-                            {item.label}
-                          </span>
+                          <span className="truncate">{t(item.labelKey)}</span>
                         </div>
                         <ChevronRight
                           size={14}

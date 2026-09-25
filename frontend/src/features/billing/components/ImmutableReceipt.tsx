@@ -6,7 +6,8 @@ import Typography from "@mui/material/Typography";
 
 import { meridian } from "@/styles/theme";
 import { useCurrentUser } from "@/features/session/useCurrentUser";
-import { PAYMENT_MODE_LABELS } from "../constants";
+import { useLocale } from "@/lib/i18n";
+import { paymentModeLabel } from "../lib/labels";
 import { formatINR } from "../lib/formatters";
 import type { InvoiceWithItems, PaymentWithRefunds } from "../types";
 import { PaymentStatusChip } from "./PaymentStatusChip";
@@ -34,6 +35,7 @@ export function ImmutableReceipt({ payment, invoice }: Props) {
   // missing one, so it renders nothing rather than a placeholder while the
   // session loads.
   const { user: currentUser } = useCurrentUser();
+  const { localizeField, t } = useLocale();
 
   return (
     <Box
@@ -47,31 +49,31 @@ export function ImmutableReceipt({ payment, invoice }: Props) {
       <Stack direction="row" sx={{ justifyContent: "space-between", mb: 2, gap: 2 }}>
         <Box>
           <Typography sx={{ m: 0, fontSize: "1.0625rem", fontWeight: 700, color: meridian.textPrimary }}>
-            Receipt (immutable)
+            {t("billing.receipt.immutableTitle")}
           </Typography>
           <Typography sx={{ m: 0, mt: 0.35, fontSize: "0.75rem", color: meridian.textSecondary }}>
-            Financial fields cannot be edited after collection
+            {t("billing.receipt.immutableHint")}
           </Typography>
         </Box>
         <PaymentStatusChip status={payment.status} />
       </Stack>
 
       <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary, mb: 1.5 }}>
-        {currentUser?.facility.name ?? ""}
+        {localizeField(currentUser?.facility.name ?? "", currentUser?.facility.name_hi)}
       </Typography>
 
-      <Row label="Receipt #" value={payment.receipt_number} />
-      <Row label="Invoice #" value={invoice.invoice_number} />
+      <Row label={t("billing.receipt.receiptNo")} value={payment.receipt_number} />
+      <Row label={t("billing.receipt.invoiceNo")} value={invoice.invoice_number} />
       <Row
-        label="Patient"
+        label={t("billing.receipt.patient")}
         value={`${invoice.patient?.full_name ?? invoice.patient_id} (${invoice.patient?.uhid ?? "—"})`}
       />
-      <Row label="Amount" value={formatINR(payment.amount)} />
-      <Row label="Currency" value={payment.currency} />
-      <Row label="Mode" value={PAYMENT_MODE_LABELS[payment.mode]} />
-      <Row label="Collected by" value={payment.collected_by} />
+      <Row label={t("billing.receipt.amount")} value={formatINR(payment.amount)} />
+      <Row label={t("billing.receipt.currency")} value={payment.currency} />
+      <Row label={t("billing.receipt.mode")} value={paymentModeLabel(t, payment.mode)} />
+      <Row label={t("billing.receipt.collectedBy")} value={payment.collected_by} />
       <Row
-        label="Collected at"
+        label={t("billing.receipt.collectedAt")}
         value={new Intl.DateTimeFormat("en-IN", {
           dateStyle: "medium",
           timeStyle: "short",
@@ -80,7 +82,7 @@ export function ImmutableReceipt({ payment, invoice }: Props) {
 
       {payment.refunds.length > 0 ? (
         <Box sx={{ mt: 2, pt: 1.5, borderTop: `1px solid ${meridian.border}` }}>
-          <Typography sx={{ fontSize: "0.8125rem", fontWeight: 700, mb: 1 }}>Refunds</Typography>
+          <Typography sx={{ fontSize: "0.8125rem", fontWeight: 700, mb: 1 }}>{t("billing.receipt.refunds")}</Typography>
           {payment.refunds.map((r) => (
             <Typography key={r.id} sx={{ fontSize: "0.75rem", color: meridian.textSecondary, mb: 0.5 }}>
               {r.refund_number} · {formatINR(r.amount)} · {r.reason}

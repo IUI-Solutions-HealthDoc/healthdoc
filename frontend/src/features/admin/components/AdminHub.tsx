@@ -6,60 +6,61 @@ import Typography from "@mui/material/Typography";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import Link from "next/link";
 
+import { useLocale, type MessageKey } from "@/lib/i18n";
 import { meridian } from "@/styles/theme";
 import { adminPanelSx } from "../panelSx";
 import { AdminPageHeader } from "./AdminPageHeader";
 
-const LINKS = [
+const LINKS: { href: string; titleKey: MessageKey; subtitleKey: MessageKey }[] = [
   {
     href: "/admin/users",
-    title: "Users",
-    subtitle: "Create staff accounts and manage active access",
+    titleKey: "admin.hub.usersTitle",
+    subtitleKey: "admin.hub.usersSubtitle",
   },
   {
     href: "/admin/account-requests",
-    title: "Account requests",
-    subtitle: "Review staff account requests with two-person approval",
+    titleKey: "admin.hub.accountRequestsTitle",
+    subtitleKey: "admin.hub.accountRequestsSubtitle",
   },
   {
     href: "/admin/permissions",
-    title: "Permissions",
-    subtitle: "Manage facility modules and role access",
+    titleKey: "admin.hub.permissionsTitle",
+    subtitleKey: "admin.hub.permissionsSubtitle",
   },
   {
     href: "/admin/departments",
-    title: "Departments & rooms",
-    subtitle: "Facility departments, active status and room configuration",
+    titleKey: "admin.hub.departmentsTitle",
+    subtitleKey: "admin.hub.departmentsSubtitle",
   },
   {
     href: "/admin/abdm-sync",
-    title: "ABDM identity links",
-    subtitle: "Inspect and unlink verified ABHA records",
+    titleKey: "admin.hub.abdmTitle",
+    subtitleKey: "admin.hub.abdmSubtitle",
   },
   {
     href: "/admin/data-protection",
-    title: "Data protection",
-    subtitle: "DPO, grievances and consent-manager governance",
+    titleKey: "admin.hub.dataProtectionTitle",
+    subtitleKey: "admin.hub.dataProtectionSubtitle",
   },
   {
     href: "/admin/maintenance",
-    title: "Equipment maintenance",
-    subtitle: "Machine service and maintenance register",
+    titleKey: "admin.hub.maintenanceTitle",
+    subtitleKey: "admin.hub.maintenanceSubtitle",
   },
   {
     href: "/audit-viewer",
-    title: "Audit trail",
-    subtitle: "Review facility activity and integrity records",
+    titleKey: "admin.hub.auditTitle",
+    subtitleKey: "admin.hub.auditSubtitle",
   },
-] as const;
+];
 
 export function AdminHub() {
+  const { t } = useLocale();
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
       <AdminPageHeader
-        eyebrow="Governance"
-        title="Admin"
-        subtitle="Manage staff accounts, facility access, departments, and governance."
+        eyebrow={t("admin.hub.eyebrow")}
+        title={t("admin.overviewTitle")}
       />
 
       <Stack spacing={1.5}>
@@ -99,12 +100,12 @@ export function AdminHub() {
               <Typography
                 sx={{ m: 0, fontSize: "1.0625rem", fontWeight: 700, color: meridian.textPrimary }}
               >
-                {item.title}
+                {t(item.titleKey)}
               </Typography>
               <Typography
                 sx={{ m: 0, mt: 0.5, fontSize: "0.8125rem", color: meridian.textSecondary }}
               >
-                {item.subtitle}
+                {t(item.subtitleKey)}
               </Typography>
             </Box>
             <ChevronRightIcon sx={{ color: meridian.textSecondary, flexShrink: 0 }} />

@@ -8,6 +8,7 @@ import {
 } from "@/features/patientPortal/api";
 import { ReleasedDocumentsTab } from "@/features/patientPortal/components/ReleasedDocumentsTab";
 import { ApiError, formatDateTime } from "@/lib/api";
+import { useLocale } from "@/lib/i18n";
 
 type ViewState =
   | { status: "loading" }
@@ -15,32 +16,25 @@ type ViewState =
   | { status: "error"; message: string }
   | { status: "ready"; data: PortalDashboard };
 
-const verificationLabels = {
-  abha_otp: "ABHA OTP",
-  in_person_document: "In-person document check",
-};
-
 function humanise(value: string | null): string {
   return value ? value.replaceAll("_", " ") : "—";
 }
 
 function UnboundPortal() {
+  const { t } = useLocale();
   return (
     <section className="surface-card space-y-3 p-5">
-      <h2 className="text-lg font-medium">Identity verification required</h2>
-      <p className="text-sm text-muted-foreground">
-        A portal role alone cannot prove which patient you are. HealthDoc will not ask for a
-        patient ID or let this account browse facility records.
-      </p>
-      <p className="text-sm text-muted-foreground">
-        Ask registration to activate the portal after an ABHA OTP or approved in-person identity
-        check. Until then, no patient data is requested or displayed.
-      </p>
+      <h2 className="text-lg font-medium">{t("patientPortal.unboundTitle")}</h2>
+      <p className="text-sm text-muted-foreground">{t("patientPortal.unboundBody1")}</p>
+      <p className="text-sm text-muted-foreground">{t("patientPortal.unboundBody2")}</p>
     </section>
   );
 }
 
 export default function Page() {
+  const { t } = useLocale();
+  const verificationLabel = (method: "abha_otp" | "in_person_document") =>
+    method === "abha_otp" ? t("patientPortal.verify.abhaOtp") : t("patientPortal.verify.inPerson");
   const [view, setView] = useState<ViewState>({ status: "loading" });
   const [activeTab, setActiveTab] = useState<"documents" | "permissions" | "identity">("documents");
   const [historyPage, setHistoryPage] = useState(1);
@@ -65,7 +59,7 @@ export default function Page() {
       }
       setView({
         status: "error",
-        message: error instanceof Error ? error.message : "Patient portal could not be loaded",
+        message: error instanceof Error ? error.message : t("patientPortal.errLoad"),
       });
     }
   }, []);
@@ -86,24 +80,21 @@ export default function Page() {
     <main id="main-content" className="mx-auto max-w-6xl space-y-6 p-6">
       <header role="banner" className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p className="text-sm font-medium uppercase tracking-wide text-primary">Patient portal</p>
-          <h1 className="mt-2 text-3xl font-semibold">My health-data permissions</h1>
-          <p className="mt-2 text-muted-foreground">
-            Access released clinical documents, download printable reports, manage ABHA identity, and review data access history.
-          </p>
+          <p className="text-sm font-medium uppercase tracking-wide text-primary">{t("area.patient")}</p>
+          <h1 className="mt-2 text-3xl font-semibold">{t("patientPortal.title")}</h1>
         </div>
         <button type="button" className="rounded-md border border-border px-4 py-2 text-sm" onClick={() => void load()}>
-          Refresh
+          {t("common.refresh")}
         </button>
       </header>
 
       {view.status === "loading" ? (
-        <p role="status" className="surface-card p-5 text-sm text-muted-foreground">Loading your verified record…</p>
+        <p role="status" className="surface-card p-5 text-sm text-muted-foreground">{t("patientPortal.loadingRecord")}</p>
       ) : null}
       {view.status === "unbound" ? <UnboundPortal /> : null}
       {view.status === "error" ? (
         <div role="alert" className="rounded-md border border-danger/30 bg-danger-muted p-5 text-danger">
-          <p className="font-medium">Portal unavailable</p>
+          <p className="font-medium">{t("patientPortal.unavailableTitle")}</p>
           <p className="mt-1 text-sm">{view.message}</p>
         </div>
       ) : null}
@@ -111,7 +102,7 @@ export default function Page() {
       {view.status === "ready" ? (
         <>
           {/* Navigation Tab Bar (ARIA compliant) */}
-          <div role="tablist" aria-label="Portal section tabs" className="flex border-b border-border">
+          <div role="tablist" aria-label={t("patientPortal.tabListAria")} className="flex border-b border-border">
             <button
               id="portal-tab-documents"
               role="tab"
@@ -125,7 +116,7 @@ export default function Page() {
                   : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
-              My Clinical Documents
+              {t("patientPortal.tab.documents")}
             </button>
             <button
               id="portal-tab-permissions"
@@ -140,7 +131,7 @@ export default function Page() {
                   : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
-              Consent & Access History
+              {t("patientPortal.tab.permissions")}
             </button>
             <button
               id="portal-tab-identity"
@@ -155,7 +146,7 @@ export default function Page() {
                   : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
-              ABHA & Identity
+              {t("patientPortal.tab.identity")}
             </button>
           </div>
 
@@ -182,7 +173,7 @@ export default function Page() {
                 <article className="surface-card p-5">
                   <p className="text-sm text-muted-foreground">Portal identity verified by</p>
                   <p className="mt-2 text-xl font-semibold">
-                    {verificationLabels[view.data.binding.verification_method]}
+                    {verificationLabel(view.data.binding.verification_method)}
                   </p>
                   <p className="mt-2 text-sm text-muted-foreground">
                     Verified {formatDateTime(view.data.binding.verified_at)}
@@ -208,7 +199,7 @@ export default function Page() {
             <article className="surface-card p-5">
               <p className="text-sm text-muted-foreground">Portal identity verified by</p>
               <p className="mt-2 text-xl font-semibold">
-                {verificationLabels[view.data.binding.verification_method]}
+                {verificationLabel(view.data.binding.verification_method)}
               </p>
               <p className="mt-2 text-sm text-muted-foreground">
                 Verified {formatDateTime(view.data.binding.verified_at)}

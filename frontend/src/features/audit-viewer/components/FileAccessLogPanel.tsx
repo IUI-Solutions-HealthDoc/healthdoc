@@ -9,6 +9,7 @@ import Typography from "@mui/material/Typography";
 
 import { DataTable, type DataTableColumn } from "@/components/tables/DataTable";
 import { StatusChip } from "@/components/ui/StatusChip";
+import { useLocale } from "@/lib/i18n";
 import { meridian } from "@/styles/theme";
 import { FILE_ACCESS_ACTION_LABELS } from "../constants";
 import { formatDateTime } from "../lib/formatters";
@@ -31,6 +32,7 @@ export function FileAccessLogPanel({
   onQueryChange,
   onActionChange,
 }: Props) {
+  const { t } = useLocale();
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
 
@@ -91,7 +93,7 @@ export function FileAccessLogPanel({
       <Stack direction={{ xs: "column", sm: "row" }} spacing={1.25} sx={{ px: 2.5, pb: 2 }}>
         <TextField
           size="small"
-          placeholder="Search file, user…"
+          placeholder={t("audit.fileAccess.searchPlaceholder")}
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}
           fullWidth
@@ -118,7 +120,7 @@ export function FileAccessLogPanel({
         rows={paginatedRows}
         getRowId={(r) => r.id}
         loading={loading}
-        emptyMessage="No file access events."
+        emptyMessage={t("audit.fileAccess.empty")}
         page={page}
         rowsPerPage={rowsPerPage}
         totalCount={rows.length}

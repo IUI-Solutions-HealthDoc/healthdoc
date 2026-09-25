@@ -8,6 +8,7 @@ import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 
 import { meridian } from "@/styles/theme";
+import { useLocale, type MessageKey } from "@/lib/i18n";
 import { ENCOUNTER_TYPE_OPTIONS } from "../constants";
 import { formatAgeSex, formatTime } from "../lib/formatters";
 import { doctorPanelSx } from "../panelSx";
@@ -45,6 +46,7 @@ export function EncounterHeaderPanel({
   encounterType,
   onEncounterTypeChange,
 }: EncounterHeaderPanelProps) {
+  const { t, localizeField } = useLocale();
   return (
     <Box sx={{ ...doctorPanelSx, display: "flex", flexDirection: "column", gap: 2 }}>
       <Stack direction="row" spacing={2} sx={{ alignItems: "flex-start", justifyContent: "space-between" }}>
@@ -57,24 +59,27 @@ export function EncounterHeaderPanel({
         <TextField
           select
           size="small"
-          label="Encounter type"
+          label={t("doctor.encounterType")}
           value={encounterType}
           onChange={(e) => onEncounterTypeChange(e.target.value as EncounterType)}
           sx={{ minWidth: 190 }}
         >
           {ENCOUNTER_TYPE_OPTIONS.map((o) => (
             <MenuItem key={o.value} value={o.value}>
-              {o.label}
+              {t(("doctor.encounterType." + o.value) as MessageKey)}
             </MenuItem>
           ))}
         </TextField>
       </Stack>
 
       <Stack direction="row" spacing={4} useFlexGap sx={{ flexWrap: "wrap" }}>
-        <Meta label="Provider" value={context.provider_name} />
-        <Meta label="Department" value={context.department} />
-        <Meta label="Visit ID" value={context.visit_id} />
-        <Meta label="Started at" value={formatTime(startedAt)} />
+        <Meta label={t("common.doctor")} value={context.provider_name} />
+        <Meta
+          label={t("receptionist.department")}
+          value={localizeField(context.department, context.department_hi)}
+        />
+        <Meta label={t("doctor.visitId")} value={context.visit_id} />
+        <Meta label={t("doctor.startedAt")} value={formatTime(startedAt)} />
       </Stack>
     </Box>
   );
