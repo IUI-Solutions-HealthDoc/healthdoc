@@ -127,10 +127,8 @@ const roles = [
     forbiddenPath: "/doctor",
     api: { method: "GET", path: "/api/v1/patient-portal/me/access-history" },
     async startJourney(page) {
-      await page.waitForFunction(
-        () => document.body.textContent?.includes("My health-data permissions"),
-        { timeout: 60_000 },
-      );
+      // The tab ID is the stable UI contract; visible text is localized.
+      await page.waitForSelector("#portal-tab-permissions", { timeout: 60_000 });
     },
   },
 ];

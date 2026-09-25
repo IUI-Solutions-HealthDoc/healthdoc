@@ -302,6 +302,7 @@ version embeds it as an image.*
 ```
 code            varchar(20) UNIQUE NOT NULL      -- e.g. JPR001, used inside UHID
 name            text NOT NULL
+name_hi         text NULL                       -- optional Hindi label; 0086, English fallback
 state_code      varchar(5) NOT NULL              -- e.g. RJ
 district        text
 facility_type   varchar(50)                      -- phc | chc | district_hospital | medical_college
@@ -501,6 +502,7 @@ notification_channel varchar(50)
 **departments**
 ```
 name        text NOT NULL
+name_hi     text NULL                            -- optional Hindi label; 0086, English fallback
 code        varchar(20) NOT NULL                 -- used in token numbers, e.g. MED
 facility_id UUID NOT NULL → facilities
 is_active   boolean NOT NULL DEFAULT true
@@ -545,6 +547,7 @@ abha_linked_at  timestamptz NULL                 -- added by 0030; when ABHA was
                                                  -- a blob with no key version cannot be decrypted.
 abha_profile_token_encrypted bytea NULL          -- 0083: enrolment/login X-token. Not a HIP link token.
 abha_profile_token_key_version smallint NULL     -- 0083; both-or-neither with the profile blob.
+abha_profile_token_kind varchar(50) NOT NULL DEFAULT 'abha' -- 0085; ABHA or PHR login family
 identity_path   varchar(50) NOT NULL             -- IdentityPath enum (ADR 0001)
 identity_status varchar(50) NOT NULL DEFAULT 'verified'  -- IdentityStatus enum
 status          varchar(50) NOT NULL DEFAULT 'active'    -- PatientStatus: active|merged|deceased
@@ -1139,7 +1142,7 @@ UNIQUE (facility_id, counter_type, counter_date)`; allocate with
 
 ### 0015 — wards, beds, admissions, discharges (B3)
 
-**wards** — `name text NOT NULL · department_id UUID NULL → departments · facility_id UUID NOT NULL → facilities · is_active bool`
+**wards** — `name text NOT NULL · name_hi text NULL · department_id UUID NULL → departments · facility_id UUID NOT NULL → facilities · is_active bool`
 **beds** — `ward_id UUID NOT NULL → wards · bed_number varchar(20) NOT NULL · status varchar(30) DEFAULT 'vacant' (BedStatus) · UNIQUE (ward_id, bed_number)`
 
 **admissions** `[Blame]` — (Aditya: no ward/room/bed varchars — real FKs)
@@ -1777,6 +1780,7 @@ or certification evidence by itself. See `abdm-callback-diagnostics-2026-09-14.m
 facility_id UUID NOT NULL REFERENCES facilities(id)
 department_id UUID NULL REFERENCES departments(id)
 name varchar(100) NOT NULL
+name_hi text NULL                                -- optional Hindi label; 0087, English fallback
 duration_minutes integer NOT NULL DEFAULT 15
 is_active boolean NOT NULL DEFAULT true
 description text NULL
@@ -2405,6 +2409,7 @@ enforced, making an overcharge a compliance breach rather than a pricing mistake
 facility_id     UUID NOT NULL → facilities
 charge_code     varchar(30) NOT NULL             -- stable across price changes
 description     text NOT NULL
+description_hi  text NULL                       -- optional Hindi label; 0086, English fallback
 charge_category varchar(50) NOT NULL             -- ChargeCategory enum (same as invoice_items)
 unit_price      numeric(12,2) NOT NULL CHECK (>= 0)
 scheme_code     varchar(30) NULL                 -- NULL = general tariff; 'PMJAY' = scheme rate
