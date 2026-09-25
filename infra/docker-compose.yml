@@ -59,8 +59,10 @@ services:
       - "127.0.0.1:${KEYCLOAK_PORT:-8081}:8080"
 
   minio:
-    # Official Quay mirror, pinned to the existing binary (see minio/README.md).
-    image: quay.io/minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    # The old registry digest is no longer pullable. Build the same source
+    # revision as the running local image; do not silently upgrade /data.
+    build: {context: ../infra/minio, dockerfile: Dockerfile.source}
+    image: healthdoc-minio-source:2025-09-07
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
@@ -68,7 +70,7 @@ services:
     volumes:
       - minio-data:/data
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/minio/health/live"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -77,18 +79,19 @@ services:
       - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
 
   minio-init:
-    image: quay.io/minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    # Reuse the already-built backend image and its MinIO SDK. The old mc
+    # registry digest fails fresh pulls for the same reason as the server.
+    image: healthdoc-backend
     depends_on:
       minio:
         condition: service_healthy
     environment:
+      MINIO_ENDPOINT: minio:9000
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
       MINIO_BUCKET_FILES: ${MINIO_BUCKET_FILES:-hd-files}
       MINIO_BUCKET_REPORTS: ${MINIO_BUCKET_REPORTS:-hd-reports}
-    entrypoint: ["/bin/sh", "/init/init-buckets.sh"]
-    volumes:
-      - ../infra/minio/init-buckets.sh:/init/init-buckets.sh:ro
+    entrypoint: ["python", "-m", "scripts.init_minio_buckets"]
 
   orthanc:
     # PACS — only needed when the radiology module is enabled at this facility.

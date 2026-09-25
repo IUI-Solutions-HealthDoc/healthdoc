@@ -87,22 +87,31 @@ services:
 
   minio:
     <<: *restart
-    # Same binary as development/CI; registry repair, not a storage upgrade.
-    image: quay.io/minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    # The old registry artifact is no longer pullable. Build the source revision
+    # corresponding to the deployed release; rehearse before replacing a server.
+    build: {context: ./minio, dockerfile: Dockerfile.source}
+    image: healthdoc-minio-source:2025-09-07
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?required}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?required}
     volumes: [minio-data:/data]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   minio-init:
-    image: quay.io/minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    image: ${HEALTHDOC_BACKEND_IMAGE:?required}
     environment:
+      MINIO_ENDPOINT: minio:9000
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?required}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?required}
-    entrypoint: ["/bin/sh", "/init/init-buckets.sh"]
-    volumes: [./minio/init-buckets.sh:/init/init-buckets.sh:ro]
-    depends_on: {minio: {condition: service_started}}
+      MINIO_BUCKET_FILES: ${MINIO_BUCKET_FILES:-hd-files}
+      MINIO_BUCKET_REPORTS: ${MINIO_BUCKET_REPORTS:-hd-reports}
+    entrypoint: ["python", "-m", "scripts.init_minio_buckets"]
+    depends_on: {minio: {condition: service_healthy}}
 
   migrate:
     image: ${HEALTHDOC_BACKEND_IMAGE:?required}
