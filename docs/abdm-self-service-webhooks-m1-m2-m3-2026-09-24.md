@@ -1,7 +1,7 @@
 # HealthDoc — self-service ABDM M1, M2 and M3 runbook
 
-Updated: 25 September 2026. The queue and database counts below are explicitly
-the 24 September snapshot; no live milestone transaction is inferred from them.
+Updated: 26 September 2026. Older queue/data counts are labeled by snapshot;
+no live milestone transaction is inferred from them.
 Audience: the HealthDoc owner, a facility administrator and the authorized test clinician.
 This is an execution guide, **not a certificate or a claim that all milestones pass**.
 
@@ -14,8 +14,10 @@ and HIU**, under SBXID_053401 at https://abdm.healthdoc.world.
 The new HPID is masked, ending 6184; its professional/council application
 is Draft, so clinician authority/full identifier are still unverified.
 HealthDoc's local HFR setting and facility row now use the confirmed ID.
-Its HIP/HIU sender settings still use the old service IDs; those pending jobs
-have not been rewritten. See [Postman setup](postman/README.md).
+On 26 September the 22 old pending jobs for this facility were frozen without
+rewriting their payloads; its HIP/HIU sender settings were then switched to
+the confirmed IN-number. See the cutover record below and
+[Postman setup](postman/README.md).
 
 ## 1. Start here: what is actually ready
 
@@ -29,10 +31,10 @@ have not been rewritten. See [Postman setup](postman/README.md).
 | Corrected HPID screenshot | Masked, ending **6184**; Healthcare Professional & Facility Manager; application/council status **Draft**, not verified clinician authority |
 | Registry environment | Corrected screenshot shows **hspsbx.abdm.gov.in**; association independently confirmed by NHA sandbox GET |
 | New backend repairs | [PR #597](https://github.com/IUI-Solutions-HealthDoc/healthdoc/pull/597) merged into `staging`; the restored local backend runs its enum/ORM repair |
-| Database | Backed up and upgraded from **0085** through **0087** on 25 September; `alembic current` reports `0087 (head)` |
+| Database | Fresh private logical backup restored successfully into a disposable network-isolated PostgreSQL 16 container; local application database upgraded through **0088** on 26 September. This is not full PITR. |
 | Public routing test | The public token callback initially returned **502** on 25 September because its origin containers mounted deleted temporary worktrees; after recovery it returned **405** to a safe GET, as expected for a POST-only route. No NHA transaction was sent. |
 | Durable evidence | Receipt table and persistent nginx access logs exist; receipts survived backend recreation |
-| 25 September queue snapshot | **21 context_notify + 1 link_context pending** for the affected local facility, plus one unrelated context_notify; 2 link_token jobs done. Do not switch HIP/HIU sender IDs blindly. |
+| 26 September cutover | **22 frozen** for local facility (21 context_notify, 1 link_context); 2 prior jobs done; one pending job for another facility untouched. Backend uses `IN0910034387` for HFR/HIP/HIU. Delivery worker remains off. |
 | 24 September data snapshot | **0 stored linking tokens, 0 received-content rows, 0 stored transfer keys**; re-query before a milestone claim |
 | Background processes | No standalone ABDM delivery or cleanup worker appeared in the 24 September inventory; re-check after restart |
 | Test evidence | 809 focused isolated ABDM/Scan-and-Share/schema tests passed previously; not a complete live acceptance run |
@@ -268,12 +270,12 @@ Read the service back after any successful write and retain the redacted result.
 
 **Important local alignment gap:** on 25 September, `ABDM_HFR_FACILITY_ID`
 and the development facility's `hfr_facility_id` were verified as
-`IN0910034387`. The HIP/HIU sender IDs still use the old service IDs until
-the 22 pending jobs for this facility are frozen using migration 0088 and the
-count-checked procedure below. The other facility's pending job is outside
-this cutover. Do not create a duplicate local facility, rewrite old clinical
-authorship, or call the new IN-number integration finished before new
-transactions and callbacks have been observed.
+`IN0910034387`. The 22 historical jobs were frozen with migration 0088 and
+the count-checked procedure below. The private HIP/HIU sender settings were
+then switched to `IN0910034387` on 26 September. The other facility's pending
+job is outside this cutover. Do not create a duplicate local facility,
+rewrite old clinical authorship, or call the new IN-number integration
+finished before new transactions and callbacks have been observed.
 
 ## 5. Bind your own doctor correctly
 
@@ -487,6 +489,16 @@ docker exec healthdoc-backend-1 python -m scripts.freeze_abdm_jobs \
    not bulk retry or delete them. Starting continuous delivery remains a
    separate decision after queue inspection.
 
+**Local execution record, 26 September:** a private `pg_dump -Fc` archive was
+created under `backups/abdm-service-cutover-20260926/` and restored into a
+disposable, network-isolated PostgreSQL 16 container. Revision 0088 applied. With no
+leased jobs or delivery worker, dry-run and apply both matched 22 jobs before
+`2026-09-25T20:18:02Z`. Post-check: 22 frozen and 2 done for the local facility;
+one pending job for another facility remained unchanged. The backend and
+frontend were recreated from the cutover worktree; local health returned 200,
+the public callback safe GET returned 405, and the backend reported the
+corrected HFR/HIP/HIU IDs. No live NHA flow was sent by this cutover.
+
 ### Controlled single-job execution — operator only
 
 1. Select the exact **new** job for the authorized current patient operation.
@@ -539,8 +551,8 @@ revert application code while retaining the same database.
 
 Pause participant activity before a restart. Do not print or commit `.env`,
 start an old worker override, delete a mounted worktree, or run database
-tests against the application database. Existing backup archives have not
-been restore-rehearsed; verify a fresh backup before migration 0088.
+tests against the application database. The 26 September logical archive
+restored in isolation; this does not prove point-in-time or multi-system recovery.
 
 ## Appendix C. What cannot be finished by filling in IDs alone
 
