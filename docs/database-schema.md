@@ -206,7 +206,7 @@ do not merge out of order.**
 | 0085 | abha_profile_token_kind | ALTER patients: abha_profile_token_kind | Which login family issued the profile X-token: `abha` opens /v3/profile/account, `phr` opens /v3/phr/web/login/profile. Default `abha` is the true value for every earlier token. |
 | 0086 | catalogue_hindi_labels | ALTER facilities: name_hi; ALTER departments: name_hi; ALTER wards: name_hi; ALTER charge_master: description_hi | Optional Hindi catalogue labels; English remains the fallback. Widens the existing profile-token kind to varchar(50) for local schema parity. |
 | 0087 | appointment_service_hindi | ALTER appointment_services: name_hi | Optional Hindi appointment-service label; English remains the fallback. |
-| 0088 | abdm_frozen_delivery_jobs | ALTER abdm_jobs status CHECK | Adds `frozen` for historical jobs held during a service-ID cutover; the delivery worker and operator retry must not dispatch them. |
+| 0088 | abdm_frozen_delivery_jobs | abdm_jobs | Widens the status CHECK with `frozen` for historical jobs held during a service-ID cutover; the delivery worker and operator retry must not dispatch them. |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
