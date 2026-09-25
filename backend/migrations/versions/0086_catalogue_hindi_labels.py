@@ -23,7 +23,7 @@ def upgrade() -> None:
     op.alter_column(
         "patients",
         "abha_profile_token_kind",
-        existing_type=sa.String(10),
+        existing_type=sa.String(10),  # pr-check: ignore — historical width, widened below
         type_=sa.String(50),
         existing_nullable=False,
         existing_server_default="abha",
