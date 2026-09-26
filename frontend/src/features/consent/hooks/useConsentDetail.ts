@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { translate } from "@/lib/i18n";
+
 import { getConsent } from "../api";
 import type { ConsentRecord } from "../types";
 
@@ -52,7 +54,7 @@ export function useConsentDetail(patientId: string | null, id: string | null) {
     } catch (reason) {
       if (contextRef.current === context && requestRef.current === request) {
         setRecord(null);
-        setError(reason instanceof Error ? reason.message : "Failed to load consent details");
+        setError(reason instanceof Error ? reason.message : translate("consent.loadDetailFailed"));
       }
     } finally {
       if (contextRef.current === context && requestRef.current === request) setLoading(false);

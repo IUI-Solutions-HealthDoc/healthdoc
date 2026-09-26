@@ -125,8 +125,10 @@ class PendingAdmissionItemOut(BaseModel):
     priority: str
     recommended_ward_id: UUID | None = None
     recommended_ward_name: str | None = None
+    recommended_ward_name_hi: str | None = None
     recommended_department_id: UUID | None = None
     recommended_department_name: str | None = None
+    recommended_department_name_hi: str | None = None
     reason: str | None = None
     doctor_id: UUID | None = None
     doctor_name: str | None = None
@@ -140,6 +142,7 @@ class PendingDischargeItemOut(BaseModel):
     patient_uhid: str
     ward_id: UUID
     ward_name: str
+    ward_name_hi: str | None = None
     bed_id: UUID
     bed_number: str
     admitted_at: datetime

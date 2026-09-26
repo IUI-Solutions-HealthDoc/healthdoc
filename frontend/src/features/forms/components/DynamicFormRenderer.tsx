@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AlertCircle, CheckCircle2, FileText, Send } from "lucide-react";
+import { useLocale } from "@/lib/i18n";
+
 import { submitForm } from "../api";
 import { useClinicalWrite } from "@/lib/useClinicalWrite";
 import type { FormDefinition, FormSubmission } from "../types";
@@ -23,6 +25,7 @@ function FormEditor({
   visitId,
   onSuccess,
 }: DynamicFormRendererProps) {
+  const { t } = useLocale();
   const [formData, setFormData] = useState<Record<string, unknown>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,7 +50,7 @@ function FormEditor({
     // Validate required fields
     for (const field of formDef.fields_schema) {
       if (field.required && (formData[field.id] === undefined || formData[field.id] === "")) {
-        setError(`Field "${field.label}" is required.`);
+        setError(t("forms.renderer.fieldRequired", { label: field.label }));
         return;
       }
     }
@@ -68,11 +71,11 @@ function FormEditor({
       if (!mounted.current) return;
       if (sub.patient_id !== patientId || sub.form_id !== formDef.id)
         throw new Error("The saved form does not match the selected patient and form.");
-      setSuccessMsg("Clinical form submitted and recorded successfully!");
+      setSuccessMsg(t("forms.renderer.submitSuccess"));
       setFormData({});
       onSuccess(sub);
     } catch (err: unknown) {
-      if (mounted.current) setError(err instanceof Error ? err.message : "Failed to submit form responses.");
+      if (mounted.current) setError(err instanceof Error ? err.message : t("forms.renderer.submitFailed"));
     } finally {
       if (mounted.current) setIsSubmitting(false);
     }
@@ -87,7 +90,7 @@ function FormEditor({
             <h3 className="text-lg font-bold text-foreground">{formDef.title}</h3>
           </div>
           <p className="text-xs text-muted-foreground mt-0.5 font-mono">
-            Code: {formDef.code} • v{formDef.version}
+            {t("forms.renderer.codeVersion", { code: formDef.code, version: formDef.version })}
           </p>
         </div>
         <span className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary capitalize">
@@ -171,7 +174,7 @@ function FormEditor({
                   className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                   required={field.required}
                 >
-                  <option value="">Select option...</option>
+                  <option value="">{t("forms.renderer.selectOption")}</option>
                   {field.options?.map((opt) => (
                     <option key={opt.value} value={opt.value}>
                       {opt.label}
@@ -188,7 +191,7 @@ function FormEditor({
                     onChange={(e) => handleFieldChange(field.id, e.target.checked)}
                     className="rounded border-input text-primary focus:ring-primary h-4 w-4"
                   />
-                  <span className="text-muted-foreground">{field.placeholder || "Yes / Confirmed"}</span>
+                  <span className="text-muted-foreground">{field.placeholder || t("forms.renderer.checkboxDefault")}</span>
                 </label>
               )}
             </div>
@@ -203,7 +206,11 @@ function FormEditor({
             className="flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors shadow-sm disabled:opacity-50"
           >
             <Send className="h-4 w-4" />
-            {isSubmitting ? "Submitting..." : write.retryPending ? "Retry unchanged save" : "Submit Clinical Form"}
+            {isSubmitting
+              ? t("forms.renderer.submitting")
+              : write.retryPending
+                ? t("forms.renderer.retrySave")
+                : t("forms.renderer.submitClinical")}
           </button>
         </div>
       </form>

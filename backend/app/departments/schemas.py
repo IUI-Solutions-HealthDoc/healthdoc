@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 class DepartmentCreate(BaseModel):
     name: str = Field(min_length=2, max_length=100)
+    name_hi: str | None = Field(default=None, max_length=100)
     code: str = Field(min_length=2, max_length=20, pattern=r"^[A-Za-z0-9_-]+$")
 
     @field_validator("name")
@@ -15,6 +16,14 @@ class DepartmentCreate(BaseModel):
             raise ValueError("name must contain at least two non-whitespace characters")
         return value
 
+    @field_validator("name_hi")
+    @classmethod
+    def _normalise_name_hi(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
     @field_validator("code")
     @classmethod
     def _normalise_code(cls, value: str) -> str:
@@ -24,6 +33,7 @@ class DepartmentCreate(BaseModel):
 class DepartmentOut(BaseModel):
     id: uuid.UUID
     name: str
+    name_hi: str | None = None
     code: str
     facility_id: uuid.UUID
     is_active: bool
@@ -33,6 +43,7 @@ class DepartmentOut(BaseModel):
 
 class DepartmentUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=2, max_length=100)
+    name_hi: str | None = Field(default=None, max_length=100)
     code: str | None = Field(
         default=None, min_length=2, max_length=20, pattern=r"^[A-Za-z0-9_-]+$"
     )
@@ -47,6 +58,14 @@ class DepartmentUpdate(BaseModel):
         if len(value) < 2:
             raise ValueError("name must contain at least two non-whitespace characters")
         return value
+
+    @field_validator("name_hi")
+    @classmethod
+    def _normalise_name_hi(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
 
     @field_validator("code")
     @classmethod

@@ -61,7 +61,7 @@ def public_job(job: AbdmJob) -> JobOut:
 async def list_jobs(
     current_db_user: CurrentDbUser,
     db: DbSession,
-    status: Literal["pending", "leased", "done", "dead"] = "dead",
+    status: Literal["pending", "leased", "done", "dead", "frozen"] = "dead",
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=100),
 ) -> list[JobOut]:
@@ -115,6 +115,14 @@ async def retry_job(
             db, idempotency_key, endpoint, 200, output.model_dump(mode="json"), current_db_user.id
         )
         return output  # A new operator request must not reset active attempts.
+    if job.status == "frozen":
+        raise HTTPException(
+            409,
+            {
+                "code": "job_frozen",
+                "message": "This historical delivery job is frozen for service-ID reconciliation",
+            },
+        )
     if job.status != "dead":
         raise HTTPException(
             409, {"code": "job_not_retryable", "message": "Only exhausted jobs can be retried"}

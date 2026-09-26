@@ -8,6 +8,8 @@ import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 
 import { Button } from "@/components/ui/Button";
+import { useLocale } from "@/lib/i18n";
+import type { MessageKey } from "@/lib/i18n";
 import { meridian } from "@/styles/theme";
 import { useBreakGlass } from "../hooks/useBreakGlass";
 import { doctorButtonSx, doctorPanelSx } from "../panelSx";
@@ -15,10 +17,10 @@ import type { QueueToken, RecordAccessBlockedReason } from "../types";
 import { BreakGlassBanner } from "./BreakGlassBanner";
 import { BreakGlassWarningModal } from "./BreakGlassWarningModal";
 
-const BLOCKED_COPY: Record<RecordAccessBlockedReason, string> = {
-  consent_absent: "This patient has not given consent for you to view their record.",
-  consent_expired: "This patient's consent has expired.",
-  consent_revoked: "This patient has withdrawn their consent.",
+const BLOCKED_KEYS: Record<RecordAccessBlockedReason, MessageKey> = {
+  consent_absent: "doctor.breakGlassConsentAbsent",
+  consent_expired: "doctor.breakGlassConsentExpired",
+  consent_revoked: "doctor.breakGlassConsentRevoked",
 };
 
 /**
@@ -39,6 +41,7 @@ export function BreakGlassGate(props: Props) {
 }
 
 function PatientRecordGate({ patient, children }: Props) {
+  const { t } = useLocale();
   const {
     loading,
     submitting,
@@ -84,13 +87,12 @@ function PatientRecordGate({ patient, children }: Props) {
   return (
     <>
       <Box sx={{ ...doctorPanelSx, display: "flex", flexDirection: "column", gap: 1.5 }}>
-        <Typography sx={{ fontSize: "1.0625rem", fontWeight: 700 }}>Record locked</Typography>
+        <Typography sx={{ fontSize: "1.0625rem", fontWeight: 700 }}>{t("doctor.breakGlassRecordLocked")}</Typography>
         <Typography sx={{ fontSize: "0.875rem", color: meridian.textSecondary, lineHeight: 1.55 }}>
-          {blockedReason ? BLOCKED_COPY[blockedReason] : "You cannot view this record."}
+          {blockedReason ? t(BLOCKED_KEYS[blockedReason]) : t("doctor.breakGlassCannotView")}
         </Typography>
         <Typography sx={{ fontSize: "0.8125rem", color: meridian.textSecondary, lineHeight: 1.55 }}>
-          If this is a clinical emergency you can request a two-hour override. Keycloak must first
-          verify your authenticator; HealthDoc never receives the authentication code.
+          {t("doctor.breakGlassEmergencyHint")}
         </Typography>
         {stepUpError ? <Alert severity="error">{stepUpError}</Alert> : null}
         <Box>
@@ -104,7 +106,7 @@ function PatientRecordGate({ patient, children }: Props) {
               else void beginStepUp();
             }}
           >
-            {mfaVerified ? "Emergency access" : "Verify with Keycloak"}
+            {mfaVerified ? t("doctor.breakGlassEmergencyAccess") : t("doctor.breakGlassVerifyKeycloak")}
           </Button>
         </Box>
       </Box>

@@ -6,6 +6,7 @@ import Typography from "@mui/material/Typography";
 
 import { DataTable, type DataTableColumn } from "@/components/tables/DataTable";
 import { StatusChip } from "@/components/ui/StatusChip";
+import { useLocale } from "@/lib/i18n";
 import { meridian } from "@/styles/theme";
 import type { AccessChannel, DataAccessLog } from "../types";
 import { BreakGlassBadge } from "./BreakGlassBadge";
@@ -18,15 +19,16 @@ type Props = {
 };
 
 export function DataAccessLogPanel({ rows, loading, channels }: Props) {
+  const { t } = useLocale();
   const columns: DataTableColumn<DataAccessLog>[] = [
     {
       key: "accessed_at",
-      label: "Accessed",
+      label: t("consent.accessed"),
       render: (r) => formatDateTime(r.accessed_at),
     },
     {
       key: "user_display",
-      label: "User",
+      label: t("consent.user"),
       render: (r) => (
         <Stack spacing={0.5}>
           <Typography sx={{ fontSize: "0.8125rem" }}>{r.user_display ?? r.user_id}</Typography>
@@ -38,24 +40,24 @@ export function DataAccessLogPanel({ rows, loading, channels }: Props) {
     },
     {
       key: "resource_type",
-      label: "Resource",
+      label: t("consent.resource"),
       render: (r) => `${r.resource_type}${r.resource_id ? ` / ${r.resource_id}` : ""}`,
     },
     {
       key: "access_channel",
-      label: "Channel",
+      label: t("field.channel"),
       render: (r) => channels[r.access_channel] ?? r.access_channel,
     },
     {
       key: "flags",
-      label: "Flags",
+      label: t("consent.flags"),
       render: (r) => (
         <Stack direction="row" useFlexGap sx={{ gap: 0.75, flexWrap: "wrap" }}>
           {r.emergency_access ? <BreakGlassBadge /> : null}
           {r.consent_required && !r.consent_verified ? (
-            <StatusChip status="failed" label="Consent not verified" />
+            <StatusChip status="failed" label={t("consent.notVerified")} />
           ) : null}
-          {r.consent_verified ? <StatusChip status="verified" label="Verified" /> : null}
+          {r.consent_verified ? <StatusChip status="verified" label={t("consent.verified")} /> : null}
         </Stack>
       ),
     },
@@ -73,10 +75,10 @@ export function DataAccessLogPanel({ rows, loading, channels }: Props) {
     >
       <Box sx={{ px: 2.5, pt: 2.25, pb: 1.75 }}>
         <Typography sx={{ m: 0, fontSize: "1.0625rem", fontWeight: 700, color: meridian.textPrimary }}>
-          Data access log
+          {t("consent.dataAccessLog")}
         </Typography>
         <Typography sx={{ m: 0, mt: 0.4, fontSize: "0.8125rem", color: meridian.textSecondary }}>
-          A permanent history of record access, with emergency access highlighted.
+          {t("consent.dataAccessLogHint")}
         </Typography>
       </Box>
 
@@ -85,7 +87,7 @@ export function DataAccessLogPanel({ rows, loading, channels }: Props) {
         rows={rows}
         getRowId={(r) => r.id}
         loading={loading}
-        emptyMessage="No data access events for this consent."
+        emptyMessage={t("consent.noAccessEvents")}
       />
     </Box>
   );

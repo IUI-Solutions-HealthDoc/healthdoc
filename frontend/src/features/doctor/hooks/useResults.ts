@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { toast } from "@/components/ui/toast";
+import { useLocale } from "@/lib/i18n";
 import {
   createDoctorReview,
   getLabResults,
@@ -29,6 +30,7 @@ export type ResultsFilter = "all" | "unread" | "critical";
  * against the encounter — the result itself is never written to.
  */
 export function useResults() {
+  const { t } = useLocale();
   const [items, setItems] = useState<ResultWorklistItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -46,12 +48,16 @@ export function useResults() {
     let alive = true;
     listResultsWorklist()
       .then((rows) => alive && setItems(rows))
-      .catch((e) => alive && setError(e instanceof Error ? e.message : "Failed to load results"))
+      .catch(
+        (e) =>
+          alive &&
+          setError(e instanceof Error ? e.message : t("doctor.toast.loadResultsFailed")),
+      )
       .finally(() => alive && setLoading(false));
     return () => {
       alive = false;
     };
-  }, []);
+  }, [t]);
 
   const isOutstanding = (i: ResultWorklistItem) =>
     Boolean(i.result_status) && i.review_status !== "signed_off";
@@ -95,11 +101,11 @@ export function useResults() {
       }
       setReviews(await getReviewsForItem(item.encounter_id, item.id, item.order_type));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to load result");
+      toast.error(e instanceof Error ? e.message : t("doctor.toast.loadResultFailed"));
     } finally {
       setDetailLoading(false);
     }
-  }, []);
+  }, [t]);
 
   const labResult = useMemo(
     () => labVersions.find((r) => r.version === viewingVersion) ?? null,
@@ -146,14 +152,16 @@ export function useResults() {
         // No localOnly() suffix: this write really persists now. Keeping it
         // would be a stale reassurance in the other direction — telling a
         // clinician a sign-off did NOT save when it did.
-        toast.success(status === "signed_off" ? "Result signed off" : "Marked as reviewed");
+        toast.success(
+          status === "signed_off" ? t("doctor.toast.resultSignedOff") : t("doctor.toast.markedReviewed"),
+        );
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : "Failed to update review");
+        toast.error(e instanceof Error ? e.message : t("doctor.toast.updateReviewFailed"));
       } finally {
         setSigning(false);
       }
     },
-    [review, selected],
+    [review, selected, t],
   );
 
   return {

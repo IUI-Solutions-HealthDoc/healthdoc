@@ -1,11 +1,18 @@
+"use client";
+
+import { useLocale } from "@/lib/i18n";
 import { FormActionsProps } from "./FormActions.types";
 
 export default function FormActions({
   isSubmitting = false,
-  submitLabel = "Save",
-  resetLabel = "Reset",
+  submitLabel,
+  resetLabel,
   onReset,
 }: FormActionsProps) {
+  const { t } = useLocale();
+  const submit = submitLabel ?? t("common.save");
+  const reset = resetLabel ?? t("common.reset");
+
   return (
     <div className="flex justify-end gap-3">
       <button
@@ -14,7 +21,7 @@ export default function FormActions({
         disabled={isSubmitting}
         className="btn btn-outline"
       >
-        {resetLabel}
+        {reset}
       </button>
 
       <button
@@ -23,7 +30,7 @@ export default function FormActions({
         aria-busy={isSubmitting}
         className="btn btn-primary"
       >
-        {isSubmitting ? "Saving..." : submitLabel}
+        {isSubmitting ? t("forms.saving") : submit}
       </button>
     </div>
   );

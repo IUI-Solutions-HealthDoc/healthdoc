@@ -207,7 +207,8 @@ billing_counters_t = sa.table(
 charge_master_t = sa.table(
     "charge_master",
     sa.column("id"), sa.column("facility_id"), sa.column("charge_code"),
-    sa.column("charge_category"), sa.column("description"), sa.column("unit_price"),
+    sa.column("charge_category"), sa.column("description"), sa.column("description_hi"),
+    sa.column("unit_price"),
     sa.column("scheme_code"), sa.column("effective_from"), sa.column("effective_to"),
     sa.column("is_active"),
     # Blame columns. A sa.table projection only knows the columns named here —
@@ -1676,6 +1677,7 @@ async def create_tariff(
     unit_price: Decimal,
     effective_from: date,
     scheme_code: str | None = None,
+    description_hi: str | None = None,
     created_by: uuid.UUID,
 ) -> uuid.UUID:
     """Add a tariff row, closing whatever it supersedes.
@@ -1732,6 +1734,7 @@ async def create_tariff(
             facility_id=facility_id,
             charge_code=charge_code,
             description=description,
+            description_hi=description_hi,
             charge_category=charge_category,
             unit_price=unit_price,
             scheme_code=scheme_code,

@@ -23,6 +23,7 @@ export interface CurrentUser {
     id: string;
     code: string;
     name: string;
+    name_hi?: string | null;
     timezone: string;
   };
   /**
@@ -38,6 +39,7 @@ export interface CurrentUser {
     id: string;
     code: string;
     name: string;
+    name_hi?: string | null;
   } | null;
 }
 

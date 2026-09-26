@@ -25,6 +25,10 @@ import type {
   VisitWithoutToken,
 } from "@/features/receptionist/types";
 import { ScanShareDeskModal } from "@/features/receptionist/ScanShareDeskModal";
+import { PageHeading } from "@/components/common/PageHeading";
+import { useLocale, type MessageKey } from "@/lib/i18n";
+
+const QUEUE_PRIORITIES = ["normal", "senior_citizen", "pregnant", "follow_up_recall"] as const;
 
 
 /**
@@ -35,6 +39,16 @@ import { ScanShareDeskModal } from "@/features/receptionist/ScanShareDeskModal";
  * receptionist answers "how long is the wait for Dr X" from.
  */
 export default function Page() {
+  const { t, localizeField } = useLocale();
+  const priorityLabel = useCallback(
+    (code: string) => {
+      if ((QUEUE_PRIORITIES as readonly string[]).includes(code)) {
+        return t(`priority.${code}` as MessageKey);
+      }
+      return code.replaceAll("_", " ");
+    },
+    [t],
+  );
   const [queues, setQueues] = useState<QueueSummary[] | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [tokens, setTokens] = useState<QueueTokenList | null>(null);
@@ -91,9 +105,9 @@ export default function Page() {
       setOpeningOptions(null);
       setSelected(null);
       setTokens(null);
-      setError(reason instanceof ApiError ? reason.message : "Could not load queues");
+      setError(reason instanceof ApiError ? reason.message : t("receptionist.errLoadQueues"));
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void load();
@@ -109,18 +123,18 @@ export default function Page() {
       })
       .catch((reason: unknown) => {
         if (!cancelled) {
-          setError(reason instanceof ApiError ? reason.message : "Could not load tokens");
+          setError(reason instanceof ApiError ? reason.message : t("receptionist.errLoadTokens"));
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [selected]);
+  }, [selected, t]);
 
   const handleCreateQueue = async () => {
     const option = openingOptions?.items.find((item) => item.roster_id === optionId);
     if (!option || !openingOptions) {
-      setError("Select an available rostered clinic before opening a queue.");
+      setError(t("receptionist.errSelectRosterBeforeOpen"));
       return;
     }
     setCreating(true);
@@ -136,13 +150,16 @@ export default function Page() {
         },
         createKey,
       );
-      toast.success("Queue opened", `${option.staff_name} · ${option.department_name}`);
+      toast.success(
+        t("receptionist.queueOpened"),
+        `${option.staff_name} · ${localizeField(option.department_name, option.department_name_hi)}`,
+      );
       setCreateKey(newIdempotencyKey());
       setDisplayLabel("");
       setShowOpenQueue(false);
       await load();
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Could not open queue");
+      setError(reason instanceof ApiError ? reason.message : t("receptionist.errOpenQueue"));
     } finally {
       setCreating(false);
     }
@@ -151,7 +168,7 @@ export default function Page() {
   const handlePriorityUpdate = async () => {
     if (!priorityTokenId || !selected) return;
     if (priorityReason.trim().length < 10) {
-      setError("Priority change reason must be at least 10 characters.");
+      setError(t("receptionist.errPriorityReasonMinLength"));
       return;
     }
 
@@ -166,10 +183,10 @@ export default function Page() {
       setTokens(refreshed);
       setPriorityTokenId(null);
       setPriorityReason("");
-      toast.success("Priority updated", "The queue order now reflects the new priority.");
+      toast.success(t("receptionist.toastPriorityUpdatedTitle"), t("receptionist.toastPriorityUpdatedBody"));
       await load();
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Could not update token priority");
+      setError(reason instanceof ApiError ? reason.message : t("receptionist.errUpdateTokenPriority"));
     } finally {
       setUpdatingPriority(false);
     }
@@ -188,7 +205,13 @@ export default function Page() {
         },
         newIdempotencyKey(),
       );
-      toast.success("Token issued", `Token ${issued.token_display} issued for ${assigningVisit.patient_name}`);
+      toast.success(
+        t("receptionist.issueToken"),
+        t("receptionist.toastTokenIssued", {
+          token: issued.token_display,
+          name: assigningVisit.patient_name,
+        }),
+      );
       setAssigningVisit(null);
       await load();
       if (selected) {
@@ -196,7 +219,7 @@ export default function Page() {
         setTokens(refreshed);
       }
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Could not issue token for visit");
+      setError(reason instanceof ApiError ? reason.message : t("receptionist.errIssueToken"));
     } finally {
       setAssigningBusy(false);
     }
@@ -204,9 +227,7 @@ export default function Page() {
 
   const handleReconcileAllStale = async () => {
     if (
-      !window.confirm(
-        "Reconcile all stale visits from prior days? Registered visits will be marked as LWBS and consultation visits as Closed. Live queue tokens will be closed as No-Show. Clinical history and invoices are preserved.",
-      )
+      !window.confirm(t("receptionist.reconcileConfirmMessage"))
     ) {
       return;
     }
@@ -216,12 +237,15 @@ export default function Page() {
       const res = await reconcileStaleVisits();
       setReconcileResult(res);
       toast.success(
-        "Stale visits reconciled",
-        `Successfully reconciled ${res.reconciled_count} visits (${res.skipped_count} skipped/exempt).`,
+        t("receptionist.toastStaleReconciledTitle"),
+        t("receptionist.toastStaleReconciledBody", {
+          reconciled: res.reconciled_count,
+          skipped: res.skipped_count,
+        }),
       );
       await load();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to reconcile stale visits");
+      setError(err instanceof ApiError ? err.message : t("receptionist.errReconcileStale"));
     } finally {
       setReconciling(false);
     }
@@ -230,12 +254,10 @@ export default function Page() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold">Today&apos;s queues</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Waiting counts for every open clinic.
-          </p>
-        </div>
+        <PageHeading
+          titleKey="receptionist.queueTitle"
+          subtitleKey="receptionist.queueSubtitle"
+        />
         {/* Manual refresh, not a poll. The live board is /queue-display, which
             is push-based; polling here would add load for a screen someone
             looks at when a patient asks, not continuously. */}
@@ -249,7 +271,7 @@ export default function Page() {
                 : "border-border bg-card text-foreground hover:bg-muted"
             }`}
           >
-            Stale Visits Review
+            {t("receptionist.staleVisits")}
             {staleReport && staleReport.total_stale_count > 0 ? (
               <span className="ml-2 rounded-full bg-rose-600 px-1.5 py-0.5 text-[11px] font-bold text-white">
                 {staleReport.total_stale_count}
@@ -265,7 +287,7 @@ export default function Page() {
                 : "border-border bg-card text-foreground hover:bg-muted"
             }`}
           >
-            Visits Awaiting Token
+            {t("receptionist.visitsAwaitingToken")}
             {unassignedVisits && unassignedVisits.length > 0 ? (
               <span className="ml-2 rounded-full bg-amber-500 px-1.5 py-0.5 text-[11px] font-bold text-white">
                 {unassignedVisits.length}
@@ -277,17 +299,17 @@ export default function Page() {
             onClick={() => setShowScanShareModal(true)}
             className="rounded-md border border-primary/40 bg-primary/10 px-3.5 py-2 text-sm font-semibold text-primary hover:bg-primary/20"
           >
-            ABDM Scan &amp; Share
+            {t("receptionist.abdmScanShare")}
           </button>
           <button
             type="button"
             onClick={() => setShowOpenQueue((shown) => !shown)}
             className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white"
           >
-            {showOpenQueue ? "Close form" : "Open queue"}
+            {showOpenQueue ? t("common.close") : t("receptionist.openQueue")}
           </button>
           <button type="button" onClick={() => void load()} className="text-sm underline">
-            Refresh
+            {t("common.refresh")}
           </button>
         </div>
       </div>
@@ -303,26 +325,26 @@ export default function Page() {
           <div className="flex items-center justify-between">
             <div>
               <h2 id="unassigned-visits-title" className="text-lg font-semibold">
-                Visits Awaiting Queue Token ({unassignedVisits?.length ?? 0})
+                {t("receptionist.visitsAwaitingHeading", { count: unassignedVisits?.length ?? 0 })}
               </h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                Visits created today where queue token issuance was interrupted or skipped.
+                {t("receptionist.visitsAwaitingHint")}
               </p>
             </div>
           </div>
 
           {unassignedVisits && unassignedVisits.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No visits currently awaiting queue tokens.</p>
+            <p className="text-sm text-muted-foreground">{t("receptionist.noVisitsAwaiting")}</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="min-w-full border-collapse">
                 <thead className="bg-muted/40 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   <tr>
-                    <th className="px-4 py-2.5 text-left">Visit #</th>
-                    <th className="px-4 py-2.5 text-left">Patient</th>
-                    <th className="px-4 py-2.5 text-left">Department</th>
-                    <th className="px-4 py-2.5 text-left">Visit Date</th>
-                    <th className="px-4 py-2.5 text-right">Action</th>
+                    <th className="px-4 py-2.5 text-left">{t("receptionist.visitNumber")}</th>
+                    <th className="px-4 py-2.5 text-left">{t("common.patient")}</th>
+                    <th className="px-4 py-2.5 text-left">{t("receptionist.department")}</th>
+                    <th className="px-4 py-2.5 text-left">{t("receptionist.visitDate")}</th>
+                    <th className="px-4 py-2.5 text-right">{t("receptionist.action")}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border text-sm">
@@ -331,9 +353,9 @@ export default function Page() {
                       <td className="px-4 py-3 font-mono font-bold text-primary">{v.visit_number}</td>
                       <td className="px-4 py-3">
                         <span className="block font-medium text-foreground">{v.patient_name}</span>
-                        <span className="font-mono text-xs text-muted-foreground">{v.uhid ?? v.thid ?? "No UHID"}</span>
+                        <span className="font-mono text-xs text-muted-foreground">{v.uhid ?? v.thid ?? t("receptionist.noUhid")}</span>
                       </td>
-                      <td className="px-4 py-3 text-muted-foreground">{v.department_name ?? "General"}</td>
+                      <td className="px-4 py-3 text-muted-foreground">{localizeField(v.department_name ?? t("receptionist.generalClinic"), v.department_name_hi)}</td>
                       <td className="px-4 py-3 text-xs text-muted-foreground">{formatDateTime(v.visit_date)}</td>
                       <td className="px-4 py-3 text-right">
                         <button
@@ -345,7 +367,7 @@ export default function Page() {
                           }}
                           className="rounded-md bg-primary px-3 py-1 text-xs font-semibold text-white shadow-xs hover:bg-primary/90 transition"
                         >
-                          Issue Token
+                          {t("receptionist.issueToken")}
                         </button>
                       </td>
                     </tr>
@@ -359,22 +381,25 @@ export default function Page() {
             <div className="rounded-lg border border-primary/30 bg-primary/5 p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-foreground">
-                  Issue Token for {assigningVisit.patient_name} ({assigningVisit.visit_number})
+                  {t("receptionist.issueTokenHeading", {
+                    name: assigningVisit.patient_name,
+                    visit: assigningVisit.visit_number,
+                  })}
                 </h3>
                 <button
                   type="button"
                   onClick={() => setAssigningVisit(null)}
                   className="text-xs text-muted-foreground underline"
                 >
-                  Cancel
+                  {t("common.cancel")}
                 </button>
               </div>
               {queues && queues.length === 0 ? (
-                <p className="text-xs text-danger">No open queues available. Open a clinic queue first.</p>
+                <p className="text-xs text-danger">{t("receptionist.noOpenQueuesFirst")}</p>
               ) : (
                 <div className="grid gap-3 sm:grid-cols-[2fr_1fr_auto] sm:items-end">
                   <label className="space-y-1 text-xs">
-                    <span className="text-muted-foreground">Select Clinic / Doctor *</span>
+                    <span className="text-muted-foreground">{t("receptionist.selectClinicDoctor")} *</span>
                     <select
                       value={assignQueueId}
                       onChange={(e) => setAssignQueueId(e.target.value)}
@@ -382,22 +407,25 @@ export default function Page() {
                     >
                       {queues?.map((q) => (
                         <option key={q.id} value={q.id}>
-                          {q.doctor_name ?? "Doctor"} {q.room_number ? `· Room ${q.room_number}` : ""} ({q.waiting_count} waiting)
+                          {q.doctor_name ?? t("common.doctor")}{" "}
+                          {q.room_number ? `· ${t("receptionist.room", { number: q.room_number })}` : ""} (
+                          {t("receptionist.queueOptionWaiting", { waiting: q.waiting_count })})
                         </option>
                       ))}
                     </select>
                   </label>
                   <label className="space-y-1 text-xs">
-                    <span className="text-muted-foreground">Priority</span>
+                    <span className="text-muted-foreground">{t("receptionist.priority")}</span>
                     <select
                       value={assignPriority}
                       onChange={(e) => setAssignPriority(e.target.value)}
                       className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm"
                     >
-                      <option value="normal">Normal</option>
-                      <option value="senior_citizen">Senior citizen</option>
-                      <option value="pregnant">Pregnant patient</option>
-                      <option value="follow_up_recall">Follow-up recall</option>
+                      {QUEUE_PRIORITIES.map((value) => (
+                        <option key={value} value={value}>
+                          {priorityLabel(value)}
+                        </option>
+                      ))}
                     </select>
                   </label>
                   <button
@@ -406,7 +434,7 @@ export default function Page() {
                     onClick={() => void handleIssueTokenForVisit()}
                     className="rounded-md bg-primary px-4 py-1.5 text-sm font-medium text-white disabled:opacity-50"
                   >
-                    {assigningBusy ? "Issuing…" : "Confirm Token"}
+                    {assigningBusy ? t("receptionist.issuing") : t("receptionist.confirmToken")}
                   </button>
                 </div>
               )}
@@ -420,10 +448,12 @@ export default function Page() {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 id="stale-visits-title" className="text-lg font-semibold text-foreground">
-                Stale Visits Review &amp; Reconciliation ({staleReport?.total_stale_count ?? 0})
+                {t("receptionist.staleReviewTitle", { count: staleReport?.total_stale_count ?? 0 })}
               </h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                Unclosed OPD visits from previous days (before {staleReport?.cutoff_date ?? "today"}). Exempts Emergency &amp; IPD visits. Reconciles unconsulted visits to LWBS and consultation visits to Closed, cancelling live queue tokens while preserving all clinical history and billing.
+                {t("receptionist.staleReviewDescription", {
+                  cutoff: staleReport?.cutoff_date ?? t("common.today"),
+                })}
               </p>
             </div>
             {staleReport && staleReport.total_stale_count > 0 && (
@@ -433,34 +463,38 @@ export default function Page() {
                 onClick={() => void handleReconcileAllStale()}
                 className="rounded-md bg-rose-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-rose-700 disabled:opacity-50"
               >
-                {reconciling ? "Reconciling..." : `Reconcile All (${staleReport.total_stale_count})`}
+                {reconciling ? t("receptionist.reconciling") : t("receptionist.reconcileAllButton", { count: staleReport.total_stale_count })}
               </button>
             )}
           </div>
 
           {reconcileResult && (
             <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300">
-              <span className="font-semibold">Reconciliation Completed:</span> {reconcileResult.reconciled_count} visits reconciled successfully ({reconcileResult.skipped_count} skipped/exempt).
+              <span className="font-semibold">{t("receptionist.reconciliationCompleted")}</span>{" "}
+              {t("receptionist.reconcileSummary", {
+                reconciled: reconcileResult.reconciled_count,
+                skipped: reconcileResult.skipped_count,
+              })}
             </div>
           )}
 
           {staleReport && staleReport.candidates.length === 0 ? (
             <div className="rounded-lg border border-border bg-muted/20 p-6 text-center text-sm text-muted-foreground">
-              No stale unclosed visits found from prior business days. All previous OPD visits and tokens are cleanly resolved.
+              {t("receptionist.staleVisitsEmpty")}
             </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="min-w-full border-collapse">
                 <thead className="bg-muted/40 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   <tr>
-                    <th className="px-4 py-2.5 text-left">Visit #</th>
-                    <th className="px-4 py-2.5 text-left">Patient</th>
-                    <th className="px-4 py-2.5 text-left">Department</th>
-                    <th className="px-4 py-2.5 text-left">Visit Date</th>
-                    <th className="px-4 py-2.5 text-left">Status</th>
-                    <th className="px-4 py-2.5 text-left">Queue Token</th>
-                    <th className="px-4 py-2.5 text-left">Encounters</th>
-                    <th className="px-4 py-2.5 text-right">Recommended</th>
+                    <th className="px-4 py-2.5 text-left">{t("receptionist.visitNumber")}</th>
+                    <th className="px-4 py-2.5 text-left">{t("common.patient")}</th>
+                    <th className="px-4 py-2.5 text-left">{t("receptionist.department")}</th>
+                    <th className="px-4 py-2.5 text-left">{t("receptionist.visitDate")}</th>
+                    <th className="px-4 py-2.5 text-left">{t("common.status")}</th>
+                    <th className="px-4 py-2.5 text-left">{t("receptionist.queueToken")}</th>
+                    <th className="px-4 py-2.5 text-left">{t("receptionist.encounters")}</th>
+                    <th className="px-4 py-2.5 text-right">{t("receptionist.recommended")}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border text-sm">
@@ -471,7 +505,7 @@ export default function Page() {
                         <span className="block font-medium text-foreground">{c.patient_name}</span>
                         <span className="font-mono text-xs text-muted-foreground">{c.patient_uhid}</span>
                       </td>
-                      <td className="px-4 py-3 text-muted-foreground">{c.department_name ?? "General"}</td>
+                      <td className="px-4 py-3 text-muted-foreground">{localizeField(c.department_name ?? t("receptionist.generalClinic"), c.department_name_hi)}</td>
                       <td className="px-4 py-3 text-xs text-muted-foreground">{formatDateTime(c.visit_date)}</td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex rounded px-2 py-0.5 text-xs font-medium ${
@@ -488,19 +522,19 @@ export default function Page() {
                             {c.live_token_display} ({c.live_token_status})
                           </span>
                         ) : (
-                          <span className="text-muted-foreground">None</span>
+                          <span className="text-muted-foreground">{t("receptionist.none")}</span>
                         )}
                       </td>
                       <td className="px-4 py-3 text-xs">
                         {c.has_active_encounter ? (
-                          <span className="text-rose-600 font-medium">In-progress note</span>
+                          <span className="text-rose-600 font-medium">{t("receptionist.inProgressNote")}</span>
                         ) : (
-                          <span className="text-muted-foreground">{c.encounter_count} notes</span>
+                          <span className="text-muted-foreground">{t("receptionist.encounterNotesCount", { count: c.encounter_count })}</span>
                         )}
                       </td>
                       <td className="px-4 py-3 text-right text-xs font-medium">
                         <span className="rounded bg-muted px-2 py-1 text-foreground">
-                          {c.recommended_visit_action === "mark_lwbs" ? "Set LWBS" : "Close"}
+                          {c.recommended_visit_action === "mark_lwbs" ? t("receptionist.setLwbs") : t("common.close")}
                         </span>
                       </td>
                     </tr>
@@ -515,21 +549,19 @@ export default function Page() {
       {showOpenQueue && (
         <section className="surface-card space-y-4 p-5" aria-labelledby="open-queue-title">
           <div>
-            <h2 id="open-queue-title" className="text-lg font-semibold">Open today&apos;s queue</h2>
+            <h2 id="open-queue-title" className="text-lg font-semibold">{t("receptionist.openTodaysQueue")}</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Available doctors come from today&apos;s HOD-approved roster.
+              {t("receptionist.rosterFromHodHint")}
             </p>
           </div>
           {openingOptions && openingOptions.items.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No available roster entries remain for {openingOptions.service_date}. The department
-              HOD can add one from Department dashboard → Department roster; a development database
-              seed is not required.
+              {t("receptionist.noRosterForDate", { date: openingOptions.service_date })}
             </p>
           ) : (
             <div className="grid gap-4 md:grid-cols-[2fr_1fr_auto] md:items-end">
               <label className="space-y-1 text-sm">
-                <span className="text-muted-foreground">Rostered clinic</span>
+                <span className="text-muted-foreground">{t("receptionist.rosteredClinic")}</span>
                 <select
                   className="w-full rounded-md border border-border bg-background px-3 py-2"
                   value={optionId}
@@ -537,20 +569,20 @@ export default function Page() {
                 >
                   {openingOptions?.items.map((option) => (
                     <option key={option.roster_id} value={option.roster_id}>
-                      {option.staff_name} · {option.department_name} · {option.shift}
-                      {option.room_number ? ` · Room ${option.room_number}` : ""}
+                      {option.staff_name} · {localizeField(option.department_name, option.department_name_hi)} · {option.shift}
+                      {option.room_number ? ` · ${t("receptionist.room", { number: option.room_number })}` : ""}
                     </option>
                   ))}
                 </select>
               </label>
               <label className="space-y-1 text-sm">
-                <span className="text-muted-foreground">Display label (optional)</span>
+                <span className="text-muted-foreground">{t("receptionist.displayLabelOptional")}</span>
                 <input
                   maxLength={50}
                   className="w-full rounded-md border border-border px-3 py-2"
                   value={displayLabel}
                   onChange={(event) => setDisplayLabel(event.target.value)}
-                  placeholder="e.g. General OPD"
+                  placeholder={t("receptionist.displayLabelExample")}
                 />
               </label>
               <button
@@ -559,7 +591,7 @@ export default function Page() {
                 onClick={() => void handleCreateQueue()}
                 className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
               >
-                {creating ? "Opening…" : "Open"}
+                {creating ? t("common.loading") : t("common.open")}
               </button>
             </div>
           )}
@@ -569,7 +601,7 @@ export default function Page() {
       {queues !== null && queues.length === 0 && (
         <div className="surface-card p-6">
           <p className="text-sm text-muted-foreground">
-            No open queues today.
+            {t("receptionist.noOpenQueues")}
           </p>
         </div>
       )}
@@ -592,15 +624,15 @@ export default function Page() {
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <p className="text-base font-bold text-foreground group-hover:text-primary transition-colors">
-                      {q.doctor_name ?? "General Clinic"}
+                      {q.doctor_name ?? t("receptionist.generalClinic")}
                     </p>
                     <p className="mt-0.5 text-xs font-medium text-muted-foreground">
-                      {q.room_number ? `Room ${q.room_number}` : "Room not assigned"}
+                      {q.room_number ? t("receptionist.room", { number: q.room_number }) : t("receptionist.roomNotAssigned")}
                     </p>
                   </div>
                   {isSelected && (
                     <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
-                      ACTIVE
+                      {t("receptionist.queueBadgeActive")}
                     </span>
                   )}
                 </div>
@@ -611,12 +643,12 @@ export default function Page() {
                       {q.waiting_count}
                     </span>
                     <span className="ml-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                      waiting
+                      {t("receptionist.waitingShort")}
                     </span>
                   </div>
                   <div className="text-right">
                     <span className="block text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
-                      Now Serving
+                      {t("receptionist.nowServingLabel")}
                     </span>
                     <span className="inline-block rounded bg-primary/10 px-2 py-0.5 font-mono text-sm font-bold text-primary">
                       {q.now_serving ?? "—"}
@@ -633,10 +665,10 @@ export default function Page() {
         <div className="surface-card overflow-hidden shadow-sm">
           <div className="flex flex-wrap items-center justify-between border-b border-border bg-muted/20 px-6 py-4">
             <h2 className="text-base font-bold text-foreground">
-              Queue Roster: <span className="text-primary">{tokens.waiting_count} patients waiting</span>
+              {t("receptionist.queueRosterHeading", { count: tokens.waiting_count })}
             </h2>
             <div className="flex items-center gap-2">
-              <span className="text-xs font-medium text-muted-foreground">Current counter:</span>
+              <span className="text-xs font-medium text-muted-foreground">{t("receptionist.currentCounter")}</span>
               <span className="rounded bg-primary px-2.5 py-1 font-mono text-xs font-bold text-primary-foreground shadow-xs">
                 {tokens.now_serving ?? "—"}
               </span>
@@ -646,36 +678,36 @@ export default function Page() {
             <table className="min-w-full border-collapse">
               <thead className="table-sticky-header">
                 <tr>
-                  <th className="px-5 py-3.5 text-left">Token</th>
-                  <th className="px-5 py-3.5 text-left">Patient & Identifier</th>
-                  <th className="px-5 py-3.5 text-left">Status</th>
-                  <th className="px-5 py-3.5 text-left">Priority</th>
-                  <th className="px-5 py-3.5 text-left">Issued Time</th>
-                  <th className="px-5 py-3.5 text-right">Action</th>
+                  <th className="px-5 py-3.5 text-left">{t("receptionist.token")}</th>
+                  <th className="px-5 py-3.5 text-left">{t("receptionist.patientIdentifier")}</th>
+                  <th className="px-5 py-3.5 text-left">{t("common.status")}</th>
+                  <th className="px-5 py-3.5 text-left">{t("receptionist.priority")}</th>
+                  <th className="px-5 py-3.5 text-left">{t("receptionist.issuedTime")}</th>
+                  <th className="px-5 py-3.5 text-right">{t("receptionist.action")}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {tokens.items.map((t) => {
-                  const isSenior = t.priority === "senior_citizen";
-                  const isEmergency = t.priority === "emergency";
+                {tokens.items.map((tokenRow) => {
+                  const isSenior = tokenRow.priority === "senior_citizen";
+                  const isEmergency = tokenRow.priority === "emergency";
                   return (
-                    <tr key={t.id} className="table-row-hover transition-colors">
+                    <tr key={tokenRow.id} className="table-row-hover transition-colors">
                       <td className="px-5 py-3.5 font-mono text-sm font-bold text-primary">
                         <span className="rounded bg-primary/10 px-2 py-1">
-                          {t.token_display}
+                          {tokenRow.token_display}
                         </span>
                       </td>
                       <td className="px-5 py-3.5 text-sm">
                         <span className="block font-semibold text-foreground">
-                          {t.patient_name ?? "Patient unavailable"}
+                          {tokenRow.patient_name ?? t("receptionist.patientUnavailable")}
                         </span>
                         <span className="font-mono text-xs text-muted-foreground">
-                          {t.patient_identifier ?? "No identifier"}
+                          {tokenRow.patient_identifier ?? t("receptionist.noIdentifier")}
                         </span>
                       </td>
                       <td className="px-5 py-3.5 text-xs">
                         <span className="inline-flex items-center rounded-full px-2.5 py-0.5 font-semibold capitalize bg-muted text-muted-foreground">
-                          {t.status.replaceAll("_", " ")}
+                          {tokenRow.status.replaceAll("_", " ")}
                         </span>
                       </td>
                       <td className="px-5 py-3.5 text-xs">
@@ -688,24 +720,24 @@ export default function Page() {
                                 : "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300"
                           }`}
                         >
-                          {t.priority.replaceAll("_", " ")}
+                          {priorityLabel(tokenRow.priority)}
                         </span>
                       </td>
                       <td className="px-5 py-3.5 text-xs text-muted-foreground">
-                        {formatDateTime(t.created_at)}
+                        {formatDateTime(tokenRow.created_at)}
                       </td>
                       <td className="px-5 py-3.5 text-right text-xs">
-                        {t.status === "waiting" && t.priority === "normal" ? (
+                        {tokenRow.status === "waiting" && tokenRow.priority === "normal" ? (
                           <button
                             type="button"
                             className="rounded border border-border bg-card px-2.5 py-1 font-medium text-foreground shadow-xs hover:bg-muted transition"
                             onClick={() => {
-                              setPriorityTokenId(t.id);
+                              setPriorityTokenId(tokenRow.id);
                               setPriority("senior_citizen");
                               setPriorityReason("");
                             }}
                           >
-                            Escalate Priority
+                            {t("receptionist.escalatePriority")}
                           </button>
                         ) : (
                           <span className="text-muted-foreground">—</span>
@@ -724,30 +756,32 @@ export default function Page() {
         <section className="surface-card space-y-4 p-5" aria-labelledby="priority-title">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h2 id="priority-title" className="text-lg font-semibold">Change queue priority</h2>
+              <h2 id="priority-title" className="text-lg font-semibold">{t("receptionist.changeQueuePriority")}</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                Reception can record senior-citizen, pregnancy, or follow-up priority. Emergency escalation remains a clinical decision.
+                {t("receptionist.priorityEscalationHint")}
               </p>
             </div>
             <button type="button" className="text-sm underline" onClick={() => setPriorityTokenId(null)}>
-              Cancel
+              {t("common.cancel")}
             </button>
           </div>
           <div className="grid gap-4 md:grid-cols-[1fr_2fr_auto] md:items-end">
             <label className="space-y-1 text-sm">
-              <span className="text-muted-foreground">Priority *</span>
+              <span className="text-muted-foreground">{t("receptionist.priorityRequired")}</span>
               <select
                 value={priority}
                 onChange={(event) => setPriority(event.target.value as TokenPriorityUpdate["priority"])}
                 className="w-full rounded-md border border-border bg-background px-3 py-2"
               >
-                <option value="senior_citizen">Senior citizen</option>
-                <option value="pregnant">Pregnant patient</option>
-                <option value="follow_up_recall">Follow-up recall</option>
+                {(["senior_citizen", "pregnant", "follow_up_recall"] as const).map((value) => (
+                  <option key={value} value={value}>
+                    {priorityLabel(value)}
+                  </option>
+                ))}
               </select>
             </label>
             <label className="space-y-1 text-sm">
-              <span className="text-muted-foreground">Reason *</span>
+              <span className="text-muted-foreground">{t("receptionist.reasonRequired")}</span>
               <input
                 required
                 minLength={10}
@@ -757,7 +791,7 @@ export default function Page() {
                 className={`w-full rounded-md border px-3 py-2 ${
                   priorityReason && priorityReason.trim().length < 10 ? "border-danger" : "border-border"
                 }`}
-                placeholder="Record why the priority applies"
+                placeholder={t("receptionist.priorityReasonPlaceholder")}
               />
             </label>
             <button
@@ -766,7 +800,7 @@ export default function Page() {
               onClick={() => void handlePriorityUpdate()}
               className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
             >
-              {updatingPriority ? "Updating…" : "Update"}
+              {updatingPriority ? t("common.loading") : t("common.save")}
             </button>
           </div>
         </section>

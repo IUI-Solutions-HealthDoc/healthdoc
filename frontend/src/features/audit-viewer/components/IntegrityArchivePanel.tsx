@@ -5,6 +5,7 @@ import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 
 import { StatusChip } from "@/components/ui/StatusChip";
+import { useLocale } from "@/lib/i18n";
 import { meridian } from "@/styles/theme";
 import { VERIFICATION_STATUS_LABELS } from "../constants";
 import { formatDateTime, truncateHash } from "../lib/formatters";
@@ -17,9 +18,10 @@ type Props = {
 };
 
 export function IntegrityArchivePanel({ checks, archives, loading }: Props) {
+  const { t } = useLocale();
   if (loading) {
     return (
-      <Typography sx={{ color: meridian.textSecondary, p: 2 }}>Loading integrity…</Typography>
+      <Typography sx={{ color: meridian.textSecondary, p: 2 }}>{t("audit.integrity.loading")}</Typography>
     );
   }
 
@@ -35,10 +37,10 @@ export function IntegrityArchivePanel({ checks, archives, loading }: Props) {
         }}
       >
         <Typography sx={{ m: 0, mb: 1.5, fontSize: "1.0625rem", fontWeight: 700, color: meridian.textPrimary }}>
-          Integrity checks
+          {t("audit.integrity.checksTitle")}
         </Typography>
         {checks.length === 0 ? (
-          <Typography sx={{ color: meridian.textSecondary, fontSize: "0.875rem" }}>No checks.</Typography>
+          <Typography sx={{ color: meridian.textSecondary, fontSize: "0.875rem" }}>{t("audit.integrity.noChecks")}</Typography>
         ) : (
           <Stack spacing={1.5}>
             {checks.map((c) => (

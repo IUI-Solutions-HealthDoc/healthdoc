@@ -178,6 +178,7 @@ async def test_opening_options_are_named_facility_scoped_available_roster_rows(d
         "staff_name": doctor.full_name,
         "department_id": dept.id,
         "department_name": dept.name,
+        "department_name_hi": None,
         "room_id": room.id,
         "room_number": room.room_number,
         "shift": "morning",

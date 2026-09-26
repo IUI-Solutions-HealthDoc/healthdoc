@@ -23,6 +23,7 @@ class Facility(Base, UUIDPk, Timestamps):
 
     code: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
+    name_hi: Mapped[str | None] = mapped_column(Text, nullable=True)
     state_code: Mapped[str] = mapped_column(String(5), nullable=False)
     timezone: Mapped[str] = mapped_column(String(50), nullable=False, server_default="Asia/Kolkata")
     district: Mapped[str | None] = mapped_column(Text)

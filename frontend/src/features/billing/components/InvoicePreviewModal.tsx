@@ -6,7 +6,8 @@ import Typography from "@mui/material/Typography";
 
 import { Modal } from "@/components/ui/Modal";
 import { meridian } from "@/styles/theme";
-import { CHARGE_CATEGORY_LABELS } from "../constants";
+import { useLocale } from "@/lib/i18n";
+import { chargeCategoryLabel } from "../lib/labels";
 import { formatINR } from "../lib/formatters";
 import type { InvoiceWithItems } from "../types";
 
@@ -27,6 +28,7 @@ export function InvoicePreviewModal({
   onClose,
   onIssue,
 }: Props) {
+  const { t } = useLocale();
   if (!invoice) return null;
 
   return (
@@ -67,7 +69,7 @@ export function InvoicePreviewModal({
               sx={{ justifyContent: "space-between", gap: 2 }}
             >
               <Typography sx={{ fontSize: "0.875rem", color: meridian.textPrimary }}>
-                {CHARGE_CATEGORY_LABELS[item.charge_category]} — {item.description} ×{" "}
+                {chargeCategoryLabel(t, item.charge_category)} — {item.description} ×{" "}
                 {item.quantity}
               </Typography>
               <Typography sx={{ fontWeight: 600, fontSize: "0.875rem" }}>

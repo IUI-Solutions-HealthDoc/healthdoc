@@ -23,8 +23,10 @@ import {
   type OutboxEvent,
   type OutboxMetrics,
 } from "../api/outbox";
+import { useLocale } from "@/lib/i18n";
 
 export function IntegrationConsole() {
+  const { t } = useLocale();
   const [metrics, setMetrics] = useState<OutboxMetrics | null>(null);
   const [events, setEvents] = useState<OutboxEvent[]>([]);
   const [deadLetters, setDeadLetters] = useState<OutboxDeadLetter[]>([]);
@@ -63,7 +65,12 @@ export function IntegrationConsole() {
       setReplayingId(dl.id);
       setSuccessMsg(null);
       await replayDeadLetter(dl.id);
-      setSuccessMsg(`Event ${dl.event_type} (${dl.id.slice(0, 8)}) re-enqueued for delivery.`);
+      setSuccessMsg(
+        t("integration.replaySuccess", {
+          eventType: dl.event_type,
+          idPrefix: dl.id.slice(0, 8),
+        }),
+      );
       await loadData();
     } catch (err: unknown) {
       console.error("Replay failed:", err);
@@ -79,11 +86,9 @@ export function IntegrationConsole() {
         <div>
           <h1 className="text-2xl font-black tracking-tight text-foreground flex items-center gap-2">
             <Radio className="h-7 w-7 text-primary" />
-            Integration Console & Safe Outbox DLQ
+            {t("integration.title")}
           </h1>
-          <p className="text-xs text-muted-foreground mt-1">
-            Transactional event streaming, delivery lag telemetry, PHI-redacted dead-letter queue & replay (HD-31)
-          </p>
+          <p className="text-xs text-muted-foreground mt-1">{t("integration.subtitle")}</p>
         </div>
 
         <button
@@ -91,7 +96,7 @@ export function IntegrationConsole() {
           className="flex items-center gap-1.5 rounded-xl border border-border bg-card px-3.5 py-2 text-xs font-semibold text-foreground hover:bg-muted transition-colors shadow-sm self-start"
         >
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-          Refresh Metrics
+          {t("integration.refreshMetrics")}
         </button>
       </div>
 
@@ -99,49 +104,49 @@ export function IntegrationConsole() {
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-semibold text-muted-foreground uppercase">Pending Queue</span>
+            <span className="text-[11px] font-semibold text-muted-foreground uppercase">{t("integration.metric.pendingQueue")}</span>
             <Clock className="h-4 w-4 text-amber-500" />
           </div>
           <div className="mt-2 text-2xl font-black text-foreground">{metrics?.pending_count ?? 0}</div>
-          <p className="text-[10px] text-muted-foreground mt-0.5">Awaiting cloud publish</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">{t("integration.metric.pendingHint")}</p>
         </div>
 
         <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-semibold text-muted-foreground uppercase">In Flight</span>
+            <span className="text-[11px] font-semibold text-muted-foreground uppercase">{t("integration.metric.inFlight")}</span>
             <Activity className="h-4 w-4 text-sky-500" />
           </div>
           <div className="mt-2 text-2xl font-black text-foreground">{metrics?.in_flight_count ?? 0}</div>
-          <p className="text-[10px] text-muted-foreground mt-0.5">Currently dispatching</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">{t("integration.metric.inFlightHint")}</p>
         </div>
 
         <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-semibold text-muted-foreground uppercase">Delivered</span>
+            <span className="text-[11px] font-semibold text-muted-foreground uppercase">{t("integration.metric.delivered")}</span>
             <CheckCircle2 className="h-4 w-4 text-emerald-500" />
           </div>
           <div className="mt-2 text-2xl font-black text-foreground">{metrics?.sent_count ?? 0}</div>
-          <p className="text-[10px] text-muted-foreground mt-0.5">Acknowledged events</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">{t("integration.metric.deliveredHint")}</p>
         </div>
 
         <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4 shadow-sm">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-semibold text-destructive uppercase">Dead Letters (DLQ)</span>
+            <span className="text-[11px] font-semibold text-destructive uppercase">{t("integration.metric.dlq")}</span>
             <AlertOctagon className="h-4 w-4 text-destructive" />
           </div>
           <div className="mt-2 text-2xl font-black text-destructive">{metrics?.dead_letter_count ?? 0}</div>
-          <p className="text-[10px] text-muted-foreground mt-0.5">Max retries exhausted</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">{t("integration.metric.dlqHint")}</p>
         </div>
 
         <div className="rounded-2xl border border-border bg-card p-4 shadow-sm col-span-2 sm:col-span-1">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-semibold text-muted-foreground uppercase">Publish Lag</span>
+            <span className="text-[11px] font-semibold text-muted-foreground uppercase">{t("integration.metric.publishLag")}</span>
             <Radio className="h-4 w-4 text-primary" />
           </div>
           <div className="mt-2 text-2xl font-black text-foreground">
             {metrics ? `${metrics.delivery_lag_seconds.toFixed(1)}s` : "0.0s"}
           </div>
-          <p className="text-[10px] text-muted-foreground mt-0.5">Oldest pending age</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">{t("integration.metric.publishLagHint")}</p>
         </div>
       </div>
 
@@ -164,7 +169,7 @@ export function IntegrationConsole() {
             }`}
           >
             <ShieldAlert className="h-4 w-4" />
-            Dead-Letter Queue ({deadLetters.length})
+            {t("integration.tab.dlq", { count: deadLetters.length })}
           </button>
           <button
             onClick={() => setActiveTab("events")}
@@ -175,7 +180,7 @@ export function IntegrationConsole() {
             }`}
           >
             <Activity className="h-4 w-4" />
-            Outbox Event Stream ({events.length})
+            {t("integration.tab.events", { count: events.length })}
           </button>
         </div>
 
@@ -184,19 +189,19 @@ export function IntegrationConsole() {
             {deadLetters.length === 0 ? (
               <div className="text-center py-12 text-muted-foreground text-xs">
                 <CheckCircle2 className="h-8 w-8 mx-auto mb-2 text-emerald-500 opacity-60" />
-                Dead-Letter Queue is empty. All background outbox events delivered smoothly!
+                {t("integration.dlqEmpty")}
               </div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
                   <thead className="bg-muted/50 text-muted-foreground font-semibold">
                     <tr>
-                      <th className="p-3">Event Type</th>
-                      <th className="p-3">Aggregate</th>
-                      <th className="p-3">Error Reason</th>
-                      <th className="p-3">Failed At</th>
-                      <th className="p-3">Replays</th>
-                      <th className="p-3 text-right">Actions</th>
+                      <th className="p-3">{t("integration.col.eventType")}</th>
+                      <th className="p-3">{t("integration.col.aggregate")}</th>
+                      <th className="p-3">{t("integration.col.errorReason")}</th>
+                      <th className="p-3">{t("integration.col.failedAt")}</th>
+                      <th className="p-3">{t("integration.col.replays")}</th>
+                      <th className="p-3 text-right">{t("integration.col.actions")}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
@@ -222,7 +227,7 @@ export function IntegrationConsole() {
                             className="inline-flex items-center gap-1 rounded-lg border border-border bg-background px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-muted"
                           >
                             <Eye className="h-3 w-3" />
-                            Payload
+                            {t("integration.payload")}
                           </button>
                           <button
                             disabled={replayingId === dl.id}
@@ -230,7 +235,7 @@ export function IntegrationConsole() {
                             className="inline-flex items-center gap-1 rounded-lg bg-primary px-2.5 py-1 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 shadow-sm"
                           >
                             <RotateCcw className={`h-3 w-3 ${replayingId === dl.id ? "animate-spin" : ""}`} />
-                            Replay
+                            {t("integration.replay")}
                           </button>
                         </td>
                       </tr>
@@ -247,13 +252,13 @@ export function IntegrationConsole() {
               <table className="w-full text-left text-xs">
                 <thead className="bg-muted/50 text-muted-foreground font-semibold">
                   <tr>
-                    <th className="p-3">Seq #</th>
-                    <th className="p-3">Event Type</th>
-                    <th className="p-3">Aggregate</th>
-                    <th className="p-3">Status</th>
-                    <th className="p-3">Attempts</th>
-                    <th className="p-3">Created</th>
-                    <th className="p-3">Sent</th>
+                    <th className="p-3">{t("integration.col.seq")}</th>
+                    <th className="p-3">{t("integration.col.eventType")}</th>
+                    <th className="p-3">{t("integration.col.aggregate")}</th>
+                    <th className="p-3">{t("integration.col.status")}</th>
+                    <th className="p-3">{t("integration.col.attempts")}</th>
+                    <th className="p-3">{t("integration.col.created")}</th>
+                    <th className="p-3">{t("integration.col.sent")}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -303,8 +308,8 @@ export function IntegrationConsole() {
               <div className="flex items-center gap-2">
                 <Lock className="h-5 w-5 text-emerald-500" />
                 <div>
-                  <h3 className="text-lg font-bold text-card-foreground">Sanitized DLQ Payload</h3>
-                  <p className="text-xs text-muted-foreground">PHI-redacted clinical outbox payload</p>
+                  <h3 className="text-lg font-bold text-card-foreground">{t("integration.modal.title")}</h3>
+                  <p className="text-xs text-muted-foreground">{t("integration.modal.subtitle")}</p>
                 </div>
               </div>
               <button
@@ -318,19 +323,19 @@ export function IntegrationConsole() {
             <div className="mt-4 space-y-3">
               <div className="p-3 rounded-xl bg-muted/40 border border-border text-xs space-y-1">
                 <div>
-                  <strong>Event:</strong> <span className="font-mono">{inspectItem.event_type}</span>
+                  <strong>{t("integration.modal.event")}</strong> <span className="font-mono">{inspectItem.event_type}</span>
                 </div>
                 <div>
-                  <strong>Aggregate:</strong> {inspectItem.aggregate_type} ({inspectItem.aggregate_id})
+                  <strong>{t("integration.modal.aggregate")}</strong> {inspectItem.aggregate_type} ({inspectItem.aggregate_id})
                 </div>
                 <div className="text-destructive">
-                  <strong>Failure:</strong> {inspectItem.error_message}
+                  <strong>{t("integration.modal.failure")}</strong> {inspectItem.error_message}
                 </div>
               </div>
 
               <div>
                 <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground block mb-1">
-                  Redacted Payload JSON
+                  {t("integration.modal.redactedJson")}
                 </span>
                 <div className="p-3 rounded-xl bg-background border border-border max-h-60 overflow-y-auto font-mono text-xs">
                   <pre className="whitespace-pre-wrap">
@@ -345,7 +350,7 @@ export function IntegrationConsole() {
                   onClick={() => setInspectItem(null)}
                   className="rounded-xl border border-border px-4 py-2 text-xs font-semibold text-muted-foreground hover:bg-muted transition-colors"
                 >
-                  Close
+                  {t("common.close")}
                 </button>
               </div>
             </div>

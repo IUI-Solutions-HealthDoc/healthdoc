@@ -12,6 +12,7 @@ import { IndentWorkspace } from "@/features/inventory/IndentWorkspace";
 import { listReorderAlerts } from "@/features/pharmacy/api";
 import type { ReorderAlertItem } from "@/features/pharmacy/types";
 import { ApiError } from "@/lib/api";
+import { useLocale, type MessageKey } from "@/lib/i18n";
 import { useAuth } from "@/providers/auth-provider";
 
 type StockTab = "purchase-orders" | "grn" | "transfers" | "indents" | "adjustments";
@@ -19,15 +20,16 @@ type StockTab = "purchase-orders" | "grn" | "transfers" | "indents" | "adjustmen
 // Ordered as the goods move: ordered -> received -> moved between stores ->
 // requested by a ward -> corrected. A storekeeper reading left to right is
 // following the same path the stock takes.
-const STOCK_TABS: Array<{ id: StockTab; label: string }> = [
-  { id: "purchase-orders", label: "Purchase orders" },
-  { id: "grn", label: "Goods receipt" },
-  { id: "transfers", label: "Transfers" },
-  { id: "indents", label: "Indents" },
-  { id: "adjustments", label: "Adjustments" },
+const STOCK_TABS: Array<{ id: StockTab; labelKey: MessageKey }> = [
+  { id: "purchase-orders", labelKey: "inventory.tab.purchaseOrders" },
+  { id: "grn", labelKey: "inventory.tab.grn" },
+  { id: "transfers", labelKey: "inventory.tab.transfers" },
+  { id: "indents", labelKey: "inventory.tab.indents" },
+  { id: "adjustments", labelKey: "inventory.tab.adjustments" },
 ];
 
 function Inventory() {
+  const { t } = useLocale();
   const { user, isLoading: authLoading } = useAuth();
   const isHod = user?.role === "hod";
   const [tab, setTab] = useState<StockTab>("purchase-orders");
@@ -53,17 +55,16 @@ function Inventory() {
   }, [load]);
 
   if (authLoading) {
-    return <p className="p-6 text-sm text-muted-foreground">Loading…</p>;
+    return <p className="p-6 text-sm text-muted-foreground">{t("common.loading")}</p>;
   }
 
   if (isHod) {
     return (
       <div className="space-y-6 p-6">
         <div>
-          <h1 className="text-3xl font-semibold">Department indents</h1>
+          <h1 className="text-3xl font-semibold">{t("inventory.indentsTitle")}</h1>
           <p className="mt-2 max-w-prose text-sm text-muted-foreground">
-            Review requests awaiting head-of-department approval. Purchasing,
-            receiving, stock transfers and adjustments remain with the store.
+            {t("inventory.hodSubtitle")}
           </p>
         </div>
         <IndentWorkspace />
@@ -75,13 +76,11 @@ function Inventory() {
     <div className="space-y-8 p-6">
       <div className="flex flex-wrap items-baseline justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-semibold">Inventory control</h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Live reorder thresholds and batch-expiry exposure for this facility.
-          </p>
+          <h1 className="text-3xl font-semibold">{t("inventory.title")}</h1>
+          <p className="mt-2 text-sm text-muted-foreground">{t("inventory.subtitle")}</p>
         </div>
         <button type="button" className="text-sm underline" onClick={() => void load()}>
-          Refresh
+          {t("common.refresh")}
         </button>
       </div>
 
@@ -93,23 +92,23 @@ function Inventory() {
 
       <section className="space-y-4">
         <div>
-          <h2 className="text-xl font-semibold">Reorder alerts</h2>
-          <p className="text-sm text-muted-foreground">
-            Items at or below their configured reorder level.
-          </p>
+          <h2 className="text-xl font-semibold">{t("inventory.reorderAlertsTitle")}</h2>
+          <p className="text-sm text-muted-foreground">{t("inventory.reorderAlertsHint")}</p>
         </div>
-        {alerts === null ? <p className="text-sm text-muted-foreground">Loading…</p> : null}
+        {alerts === null ? (
+          <p className="text-sm text-muted-foreground">{t("common.loading")}</p>
+        ) : null}
         {alerts?.length === 0 ? (
-          <div className="surface-card p-6 text-sm text-success">No items are below reorder level.</div>
+          <div className="surface-card p-6 text-sm text-success">{t("inventory.reorderEmpty")}</div>
         ) : null}
         {alerts && alerts.length > 0 ? (
           <div className="surface-card overflow-hidden">
             <table className="min-w-full border-collapse text-sm">
               <thead className="bg-muted">
                 <tr>
-                  <th className="px-4 py-3 text-left">Item</th>
-                  <th className="px-4 py-3 text-right">Current stock</th>
-                  <th className="px-4 py-3 text-right">Reorder level</th>
+                  <th className="px-4 py-3 text-left">{t("inventory.col.item")}</th>
+                  <th className="px-4 py-3 text-right">{t("inventory.col.currentStock")}</th>
+                  <th className="px-4 py-3 text-right">{t("inventory.col.reorderLevel")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -129,7 +128,7 @@ function Inventory() {
       </section>
 
       <section className="space-y-4">
-        <h2 className="text-xl font-semibold">Batch expiry</h2>
+        <h2 className="text-xl font-semibold">{t("inventory.batchExpiryTitle")}</h2>
         <ExpiryTracker />
       </section>
 
@@ -144,12 +143,8 @@ function Inventory() {
       */}
       <section className="space-y-4">
         <div>
-          <h2 className="text-xl font-semibold">Stock movement</h2>
-          <p className="text-sm text-muted-foreground">
-            Ordering, receiving, moving, requesting and correcting — in the order
-            the stock itself travels. Every step is reviewed or countersigned by
-            someone other than the person who started it.
-          </p>
+          <h2 className="text-xl font-semibold">{t("inventory.stockMovementTitle")}</h2>
+          <p className="text-sm text-muted-foreground">{t("inventory.stockMovementHint")}</p>
         </div>
 
         <div className="flex gap-1 border-b border-border">
@@ -164,7 +159,7 @@ function Inventory() {
                   : "text-muted-foreground"
               }`}
             >
-              {entry.label}
+              {t(entry.labelKey)}
             </button>
           ))}
         </div>

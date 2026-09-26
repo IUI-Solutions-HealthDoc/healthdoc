@@ -189,6 +189,7 @@ class ChargeMaster(UUIDPk, Blame, Timestamps, Base):
         UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False)
     charge_code: Mapped[str] = mapped_column(String(30), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
+    description_hi: Mapped[str | None] = mapped_column(Text, nullable=True)
     charge_category: Mapped[str] = mapped_column(String(50), nullable=False)
     unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
 

@@ -54,6 +54,7 @@ class FacilityOut(BaseModel):
     id: uuid.UUID
     code: str
     name: str
+    name_hi: str | None = None
     timezone: str
 
 
@@ -70,6 +71,7 @@ class DepartmentOut(BaseModel):
     id: uuid.UUID
     code: str
     name: str
+    name_hi: str | None = None
 
 
 class MeOut(BaseModel):

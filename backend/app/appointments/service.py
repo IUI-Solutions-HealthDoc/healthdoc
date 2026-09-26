@@ -66,6 +66,7 @@ async def create_service(
         facility_id=facility_id,
         department_id=payload.department_id,
         name=payload.name,
+        name_hi=payload.name_hi,
         duration_minutes=payload.duration_minutes,
         description=payload.description,
         is_active=True,
@@ -108,6 +109,7 @@ async def list_appointments(
             Patient.uhid.label("patient_uhid"),
             User.full_name.label("doctor_name"),
             Department.name.label("department_name"),
+            Department.name_hi.label("department_name_hi"),
         )
         .join(Patient, Patient.id == Appointment.patient_id)
         .join(Department, Department.id == Appointment.department_id)
@@ -118,7 +120,7 @@ async def list_appointments(
 
     rows = (await db.execute(stmt)).all()
     results = []
-    for appt, patient_name, patient_uhid, doctor_name, department_name in rows:
+    for appt, patient_name, patient_uhid, doctor_name, department_name, department_name_hi in rows:
         d = {
             "id": appt.id,
             "facility_id": appt.facility_id,
@@ -145,6 +147,7 @@ async def list_appointments(
             "patient_uhid": patient_uhid,
             "doctor_name": doctor_name,
             "department_name": department_name,
+            "department_name_hi": department_name_hi,
         }
         results.append(d)
     return results

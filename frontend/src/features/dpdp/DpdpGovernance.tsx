@@ -12,12 +12,13 @@
  * The screen's job is to make the true state visible, including when the true
  * state is "nobody has been appointed".
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { listUsers } from "@/features/admin/api/users";
 import type { User } from "@/features/admin/types";
 import { useCurrentUser } from "@/features/session/useCurrentUser";
 import { ApiError } from "@/lib/api";
+import { useLocale, type MessageKey } from "@/lib/i18n";
 
 import {
   appointDpo,
@@ -32,28 +33,7 @@ import {
 } from "./api";
 import type { ConsentManager, Dpo, Grievance, GrievanceStatus } from "./types";
 
-type TransitionOption = { value: GrievanceStatus; label: string };
-
-/** Mirrors the backend state machine in app/dpdp/service.py.
- *
- * This is intentionally keyed by the CURRENT status. Rendering every status
- * except the current one offered buttons the server correctly rejected with
- * `illegal_grievance_transition` — a screen that loaded cleanly but failed as
- * soon as its primary controls were used.
- */
-const NEXT_STATUS: Record<GrievanceStatus, readonly TransitionOption[]> = {
-  pending: [
-    { value: "under_review", label: "Take under review" },
-    { value: "escalated_dpb", label: "Escalate to the Data Protection Board" },
-  ],
-  under_review: [
-    { value: "resolved", label: "Resolve" },
-    { value: "escalated_dpb", label: "Escalate to the Data Protection Board" },
-  ],
-  escalated_dpb: [{ value: "resolved", label: "Resolve" }],
-  resolved: [{ value: "closed", label: "Close" }],
-  closed: [],
-};
+type TransitionOption = { value: GrievanceStatus; labelKey: MessageKey };
 
 function statusTone(status: string): string {
   if (status === "resolved" || status === "closed") return "bg-green-100 text-green-800";
@@ -69,8 +49,26 @@ function isOverdue(grievance: Grievance): boolean {
 }
 
 export function DpdpGovernance() {
+  const { t } = useLocale();
   const { user, loading: sessionLoading } = useCurrentUser();
   const isAdmin = (user?.roles ?? []).includes("admin");
+
+  const nextStatus = useMemo(
+    (): Record<GrievanceStatus, readonly TransitionOption[]> => ({
+      pending: [
+        { value: "under_review", labelKey: "dpdp.grievance.action.under_review" },
+        { value: "escalated_dpb", labelKey: "dpdp.grievance.action.escalated_dpb" },
+      ],
+      under_review: [
+        { value: "resolved", labelKey: "dpdp.grievance.action.resolved" },
+        { value: "escalated_dpb", labelKey: "dpdp.grievance.action.escalated_dpb" },
+      ],
+      escalated_dpb: [{ value: "resolved", labelKey: "dpdp.grievance.action.resolved" }],
+      resolved: [{ value: "closed", labelKey: "dpdp.grievance.action.closed" }],
+      closed: [],
+    }),
+    [],
+  );
 
   const [dpo, setDpo] = useState<Dpo | null>(null);
   const [dpoMissing, setDpoMissing] = useState(false);
@@ -122,9 +120,9 @@ export function DpdpGovernance() {
       setStaff(staffPage?.items ?? []);
       setError(null);
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Could not load DPDP governance");
+      setError(reason instanceof ApiError ? reason.message : t("dpdp.loadFailed"));
     }
-  }, [isAdmin, sessionLoading]);
+  }, [isAdmin, sessionLoading, t]);
 
   useEffect(() => {
     void load();
@@ -157,7 +155,7 @@ export function DpdpGovernance() {
           setContact("");
           setPublishContact(false);
         }),
-      "Could not appoint the DPO",
+      t("dpdp.dpoAppointFailed"),
     );
 
   const nameOf = (userId: string) =>
@@ -171,21 +169,21 @@ export function DpdpGovernance() {
     let escalationReason: string | null = null;
 
     if (target === "resolved") {
-      const entered = window.prompt("How was this resolved?");
+      const entered = window.prompt(t("dpdp.grievance.promptResolution"));
       if (entered === null) return;
       resolution = entered.trim();
       if (!resolution) {
-        setError("A resolution is required before a grievance can be resolved.");
+        setError(t("dpdp.grievance.resolutionRequired"));
         return;
       }
     }
 
     if (target === "escalated_dpb") {
-      const entered = window.prompt("Why is this being escalated?");
+      const entered = window.prompt(t("dpdp.grievance.promptEscalation"));
       if (entered === null) return;
       escalationReason = entered.trim();
       if (!escalationReason) {
-        setError("An escalation reason is required before sending a grievance to the Board.");
+        setError(t("dpdp.grievance.escalationRequired"));
         return;
       }
     }
@@ -198,19 +196,15 @@ export function DpdpGovernance() {
           escalation_reason: escalationReason,
           assigned_to: null,
         }),
-      "Could not update the grievance",
+      t("dpdp.grievanceUpdateFailed"),
     );
   };
 
   return (
     <div className="space-y-8 p-6">
       <div>
-        <h1 className="text-3xl font-semibold">Data protection governance</h1>
-        <p className="mt-2 max-w-prose text-sm text-muted-foreground">
-          The DPDP Act requires a data fiduciary to name a data protection
-          officer, publish a way to reach them, and operate a grievance
-          mechanism. This is where those obligations are recorded.
-        </p>
+        <h1 className="text-3xl font-semibold">{t("dpdp.title")}</h1>
+        <p className="mt-2 max-w-prose text-sm text-muted-foreground">{t("dpdp.subtitle")}</p>
       </div>
 
       {error ? (
@@ -221,38 +215,31 @@ export function DpdpGovernance() {
 
       {/* ------------------------------------------------------------ DPO */}
       <section className="space-y-3">
-        <h2 className="text-xl font-semibold">Data protection officer</h2>
+        <h2 className="text-xl font-semibold">{t("dpdp.dpoSection")}</h2>
 
         {dpoMissing ? (
-          <p className="rounded border border-warning p-3 text-sm">
-            <strong>No data protection officer has been appointed.</strong> The
-            Act requires one. Until an appointment is recorded here, a patient
-            has no published contact for a data-protection concern.
-          </p>
+          <p className="rounded border border-warning p-3 text-sm">{t("dpdp.dpoMissingWarning")}</p>
         ) : null}
 
         {dpo ? (
           <div className="rounded border border-border p-4 text-sm">
             <p className="font-medium">{nameOf(dpo.user_id)}</p>
             <p className="mt-1 text-muted-foreground">
-              Appointed {new Date(dpo.appointed_at).toLocaleDateString()}
+              {t("dpdp.dpoAppointed", { date: new Date(dpo.appointed_at).toLocaleDateString() })}
             </p>
             {dpo.contact_published ? (
-              <p className="mt-1">Published contact: {dpo.published_contact}</p>
+              <p className="mt-1">{t("dpdp.dpoPublishedContact", { contact: dpo.published_contact ?? "" })}</p>
             ) : (
-              <p className="mt-1 text-warning">
-                Contact is not published — a DPO a patient cannot reach satisfies
-                the appointment but not the obligation.
-              </p>
+              <p className="mt-1 text-warning">{t("dpdp.dpoContactNotPublished")}</p>
             )}
             {isAdmin ? (
               <button
                 type="button"
                 disabled={busy}
-                onClick={() => void act(() => deactivateDpo(dpo.id), "Could not stand the DPO down")}
+                onClick={() => void act(() => deactivateDpo(dpo.id), t("dpdp.dpoStandDownFailed"))}
                 className="mt-3 rounded border border-gray-300 px-3 py-1 text-xs disabled:opacity-50"
               >
-                Stand down
+                {t("dpdp.dpoStandDown")}
               </button>
             ) : null}
           </div>
@@ -261,17 +248,17 @@ export function DpdpGovernance() {
         {isAdmin ? (
           <div className="rounded border border-border p-4">
             <h3 className="text-base font-semibold">
-              {dpo ? "Appoint a successor" : "Appoint a DPO"}
+              {dpo ? t("dpdp.dpoAppointSuccessor") : t("dpdp.dpoAppoint")}
             </h3>
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <label className="text-sm">
-                <span className="block text-muted-foreground">Officer</span>
+                <span className="block text-muted-foreground">{t("dpdp.dpoOfficer")}</span>
                 <select
                   className="mt-1 w-full rounded border border-gray-300 p-2"
                   value={appointee}
                   onChange={(e) => setAppointee(e.target.value)}
                 >
-                  <option value="">Select a member of staff…</option>
+                  <option value="">{t("dpdp.dpoSelectStaff")}</option>
                   {staff.map((candidate) => (
                     <option key={candidate.id} value={candidate.id}>
                       {candidate.full_name}
@@ -280,12 +267,10 @@ export function DpdpGovernance() {
                 </select>
               </label>
               <label className="text-sm">
-                <span className="block text-muted-foreground">
-                  Published contact
-                </span>
+                <span className="block text-muted-foreground">{t("dpdp.dpoPublishedContactLabel")}</span>
                 <input
                   className="mt-1 w-full rounded border border-gray-300 p-2"
-                  placeholder="dpo@hospital.example / phone"
+                  placeholder={t("dpdp.dpoContactPlaceholder")}
                   value={contact}
                   onChange={(e) => setContact(e.target.value)}
                   disabled={!publishContact}
@@ -303,7 +288,7 @@ export function DpdpGovernance() {
               />
               {/* The server refuses both halves of the mismatch, so the form
                   keeps them in step rather than letting a 422 explain it. */}
-              Publish this contact to data principals
+              {t("dpdp.dpoPublishContact")}
             </label>
             <button
               type="button"
@@ -311,7 +296,7 @@ export function DpdpGovernance() {
               onClick={() => void submitAppointment()}
               className="mt-4 rounded bg-blue-700 px-4 py-2 text-sm text-white disabled:bg-gray-300"
             >
-              {dpo ? "Appoint successor" : "Appoint"}
+              {dpo ? t("dpdp.dpoAppointSuccessorButton") : t("dpdp.dpoAppointButton")}
             </button>
           </div>
         ) : null}
@@ -319,14 +304,16 @@ export function DpdpGovernance() {
         {history.length > 1 ? (
           <details className="text-sm">
             <summary className="cursor-pointer text-muted-foreground">
-              Appointment history ({history.length})
+              {t("dpdp.dpoHistory", { count: history.length })}
             </summary>
             <ul className="mt-2 space-y-1">
               {history.map((entry) => (
                 <li key={entry.id} className="text-muted-foreground">
-                  {nameOf(entry.user_id)} — appointed{" "}
-                  {new Date(entry.appointed_at).toLocaleDateString()}
-                  {entry.is_active ? " · current" : ""}
+                  {t("dpdp.dpoHistoryEntry", {
+                    name: nameOf(entry.user_id),
+                    date: new Date(entry.appointed_at).toLocaleDateString(),
+                    current: entry.is_active ? t("dpdp.dpoCurrentSuffix") : "",
+                  })}
                 </li>
               ))}
             </ul>
@@ -336,9 +323,9 @@ export function DpdpGovernance() {
 
       {/* ----------------------------------------------------- grievances */}
       <section className="space-y-3">
-        <h2 className="text-xl font-semibold">Grievance register ({grievances.length})</h2>
+        <h2 className="text-xl font-semibold">{t("dpdp.grievancesSection", { count: grievances.length })}</h2>
         {grievances.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No grievances recorded.</p>
+          <p className="text-sm text-muted-foreground">{t("dpdp.grievancesEmpty")}</p>
         ) : (
           <ul className="space-y-2">
             {grievances.map((grievance) => (
@@ -364,19 +351,19 @@ export function DpdpGovernance() {
                 <p className="mt-1">{grievance.description}</p>
 
                 <p className={`mt-1 text-xs ${isOverdue(grievance) ? "text-danger" : "text-muted-foreground"}`}>
-                  Due {new Date(grievance.due_at).toLocaleString()}
-                  {isOverdue(grievance) ? " — past its response deadline" : ""}
+                  {t("dpdp.grievanceDue", { date: new Date(grievance.due_at).toLocaleString() })}
+                  {isOverdue(grievance) ? t("dpdp.grievanceOverdue") : ""}
                 </p>
 
                 {grievance.resolution ? (
                   <p className="mt-1 text-muted-foreground">
-                    Resolution: {grievance.resolution}
+                    {t("dpdp.grievanceResolution", { text: grievance.resolution })}
                   </p>
                 ) : null}
 
-                {NEXT_STATUS[grievance.status].length > 0 ? (
+                {nextStatus[grievance.status].length > 0 ? (
                   <div className="mt-2 flex flex-wrap gap-2">
-                    {NEXT_STATUS[grievance.status].map((option) => (
+                    {nextStatus[grievance.status].map((option) => (
                         <button
                           key={option.value}
                           type="button"
@@ -384,7 +371,7 @@ export function DpdpGovernance() {
                           onClick={() => submitTransition(grievance, option.value)}
                           className="rounded border border-gray-300 px-3 py-1 text-xs disabled:opacity-50"
                         >
-                          {option.label}
+                          {t(option.labelKey)}
                         </button>
                       ))}
                   </div>
@@ -397,14 +384,11 @@ export function DpdpGovernance() {
 
       {/* ----------------------------------------------- consent managers */}
       <section className="space-y-3">
-        <h2 className="text-xl font-semibold">Consent managers ({managers.length})</h2>
-        <p className="text-sm text-muted-foreground">
-          Registered under DPDP Rules 2025. `consent_records.consent_manager_id`
-          points at these.
-        </p>
+        <h2 className="text-xl font-semibold">{t("dpdp.consentManagersSection", { count: managers.length })}</h2>
+        <p className="text-sm text-muted-foreground">{t("dpdp.consentManagersHint")}</p>
 
         {managers.length === 0 ? (
-          <p className="text-sm text-muted-foreground">None registered.</p>
+          <p className="text-sm text-muted-foreground">{t("dpdp.consentManagersEmpty")}</p>
         ) : (
           <ul className="space-y-2">
             {managers.map((manager) => (
@@ -421,7 +405,7 @@ export function DpdpGovernance() {
                         : "bg-gray-100 text-gray-700"
                     }`}
                   >
-                    {manager.is_active ? "active" : "inactive"}
+                    {manager.is_active ? t("dpdp.consentManagerActive") : t("dpdp.consentManagerInactive")}
                   </span>
                 </div>
                 {manager.endpoint_url ? (
@@ -437,12 +421,12 @@ export function DpdpGovernance() {
                       void act(
                         () =>
                           updateConsentManager(manager.id, { is_active: !manager.is_active }),
-                        "Could not update the consent manager",
+                        t("dpdp.consentManagerUpdateFailed"),
                       )
                     }
                     className="mt-2 rounded border border-gray-300 px-3 py-1 text-xs disabled:opacity-50"
                   >
-                    {manager.is_active ? "Deactivate" : "Reactivate"}
+                    {manager.is_active ? t("dpdp.consentManagerDeactivate") : t("dpdp.consentManagerReactivate")}
                   </button>
                 ) : null}
               </li>
@@ -452,10 +436,10 @@ export function DpdpGovernance() {
 
         {isAdmin ? (
           <div className="rounded border border-border p-4">
-            <h3 className="text-base font-semibold">Register a consent manager</h3>
+            <h3 className="text-base font-semibold">{t("dpdp.registerConsentManager")}</h3>
             <div className="mt-3 grid gap-3 sm:grid-cols-3">
               <label className="text-sm">
-                <span className="block text-muted-foreground">Registration id</span>
+                <span className="block text-muted-foreground">{t("dpdp.registrationId")}</span>
                 <input
                   className="mt-1 w-full rounded border border-gray-300 p-2"
                   value={cmRegistrationId}
@@ -463,7 +447,7 @@ export function DpdpGovernance() {
                 />
               </label>
               <label className="text-sm">
-                <span className="block text-muted-foreground">Name</span>
+                <span className="block text-muted-foreground">{t("dpdp.managerName")}</span>
                 <input
                   className="mt-1 w-full rounded border border-gray-300 p-2"
                   value={cmName}
@@ -471,7 +455,7 @@ export function DpdpGovernance() {
                 />
               </label>
               <label className="text-sm">
-                <span className="block text-muted-foreground">Endpoint URL</span>
+                <span className="block text-muted-foreground">{t("dpdp.endpointUrl")}</span>
                 <input
                   className="mt-1 w-full rounded border border-gray-300 p-2"
                   placeholder="https://…"
@@ -495,12 +479,12 @@ export function DpdpGovernance() {
                       setCmName("");
                       setCmEndpoint("");
                     }),
-                  "Could not register the consent manager",
+                  t("dpdp.registerConsentManagerFailed"),
                 )
               }
               className="mt-4 rounded bg-blue-700 px-4 py-2 text-sm text-white disabled:bg-gray-300"
             >
-              Register
+              {t("dpdp.register")}
             </button>
           </div>
         ) : null}

@@ -8,6 +8,7 @@ import { ImmunizationScheduleView } from "./components/ImmunizationScheduleView"
 import { RecordImmunizationModal } from "./components/RecordImmunizationModal";
 import type { ImmunizationCertificate, Vaccine } from "./types";
 import { api } from "@/lib/api";
+import { useLocale } from "@/lib/i18n";
 
 interface PatientSearchResult {
   items: Array<{
@@ -23,6 +24,7 @@ const describe = (err: unknown, fallback: string) =>
   err instanceof Error && err.message ? err.message : fallback;
 
 export function ImmunizationPage() {
+  const { t } = useLocale();
   const [catalogue, setCatalogue] = useState<Vaccine[]>([]);
   const [loadingCatalogue, setLoadingCatalogue] = useState(true);
   const [catalogueError, setCatalogueError] = useState<string | null>(null);
@@ -64,11 +66,11 @@ export function ImmunizationPage() {
       setCatalogue(cat);
     } catch (err: unknown) {
       if (request === catalogueSequence.current)
-        setCatalogueError(describe(err, "The vaccine catalogue could not be loaded."));
+        setCatalogueError(describe(err, t("immunization.errCatalogue")));
     } finally {
       if (request === catalogueSequence.current) setLoadingCatalogue(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void loadCatalogue();
@@ -100,17 +102,15 @@ export function ImmunizationPage() {
         setActivePatient({
           id: p.id,
           uhid: p.uhid,
-          full_name: p.full_name || `${p.first_name || ""} ${p.last_name || ""}`.trim() || "Patient",
+          full_name: p.full_name || `${p.first_name || ""} ${p.last_name || ""}`.trim() || t("common.patient"),
         });
       } else if (items.length === 0) {
-        setSearchError("No patient matched that exact UHID or mobile number.");
+        setSearchError(t("immunization.errNoPatientMatch"));
       } else {
-        // Family members often share a mobile number; a silent no-op or the
-        // first match would both be wrong for a vaccination record.
-        setSearchError(`${items.length} patients share that identifier. Enter the exact UHID to select one.`);
+        setSearchError(t("immunization.errMultiplePatients", { count: items.length }));
       }
     } catch (err: unknown) {
-      if (request === searchSequence.current) setSearchError(describe(err, "Patient search failed."));
+      if (request === searchSequence.current) setSearchError(describe(err, t("immunization.errSearchFailed")));
     } finally {
       if (request === searchSequence.current) setIsSearching(false);
     }
@@ -126,7 +126,7 @@ export function ImmunizationPage() {
       setIsCertModalOpen(true);
     } catch (err: unknown) {
       if (patientRef.current === activePatient)
-        setCertificateError(describe(err, "The immunization certificate could not be loaded."));
+        setCertificateError(describe(err, t("immunization.errCertificate")));
     }
   };
 
@@ -134,7 +134,7 @@ export function ImmunizationPage() {
     return (
       <div className="flex items-center justify-center p-16 text-muted-foreground">
         <RefreshCw className="h-6 w-6 animate-spin mr-2" />
-        <span>Loading immunization catalogue...</span>
+        <span>{t("immunization.loadingCatalogue")}</span>
       </div>
     );
   }
@@ -143,14 +143,14 @@ export function ImmunizationPage() {
     return (
       <div role="alert" className="rounded-2xl border border-destructive/30 bg-destructive/10 p-8 text-center text-sm text-destructive space-y-3">
         <AlertCircle className="h-8 w-8 mx-auto" />
-        <p>The vaccine catalogue could not be loaded: {catalogueError}</p>
-        <p className="text-xs text-muted-foreground">Doses cannot be recorded until the catalogue is available. This is a failed read, not an empty catalogue.</p>
+        <p>{t("immunization.errCatalogueDetail", { message: catalogueError })}</p>
+        <p className="text-xs text-muted-foreground">{t("immunization.errCatalogueHint")}</p>
         <button
           type="button"
           onClick={() => void loadCatalogue()}
           className="rounded-xl border border-destructive/40 px-4 py-2 text-xs font-semibold hover:bg-destructive/10 transition-colors"
         >
-          Retry loading catalogue
+          {t("immunization.retryCatalogue")}
         </button>
       </div>
     );
@@ -163,11 +163,9 @@ export function ImmunizationPage() {
         <div>
           <h1 className="text-2xl font-black tracking-tight text-foreground flex items-center gap-2">
             <Syringe className="h-7 w-7 text-primary" />
-            Immunization Management
+            {t("immunization.title")}
           </h1>
-          <p className="text-xs text-muted-foreground mt-1">
-            Universal Immunization Programme, paediatric schedules, batch traceability & digital certification
-          </p>
+          <p className="text-xs text-muted-foreground mt-1">{t("immunization.subtitle")}</p>
         </div>
 
         {/* Tab switcher */}
@@ -181,7 +179,7 @@ export function ImmunizationPage() {
             }`}
           >
             <Syringe className="h-3.5 w-3.5" />
-            Patient Schedule
+            {t("immunization.tab.patientSchedule")}
           </button>
           <button
             onClick={() => setTopTab("catalogue")}
@@ -192,7 +190,7 @@ export function ImmunizationPage() {
             }`}
           >
             <BookOpen className="h-3.5 w-3.5" />
-            Vaccine Catalogue ({catalogue.length})
+            {t("immunization.tab.catalogueCount", { count: catalogue.length })}
           </button>
         </div>
       </div>
@@ -206,7 +204,7 @@ export function ImmunizationPage() {
                 <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
                 <input
                   type="text"
-                  placeholder="Search patient by exact UHID or mobile number..."
+                  placeholder={t("immunization.searchPlaceholder")}
                   value={patientSearch}
                   onChange={(e) => setPatientSearch(e.target.value)}
                   className="w-full rounded-xl border border-input bg-background pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
@@ -217,7 +215,7 @@ export function ImmunizationPage() {
                 disabled={isSearching}
                 className="rounded-xl bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
               >
-                {isSearching ? "Searching…" : "Find Patient"}
+                {isSearching ? t("immunization.searching") : t("immunization.findPatient")}
               </button>
             </form>
             {searchError && (
@@ -246,7 +244,7 @@ export function ImmunizationPage() {
           ) : (
             <div className="rounded-2xl border border-dashed border-border p-12 text-center text-muted-foreground text-sm">
               <Syringe className="h-10 w-10 mx-auto mb-3 opacity-30 text-primary" />
-              Search for a patient or enter a UHID above to review due vaccines and record immunizations.
+              {t("immunization.noPatientSelected")}
             </div>
           )}
         </div>
@@ -255,21 +253,21 @@ export function ImmunizationPage() {
         <div className="rounded-2xl border border-border bg-card overflow-hidden shadow-sm">
           <div className="p-4 border-b border-border bg-muted/20 flex items-center justify-between">
             <div>
-              <h3 className="text-sm font-bold text-foreground">Standardized National Vaccine Schedule</h3>
-              <p className="text-xs text-muted-foreground">Universal Immunization Programme (UIP) approved antigens</p>
+              <h3 className="text-sm font-bold text-foreground">{t("immunization.catalogueTitle")}</h3>
+              <p className="text-xs text-muted-foreground">{t("immunization.catalogueSubtitle")}</p>
             </div>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead className="bg-muted/50 text-muted-foreground font-semibold">
                 <tr>
-                  <th className="p-3">Vaccine Name</th>
-                  <th className="p-3">Code</th>
-                  <th className="p-3">Target Disease</th>
-                  <th className="p-3">Schedule Age</th>
-                  <th className="p-3">Dose #</th>
-                  <th className="p-3">Route</th>
-                  <th className="p-3">Site</th>
+                  <th className="p-3">{t("immunization.col.vaccineName")}</th>
+                  <th className="p-3">{t("immunization.col.code")}</th>
+                  <th className="p-3">{t("immunization.col.targetDisease")}</th>
+                  <th className="p-3">{t("immunization.col.scheduleAge")}</th>
+                  <th className="p-3">{t("immunization.col.dose")}</th>
+                  <th className="p-3">{t("immunization.col.route")}</th>
+                  <th className="p-3">{t("immunization.col.site")}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -280,12 +278,12 @@ export function ImmunizationPage() {
                     <td className="p-3 text-muted-foreground">{v.target_disease}</td>
                     <td className="p-3 font-medium">
                       {v.min_age_days === 0
-                        ? "At Birth"
-                        : `${v.min_age_days} days`}
+                        ? t("immunization.atBirth")
+                        : t("immunization.daysAge", { days: v.min_age_days })}
                     </td>
                     <td className="p-3">
                       <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
-                        Dose {v.standard_doses}
+                        {t("immunization.doseLabel", { n: v.standard_doses })}
                       </span>
                     </td>
                     <td className="p-3 text-muted-foreground">{v.route}</td>

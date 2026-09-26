@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { toast } from "@/components/ui/toast";
 import { ApiError, newIdempotencyKey } from "@/lib/api";
+import { useLocale, type MessageKey } from "@/lib/i18n";
 
 import {
   createRosterEntry,
@@ -24,10 +25,10 @@ interface RosterManagerProps {
   today: string;
 }
 
-const SHIFTS: ReadonlyArray<{ value: RosterShift; label: string }> = [
-  { value: "morning", label: "Morning" },
-  { value: "evening", label: "Evening" },
-  { value: "night", label: "Night" },
+const SHIFTS: ReadonlyArray<{ value: RosterShift; labelKey: MessageKey }> = [
+  { value: "morning", labelKey: "hod.roster.shift.morning" },
+  { value: "evening", labelKey: "hod.roster.shift.evening" },
+  { value: "night", labelKey: "hod.roster.shift.night" },
 ];
 
 function requestMessage(reason: unknown, fallback: string): string {
@@ -45,6 +46,7 @@ function requestMessage(reason: unknown, fallback: string): string {
  * real HOD can recover an empty day without a SQL seed or an engineer.
  */
 export function RosterManager({ departmentId, today }: RosterManagerProps) {
+  const { t } = useLocale();
   const [rosterDate, setRosterDate] = useState(today);
   const [staffId, setStaffId] = useState("");
   const [roomId, setRoomId] = useState("");
@@ -80,11 +82,11 @@ export function RosterManager({ departmentId, today }: RosterManagerProps) {
       );
       setError(null);
     } catch (reason) {
-      setError(requestMessage(reason, "Could not load the roster."));
+      setError(requestMessage(reason, t("hod.roster.errLoad")));
     } finally {
       setLoading(false);
     }
-  }, [departmentId, rosterDate]);
+  }, [departmentId, rosterDate, t]);
 
   useEffect(() => {
     void load();
@@ -132,7 +134,7 @@ export function RosterManager({ departmentId, today }: RosterManagerProps) {
       setCreateKey(newIdempotencyKey());
       setEntries(await listRoster(departmentId, rosterDate));
     } catch (reason) {
-      setError(requestMessage(reason, "Could not add the roster entry."));
+      setError(requestMessage(reason, t("hod.roster.errAdd")));
     } finally {
       setSaving(false);
     }
@@ -150,7 +152,7 @@ export function RosterManager({ departmentId, today }: RosterManagerProps) {
         updated.is_available ? "Staff marked available" : "Staff marked unavailable",
       );
     } catch (reason) {
-      setError(requestMessage(reason, "Could not update availability."));
+      setError(requestMessage(reason, t("hod.roster.errUpdateAvailability")));
     } finally {
       setUpdatingId(null);
     }
@@ -160,14 +162,14 @@ export function RosterManager({ departmentId, today }: RosterManagerProps) {
     <section className="space-y-4" aria-labelledby="roster-heading">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 id="roster-heading" className="text-xl font-semibold">Department roster</h2>
+          <h2 id="roster-heading" className="text-xl font-semibold">{t("hod.roster.title")}</h2>
           <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
             Add staff here before reception opens the day&apos;s OPD queues. Room assignment is
             optional and only active staff from this department are shown.
           </p>
         </div>
         <label className="space-y-1 text-sm">
-          <span className="text-muted-foreground">View date</span>
+          <span className="text-muted-foreground">{t("hod.roster.viewDate")}</span>
           <input
             type="date"
             min={today}
@@ -190,7 +192,7 @@ export function RosterManager({ departmentId, today }: RosterManagerProps) {
         noValidate
       >
         <label className="space-y-1 text-sm">
-          <span className="text-muted-foreground">Staff member</span>
+          <span className="text-muted-foreground">{t("hod.roster.staffMember")}</span>
           <select
             value={staffId}
             onChange={(event) => {
@@ -219,7 +221,7 @@ export function RosterManager({ departmentId, today }: RosterManagerProps) {
             className="w-full rounded-md border border-border bg-background px-3 py-2"
           >
             {SHIFTS.map((item) => (
-              <option key={item.value} value={item.value}>{item.label}</option>
+              <option key={item.value} value={item.value}>{t(item.labelKey)}</option>
             ))}
           </select>
         </label>
@@ -243,7 +245,7 @@ export function RosterManager({ departmentId, today }: RosterManagerProps) {
           disabled={saving || loading || candidates.length === 0}
           className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
         >
-          {saving ? "Adding…" : "Add to roster"}
+          {saving ? t("hod.roster.adding") : t("hod.roster.addToRoster")}
         </button>
 
         {fieldError ? (
@@ -257,7 +259,7 @@ export function RosterManager({ departmentId, today }: RosterManagerProps) {
         ) : null}
       </form>
 
-      {loading ? <p className="text-sm text-muted-foreground">Loading roster…</p> : null}
+      {loading ? <p className="text-sm text-muted-foreground">{t("hod.roster.loading")}</p> : null}
       {!loading && entries.length === 0 ? (
         <p className="rounded border border-dashed border-border p-4 text-sm text-muted-foreground">
           No roster entries for {rosterDate}. Add the first entry above so reception can open

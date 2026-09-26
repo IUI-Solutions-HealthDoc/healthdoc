@@ -3,6 +3,7 @@ import { api, newIdempotencyKey } from "@/lib/api";
 export interface Department {
   id: string;
   name: string;
+  name_hi?: string | null;
   code: string;
   facility_id: string;
   is_active: boolean;
@@ -30,11 +31,19 @@ export function listRooms(): Promise<ListResponse<Room>> {
   return api<ListResponse<Room>>("/departments/rooms?page=1&page_size=100");
 }
 
-export function createDepartment(name: string, code: string): Promise<Department> {
+export function createDepartment(
+  name: string,
+  code: string,
+  name_hi?: string | null,
+): Promise<Department> {
   return api<Department>("/departments", {
     method: "POST",
     idempotencyKey: newIdempotencyKey(),
-    body: JSON.stringify({ name, code }),
+    body: JSON.stringify({
+      name,
+      code,
+      ...(name_hi && name_hi.trim() ? { name_hi: name_hi.trim() } : {}),
+    }),
   });
 }
 

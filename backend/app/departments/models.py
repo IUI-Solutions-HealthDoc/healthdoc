@@ -13,6 +13,7 @@ class Department(Base, UUIDPk, Timestamps):
     )
 
     name: Mapped[str] = mapped_column(Text(), nullable=False)
+    name_hi: Mapped[str | None] = mapped_column(Text(), nullable=True)
     code: Mapped[str] = mapped_column(String(20), nullable=False)
     
     facility_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("facilities.id"), nullable=False)

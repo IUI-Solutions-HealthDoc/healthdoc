@@ -37,6 +37,7 @@ async def create_department(
     dept = await service.create_department(
         db,
         name=payload.name,
+        name_hi=payload.name_hi,
         code=payload.code,
         facility_id=current_db_user.facility_id,
     )
@@ -164,6 +165,8 @@ async def update_department(
         db,
         department_id,
         name=payload.name,
+        name_hi=payload.name_hi,
+        update_name_hi="name_hi" in payload.model_fields_set,
         code=payload.code,
         is_active=payload.is_active,
         facility_id=current_db_user.facility_id,

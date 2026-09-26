@@ -17,6 +17,7 @@ import type { User } from "../types";
 import type { FieldErrors } from "../validation";
 import type { Department } from "../api/departments";
 import { UserHeader } from "./UserHeader";
+import { useLocale } from "@/lib/i18n";
 
 type Props = {
   draft: User;
@@ -51,6 +52,7 @@ export function UserProfileForm({
   onSave,
   onToggleActive,
 }: Props) {
+  const { localizeField } = useLocale();
   const saveDisabled = busy || !isDirty;
 
   return (
@@ -114,7 +116,7 @@ export function UserProfileForm({
             <MenuItem value="">No department</MenuItem>
             {departments.filter((department) => department.is_active).map((department) => (
               <MenuItem key={department.id} value={department.id}>
-                {department.name} ({department.code})
+                {localizeField(department.name, department.name_hi)} ({department.code})
               </MenuItem>
             ))}
           </TextField>

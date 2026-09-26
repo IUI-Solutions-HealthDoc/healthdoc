@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { toast } from "@/components/ui/toast";
+import { useLocale } from "@/lib/i18n";
 import {
   listDiagnoses,
   saveDiagnosis,
@@ -19,6 +20,7 @@ import type {
 } from "../types";
 
 export function useDiagnoses(encounter: ActiveEncounter) {
+  const { t } = useLocale();
   const [rows, setRows] = useState<DraftDiagnosis[]>([]);
   const [options, setOptions] = useState<IcdConcept[]>([]);
   const [loading, setLoading] = useState(true);
@@ -48,7 +50,7 @@ export function useDiagnoses(encounter: ActiveEncounter) {
       })
       .catch((error: unknown) => {
         if (!cancelled) {
-          toast.error(error instanceof Error ? error.message : "Failed to load diagnoses");
+          toast.error(error instanceof Error ? error.message : t("doctor.toast.loadDiagnosesFailed"));
         }
       })
       .finally(() => {
@@ -57,7 +59,7 @@ export function useDiagnoses(encounter: ActiveEncounter) {
     return () => {
       cancelled = true;
     };
-  }, [encounter.id]);
+  }, [encounter.id, t]);
 
   const search = useCallback(
     async (query: string, system: "all" | "icd10" | "icd11" | "snomed" = "all") => {
@@ -139,7 +141,7 @@ export function useDiagnoses(encounter: ActiveEncounter) {
   const save = useCallback(async () => {
     const pending = rows.filter((row) => !row.persisted);
     if (pending.length === 0) {
-      toast.error("Add at least one diagnosis");
+      toast.error(t("doctor.toast.addDiagnosisRequired"));
       return;
     }
     setSaving(true);
@@ -165,7 +167,9 @@ export function useDiagnoses(encounter: ActiveEncounter) {
         ),
       );
       toast.success(
-        `${pending.length} diagnosis${pending.length > 1 ? "es" : ""} saved`,
+        pending.length === 1
+          ? t("doctor.toast.diagnosesSavedOne")
+          : t("doctor.toast.diagnosesSavedMany", { count: pending.length }),
       );
     } catch (e) {
       if (savedIds.length > 0) {
@@ -175,12 +179,13 @@ export function useDiagnoses(encounter: ActiveEncounter) {
           ),
         );
       }
-      const prefix = savedIds.length > 0 ? `${savedIds.length} saved; unsaved rows were kept. ` : "";
-      toast.error(`${prefix}${e instanceof Error ? e.message : "Failed to save diagnoses"}`);
+      const prefix =
+        savedIds.length > 0 ? t("doctor.toast.diagnosesPartialPrefix", { saved: savedIds.length }) : "";
+      toast.error(`${prefix}${e instanceof Error ? e.message : t("doctor.toast.saveDiagnosesFailed")}`);
     } finally {
       setSaving(false);
     }
-  }, [encounter.id, rows]);
+  }, [encounter.id, rows, t]);
 
   return {
     rows,

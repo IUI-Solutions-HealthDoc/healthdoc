@@ -7,6 +7,13 @@ const code = z.string().trim().min(1, "Enter a charge code.").max(30, "Use at mo
 export const tariffFormSchema = z.object({
   charge_code: code,
   description: z.string().trim().min(1, "Enter a description.").refine(noControl, "Control characters are not allowed."),
+  description_hi: z
+    .string()
+    .trim()
+    .max(200)
+    .refine(noControl, "Control characters are not allowed.")
+    .optional()
+    .transform((value) => (value && value.length > 0 ? value : null)),
   charge_category: z.enum(["registration", "consultation", "lab", "radiology", "pharmacy", "procedure", "ipd_stay", "blood", "other"]),
   // Numeric(12,2): validate and normalize strings without binary float rounding.
   unit_price: z.string().trim().regex(/^\d{1,10}(\.\d{1,2})?$/, "Enter a non-negative price with up to 10 whole digits and 2 decimals.")

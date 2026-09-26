@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { ApiError } from "@/lib/api";
+import { useLocale } from "@/lib/i18n";
 
 import { expiryTracker } from "./api";
 import {
@@ -29,6 +30,7 @@ const TONE: Record<ExpiryBucket, string> = {
  * boundary and could show a batch in two buckets at once.
  */
 export function ExpiryTracker() {
+  const { t } = useLocale();
   const [batches, setBatches] = useState<ExpiringBatch[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -40,7 +42,7 @@ export function ExpiryTracker() {
       })
       .catch((reason: unknown) => {
         if (!cancelled) {
-          setError(reason instanceof ApiError ? reason.message : "Could not load expiry data");
+          setError(reason instanceof ApiError ? reason.message : t("pharmacy.errLoadExpiry"));
         }
       });
     return () => {
@@ -74,7 +76,7 @@ export function ExpiryTracker() {
   }
 
   if (batches === null) {
-    return <p className="text-sm text-muted-foreground">Loading expiry data…</p>;
+    return <p className="text-sm text-muted-foreground">{t("pharmacy.expiry.loading")}</p>;
   }
 
   return (
@@ -88,18 +90,20 @@ export function ExpiryTracker() {
             <div className="flex items-center justify-between border-b border-border px-6 py-4">
               <h3 className="text-base font-semibold">{BUCKET_LABELS[bucket]}</h3>
               <span className={`rounded-full px-2 py-1 text-xs font-medium ${TONE[bucket]}`}>
-                {rows.length} batch{rows.length === 1 ? "" : "es"}
+                {rows.length === 1
+                  ? t("pharmacy.expiry.batchCount", { count: rows.length })
+                  : t("pharmacy.expiry.batchCountPlural", { count: rows.length })}
               </span>
             </div>
 
             <table className="min-w-full border-collapse">
               <thead className="bg-muted">
                 <tr>
-                  <th className="px-4 py-3 text-left">Medicine</th>
-                  <th className="px-4 py-3 text-left">Batch</th>
-                  <th className="px-4 py-3 text-left">Expires</th>
-                  <th className="px-4 py-3 text-left">Quantity</th>
-                  <th className="px-4 py-3 text-left">Location</th>
+                  <th className="px-4 py-3 text-left">{t("pharmacy.expiry.col.medicine")}</th>
+                  <th className="px-4 py-3 text-left">{t("pharmacy.expiry.col.batch")}</th>
+                  <th className="px-4 py-3 text-left">{t("pharmacy.expiry.col.expires")}</th>
+                  <th className="px-4 py-3 text-left">{t("pharmacy.expiry.col.quantity")}</th>
+                  <th className="px-4 py-3 text-left">{t("pharmacy.expiry.col.location")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -111,8 +115,8 @@ export function ExpiryTracker() {
                       {batch.expiry_date}
                       <span className="ml-2 text-muted-foreground">
                         {batch.days_to_expiry < 0
-                          ? `${Math.abs(batch.days_to_expiry)}d ago`
-                          : `in ${batch.days_to_expiry}d`}
+                          ? t("pharmacy.expiry.daysAgo", { days: Math.abs(batch.days_to_expiry) })
+                          : t("pharmacy.expiry.daysIn", { days: batch.days_to_expiry })}
                       </span>
                     </td>
                     {/* Quantity stays a string — it is a Decimal on the wire and
@@ -130,7 +134,7 @@ export function ExpiryTracker() {
       {batches.length === 0 && (
         <div className="surface-card p-6">
           <p className="text-sm text-muted-foreground">
-            No batches expiring within 90 days.
+            {t("pharmacy.expiry.empty")}
           </p>
         </div>
       )}

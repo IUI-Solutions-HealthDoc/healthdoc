@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from "react";
 
 import { toast } from "@/components/ui/toast";
 import { newIdempotencyKey } from "@/lib/api";
+import { useLocale } from "@/lib/i18n";
 import { saveVitals } from "../api";
 import { computeBmi, computeWhr } from "../lib/formatters";
 import type { ActiveEncounter, VitalsInput } from "../types";
@@ -43,6 +44,7 @@ function num(v: string): number | undefined {
 }
 
 export function useVitals(encounter: ActiveEncounter) {
+  const { t } = useLocale();
   const [form, setForm] = useState<VitalsForm>(EMPTY);
   const [saving, setSaving] = useState(false);
   const [idempotencyKey, setIdempotencyKey] = useState(() => newIdempotencyKey());
@@ -58,7 +60,7 @@ export function useVitals(encounter: ActiveEncounter) {
 
   const record = useCallback(async () => {
     if (!anyEntered) {
-      toast.error("Enter at least one vital before recording");
+      toast.error(t("doctor.toast.enterOneVital"));
       return;
     }
     setSaving(true);
@@ -83,13 +85,13 @@ export function useVitals(encounter: ActiveEncounter) {
       await saveVitals(input, idempotencyKey);
       setForm(EMPTY);
       setIdempotencyKey(newIdempotencyKey());
-      toast.success("Vitals recorded");
+      toast.success(t("doctor.toast.vitalsRecorded"));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to record vitals");
+      toast.error(e instanceof Error ? e.message : t("doctor.toast.recordVitalsFailed"));
     } finally {
       setSaving(false);
     }
-  }, [anyEntered, encounter, form, idempotencyKey]);
+  }, [anyEntered, encounter, form, idempotencyKey, t]);
 
   return { form, setField, bmi, whr, anyEntered, saving, record };
 }

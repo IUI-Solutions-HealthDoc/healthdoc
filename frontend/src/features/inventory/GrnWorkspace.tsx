@@ -20,6 +20,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { searchMedicines } from "@/features/pharmacy/api";
 import type { MedicineSearchResult } from "@/features/pharmacy/types";
 import { ApiError } from "@/lib/api";
+import { useLocale } from "@/lib/i18n";
 
 import { createGrn, listGrns, listPurchaseOrders, listStockLocations, listSuppliers, verifyGrn } from "./api";
 import type { GrnItemDraft, GrnListRow, PurchaseOrder, StockLocation, Supplier } from "./types";
@@ -41,6 +42,7 @@ function statusTone(status: string): string {
 }
 
 export function GrnWorkspace() {
+  const { t } = useLocale();
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [locations, setLocations] = useState<StockLocation[]>([]);
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
@@ -76,7 +78,7 @@ export function GrnWorkspace() {
       );
       setError(null);
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Could not load goods receipts");
+      setError(reason instanceof ApiError ? reason.message : t("inventory.err.loadGrn"));
     }
   }, []);
 
@@ -160,7 +162,7 @@ export function GrnWorkspace() {
       setLines([{ ...EMPTY_LINE }]);
       await reload();
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Could not record the receipt");
+      setError(reason instanceof ApiError ? reason.message : t("inventory.err.recordReceipt"));
     } finally {
       setBusy(false);
     }
@@ -172,7 +174,7 @@ export function GrnWorkspace() {
       await verifyGrn(grnId, stockLocationId);
       await reload();
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Could not verify the receipt");
+      setError(reason instanceof ApiError ? reason.message : t("inventory.err.verifyReceipt"));
     } finally {
       setBusy(false);
     }
@@ -190,21 +192,18 @@ export function GrnWorkspace() {
       ) : null}
 
       <section className="rounded border border-gray-200 p-4">
-        <h3 className="text-base font-semibold">Record a delivery</h3>
-        <p className="mt-1 text-sm text-gray-600">
-          This logs the paperwork. Stock becomes dispensable only after the receipt
-          is verified into a store, below.
-        </p>
+        <h3 className="text-base font-semibold">{t("inventory.grn.recordTitle")}</h3>
+        <p className="mt-1 text-sm text-gray-600">{t("inventory.grn.recordHint")}</p>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <label className="text-sm sm:col-span-2">
-            <span className="block text-gray-700">Link to purchase order (optional)</span>
+            <span className="block text-gray-700">{t("inventory.grn.linkPo")}</span>
             <select
               className="mt-1 w-full rounded border border-gray-300 p-2"
               value={purchaseOrderId}
               onChange={(event) => selectPurchaseOrder(event.target.value)}
             >
-              <option value="">No purchase order — ad hoc receipt</option>
+              <option value="">{t("inventory.grn.noPo")}</option>
               {linkableOrders.map((po) => (
                 <option key={po.id} value={po.id}>
                   {po.po_number} · {po.supplier_name} · {po.status}
@@ -212,13 +211,11 @@ export function GrnWorkspace() {
               ))}
             </select>
             {purchaseOrderId ? (
-              <p className="mt-1 text-xs text-gray-600">
-                Supplier and line quantities are checked against this order on verify.
-              </p>
+              <p className="mt-1 text-xs text-gray-600">{t("inventory.grn.linkPoHint")}</p>
             ) : null}
           </label>
           <label className="text-sm">
-            <span className="block text-gray-700">Supplier</span>
+            <span className="block text-gray-700">{t("inventory.po.supplier")}</span>
             <select
               className="mt-1 w-full rounded border border-gray-300 p-2"
               value={supplierId}
@@ -232,7 +229,7 @@ export function GrnWorkspace() {
                 }
               }}
             >
-              <option value="">Select…</option>
+              <option value="">{t("common.selectEllipsis")}</option>
               {suppliers.map((supplier) => (
                 <option key={supplier.id} value={supplier.id}>
                   {supplier.name}
@@ -241,7 +238,7 @@ export function GrnWorkspace() {
             </select>
           </label>
           <label className="text-sm">
-            <span className="block text-gray-700">Supplier invoice no.</span>
+            <span className="block text-gray-700">{t("inventory.grn.invoiceNo")}</span>
             <input
               className="mt-1 w-full rounded border border-gray-300 p-2"
               value={invoiceNumber}
@@ -249,7 +246,7 @@ export function GrnWorkspace() {
             />
           </label>
           <label className="text-sm">
-            <span className="block text-gray-700">Received on</span>
+            <span className="block text-gray-700">{t("inventory.grn.receivedOn")}</span>
             <input
               type="date"
               className="mt-1 w-full rounded border border-gray-300 p-2"
@@ -264,7 +261,7 @@ export function GrnWorkspace() {
             <div key={index} className="rounded border border-gray-200 p-3">
               <div className="grid gap-2 sm:grid-cols-5">
                 <div className="sm:col-span-2">
-                  <span className="block text-sm text-gray-700">Item</span>
+                  <span className="block text-sm text-gray-700">{t("inventory.col.item")}</span>
                   {line.item_id ? (
                     <div className="mt-1 flex items-center justify-between rounded bg-gray-50 p-2 text-sm">
                       <span>{line.item_name}</span>
@@ -273,13 +270,13 @@ export function GrnWorkspace() {
                         className="text-xs text-blue-700 underline"
                         onClick={() => updateLine(index, { item_id: "", item_name: "" })}
                       >
-                        change
+                        {t("common.change")}
                       </button>
                     </div>
                   ) : (
                     <input
                       className="mt-1 w-full rounded border border-gray-300 p-2"
-                      placeholder="Search medicines…"
+                      placeholder={t("inventory.grn.searchMedicinesPlaceholder")}
                       value={activeLine === index ? search : ""}
                       onFocus={() => {
                         setActiveLine(index);
@@ -310,7 +307,7 @@ export function GrnWorkspace() {
                   ) : null}
                 </div>
                 <label className="text-sm">
-                  <span className="block text-gray-700">Batch no.</span>
+                  <span className="block text-gray-700">{t("inventory.grn.batchNo")}</span>
                   <input
                     className="mt-1 w-full rounded border border-gray-300 p-2"
                     value={line.batch_number}
@@ -318,7 +315,7 @@ export function GrnWorkspace() {
                   />
                 </label>
                 <label className="text-sm">
-                  <span className="block text-gray-700">Expiry</span>
+                  <span className="block text-gray-700">{t("inventory.grn.expiry")}</span>
                   <input
                     type="date"
                     className="mt-1 w-full rounded border border-gray-300 p-2"
@@ -327,7 +324,7 @@ export function GrnWorkspace() {
                   />
                 </label>
                 <label className="text-sm">
-                  <span className="block text-gray-700">Quantity</span>
+                  <span className="block text-gray-700">{t("inventory.field.quantity")}</span>
                   <input
                     type="number"
                     min="0"
@@ -339,10 +336,7 @@ export function GrnWorkspace() {
                 </label>
               </div>
               {line.item_id && !line.expiry_date ? (
-                <p className="mt-2 text-xs text-amber-800">
-                  No expiry date. This batch cannot be ranked for first-expiry-first-out
-                  issue, and the expiry guard will never flag it.
-                </p>
+                <p className="mt-2 text-xs text-amber-800">{t("inventory.grn.noExpiryWarning")}</p>
               ) : null}
             </div>
           ))}
@@ -351,7 +345,7 @@ export function GrnWorkspace() {
             className="text-sm text-blue-700 underline"
             onClick={() => setLines((current) => [...current, { ...EMPTY_LINE }])}
           >
-            Add another line
+            {t("inventory.grn.addLine")}
           </button>
         </div>
 
@@ -361,16 +355,16 @@ export function GrnWorkspace() {
           onClick={() => void submit()}
           className="mt-5 rounded bg-blue-700 px-4 py-2 text-sm text-white disabled:bg-gray-300"
         >
-          Record receipt
+          {t("inventory.grn.recordReceipt")}
         </button>
       </section>
 
       <section>
-        <h3 className="text-base font-semibold">Recent receipts</h3>
+        <h3 className="text-base font-semibold">{t("inventory.grn.recentTitle")}</h3>
         {rows === null ? (
-          <p className="mt-2 text-sm text-gray-600">Loading…</p>
+          <p className="mt-2 text-sm text-gray-600">{t("common.loading")}</p>
         ) : rows.length === 0 ? (
-          <p className="mt-2 text-sm text-gray-600">No goods receipts recorded yet.</p>
+          <p className="mt-2 text-sm text-gray-600">{t("inventory.grn.empty")}</p>
         ) : (
           <ul className="mt-3 space-y-2">
             {rows.map((row) => (
@@ -379,12 +373,17 @@ export function GrnWorkspace() {
                   <div>
                     <span className="font-medium">{row.supplier_name}</span>
                     {row.invoice_number ? (
-                      <span className="text-gray-600"> · invoice {row.invoice_number}</span>
+                      <span className="text-gray-600">
+                        {" "}
+                        · {t("inventory.grn.invoiceLabel", { number: row.invoice_number })}
+                      </span>
                     ) : null}
                     <span className="text-gray-600">
                       {" "}
-                      · {row.received_date} · {row.line_count} line
-                      {row.line_count === 1 ? "" : "s"}
+                      · {row.received_date} ·{" "}
+                      {row.line_count === 1
+                        ? t("inventory.grn.lines", { count: row.line_count })
+                        : t("inventory.grn.linesPlural", { count: row.line_count })}
                     </span>
                   </div>
                   <span className={`rounded px-2 py-0.5 text-xs ${statusTone(row.status)}`}>
@@ -394,10 +393,7 @@ export function GrnWorkspace() {
 
                 {row.status === "draft" || row.status === "received" ? (
                   <div className="mt-3 border-t border-gray-100 pt-3">
-                    <p className="text-xs text-amber-900">
-                      Not in stock yet. Verifying posts every line into a store and
-                      makes the quantity dispensable.
-                    </p>
+                    <p className="text-xs text-amber-900">{t("inventory.grn.notInStockYet")}</p>
                     <div className="mt-2 flex flex-wrap items-center gap-2">
                       <select
                         className="rounded border border-gray-300 p-1 text-sm"
@@ -407,7 +403,7 @@ export function GrnWorkspace() {
                         }}
                         disabled={busy}
                       >
-                        <option value="">Verify into store…</option>
+                        <option value="">{t("inventory.grn.verifyIntoStore")}</option>
                         {locations.map((location) => (
                           <option key={location.id} value={location.id}>
                             {location.name} ({location.location_type})

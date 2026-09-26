@@ -29,6 +29,7 @@ FACILITY_ID = uuid.UUID("00000000-0000-0000-0000-000000000101")
 #: where it stood until this seed existed.
 DEPARTMENT_ID = uuid.UUID("00000000-0000-0000-0000-000000000102")
 ROOM_ID = uuid.UUID("00000000-0000-0000-0000-000000000103")
+WARD_ID = uuid.UUID("00000000-0000-0000-0000-000000000104")
 
 #: Users given DEPARTMENT_ID. Clinical roles belong to a department; admin and
 #: auditor deliberately do not, which is why /users/me's join is OUTER.
@@ -146,12 +147,14 @@ async def seed(users: list[tuple[str, str]]) -> None:
             text(
                 """
                 INSERT INTO facilities
-                    (id, code, name, state_code, timezone, facility_type, is_active)
+                    (id, code, name, name_hi, state_code, timezone, facility_type, is_active)
                 VALUES
-                    (:id, 'DEV001', 'HealthDoc Development Hospital', 'DL',
+                    (:id, 'DEV001', 'HealthDoc Development Hospital',
+                     'हेल्थडॉक विकास अस्पताल', 'DL',
                      'Asia/Kolkata', 'hospital', true)
                 ON CONFLICT (id) DO UPDATE SET
                     name = EXCLUDED.name,
+                    name_hi = EXCLUDED.name_hi,
                     timezone = EXCLUDED.timezone,
                     is_active = true
                 """
@@ -172,9 +175,11 @@ async def seed(users: list[tuple[str, str]]) -> None:
         await session.execute(
             text(
                 """
-                INSERT INTO departments (id, name, code, facility_id)
-                VALUES (:id, 'General Medicine', 'GENMED', :facility_id)
-                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name
+                INSERT INTO departments (id, name, name_hi, code, facility_id)
+                VALUES (:id, 'General Medicine', 'जनरल मेडिसिन', 'GENMED', :facility_id)
+                ON CONFLICT (id) DO UPDATE SET
+                    name = EXCLUDED.name,
+                    name_hi = EXCLUDED.name_hi
                 """
             ),
             {"id": DEPARTMENT_ID, "facility_id": FACILITY_ID},
@@ -192,6 +197,85 @@ async def seed(users: list[tuple[str, str]]) -> None:
                 """
             ),
             {"id": ROOM_ID, "department_id": DEPARTMENT_ID},
+        )
+
+        # IPD desks list wards by name. Without name_hi, HI locale falls back
+        # to English even when the chrome catalogue is fully translated.
+        await session.execute(
+            text(
+                """
+                INSERT INTO wards (id, name, name_hi, department_id, facility_id, is_active)
+                VALUES (
+                    :id, 'General Ward A', 'जनरल वार्ड ए',
+                    :department_id, :facility_id, true
+                )
+                ON CONFLICT (id) DO UPDATE SET
+                    name = EXCLUDED.name,
+                    name_hi = EXCLUDED.name_hi,
+                    department_id = EXCLUDED.department_id,
+                    is_active = true
+                """
+            ),
+            {
+                "id": WARD_ID,
+                "department_id": DEPARTMENT_ID,
+                "facility_id": FACILITY_ID,
+            },
+        )
+        # Existing stacks may already have a differently-id'd ward (often
+        # "General Ward A" / "Demo Ward") created before name_hi existed.
+        await session.execute(
+            text(
+                """
+                UPDATE wards
+                   SET name_hi = CASE name
+                         WHEN 'General Ward A' THEN 'जनरल वार्ड ए'
+                         WHEN 'Demo Ward' THEN 'डेमो वार्ड'
+                         ELSE name_hi
+                       END
+                 WHERE facility_id = :facility_id
+                   AND (name_hi IS NULL OR name_hi = '')
+                   AND name IN ('General Ward A', 'Demo Ward')
+                """
+            ),
+            {"facility_id": FACILITY_ID},
+        )
+
+        # Appointment service catalogue — reception service pickers use name_hi.
+        await session.execute(
+            text(
+                """
+                INSERT INTO appointment_services
+                    (id, facility_id, department_id, name, name_hi,
+                     duration_minutes, is_active)
+                SELECT
+                    :id, :facility_id, :department_id,
+                    'Consultation', 'परामर्श', 15, true
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM appointment_services
+                     WHERE facility_id = :facility_id
+                       AND name = 'Consultation'
+                       AND is_active
+                )
+                """
+            ),
+            {
+                "id": uuid.uuid5(uuid.NAMESPACE_URL, "healthdoc:appt-service:consultation"),
+                "facility_id": FACILITY_ID,
+                "department_id": DEPARTMENT_ID,
+            },
+        )
+        await session.execute(
+            text(
+                """
+                UPDATE appointment_services
+                   SET name_hi = 'परामर्श'
+                 WHERE facility_id = :facility_id
+                   AND name = 'Consultation'
+                   AND (name_hi IS NULL OR name_hi = '')
+                """
+            ),
+            {"facility_id": FACILITY_ID},
         )
 
         for username, subject in users:
@@ -305,12 +389,12 @@ async def seed(users: list[tuple[str, str]]) -> None:
                 text(
                     """
                     INSERT INTO charge_master
-                        (id, facility_id, charge_code, description, charge_category,
-                         unit_price, scheme_code, effective_from, effective_to,
-                         is_active, created_by)
+                        (id, facility_id, charge_code, description, description_hi,
+                         charge_category, unit_price, scheme_code, effective_from,
+                         effective_to, is_active, created_by)
                     SELECT
                         :id, :facility_id, 'REGISTRATION',
-                        'OPD registration fee', 'registration',
+                        'OPD registration fee', 'OPD पंजीकरण शुल्क', 'registration',
                         50.00, NULL, DATE '2020-01-01', NULL, true, :created_by
                     WHERE NOT EXISTS (
                         SELECT 1 FROM charge_master
@@ -326,6 +410,20 @@ async def seed(users: list[tuple[str, str]]) -> None:
                     "facility_id": FACILITY_ID,
                     "created_by": tariff_author,
                 },
+            )
+            # Existing stacks already have REGISTRATION without description_hi.
+            await session.execute(
+                text(
+                    """
+                    UPDATE charge_master
+                       SET description_hi = 'OPD पंजीकरण शुल्क'
+                     WHERE facility_id = :facility_id
+                       AND charge_code = 'REGISTRATION'
+                       AND scheme_code IS NULL
+                       AND (description_hi IS NULL OR description_hi = '')
+                    """
+                ),
+                {"facility_id": FACILITY_ID},
             )
 
         # ------------------------------------------------------------------

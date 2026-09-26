@@ -4,6 +4,7 @@ import { useState } from "react";
 import { AlertCircle, CheckCircle2, Heart, Plus, Search, UserCheck, UserX, X } from "lucide-react";
 import { registerBloodDonor } from "../api";
 import { useClinicalWrite } from "@/lib/useClinicalWrite";
+import { useLocale } from "@/lib/i18n";
 import { formatBloodGroup, type BloodDonor } from "../types";
 
 interface BloodDonorRegistryProps {
@@ -12,6 +13,7 @@ interface BloodDonorRegistryProps {
 }
 
 export function BloodDonorRegistry({ donors, onRefresh }: BloodDonorRegistryProps) {
+  const { t } = useLocale();
   const [filterGroup, setFilterGroup] = useState<string>("all");
   const [filterEligible, setFilterEligible] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -56,11 +58,11 @@ export function BloodDonorRegistry({ donors, onRefresh }: BloodDonorRegistryProp
     if (isSubmitting || !write.isCurrent()) return;
     setError(null);
     if (!fullName.trim()) {
-      setError("Donor full name is required.");
+      setError(t("bloodBank.donor.errNameRequired"));
       return;
     }
     if (age < 18 || age > 65) {
-      setError("Donor age must be between 18 and 65 years per national transfusion guidelines.");
+      setError(t("bloodBank.donor.errAgeRange"));
       return;
     }
 
@@ -86,7 +88,9 @@ export function BloodDonorRegistry({ donors, onRefresh }: BloodDonorRegistryProp
       setWeight(""); setHemoglobin(""); setLastDonation("");
       onRefresh();
     } catch (err: unknown) {
-      if (write.isCurrent()) setError(err instanceof Error ? err.message : "Failed to register donor.");
+      if (write.isCurrent()) {
+        setError(err instanceof Error ? err.message : t("bloodBank.donor.errRegisterFailed"));
+      }
     } finally {
       if (write.isCurrent()) setIsSubmitting(false);
     }
@@ -101,7 +105,7 @@ export function BloodDonorRegistry({ donors, onRefresh }: BloodDonorRegistryProp
             <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
             <input
               type="text"
-              placeholder="Search donor by name, donor # or phone..."
+              placeholder={t("bloodBank.donor.searchPlaceholder")}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full rounded-xl border border-input bg-background pl-9 pr-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary"
@@ -114,7 +118,7 @@ export function BloodDonorRegistry({ donors, onRefresh }: BloodDonorRegistryProp
               onChange={(e) => setFilterGroup(e.target.value)}
               className="rounded-xl border border-input bg-background px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary font-medium"
             >
-              <option value="all">All Blood Groups</option>
+              <option value="all">{t("bloodBank.donor.allBloodGroups")}</option>
               <option value="A+">A+</option>
               <option value="A-">A-</option>
               <option value="B+">B+</option>
@@ -130,9 +134,9 @@ export function BloodDonorRegistry({ donors, onRefresh }: BloodDonorRegistryProp
               onChange={(e) => setFilterEligible(e.target.value)}
               className="rounded-xl border border-input bg-background px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary font-medium"
             >
-              <option value="all">All Eligibility</option>
-              <option value="eligible">Eligible Donors</option>
-              <option value="ineligible">Deferred / Ineligible</option>
+              <option value="all">{t("bloodBank.donor.allEligibility")}</option>
+              <option value="eligible">{t("bloodBank.donor.eligibleDonors")}</option>
+              <option value="ineligible">{t("bloodBank.donor.deferredIneligible")}</option>
             </select>
           </div>
         </div>
@@ -142,7 +146,7 @@ export function BloodDonorRegistry({ donors, onRefresh }: BloodDonorRegistryProp
           className="flex items-center justify-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors shadow-sm shrink-0"
         >
           <Plus className="h-4 w-4" />
-          Register New Donor
+          {t("bloodBank.donor.registerNew")}
         </button>
       </div>
 
@@ -152,13 +156,13 @@ export function BloodDonorRegistry({ donors, onRefresh }: BloodDonorRegistryProp
           <table className="w-full text-left text-xs">
             <thead className="bg-muted/50 text-muted-foreground font-semibold">
               <tr>
-                <th className="p-3">Donor #</th>
-                <th className="p-3">Full Name</th>
-                <th className="p-3">Blood Group</th>
-                <th className="p-3">Demographics</th>
-                <th className="p-3">Contact</th>
-                <th className="p-3">Eligibility Status</th>
-                <th className="p-3">Last Donated</th>
+                <th className="p-3">{t("bloodBank.donor.col.donorNum")}</th>
+                <th className="p-3">{t("bloodBank.donor.col.fullName")}</th>
+                <th className="p-3">{t("bloodBank.col.bloodGroup")}</th>
+                <th className="p-3">{t("bloodBank.donor.col.demographics")}</th>
+                <th className="p-3">{t("bloodBank.donor.col.contact")}</th>
+                <th className="p-3">{t("bloodBank.donor.col.eligibility")}</th>
+                <th className="p-3">{t("bloodBank.donor.col.lastDonated")}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -166,7 +170,7 @@ export function BloodDonorRegistry({ donors, onRefresh }: BloodDonorRegistryProp
                 <tr>
                   <td colSpan={7} className="p-8 text-center text-muted-foreground">
                     <Heart className="h-8 w-8 mx-auto mb-2 opacity-30 text-rose-500" />
-                    No donor records matching the current filters.
+                    {t("bloodBank.donor.empty")}
                   </td>
                 </tr>
               ) : (
@@ -182,25 +186,25 @@ export function BloodDonorRegistry({ donors, onRefresh }: BloodDonorRegistryProp
                       </span>
                     </td>
                     <td className="p-3 text-muted-foreground capitalize">
-                      {d.age_years ?? "Not recorded"} yrs • {d.sex || "Not recorded"}
+                      {d.age_years ?? t("bloodBank.notRecorded")} {t("bloodBank.donor.yearsSuffix")} • {d.sex || t("bloodBank.notRecorded")}
                     </td>
                     <td className="p-3 font-mono text-muted-foreground">{d.contact_phone || d.mobile || "—"}</td>
                     <td className="p-3">
                       {d.is_eligible ? (
                         <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
-                          <UserCheck className="h-3 w-3" /> Eligible
+                          <UserCheck className="h-3 w-3" /> {t("bloodBank.donor.eligible")}
                         </span>
                       ) : (
                         <span
-                          title={d.ineligibility_reason || "Deferred"}
+                          title={d.ineligibility_reason || t("bloodBank.donor.deferred")}
                           className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 text-[11px] font-semibold text-destructive cursor-help"
                         >
-                          <UserX className="h-3 w-3" /> Deferred
+                          <UserX className="h-3 w-3" /> {t("bloodBank.donor.deferred")}
                         </span>
                       )}
                     </td>
                     <td className="p-3 text-muted-foreground font-mono">
-                      {d.last_donation_date || "First-time donor"}
+                      {d.last_donation_date || t("bloodBank.donor.firstTime")}
                     </td>
                   </tr>
                 ))
@@ -217,7 +221,7 @@ export function BloodDonorRegistry({ donors, onRefresh }: BloodDonorRegistryProp
             <div className="flex items-center justify-between pb-4 border-b border-border">
               <div className="flex items-center gap-2">
                 <Heart className="h-5 w-5 text-rose-500" />
-                <h3 className="text-lg font-bold text-card-foreground">Donor Registration & Screening</h3>
+                <h3 className="text-lg font-bold text-card-foreground">{t("bloodBank.donor.modalTitle")}</h3>
               </div>
               <button
                 onClick={() => setIsRegisterModalOpen(false)}
@@ -239,11 +243,11 @@ export function BloodDonorRegistry({ donors, onRefresh }: BloodDonorRegistryProp
               <fieldset disabled={isSubmitting || write.retryPending} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
-                  Full Name *
+                  {t("field.fullName")} *
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g. Ramesh Chandra Sharma"
+                  placeholder={t("bloodBank.donor.namePlaceholder")}
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
                   className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
@@ -254,7 +258,7 @@ export function BloodDonorRegistry({ donors, onRefresh }: BloodDonorRegistryProp
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
-                    Age (18 - 65) *
+                    {t("bloodBank.donor.ageLabel")}
                   </label>
                   <input
                     type="number"
@@ -268,16 +272,16 @@ export function BloodDonorRegistry({ donors, onRefresh }: BloodDonorRegistryProp
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
-                    Gender *
+                    {t("bloodBank.donor.genderLabel")}
                   </label>
                   <select
                     value={gender}
                     onChange={(e) => setGender(e.target.value)}
                     className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                   >
-                    <option value="male">Male</option>
-                    <option value="female">Female</option>
-                    <option value="other">Other</option>
+                    <option value="male">{t("bloodBank.donor.genderMale")}</option>
+                    <option value="female">{t("bloodBank.donor.genderFemale")}</option>
+                    <option value="other">{t("bloodBank.donor.genderOther")}</option>
                   </select>
                 </div>
               </div>
@@ -285,7 +289,7 @@ export function BloodDonorRegistry({ donors, onRefresh }: BloodDonorRegistryProp
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
-                    ABO Blood Group *
+                    {t("bloodBank.collect.aboGroup")}
                   </label>
                   <select
                     value={bloodGroup}
@@ -300,22 +304,22 @@ export function BloodDonorRegistry({ donors, onRefresh }: BloodDonorRegistryProp
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
-                    Rh Factor *
+                    {t("bloodBank.collect.rhFactor")}
                   </label>
                   <select
                     value={rhFactor}
                     onChange={(e) => setRhFactor(e.target.value)}
                     className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                   >
-                    <option value="+">Positive (+)</option>
-                    <option value="-">Negative (-)</option>
+                    <option value="+">{t("bloodBank.collect.rhPositive")}</option>
+                    <option value="-">{t("bloodBank.collect.rhNegative")}</option>
                   </select>
                 </div>
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
-                  Contact Phone
+                  {t("bloodBank.donor.contactPhone")}
                 </label>
                 <input
                   type="tel"
@@ -327,17 +331,17 @@ export function BloodDonorRegistry({ donors, onRefresh }: BloodDonorRegistryProp
               </div>
 
               <div className="rounded-xl border border-border p-3 space-y-2 bg-muted/20">
-                <p className="text-xs">Eligibility is calculated on the server from recorded measurements; clinical clearance is still required.</p>
-                <label className="block text-xs">Weight (kg)
-                  <input aria-label="Weight (kg)" type="number" min="30" max="200" step="0.1" required value={weight} onChange={(e) => setWeight(e.target.value)} />
+                <p className="text-xs">{t("bloodBank.donor.eligibilityHint")}</p>
+                <label className="block text-xs">{t("bloodBank.donor.weightKg")}
+                  <input aria-label={t("bloodBank.donor.weightKg")} type="number" min="30" max="200" step="0.1" required value={weight} onChange={(e) => setWeight(e.target.value)} />
                 </label>
-                <label className="block text-xs">Haemoglobin (g/dL)
-                  <input aria-label="Haemoglobin (g/dL)" type="number" min="5" max="25" step="0.1" required value={hemoglobin} onChange={(e) => setHemoglobin(e.target.value)} />
+                <label className="block text-xs">{t("bloodBank.donor.hemoglobin")}
+                  <input aria-label={t("bloodBank.donor.hemoglobin")} type="number" min="5" max="25" step="0.1" required value={hemoglobin} onChange={(e) => setHemoglobin(e.target.value)} />
                 </label>
-                <label className="block text-xs">Last donation (leave blank only if none)
+                <label className="block text-xs">{t("bloodBank.donor.lastDonationHint")}
                   <input type="date" value={lastDonation} onChange={(e) => setLastDonation(e.target.value)} />
                 </label>
-                <label className="block text-xs">Screening notes
+                <label className="block text-xs">{t("bloodBank.donor.screeningNotes")}
                   <input value={ineligibilityReason} onChange={(e) => setIneligibilityReason(e.target.value)} />
                 </label>
               </div>
@@ -350,7 +354,7 @@ export function BloodDonorRegistry({ donors, onRefresh }: BloodDonorRegistryProp
                   disabled={isSubmitting || write.retryPending}
                   className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-muted transition-colors"
                 >
-                  Cancel
+                  {t("common.cancel")}
                 </button>
                 <button
                   type="submit"
@@ -358,7 +362,11 @@ export function BloodDonorRegistry({ donors, onRefresh }: BloodDonorRegistryProp
                   className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
                 >
                   <CheckCircle2 className="h-4 w-4" />
-                  {isSubmitting ? "Registering..." : write.retryPending ? "Retry unchanged save" : "Save Donor"}
+                  {isSubmitting
+                    ? t("bloodBank.donor.registering")
+                    : write.retryPending
+                      ? t("forms.renderer.retrySave")
+                      : t("bloodBank.donor.saveDonor")}
                 </button>
               </div>
             </form>

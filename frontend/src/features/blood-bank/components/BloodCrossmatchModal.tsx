@@ -14,6 +14,7 @@ import { crossmatchBlood, issueBloodUnit } from "../api";
 import { formatBloodGroup, type BloodCrossmatch, type BloodUnit } from "../types";
 import { api } from "@/lib/api";
 import { useClinicalWrite } from "@/lib/useClinicalWrite";
+import { useLocale } from "@/lib/i18n";
 
 interface BloodCrossmatchModalProps {
   isOpen: boolean;
@@ -28,6 +29,7 @@ export function BloodCrossmatchModal({
   unit,
   onSuccess,
 }: BloodCrossmatchModalProps) {
+  const { t } = useLocale();
   const [patientSearch, setPatientSearch] = useState("");
   const [selectedPatient, setSelectedPatient] = useState<{
     id: string;
@@ -96,14 +98,14 @@ export function BloodCrossmatchModal({
         setSelectedPatient({
           id: p.id,
           uhid: p.uhid,
-          full_name: p.full_name || `${p.first_name || ""} ${p.last_name || ""}`.trim() || "Patient",
+          full_name: p.full_name || `${p.first_name || ""} ${p.last_name || ""}`.trim() || t("common.patient"),
         });
       } else {
-        setError("Enter an exact UHID. Search must return exactly one patient.");
+        setError(t("bloodBank.crossmatch.errExactUhid"));
       }
     } catch (err: unknown) {
       if (!mounted.current || request !== searchSequence.current) return;
-      setError(err instanceof Error ? err.message : "Search failed.");
+      setError(err instanceof Error ? err.message : t("bloodBank.crossmatch.errSearchFailed"));
     }
   };
 
@@ -113,7 +115,7 @@ export function BloodCrossmatchModal({
     setError(null);
 
     if (!selectedPatient || !compatibility) {
-      setError("Select the patient and explicitly record the compatibility result.");
+      setError(t("bloodBank.crossmatch.errSelectPatient"));
       return;
     }
 
@@ -153,7 +155,9 @@ export function BloodCrossmatchModal({
         onClose();
       }
     } catch (err: unknown) {
-      if (mounted.current) setError(err instanceof Error ? err.message : "Crossmatch / Issue failed.");
+      if (mounted.current) {
+        setError(err instanceof Error ? err.message : t("bloodBank.crossmatch.errFailed"));
+      }
     } finally {
       if (mounted.current) setIsSubmitting(false);
     }
@@ -166,14 +170,14 @@ export function BloodCrossmatchModal({
           <div className="flex items-center gap-2">
             <TestTube className="h-5 w-5 text-primary" />
             <div>
-              <h3 className="text-lg font-bold text-card-foreground">Major/Minor Crossmatch</h3>
-              <p className="text-xs text-muted-foreground">Compatibility testing & controlled issue</p>
+              <h3 className="text-lg font-bold text-card-foreground">{t("bloodBank.crossmatch.title")}</h3>
+              <p className="text-xs text-muted-foreground">{t("bloodBank.crossmatch.subtitle")}</p>
             </div>
           </div>
           <button
             onClick={onClose}
             disabled={isSubmitting || uncertain}
-            aria-label="Close crossmatch"
+            aria-label={t("bloodBank.crossmatch.closeAria")}
             className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
           >
             <X className="h-5 w-5" />
@@ -184,10 +188,12 @@ export function BloodCrossmatchModal({
           <div className="mt-6 text-center space-y-4 p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
             <CheckCircle2 className="h-12 w-12 mx-auto text-emerald-500" />
             <div>
-              <h4 className="font-bold text-base text-foreground">Blood Unit Issued Successfully</h4>
-              <p className="text-xs text-muted-foreground mt-1">Controlled release authorized to {issuedToWard}</p>
+              <h4 className="font-bold text-base text-foreground">{t("bloodBank.crossmatch.issuedTitle")}</h4>
+              <p className="text-xs text-muted-foreground mt-1">
+                {t("bloodBank.crossmatch.issuedTo", { destination: issuedToWard })}
+              </p>
               <div className="mt-3 inline-block rounded-lg bg-background px-4 py-2 border border-border">
-                <span className="text-xs text-muted-foreground block font-medium">Crossmatch Record ID</span>
+                <span className="text-xs text-muted-foreground block font-medium">{t("bloodBank.crossmatch.recordId")}</span>
                 <span className="font-mono text-sm font-black text-primary">{completedSlip}</span>
               </div>
             </div>
@@ -198,7 +204,7 @@ export function BloodCrossmatchModal({
               }}
               className="w-full rounded-xl bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
             >
-              Done
+              {t("bloodBank.crossmatch.done")}
             </button>
           </div>
         ) : (
@@ -212,7 +218,7 @@ export function BloodCrossmatchModal({
                     {unit.bag_number || unit.unit_number || unit.id.slice(0, 8).toUpperCase()}
                   </span>
                   <span className="text-muted-foreground ml-2 capitalize">
-                    {(unit.component_type || "Component not recorded").replace(/_/g, " ")} ({unit.volume_ml} mL)
+                    {(unit.component_type || t("bloodBank.notRecorded")).replace(/_/g, " ")} ({unit.volume_ml} mL)
                   </span>
                 </div>
               </div>
@@ -233,27 +239,29 @@ export function BloodCrossmatchModal({
               {/* Patient Selection */}
               <div>
                 <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
-                  Recipient Patient *
+                  {t("bloodBank.crossmatch.recipient")}
                 </label>
                 {selectedPatient ? (
                   <div className="flex items-center justify-between p-2.5 rounded-lg border border-primary/40 bg-primary/5 text-xs">
                     <div>
                       <span className="font-bold text-foreground">{selectedPatient.full_name}</span>
-                      <span className="text-muted-foreground font-mono ml-2">UHID: {selectedPatient.uhid}</span>
+                        <span className="text-muted-foreground font-mono ml-2">
+                          {t("field.uhid")}: {selectedPatient.uhid}
+                        </span>
                     </div>
                     <button
                       type="button"
                       onClick={clearRecipient}
                       className="text-xs text-primary underline font-medium"
                     >
-                      Change
+                      {t("bloodBank.crossmatch.change")}
                     </button>
                   </div>
                 ) : (
                   <div className="flex gap-2">
                     <input
                       type="text"
-                      placeholder="Enter exact Patient UHID or Mobile..."
+                      placeholder={t("bloodBank.crossmatch.searchPlaceholder")}
                       value={patientSearch}
                       onChange={(e) => { searchSequence.current += 1; setPatientSearch(e.target.value); }}
                       className="w-full rounded-lg border border-input bg-background px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary"
@@ -261,7 +269,7 @@ export function BloodCrossmatchModal({
                     <button
                       type="button"
                       onClick={handlePatientSearch}
-                      aria-label="Search patient"
+                      aria-label={t("bloodBank.crossmatch.searchPatient")}
                       className="rounded-lg bg-secondary px-3 py-2 text-xs font-semibold text-secondary-foreground hover:bg-secondary/80 transition-colors shrink-0"
                     >
                       <Search className="h-3.5 w-3.5" />
@@ -273,7 +281,7 @@ export function BloodCrossmatchModal({
               {/* Compatibility Result */}
               <div>
                 <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
-                  Crossmatch Lab Compatibility Result *
+                  {t("bloodBank.crossmatch.compatibilityResult")}
                 </label>
                 <div className="grid grid-cols-2 gap-3">
                   <label
@@ -292,7 +300,7 @@ export function BloodCrossmatchModal({
                       className="sr-only"
                     />
                     <CheckCircle2 className="h-4 w-4" />
-                    Compatible (No Agglutination)
+                    {t("bloodBank.crossmatch.compatible")}
                   </label>
 
                   <label
@@ -311,7 +319,7 @@ export function BloodCrossmatchModal({
                       className="sr-only"
                     />
                     <AlertTriangle className="h-4 w-4" />
-                    Incompatible (Agglutinated)
+                    {t("bloodBank.crossmatch.incompatible")}
                   </label>
                 </div>
               </div>
@@ -326,19 +334,19 @@ export function BloodCrossmatchModal({
                       onChange={(e) => setIssueDirectly(e.target.checked)}
                       className="rounded border-input text-primary focus:ring-primary"
                     />
-                    <span>Issue directly to recipient ward now</span>
+                    <span>{t("bloodBank.crossmatch.issueDirectly")}</span>
                   </label>
 
                   {issueDirectly && (
                     <div className="pt-2">
                       <label className="block text-[11px] text-muted-foreground font-medium mb-1">
-                        Destination (saved in issue notes) *
+                        {t("bloodBank.crossmatch.destination")}
                       </label>
                       <input
                         type="text"
                         value={issuedToWard}
                         onChange={(e) => setIssuedToWard(e.target.value)}
-                        placeholder="e.g. ICU Bed 4, OT-2, Emergency Resus"
+                        placeholder={t("bloodBank.crossmatch.destinationPlaceholder")}
                         className="w-full rounded-lg border border-input bg-background px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary"
                         required
                       />
@@ -350,11 +358,11 @@ export function BloodCrossmatchModal({
               {/* Notes */}
               <div>
                 <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
-                  Lab Technician Observations
+                  {t("bloodBank.crossmatch.labObservations")}
                 </label>
                 <textarea
                   rows={2}
-                  placeholder="Saline phase, Albumin phase, Coomb's AHG test notes..."
+                  placeholder={t("bloodBank.crossmatch.notesPlaceholder")}
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
                   className="w-full rounded-lg border border-input bg-background px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary"
@@ -362,7 +370,9 @@ export function BloodCrossmatchModal({
               </div>
 
               </fieldset>
-              {matchSaved && !completedSlip && <p role="status" className="mt-3 text-xs">Crossmatch recorded. Any further retry applies only to issuing this same crossmatch.</p>}
+              {matchSaved && !completedSlip && (
+                <p role="status" className="mt-3 text-xs">{t("bloodBank.crossmatch.matchSavedHint")}</p>
+              )}
               <div className="flex items-center justify-end gap-3 pt-4 border-t border-border">
                 <button
                   type="button"
@@ -370,7 +380,7 @@ export function BloodCrossmatchModal({
                   disabled={isSubmitting || uncertain}
                   className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-muted transition-colors"
                 >
-                  Cancel
+                  {t("common.cancel")}
                 </button>
                 <button
                   type="submit"
@@ -379,12 +389,14 @@ export function BloodCrossmatchModal({
                 >
                   <FileCheck className="h-4 w-4" />
                   {isSubmitting
-                    ? "Saving..."
-                    : uncertain ? "Retry unchanged save"
-                    : matchSaved ? "Retry issue"
-                    : issueDirectly
-                    ? "Crossmatch & Issue"
-                    : "Save Crossmatch Result"}
+                    ? t("bloodBank.crossmatch.saving")
+                    : uncertain
+                      ? t("forms.renderer.retrySave")
+                      : matchSaved
+                        ? t("bloodBank.crossmatch.retryIssue")
+                        : issueDirectly
+                          ? t("bloodBank.crossmatch.crossmatchAndIssue")
+                          : t("bloodBank.crossmatch.saveResult")}
                 </button>
               </div>
             </form>

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import ts from "typescript";
+import { i18nStub } from "./helpers/i18n-stub.mjs";
 
 // Exercise the component's actual effect with deferred transport, without
 // pretending these hook-level regressions replace the real browser CI gate.
@@ -23,6 +24,7 @@ function componentHarness() {
   const exports = {};
   const dependencies = {
     react,
+    "@/lib/i18n": i18nStub,
     "react/jsx-runtime": { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) },
     "@/lib/api": {
       api: (path, options) => new Promise((resolve, reject) => calls.push({ path, options, resolve, reject })),

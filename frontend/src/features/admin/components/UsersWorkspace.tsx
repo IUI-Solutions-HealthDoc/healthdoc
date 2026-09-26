@@ -6,6 +6,7 @@ import Button from "@mui/material/Button";
 import Typography from "@mui/material/Typography";
 import Link from "next/link";
 
+import { useLocale } from "@/lib/i18n";
 import { meridian } from "@/styles/theme";
 import { useUserDetail } from "../hooks/useUserDetail";
 import { useUserEditor } from "../hooks/useUserEditor";
@@ -18,6 +19,7 @@ import { UserListPanel } from "./UserListPanel";
 import { UserProfileForm } from "./UserProfileForm";
 
 export function UsersWorkspace() {
+  const { t } = useLocale();
   const {
     users,
     loading: listLoading,
@@ -63,8 +65,7 @@ export function UsersWorkspace() {
       <AdminPageHeader
         backHref="/admin"
         eyebrow="Admin"
-        title="Users"
-        subtitle="Create staff accounts and manage profiles and active access."
+        title={t("admin.usersTitle")}
         actions={
           <>
             <Button
@@ -73,7 +74,7 @@ export function UsersWorkspace() {
               variant="outlined"
               sx={{ textTransform: "none", fontWeight: 600, borderRadius: "10px" }}
             >
-              Request account
+              {t("admin.users.requestAccount")}
             </Button>
             <Button
               variant="contained"
@@ -88,7 +89,7 @@ export function UsersWorkspace() {
                 "&:hover": { bgcolor: meridian.brandDeep },
               }}
             >
-              Add staff member
+              {t("admin.users.addStaff")}
             </Button>
           </>
         }
@@ -138,10 +139,10 @@ export function UsersWorkspace() {
             <Typography
               sx={{ m: 0, fontWeight: 700, fontSize: "1rem", color: meridian.textPrimary }}
             >
-              No user selected
+              {t("admin.users.noUserSelected")}
             </Typography>
             <Typography sx={{ m: 0, fontSize: "0.875rem", color: meridian.textSecondary, maxWidth: 320 }}>
-              Pick someone from the list to view and edit their profile, or add a staff member.
+              {t("admin.users.pickFromList")}
             </Typography>
           </Box>
         ) : detailError ? (
@@ -167,7 +168,7 @@ export function UsersWorkspace() {
               color: meridian.textSecondary,
             }}
           >
-            Loading user…
+            {t("admin.users.loadingUser")}
           </Box>
         ) : (
           <UserProfileForm

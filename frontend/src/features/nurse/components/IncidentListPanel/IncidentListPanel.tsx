@@ -3,6 +3,7 @@
 import { INCIDENT_STATUS_LABELS } from "@/features/nurse/constants";
 import type { ClinicalIncident } from "@/features/nurse/types";
 import { formatDateTime } from "@/lib/api";
+import { useLocale } from "@/lib/i18n";
 
 type Props = {
   incidents: ClinicalIncident[];
@@ -15,10 +16,11 @@ function shortId(value: string | null | undefined) {
 }
 
 export function IncidentListPanel({ incidents, loading, error }: Props) {
+  const { t } = useLocale();
   if (loading) {
     return (
       <div className="surface-card p-5 text-sm text-muted-foreground">
-        Loading incidents…
+        {t("nurse.loadingIncidents")}
       </div>
     );
   }

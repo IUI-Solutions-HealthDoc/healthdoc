@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { formatDateTime } from "@/lib/api";
+import { useLocale, type MessageKey } from "@/lib/i18n";
+
 import {
   getPortalDocuments,
   getPortalDocumentDetail,
@@ -9,13 +11,13 @@ import {
   type PortalDocumentDetail,
 } from "../api";
 
-const CATEGORIES = [
-  { id: "all", label: "All Documents" },
-  { id: "prescription", label: "Prescriptions" },
-  { id: "lab_report", label: "Lab Reports" },
-  { id: "radiology", label: "Radiology" },
-  { id: "discharge_summary", label: "Discharge Summaries" },
-  { id: "vaccine", label: "Vaccinations" },
+const CATEGORY_KEYS: { id: string; labelKey: MessageKey }[] = [
+  { id: "all", labelKey: "patientPortal.documents.cat.all" },
+  { id: "prescription", labelKey: "patientPortal.documents.cat.prescription" },
+  { id: "lab_report", labelKey: "patientPortal.documents.cat.lab_report" },
+  { id: "radiology", labelKey: "patientPortal.documents.cat.radiology" },
+  { id: "discharge_summary", labelKey: "patientPortal.documents.cat.discharge_summary" },
+  { id: "vaccine", labelKey: "patientPortal.documents.cat.vaccine" },
 ];
 
 function getCategoryBadge(type: string) {
@@ -36,6 +38,7 @@ function getCategoryBadge(type: string) {
 }
 
 export function ReleasedDocumentsTab() {
+  const { t } = useLocale();
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [documents, setDocuments] = useState<PortalDocumentItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -53,11 +56,11 @@ export function ReleasedDocumentsTab() {
       const res = await getPortalDocuments(cat);
       setDocuments(res.items);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load clinical documents");
+      setError(err instanceof Error ? err.message : t("patientPortal.documents.errLoad"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void loadDocuments(selectedCategory);
@@ -70,7 +73,7 @@ export function ReleasedDocumentsTab() {
       const detail = await getPortalDocumentDetail(item.document_type, item.id);
       setActiveDoc(detail);
     } catch (err) {
-      setDetailError(err instanceof Error ? err.message : "Could not load document details");
+      setDetailError(err instanceof Error ? err.message : t("patientPortal.documents.errLoadDetail"));
     } finally {
       setLoadingDetail(false);
     }
@@ -81,10 +84,10 @@ export function ReleasedDocumentsTab() {
   };
 
   return (
-    <section className="space-y-6" aria-label="My Clinical Documents">
+    <section className="space-y-6" aria-label={t("patientPortal.documents.aria")}>
       {/* Category Filter Pills */}
-      <div className="flex flex-wrap gap-2" role="tablist" aria-label="Document categories">
-        {CATEGORIES.map((cat) => {
+      <div className="flex flex-wrap gap-2" role="tablist" aria-label={t("patientPortal.documents.categoriesAria")}>
+        {CATEGORY_KEYS.map((cat) => {
           const active = selectedCategory === cat.id;
           return (
             <button
@@ -99,7 +102,7 @@ export function ReleasedDocumentsTab() {
                   : "border border-border bg-card text-muted-foreground hover:bg-muted"
               }`}
             >
-              {cat.label}
+              {t(cat.labelKey)}
             </button>
           );
         })}
@@ -108,7 +111,7 @@ export function ReleasedDocumentsTab() {
       {/* Loading & Error states */}
       {loading && (
         <div className="surface-card p-6 text-center text-sm text-muted-foreground">
-          Loading your released clinical documents…
+          {t("patientPortal.documents.loading")}
         </div>
       )}
 
@@ -121,11 +124,16 @@ export function ReleasedDocumentsTab() {
       {/* Empty State */}
       {!loading && !error && documents.length === 0 && (
         <div className="surface-card p-8 text-center">
-          <p className="font-medium text-foreground">No released clinical documents found</p>
+          <p className="font-medium text-foreground">{t("patientPortal.documents.emptyTitle")}</p>
           <p className="mt-1 text-sm text-muted-foreground">
             {selectedCategory === "all"
-              ? "Your doctor or hospital hasn't released any medical records to your portal yet."
-              : `No documents available in the "${CATEGORIES.find((c) => c.id === selectedCategory)?.label}" category.`}
+              ? t("patientPortal.documents.emptyAll")
+              : t("patientPortal.documents.emptyCategory", {
+                  category: t(
+                    CATEGORY_KEYS.find((c) => c.id === selectedCategory)?.labelKey ??
+                      "patientPortal.documents.cat.all",
+                  ),
+                })}
           </p>
         </div>
       )}
@@ -153,11 +161,11 @@ export function ReleasedDocumentsTab() {
                 </div>
                 <h3 className="mt-3 text-base font-semibold text-foreground">{doc.title}</h3>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {doc.doctor_name ? `Dr. ${doc.doctor_name}` : "Attending Physician"} ·{" "}
+                  {doc.doctor_name ? `Dr. ${doc.doctor_name}` : t("patientPortal.documents.attendingPhysician")} ·{" "}
                   {doc.facility_name ?? "HealthDoc Medical Center"}
                 </p>
                 <div className="mt-3 rounded-md bg-muted/40 p-2.5 text-xs text-muted-foreground">
-                  <span className="font-medium text-foreground">Summary: </span>
+                  <span className="font-medium text-foreground">{t("patientPortal.documents.summaryLabel")} </span>
                   {doc.summary}
                 </div>
               </div>
@@ -171,14 +179,14 @@ export function ReleasedDocumentsTab() {
                       clipRule="evenodd"
                     />
                   </svg>
-                  Digitally Released
+                  {t("patientPortal.documents.releasedBadge")}
                 </span>
                 <button
                   type="button"
                   onClick={() => void handleOpenDetail(doc)}
                   className="rounded-md border border-primary/20 bg-primary/5 px-3 py-1.5 text-xs font-semibold text-primary transition-colors hover:bg-primary/10"
                 >
-                  View & Print
+                  {t("patientPortal.documents.viewPrint")}
                 </button>
               </div>
             </article>

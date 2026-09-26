@@ -59,6 +59,7 @@ export interface QueueToken {
   provider_user_id?: string;
   provider_name?: string;
   department?: string;
+  department_hi?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -147,6 +148,7 @@ export interface EncounterContext {
   provider_user_id: string;
   provider_name: string;
   department: string;
+  department_hi?: string | null;
   token_display: string;
 }
 

@@ -7,10 +7,21 @@ import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 
+import { useLocale, type MessageKey } from "@/lib/i18n";
 import { meridian } from "@/styles/theme";
 import { formatINR } from "../lib/formatters";
 import { InvoiceStatusChip } from "./InvoiceStatusChip";
 import type { InvoiceStatus, InvoiceWithItems } from "../types";
+
+const INVOICE_STATUS_OPTIONS: { value: InvoiceStatus | "all"; labelKey: MessageKey }[] = [
+  { value: "all", labelKey: "billing.invoiceStatus.all" },
+  { value: "draft", labelKey: "billing.invoiceStatus.draft" },
+  { value: "issued", labelKey: "billing.invoiceStatus.issued" },
+  { value: "partially_paid", labelKey: "billing.invoiceStatus.partially_paid" },
+  { value: "paid", labelKey: "billing.invoiceStatus.paid" },
+  { value: "waived", labelKey: "billing.invoiceStatus.waived" },
+  { value: "cancelled", labelKey: "billing.invoiceStatus.cancelled" },
+];
 
 type Props = {
   invoices: InvoiceWithItems[];
@@ -41,6 +52,7 @@ export function InvoiceListPanel({
   onStatusChange,
   onSelect,
 }: Props) {
+  const { t } = useLocale();
   return (
     <Box
       sx={{
@@ -68,18 +80,18 @@ export function InvoiceListPanel({
             letterSpacing: "-0.02em",
           }}
         >
-          Invoices
+          {t("billing.invoicesTitle")}
         </Typography>
         <Typography sx={{ m: 0, mt: 0.4, fontSize: "0.8125rem", color: meridian.textSecondary }}>
-          One invoice per visit — open a draft to build charges
+          {t("billing.invoicesHint")}
         </Typography>
       </Box>
 
       <Stack spacing={1.25} sx={{ px: 2.5, pb: 2, flexShrink: 0 }}>
         <TextField
           size="small"
-          placeholder="Search UHID, name, INV-…"
-          label="Search invoices"
+          placeholder={t("billing.searchInvoicesPlaceholder")}
+          label={t("billing.searchInvoices")}
           slotProps={{ htmlInput: { maxLength: 120 } }}
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}
@@ -87,28 +99,26 @@ export function InvoiceListPanel({
         <TextField
           select
           size="small"
-          label="Status"
+          label={t("billing.invoiceStatusLabel")}
           value={status}
           onChange={(e) => onStatusChange(e.target.value as InvoiceStatus | "all")}
         >
-          <MenuItem value="all">All</MenuItem>
-          <MenuItem value="draft">Draft</MenuItem>
-          <MenuItem value="issued">Issued</MenuItem>
-          <MenuItem value="partially_paid">Partially Paid</MenuItem>
-          <MenuItem value="paid">Paid</MenuItem>
-          <MenuItem value="waived">Waived</MenuItem>
-          <MenuItem value="cancelled">Cancelled</MenuItem>
+          {INVOICE_STATUS_OPTIONS.map((option) => (
+            <MenuItem key={option.value} value={option.value}>
+              {t(option.labelKey)}
+            </MenuItem>
+          ))}
         </TextField>
       </Stack>
 
       <Box sx={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden", borderTop: `1px solid rgb(0 31 84 / 0.08)` }}>
         {loading ? (
           <Typography sx={{ p: 2.5, color: meridian.textSecondary, fontSize: "0.875rem" }}>
-            Loading…
+            {t("common.loading")}
           </Typography>
         ) : invoices.length === 0 ? (
           <Typography sx={{ p: 2.5, color: meridian.textSecondary, fontSize: "0.875rem" }}>
-            No invoices match.
+            {t("billing.noInvoicesMatch")}
           </Typography>
         ) : (
           invoices.map((inv) => {
@@ -183,9 +193,9 @@ export function InvoiceListPanel({
         )}
       </Box>
       <Stack direction="row" sx={{ flexShrink: 0, p: 1.5, gap: 1, alignItems: "center", justifyContent: "space-between", borderTop: `1px solid rgb(0 31 84 / 0.06)` }}>
-        <Button disabled={loading || page <= 1} onClick={() => onPageChange(page - 1)}>Previous</Button>
+        <Button disabled={loading || page <= 1} onClick={() => onPageChange(page - 1)}>{t("common.previous")}</Button>
         <Typography variant="caption">Page {page} of {Math.max(1, Math.ceil(total / pageSize))} · {total} invoices</Typography>
-        <Button disabled={loading || page * pageSize >= total} onClick={() => onPageChange(page + 1)}>Next</Button>
+        <Button disabled={loading || page * pageSize >= total} onClick={() => onPageChange(page + 1)}>{t("common.next")}</Button>
       </Stack>
     </Box>
   );

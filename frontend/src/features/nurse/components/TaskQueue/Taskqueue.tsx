@@ -1,3 +1,7 @@
+"use client";
+
+import { useLocale } from "@/lib/i18n";
+
 import { Order, TaskQueueProps } from "./Taskqueue.types";
 import { PRIORITY_SORT_ORDER, PRIORITY_STYLES } from "./Taskqueue.constants";
 
@@ -24,6 +28,8 @@ function isPending(status: Order["status"]): boolean {
 }
 
 export default function TaskQueue({ orders, onAccept, onCheckOff }: TaskQueueProps) {
+  const { t } = useLocale();
+
   const pendingOrders = orders
     .filter((order) => isPending(order.status))
     .slice()
@@ -32,7 +38,7 @@ export default function TaskQueue({ orders, onAccept, onCheckOff }: TaskQueuePro
   if (pendingOrders.length === 0) {
     return (
       <div className="surface-card p-6">
-        <p className="text-sm text-muted-foreground">No pending orders. All caught up.</p>
+        <p className="text-sm text-muted-foreground">{t("nurse.taskQueueEmpty")}</p>
       </div>
     );
   }
@@ -40,25 +46,22 @@ export default function TaskQueue({ orders, onAccept, onCheckOff }: TaskQueuePro
   return (
     <div className="surface-card overflow-hidden">
       <div className="border-b border-border px-6 py-4">
-        <h2 className="text-lg font-semibold">Pending doctor orders</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Accept records who picked up the order and when (0045). Complete records
-          check-off with authenticated nurse and timestamp.
-        </p>
+        <h2 className="text-lg font-semibold">{t("nurse.taskQueueTitle")}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">{t("nurse.taskQueueSubtitle")}</p>
       </div>
 
       <div className="overflow-x-auto">
         <table className="min-w-full border-collapse">
           <thead className="bg-muted">
             <tr>
-              <th className="px-4 py-3 text-left">Order #</th>
-              <th className="px-4 py-3 text-left">Patient</th>
-              <th className="px-4 py-3 text-left">Type</th>
-              <th className="px-4 py-3 text-left">Priority</th>
-              <th className="px-4 py-3 text-left">Status</th>
-              <th className="px-4 py-3 text-left">Ordered</th>
-              <th className="px-4 py-3 text-left">Accepted</th>
-              <th className="px-4 py-3 text-left">Action</th>
+              <th className="px-4 py-3 text-left">{t("nurse.taskColOrder")}</th>
+              <th className="px-4 py-3 text-left">{t("nurse.taskColPatient")}</th>
+              <th className="px-4 py-3 text-left">{t("nurse.taskColType")}</th>
+              <th className="px-4 py-3 text-left">{t("nurse.taskColPriority")}</th>
+              <th className="px-4 py-3 text-left">{t("nurse.taskColStatus")}</th>
+              <th className="px-4 py-3 text-left">{t("nurse.taskColOrdered")}</th>
+              <th className="px-4 py-3 text-left">{t("nurse.taskColAccepted")}</th>
+              <th className="px-4 py-3 text-left">{t("nurse.taskColAction")}</th>
             </tr>
           </thead>
 
@@ -79,7 +82,9 @@ export default function TaskQueue({ orders, onAccept, onCheckOff }: TaskQueuePro
                   <td className="px-4 py-3 text-sm">{order.patient_name ?? "-"}</td>
                   <td className="px-4 py-3 text-sm capitalize">{order.order_type}</td>
                   <td className="px-4 py-3 text-sm">
-                    <span className={`rounded-full px-2 py-1 text-xs font-medium ${PRIORITY_STYLES[order.priority]}`}>
+                    <span
+                      className={`rounded-full px-2 py-1 text-xs font-medium ${PRIORITY_STYLES[order.priority]}`}
+                    >
                       {order.priority}
                     </span>
                   </td>
@@ -98,7 +103,7 @@ export default function TaskQueue({ orders, onAccept, onCheckOff }: TaskQueuePro
                           className="btn btn-sm btn-secondary"
                           onClick={() => void onAccept?.(order.id)}
                         >
-                          Accept
+                          {t("nurse.taskAccept")}
                         </button>
                       ) : null}
                       {canComplete ? (
@@ -107,7 +112,7 @@ export default function TaskQueue({ orders, onAccept, onCheckOff }: TaskQueuePro
                           className="btn btn-sm btn-primary"
                           onClick={() => void onCheckOff(order.id)}
                         >
-                          Mark completed
+                          {t("nurse.taskMarkCompleted")}
                         </button>
                       ) : null}
                     </div>
