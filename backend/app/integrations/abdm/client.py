@@ -192,6 +192,45 @@ def _safe_error_codes(body: Any) -> tuple[str, ...]:
 _SHAPE_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,30}")
 
 
+_SCRUB = (
+    # Order matters: quoted echoes first, then identifiers, then long opaque strings.
+    (re.compile(r"(['\"])(?:(?!\1).){1,200}\1"), "<value>"),
+    (re.compile(r"\S+@\S+"), "<address>"),
+    (re.compile(r"\beyJ[\w-]+(?:\.[\w-]+)*"), "<token>"),
+    (re.compile(r"[A-Za-z0-9+/=_-]{24,}"), "<token>"),
+    (re.compile(r"\d[\d-]{3,}"), "<number>"),
+)
+
+
+def safe_rejection_message(detail: Any) -> str | None:
+    """The gateway's own words for a refused request, identifiers scrubbed.
+
+    ABDM-9999 only says "invalid"; the message says which field. Messages can
+    echo submitted values, so quoted values, addresses, numbers and token-like
+    strings are replaced before the text leaves this function. For operator
+    logs only: never persisted to the database or shown in the admin screen.
+    """
+    nodes = detail if isinstance(detail, list) else [detail]
+    texts: list[str] = []
+    for node in nodes[:5]:
+        if not isinstance(node, dict):
+            continue
+        nested = node.get("error")
+        for item in (node, nested if isinstance(nested, dict) else None):
+            if not isinstance(item, dict):
+                continue
+            for key in ("message", "description", "errorMessage"):
+                value = item.get(key)
+                if isinstance(value, str) and value.strip():
+                    texts.append(value.strip())
+    if not texts:
+        return None
+    text = " | ".join(dict.fromkeys(texts))
+    for pattern, replacement in _SCRUB:
+        text = pattern.sub(replacement, text)
+    return text[:200]
+
+
 def _body_shape(body: Any) -> str:
     """Structure of an error body: field names only, never values.
 

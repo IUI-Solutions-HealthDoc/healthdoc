@@ -473,3 +473,31 @@ async def test_documented_code_is_preferred_over_shape():
     with pytest.raises(AbdmAuthError) as caught:
         await _client(handler).request("POST", "/v3/link")
     assert safe_failure_summary(caught.value) == "AbdmAuthError:request:401:ABDM-1017"
+
+
+# ------------------------------------------------ what NHA objected to, scrubbed
+# 29 Sep 2026: link/carecontext answered 400 ABDM-9999 and only the code survived.
+@pytest.mark.parametrize(
+    ("detail", "expected"),
+    [
+        (
+            {"code": "ABDM-9999", "message": "careContexts[0].referenceNumber must not contain '/'"},
+            "careContexts[0].referenceNumber must not contain <value>",
+        ),
+        ([{"code": "ABDM-9999: ", "message": "Invalid display for patient@sbx"}], "Invalid display for <address>"),
+        (
+            {"error": {"code": "ABDM-9999", "message": "Token eyJhbGciOi.abc.def rejected for 91-2140-8178-6441"}},
+            "Token <token> rejected for <number>",
+        ),
+        (
+            {"message": "reference wellness/b939d1a4-a919-42da-a331-cb7ef300fbfb invalid"},
+            "reference <token> invalid",
+        ),
+        ({"code": "ABDM-9999"}, None),
+        ("<html>Bad Request</html>", None),
+    ],
+)
+async def test_rejection_message_keeps_the_reason_and_scrubs_identifiers(detail, expected):
+    from app.integrations.abdm.client import safe_rejection_message
+
+    assert safe_rejection_message(detail) == expected

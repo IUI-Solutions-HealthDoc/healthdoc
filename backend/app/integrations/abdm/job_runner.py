@@ -6,8 +6,10 @@ is what recovers accepted work after an API process dies or reloads.
 
 import argparse
 import asyncio
+import json
 import logging
 import uuid
+from collections.abc import Callable
 from contextlib import suppress
 from datetime import UTC, datetime
 
@@ -16,7 +18,13 @@ from sqlalchemy import or_, select
 from app.common.config import get_settings
 from app.common.db import SessionLocal
 from app.integrations.abdm import jobs
-from app.integrations.abdm.client import AbdmAuthError, AbdmProtocolError, safe_failure_summary
+from app.integrations.abdm.client import (
+    AbdmAuthError,
+    AbdmProtocolError,
+    AbdmRejected,
+    safe_failure_summary,
+    safe_rejection_message,
+)
 from app.integrations.abdm.hip import gateway, linking, worker
 from app.integrations.abdm.hip.documents import DocumentUnavailable, resolve_context_document
 from app.integrations.abdm.hip.models import (
@@ -148,6 +156,7 @@ async def run_once(
     error = None
     deferred = False
     terminal = False
+    refused = False
     try:
         done, _ = await asyncio.wait({task, heartbeat}, return_when=asyncio.FIRST_COMPLETED)
         if heartbeat in done:
@@ -163,7 +172,14 @@ async def run_once(
         # link token, and must not consume the token-generation quota.
         # An unexpected response is not evidence that repeating the operation
         # is safe either. Preserve the diagnostic for deliberate reconciliation.
-        terminal = isinstance(exc, AbdmAuthError | AbdmProtocolError)
+        terminal = isinstance(exc, AbdmAuthError | AbdmProtocolError) or (
+            # A link token is single-use at the gateway: a refused link request
+            # has spent it, so a retry can only earn a 401 (29 Sep 2026).
+            job.kind == "link_context" and isinstance(exc, AbdmRejected)
+        )
+        refused = job.kind == "link_context" and isinstance(exc, AbdmRejected | AbdmAuthError)
+        if isinstance(exc, AbdmRejected):
+            _report_refusal(job, exc, error)
         log.warning("ABDM job failed (%s)", error)
     finally:
         for pending in (task, heartbeat):
@@ -171,9 +187,32 @@ async def run_once(
             with suppress(asyncio.CancelledError, Exception):
                 await pending
     async with SessionLocal() as db:
-        await jobs.finish(db, job, error=error, deferred=deferred, terminal=terminal)
+        finished = await jobs.finish(db, job, error=error, deferred=deferred, terminal=terminal)
+        if finished and refused:
+            await linking.release_refused_link(db, link_id=job.target_id, reason=error or "")
     return True
 
+
+
+#: Where scrubbed gateway refusals are reported. The session runner prints them,
+#: because it disables logging (library logs can carry request parameters);
+#: without a listener they go to the log. Never written to the database.
+refusal_listener: Callable[[dict], None] | None = None
+
+
+def _report_refusal(job, exc: AbdmRejected, summary: str) -> None:
+    detail = {
+        "job_kind": job.kind,
+        "job_id": str(job.id),
+        "request_id": exc.request_id,
+        "http_status": exc.status_code,
+        "summary": summary,
+        "message": safe_rejection_message(exc.detail),
+    }
+    if refusal_listener is not None:
+        refusal_listener(detail)
+    else:
+        log.warning("ABDM refused a request %s", json.dumps(detail))
 
 async def cleanup_expired_keys() -> int:
     """Run even without new callbacks. Lock the same request rows as reception."""
