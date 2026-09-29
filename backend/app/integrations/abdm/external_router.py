@@ -104,6 +104,34 @@ async def _facility_id(db: AsyncSession) -> uuid.UUID:
     return facility.id
 
 
+def _shared_address(address: object) -> dict[str, str | None] | None:
+    """Map NHA's profile-share address onto the ticket snapshot.
+
+    The wire object is `{"line", "district", "state", "pinCode"}` (Scan-and-Share
+    collection, 14 Aug 2025) and arrives as a dict. Reading it with attribute
+    access raised AttributeError on any non-empty address, failing the share for
+    the patient at the desk. Only non-blank strings are kept, bounded; anything
+    that is not an object is treated as no address rather than refusing the share.
+    """
+    if not isinstance(address, dict):
+        return None
+
+    def text(*keys: str) -> str | None:
+        for key in keys:
+            value = address.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()[:200]
+        return None
+
+    mapped = {
+        "line": text("line"),
+        "district": text("district"),
+        "state": text("state"),
+        "pincode": text("pinCode", "pincode"),
+    }
+    return mapped if any(mapped.values()) else None
+
+
 async def _patient_by_address(
     db: AsyncSession, *, facility_id: uuid.UUID, abha_address: str
 ) -> Patient | None:
@@ -699,12 +727,7 @@ async def profile_share(
             "age_years": patient.age_years,
             "mobile": patient.mobile,
             "abha_number": patient.abha_number,
-            "address": {
-                "line": shared.address.line if shared.address else None,
-                "district": shared.address.district if shared.address else None,
-                "state": shared.address.state if shared.address else None,
-                "pincode": shared.address.pincode if shared.address else None,
-            } if shared.address else None,
+            "address": _shared_address(shared.address),
         },
         status="active",
         counter=None,

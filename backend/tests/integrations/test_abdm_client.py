@@ -268,7 +268,8 @@ async def test_failure_diagnostics_do_not_include_credentials_or_patient_content
     for rendered in (str(exc), repr(exc), safe_failure_summary(exc)):
         assert "SECRET" not in rendered and "patient@sbx" not in rendered
     exc.detail = [{"code": "SECRET-TOKEN"}, {"code": "ABDM-1042 patient@sbx"}]
-    assert safe_failure_summary(exc) == "AbdmRejected:request:400"
+    # No documented code survives, so the body's field names explain it instead.
+    assert safe_failure_summary(exc) == "AbdmRejected:request:400:shape=list[code]"
 
 
 @pytest.mark.parametrize(("stage", "status"), [("session", 500), ("request", 403)])
@@ -283,7 +284,9 @@ async def test_failure_diagnostics_distinguish_session_from_operation(stage, sta
     error_type = AbdmUnavailable if status == 500 else AbdmAuthError
     with pytest.raises(error_type) as caught:
         await _client(handler).request("POST", "/v3/link")
-    assert safe_failure_summary(caught.value) == f"{error_type.__name__}:{stage}:{status}"
+    assert safe_failure_summary(caught.value) == (
+        f"{error_type.__name__}:{stage}:{status}:shape=json{{message}}"
+    )
 
 
 @pytest.mark.parametrize("status", [401, 403, 500])
@@ -294,8 +297,8 @@ async def test_failure_diagnostics_distinguish_session_from_operation(stage, sta
         ({"error": {"code": "ABDM-1066", "message": "SECRET patient@sbx"}}, "ABDM-1066"),
         ({"fault": {"code": 900908, "description": "SECRET patient@sbx"}}, "900908"),
         ({"code": "900910", "message": "SECRET patient@sbx"}, "900910"),
-        ({"code": "12345678901234", "message": "SECRET patient@sbx"}, ""),
-        ({"fault": {"code": "900908 SECRET patient@sbx"}}, ""),
+        ({"code": "12345678901234", "message": "SECRET patient@sbx"}, "shape=json{code,message}"),
+        ({"fault": {"code": "900908 SECRET patient@sbx"}}, "shape=json{fault{code}}"),
     ],
 )
 async def test_auth_and_outage_errors_keep_only_safe_codes(status, stage, body, expected):
@@ -416,3 +419,57 @@ async def test_caller_supplied_request_id_is_used_for_idempotent_retry():
     await client.request("POST", "/v3/a", json={}, request_id="fixed-id")
     await client.request("POST", "/v3/a", json={}, request_id="fixed-id")
     assert seen == ["fixed-id", "fixed-id"]
+
+
+# ------------------------------------------------ undocumented refusals keep their shape
+# 28 Sep 2026: link/carecontext returned 401 twice with a body carrying neither an
+# ABDM-NNNN nor a 9009xx code, so the job recorded only "AbdmAuthError:request:401"
+# and there was nothing concrete to show NHA. The body's field names close that gap.
+@pytest.mark.parametrize(
+    ("body", "shape"),
+    [
+        (None, "empty"),
+        ("", "empty"),
+        ("<html>Unauthorized for patient@sbx</html>", "text"),
+        ({"error": {"code": "X", "message": "SECRET"}}, "json{error{code,message}}"),
+        ({"message": "SECRET", "status": 401}, "json{message,status}"),
+        ([{"code": "SECRET", "message": "patient@sbx"}], "list[code,message]"),
+        ({"patient@sbx": "SECRET", "91-1234-5678-9012": 1, "ok": True}, "json{ok}"),
+        ({"a": {"b": {"c": "SECRET"}}}, "json{a{b}}"),
+    ],
+)
+async def test_body_shape_names_fields_never_values(body, shape):
+    from app.integrations.abdm.client import _body_shape
+
+    rendered = _body_shape(body)
+    assert rendered == shape
+    assert "SECRET" not in rendered and "patient@sbx" not in rendered and "9012" not in rendered
+
+
+async def test_second_401_records_the_refusal_shape():
+    from app.integrations.abdm.client import safe_failure_summary
+
+    def handler(request):
+        if request.url.path == SESSION_PATH:
+            return httpx.Response(200, json={"accessToken": "tok", "expiresIn": 1800})
+        return httpx.Response(401, json={"message": "SECRET-TOKEN patient@sbx", "status": 401})
+
+    with pytest.raises(AbdmAuthError) as caught:
+        await _client(handler).request("POST", "/v3/link")
+    assert caught.value.body_shape == "json{message,status}"
+    summary = safe_failure_summary(caught.value)
+    assert summary == "AbdmAuthError:request:401:shape=json{message,status}"
+    assert "SECRET" not in summary and "patient@sbx" not in summary
+
+
+async def test_documented_code_is_preferred_over_shape():
+    from app.integrations.abdm.client import safe_failure_summary
+
+    def handler(request):
+        if request.url.path == SESSION_PATH:
+            return httpx.Response(200, json={"accessToken": "tok", "expiresIn": 1800})
+        return httpx.Response(401, json={"error": {"code": "ABDM-1017", "message": "SECRET"}})
+
+    with pytest.raises(AbdmAuthError) as caught:
+        await _client(handler).request("POST", "/v3/link")
+    assert safe_failure_summary(caught.value) == "AbdmAuthError:request:401:ABDM-1017"

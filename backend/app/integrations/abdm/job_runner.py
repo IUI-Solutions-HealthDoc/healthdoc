@@ -130,9 +130,17 @@ async def _heartbeat(ident: uuid.UUID, token: uuid.UUID) -> None:
                 raise RuntimeError("ABDM job lease lost")
 
 
-async def run_once(ident: uuid.UUID | None = None) -> bool:
+async def run_once(
+    ident: uuid.UUID | None = None,
+    *,
+    facility_id: uuid.UUID | None = None,
+    created_since: datetime | None = None,
+) -> bool:
     async with SessionLocal() as db:
-        job = await jobs.claim(db, ident=ident)
+        scope = {}
+        if facility_id is not None or created_since is not None:
+            scope = {"facility_id": facility_id, "created_since": created_since}
+        job = await jobs.claim(db, ident=ident, **scope)
     if job is None:
         return False
     task = asyncio.create_task(_dispatch(job))
@@ -222,17 +230,26 @@ async def cleanup_expired_keys() -> int:
             if link.status == "pending":
                 link.status = "expired"
                 link.failure_reason = "Link credential use window expired; start linking again"
-        replies = list((await db.execute(
-            select(jobs.AbdmCallbackReply).where(
-                jobs.AbdmCallbackReply.response_encrypted.is_not(None),
-                or_(
-                    jobs.AbdmCallbackReply.response_expires_at <= now,
-                    jobs.AbdmCallbackReply.id.in_(select(jobs.AbdmJob.target_id).where(
-                        jobs.AbdmJob.kind == "callback_ack", jobs.AbdmJob.status == "done",
-                    )),
-                ),
-            ).with_for_update(skip_locked=True)
-        )).scalars())
+        replies = list(
+            (
+                await db.execute(
+                    select(jobs.AbdmCallbackReply)
+                    .where(
+                        jobs.AbdmCallbackReply.response_encrypted.is_not(None),
+                        or_(
+                            jobs.AbdmCallbackReply.response_expires_at <= now,
+                            jobs.AbdmCallbackReply.id.in_(
+                                select(jobs.AbdmJob.target_id).where(
+                                    jobs.AbdmJob.kind == "callback_ack",
+                                    jobs.AbdmJob.status == "done",
+                                )
+                            ),
+                        ),
+                    )
+                    .with_for_update(skip_locked=True)
+                )
+            ).scalars()
+        )
         for reply in replies:
             reply.response_encrypted = None
         from app.integrations.abdm.callback_evidence import expire_receipts
@@ -293,7 +310,9 @@ async def _poll_jobs() -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode", choices=["all", "cleanup"], default="all")
-    parser.add_argument("--once", action="store_true", help="Run cleanup once; fail nonzero on errors")
+    parser.add_argument(
+        "--once", action="store_true", help="Run cleanup once; fail nonzero on errors"
+    )
     options = parser.parse_args()
     if options.once and options.mode != "cleanup":
         parser.error("--once requires --mode cleanup")

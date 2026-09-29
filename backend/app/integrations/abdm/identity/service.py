@@ -46,6 +46,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from app.common.config import get_settings
+from app.common.enums import AbhaProfileTokenKind
 from app.integrations.abdm.client import AbdmRejected, AbdmResponse, get_abdm_client
 
 from . import otp_session
@@ -94,8 +95,9 @@ class OtpRequested:
 _LOGIN_SCOPES: dict[str, list[str]] = {
     "abha-number": ["abha-login", "mobile-verify"],
     "aadhaar": ["abha-login", "aadhaar-verify"],
-    # Official collection: address and communication-mobile both OTP through ABDM.
-    "abha-address": ["abha-login", "mobile-verify"],
+    # ABHA address is its own login family (/v3/phr/web/login/abha/*) with its
+    # own scope: "ABHA Address Verification via Mobile OTP" in the M1 collection.
+    "abha-address": ["abha-address-login", "mobile-verify"],
     "mobile": ["abha-login", "mobile-verify"],
 }
 _LOGIN_OTP_SYSTEMS: dict[str, str] = {
@@ -108,6 +110,8 @@ _LOGIN_OTP_SYSTEMS: dict[str, str] = {
 
 @dataclass(frozen=True)
 class AbhaIssued:
+    #: Empty when an ABHA-address login did not disclose the full number
+    #: (ABDM may return it masked). A masked number is never stored.
     abha_number: str
     #: The ABHA address (PHR), e.g. "name@abdm". Distinct from the number.
     abha_address: str | None
@@ -122,6 +126,8 @@ class AbhaIssued:
     suggested_addresses: tuple[str, ...] = ()
     #: (ABHA number, display name) when the desk must choose. Never a guess.
     account_choices: tuple[tuple[str, str | None], ...] = ()
+    #: Which login family issued `linking_token`; it only opens that family.
+    token_kind: str = AbhaProfileTokenKind.ABHA.value
 
 
 def _txn_id(body: object) -> str:
@@ -489,7 +495,9 @@ async def request_login_otp(
     settings = get_settings()
     body = (
         await _post(
-            settings.abdm_path_login_request_otp,
+            settings.abdm_path_phr_login_request_otp
+            if login_hint == "abha-address"
+            else settings.abdm_path_login_request_otp,
             {
                 "scope": _LOGIN_SCOPES[login_hint],
                 "loginHint": login_hint,
@@ -584,6 +592,44 @@ async def resend_otp(
     return requested
 
 
+def _full_abha_number(value: object) -> str | None:
+    """A complete 14-digit ABHA number, hyphenated; None if absent or masked."""
+    if not isinstance(value, str):
+        return None
+    digits = value.replace("-", "").strip()
+    return hyphenate_abha(digits) if re.fullmatch(r"\d{14}", digits) else None
+
+
+def _issued_from_address_login(body: dict) -> AbhaIssued:
+    """Parse /v3/phr/web/login/abha/verify, which answers with users[], not accounts[].
+
+    One ABHA address is one account, so anything other than exactly one active
+    user is refused rather than guessed. The number is kept only when ABDM sent
+    it in full; the collection's own example masks it.
+    """
+    users = [user for user in body.get("users") or [] if isinstance(user, dict)]
+    if len(users) != 1:
+        raise AbdmIdentityError(
+            "abdm_account_selection_required", "ABDM did not return one verified ABHA address"
+        )
+    user = users[0]
+    address = user.get("abhaAddress")
+    if not isinstance(address, str) or "@" not in address or " " in address.strip():
+        raise AbdmIdentityError("abdm_bad_response", "ABDM did not return the verified ABHA address")
+    if user.get("status") not in (None, "ACTIVE"):
+        raise AbdmIdentityError("abdm_account_inactive", "This ABHA account is not active")
+    full_name = user.get("fullName")
+    return AbhaIssued(
+        abha_number=_full_abha_number(user.get("abhaNumber")) or "",
+        abha_address=address.strip(),
+        linking_token=_profile_token(body),
+        name=full_name.strip() if isinstance(full_name, str) and full_name.strip() else _name(user),
+        gender=user.get("gender") if isinstance(user.get("gender"), str) else None,
+        date_of_birth=user.get("dateOfBirth") if isinstance(user.get("dateOfBirth"), str) else None,
+        token_kind=AbhaProfileTokenKind.PHR.value,
+    )
+
+
 async def verify_login_otp(
     *, session_id: str, otp: str, facility_id: str, consume_session: bool = True
 ) -> AbhaIssued:
@@ -591,10 +637,12 @@ async def verify_login_otp(
     session = await otp_session.load(
         session_id, facility_id=facility_id, purpose=OtpPurpose.LOGIN_BY_ABHA
     )
+    address_login = session.login_hint == "abha-address"
+    settings = get_settings()
 
     body = (
         await _post(
-            get_settings().abdm_path_login_verify,
+            settings.abdm_path_phr_login_verify if address_login else settings.abdm_path_login_verify,
             {
                 # Same scope as the request leg; a session from before
                 # login_hint existed was necessarily an ABHA-number login.
@@ -617,6 +665,11 @@ async def verify_login_otp(
     # profile or guess between accounts when the login result is ambiguous.
     if body.get("authResult") != "success":
         raise AbdmIdentityError("abdm_auth_failed", "ABDM did not verify this OTP")
+    if address_login:
+        issued = _issued_from_address_login(body)
+        if consume_session:
+            await otp_session.finish(session_id)
+        return issued
     accounts = body.get("accounts")
     if not isinstance(accounts, list) or not accounts:
         raise AbdmIdentityError("abdm_account_selection_required", "ABDM did not return a verified account")
@@ -900,17 +953,32 @@ async def submit_enrolment_abha_address(
     return bound
 
 
-async def fetch_abha_profile(*, profile_token: str) -> AbhaProfileView:
+async def fetch_abha_profile(
+    *, profile_token: str, token_kind: str = AbhaProfileTokenKind.ABHA.value
+) -> AbhaProfileView:
     settings = get_settings()
+    phr = token_kind == AbhaProfileTokenKind.PHR.value
     body = (
         await _call(
             "GET",
-            settings.abdm_path_profile_account,
+            settings.abdm_path_phr_profile if phr else settings.abdm_path_profile_account,
             extra_headers={"X-token": _bearer(profile_token)},
         )
     ).body
     if not isinstance(body, dict):
         raise AbdmIdentityError("abdm_bad_response", "gateway returned a non-object body")
+    if phr:
+        # PHR profile: abhaAddress/fullName/abhaNumber (possibly masked)/kycStatus.
+        address = body.get("abhaAddress")
+        full_name = body.get("fullName")
+        return AbhaProfileView(
+            abha_number=_full_abha_number(body.get("abhaNumber")),
+            abha_address=address.strip() if isinstance(address, str) and address.strip() else None,
+            name=full_name.strip() if isinstance(full_name, str) and full_name.strip() else _name(body),
+            gender=body.get("gender") if isinstance(body.get("gender"), str) else None,
+            status=body.get("status") if isinstance(body.get("status"), str) else None,
+            kyc_verified=(body["kycStatus"] == "VERIFIED") if isinstance(body.get("kycStatus"), str) else None,
+        )
     kyc = body.get("kycVerified")
     return AbhaProfileView(
         abha_number=body.get("ABHANumber") if isinstance(body.get("ABHANumber"), str) else None,
@@ -926,15 +994,22 @@ async def fetch_abha_profile(*, profile_token: str) -> AbhaProfileView:
     )
 
 
-async def fetch_abha_card(*, profile_token: str) -> AbhaCard:
+async def fetch_abha_card(
+    *, profile_token: str, token_kind: str = AbhaProfileTokenKind.ABHA.value
+) -> AbhaCard:
     settings = get_settings()
+    phr = token_kind == AbhaProfileTokenKind.PHR.value
     response = await _call(
         "GET",
-        settings.abdm_path_profile_abha_card,
+        settings.abdm_path_phr_card if phr else settings.abdm_path_profile_abha_card,
         extra_headers={"X-Token": _bearer(profile_token)},
         parse_json=False,
     )
     content = response.body if isinstance(response.body, bytes | bytearray) else b""
     if not content:
         raise AbdmIdentityError("abdm_no_abha_card", "ABDM returned an empty ABHA card")
-    return AbhaCard(content=bytes(content), media_type="image/png")
+    media_type = "image/png"
+    declared = (response.media_type or "").split(";")[0].strip().lower()
+    if phr and (declared.startswith("image/") or declared == "application/pdf"):
+        media_type = declared
+    return AbhaCard(content=bytes(content), media_type=media_type)

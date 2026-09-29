@@ -78,6 +78,10 @@ def _abdm_public_key(monkeypatch, rsa_key):
         abdm_path_profile_abha_card = "/v3/profile/account/abha-card"
         abdm_path_login_request_otp = "/v3/profile/login/request/otp"
         abdm_path_login_verify = "/v3/profile/login/verify"
+        abdm_path_phr_login_request_otp = "/v3/phr/web/login/abha/request/otp"
+        abdm_path_phr_login_verify = "/v3/phr/web/login/abha/verify"
+        abdm_path_phr_profile = "/v3/phr/web/login/profile/abha-profile"
+        abdm_path_phr_card = "/v3/phr/web/login/profile/abha/phr-card"
         abdm_path_login_verify_user = "/v3/profile/login/verify/user"
 
     monkeypatch.setattr(crypto, "get_settings", lambda: _S())
@@ -863,3 +867,102 @@ async def test_several_login_accounts_are_not_reduced_to_the_first(monkeypatch, 
     assert gw.calls[2][1]["ABHANumber"] == "91-4444-5555-6666"
     assert gw.headers[2]["T-token"] == "Bearer selection-token"
     assert "selection-token" not in json.dumps(issued.account_choices)
+
+
+# ------------------------------------------ ABHA-address (PHR) login — M1 collection
+# "ABHA Address Verification via Mobile OTP" is its own family: /v3/phr/web/login/abha/*
+# with scope abha-address-login, answering users[] + tokens, not accounts[]. It was
+# previously sent to /v3/profile/login/* with the ABHA-number scope.
+_PHR_VERIFIED = {
+    "message": "OTP verified successfully",
+    "authResult": "success",
+    "users": [{
+        "abhaAddress": "singh128@sbx", "fullName": "Deepak Kumar Singh",
+        "abhaNumber": "91-6167-8028-XXXX", "status": "ACTIVE", "kycStatus": "VERIFIED",
+    }],
+    "tokens": {"token": "phr-x-token", "expiresIn": 1800, "refreshToken": "phr-refresh", "refreshExpiresIn": 1296000},
+}
+
+
+async def test_abha_address_login_uses_the_phr_family_and_its_own_scope(monkeypatch, rsa_key):
+    gw = _gateway(monkeypatch, [{"txnId": "phr-txn", "message": "OTP sent"}, _PHR_VERIFIED])
+    requested = await service.request_login_otp(
+        abha_address="singh128@sbx", facility_id=FACILITY_A, started_by=STAFF,
+    )
+    path, body = gw.calls[0]
+    assert path == "https://abha.test/abha/api/v3/phr/web/login/abha/request/otp"
+    assert body["scope"] == ["abha-address-login", "mobile-verify"]
+    assert body["loginHint"] == "abha-address" and body["otpSystem"] == "abdm"
+    assert _decrypt(rsa_key, body["loginId"]) == "singh128@sbx"
+
+    issued = await service.verify_login_otp(
+        session_id=requested.session_id, otp="123456", facility_id=FACILITY_A,
+    )
+    path, body = gw.calls[1]
+    assert path == "https://abha.test/abha/api/v3/phr/web/login/abha/verify"
+    assert body["scope"] == ["abha-address-login", "mobile-verify"]
+    assert body["authData"]["otp"]["txnId"] == "phr-txn"
+    assert issued.abha_address == "singh128@sbx"
+    assert issued.abha_number == "", "a masked number must never be kept"
+    assert issued.linking_token == "phr-x-token", "the refresh token is not the profile credential"
+    assert issued.token_kind == "phr"
+    assert issued.name == "Deepak Kumar Singh"
+
+
+async def test_abha_address_login_keeps_a_fully_disclosed_number(monkeypatch, rsa_key):
+    verified = json.loads(json.dumps(_PHR_VERIFIED))
+    verified["users"][0]["abhaNumber"] = "91-6167-8028-0882"
+    _gateway(monkeypatch, [{"txnId": "phr-txn"}, verified])
+    requested = await service.request_login_otp(abha_address="singh128@sbx", facility_id=FACILITY_A, started_by=STAFF)
+    issued = await service.verify_login_otp(session_id=requested.session_id, otp="123456", facility_id=FACILITY_A)
+    assert issued.abha_number == "91-6167-8028-0882"
+
+
+@pytest.mark.parametrize(
+    ("users", "code"),
+    [
+        ([], "abdm_account_selection_required"),
+        ([{"abhaAddress": "a@sbx"}, {"abhaAddress": "b@sbx"}], "abdm_account_selection_required"),
+        ([{"abhaAddress": "singh128@sbx", "status": "DEACTIVATED"}], "abdm_account_inactive"),
+        ([{"fullName": "No Address"}], "abdm_bad_response"),
+    ],
+)
+async def test_abha_address_login_refuses_rather_than_guesses(monkeypatch, rsa_key, users, code):
+    _gateway(monkeypatch, [{"txnId": "phr-txn"}, {"authResult": "success", "users": users, "tokens": {"token": "t"}}])
+    requested = await service.request_login_otp(abha_address="singh128@sbx", facility_id=FACILITY_A, started_by=STAFF)
+    with pytest.raises(service.AbdmIdentityError) as exc:
+        await service.verify_login_otp(session_id=requested.session_id, otp="123456", facility_id=FACILITY_A)
+    assert exc.value.code == code
+
+
+async def test_abha_number_login_still_uses_the_profile_family(monkeypatch, rsa_key):
+    gw = _gateway(monkeypatch, [{"txnId": "n-txn"}])
+    await service.request_login_otp(abha_number="91-1111-2222-3333", facility_id=FACILITY_A, started_by=STAFF)
+    assert gw.calls[0][0] == "https://abha.test/abha/api/v3/profile/login/request/otp"
+    assert gw.calls[0][1]["scope"] == ["abha-login", "mobile-verify"]
+
+
+async def test_phr_profile_and_card_use_the_phr_endpoints(monkeypatch, rsa_key):
+    class _Card:
+        def __init__(self):
+            self.calls = []
+
+        async def request(self, method, path, *, json=None, extra_headers=None, parse_json=True, **kw):
+            self.calls.append((method, path, extra_headers))
+            if path.endswith("phr-card"):
+                return AbdmResponse(200, b"\x89card", "rid", "image/jpeg; charset=binary")
+            return AbdmResponse(200, {
+                "abhaAddress": "singh128@sbx", "fullName": "Deepak Kumar Singh",
+                "abhaNumber": "91-3837-7464-XXXX", "gender": "M", "status": "ACTIVE", "kycStatus": "VERIFIED",
+            }, "rid")
+
+    gw = _Card()
+    monkeypatch.setattr(service, "get_abdm_client", lambda: gw)
+    profile = await service.fetch_abha_profile(profile_token="phr-x-token", token_kind="phr")
+    assert gw.calls[0][:2] == ("GET", "https://abha.test/abha/api/v3/phr/web/login/profile/abha-profile")
+    assert gw.calls[0][2]["X-token"] == "Bearer phr-x-token"
+    assert profile.abha_address == "singh128@sbx" and profile.name == "Deepak Kumar Singh"
+    assert profile.abha_number is None and profile.kyc_verified is True
+    card = await service.fetch_abha_card(profile_token="phr-x-token", token_kind="phr")
+    assert gw.calls[1][:2] == ("GET", "https://abha.test/abha/api/v3/phr/web/login/profile/abha/phr-card")
+    assert card.media_type == "image/jpeg" and card.content == b"\x89card"
