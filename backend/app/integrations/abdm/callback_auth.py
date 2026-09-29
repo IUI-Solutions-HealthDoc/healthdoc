@@ -52,7 +52,16 @@ log = logging.getLogger("healthdoc.abdm")
 CALLBACK_SECRET_HEADER = "X-HealthDoc-Callback-Secret"
 
 _PLACEHOLDER = "change-me"
-_MAX_CLOCK_SKEW = timedelta(minutes=10)
+#: How old a callback's TIMESTAMP may be. NHA's sandbox delivered a genuine
+#: on-generate-token 16 minutes after stamping it (29 Sep 2026: stamped 12:31:19,
+#: delivered 12:47:21, REQUEST-ID 46b3d102-0bc9-48bf-ad84-8c8774ad1f71), and the
+#: former symmetric 10-minute window discarded the link token. Replays are refused
+#: by the durable state below each callback (for example, a token is accepted only
+#: for a pending link with no token whose outbound request id matches), not by
+#: this window, which only bounds how stale a first delivery may be.
+_MAX_CALLBACK_AGE = timedelta(minutes=60)
+#: A timestamp from the future is clock skew or forgery; keep that bound tight.
+_MAX_FUTURE_SKEW = timedelta(minutes=5)
 # This key is a short processing lock, not the durable idempotency record.  A
 # gateway retry while the first request is still running is coalesced, but a
 # failed handler must be allowed to run again.  The database transaction/state
@@ -284,7 +293,8 @@ async def _verify_gateway_headers(
         raise HTTPException(401, {"code": "invalid_cm_id", "message": "Unauthorised"})
 
     timestamp = _parse_timestamp(raw_timestamp)
-    if abs(datetime.now(UTC) - timestamp) > _MAX_CLOCK_SKEW:
+    age = datetime.now(UTC) - timestamp
+    if age > _MAX_CALLBACK_AGE or age < -_MAX_FUTURE_SKEW:
         raise HTTPException(
             400,
             {
