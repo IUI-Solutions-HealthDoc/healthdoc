@@ -248,6 +248,8 @@ class AbdmResponse:
     status_code: int
     body: Any
     request_id: str
+    #: Content-Type as sent, for binary downloads (the PHR card).
+    media_type: str | None = None
 
 
 class _TokenCache:
@@ -480,7 +482,7 @@ class AbdmClient:
             raise AbdmProtocolError(resp.status_code)
 
         body: Any = resp.content if not parse_json else _safe_body(resp)
-        return AbdmResponse(resp.status_code, body, rid)
+        return AbdmResponse(resp.status_code, body, rid, resp.headers.get("content-type"))
 
     async def _send(
         self,

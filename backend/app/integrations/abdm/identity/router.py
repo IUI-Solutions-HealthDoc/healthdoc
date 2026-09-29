@@ -25,6 +25,7 @@ from app.audit.service import write_audit_log
 from app.auth.deps import CurrentDbUser, require_roles
 from app.common.config import get_settings
 from app.common.db import get_db
+from app.common.enums import AbhaProfileTokenKind
 from app.common.security import current_aes_key_version, decrypt_pii, encrypt_pii
 from app.integrations.abdm.client import (
     AbdmAuthError,
@@ -228,12 +229,12 @@ async def unlink_abha(
     """
     patient = await _get_patient_or_404(db, patient_id, current_db_user.facility_id)
 
-    if patient.abha_number is None:
+    if patient.abha_number is None and patient.abha_address is None:
         raise HTTPException(
             409,
             {
                 "code": "no_abha_linked",
-                "message": "Patient has no ABHA number linked",
+                "message": "Patient has no ABHA linked",
             },
         )
 
@@ -243,6 +244,7 @@ async def unlink_abha(
     patient.abha_linking_key_version = None
     patient.abha_profile_token_encrypted = None
     patient.abha_profile_token_key_version = None
+    patient.abha_profile_token_kind = AbhaProfileTokenKind.ABHA.value
     patient.abha_linked_at = None
     patient.updated_by = current_db_user.id
     await db.flush()
@@ -485,26 +487,55 @@ async def _persist_verified_identity(
 
     patient_id = uuid.UUID(session.patient_id)
     patient = await _get_patient_or_404(db, patient_id, current_db_user.facility_id)
-    normalised = _normalise_abha(issued.abha_number)
-    clash = (
-        await db.execute(
-            select(Patient.id).where(
-                Patient.abha_number == normalised,
-                Patient.id != patient.id,
-            )
-        )
-    ).scalar_one_or_none()
-    if clash is not None:
+    # An ABHA-address login can verify the address without disclosing the full
+    # number. Never store an empty or masked number: abha_number is unique, and
+    # a placeholder would collide with the next address-only patient.
+    normalised = _normalise_abha(issued.abha_number) if issued.abha_number else None
+    if normalised is None and not issued.abha_address:
         raise HTTPException(
-            409,
-            {
-                "code": "duplicate_abha",
-                "message": "This ABHA number is already linked to another patient",
-            },
+            502,
+            {"code": "abdm_bad_response", "message": "ABDM verified no ABHA number or address"},
         )
+    if normalised is not None:
+        clash = (
+            await db.execute(
+                select(Patient.id).where(
+                    Patient.abha_number == normalised,
+                    Patient.id != patient.id,
+                )
+            )
+        ).scalar_one_or_none()
+        if clash is not None:
+            raise HTTPException(
+                409,
+                {
+                    "code": "duplicate_abha",
+                    "message": "This ABHA number is already linked to another patient",
+                },
+            )
+    if issued.abha_address:
+        # abha_address is unique too; without this check a second chart for the
+        # same person failed with a database error instead of a clear refusal.
+        address_clash = (
+            await db.execute(
+                select(Patient.id).where(
+                    Patient.abha_address == issued.abha_address,
+                    Patient.id != patient.id,
+                )
+            )
+        ).scalar_one_or_none()
+        if address_clash is not None:
+            raise HTTPException(
+                409,
+                {
+                    "code": "duplicate_abha_address",
+                    "message": "This ABHA address is already linked to another patient",
+                },
+            )
 
     key_version = current_aes_key_version()
-    patient.abha_number = normalised
+    if normalised is not None:
+        patient.abha_number = normalised
     if issued.abha_address:
         patient.abha_address = issued.abha_address
     # Enrolment/login X-token is a profile credential, not a HIP linking token.
@@ -513,6 +544,7 @@ async def _persist_verified_identity(
             issued.linking_token, key_version=key_version
         )
         patient.abha_profile_token_key_version = key_version
+        patient.abha_profile_token_kind = issued.token_kind
     patient.abha_linked_at = datetime.now(UTC)
     patient.identity_status = "verified"
     patient.updated_by = current_db_user.id
@@ -1039,7 +1071,9 @@ async def get_nha_abha_profile(
     patient = await _get_patient_or_404(db, patient_id, current_db_user.facility_id)
     token = _profile_token_for(patient)
     try:
-        view = await identity_service.fetch_abha_profile(profile_token=token)
+        view = await identity_service.fetch_abha_profile(
+            profile_token=token, token_kind=patient.abha_profile_token_kind
+        )
     except AbdmNotConfigured:
         raise _unavailable("ABDM credentials are not configured on this server") from None
     except AbdmUnavailable:
@@ -1083,7 +1117,9 @@ async def download_nha_abha_card(
     patient = await _get_patient_or_404(db, patient_id, current_db_user.facility_id)
     token = _profile_token_for(patient)
     try:
-        card = await identity_service.fetch_abha_card(profile_token=token)
+        card = await identity_service.fetch_abha_card(
+            profile_token=token, token_kind=patient.abha_profile_token_kind
+        )
     except AbdmNotConfigured:
         raise _unavailable("ABDM credentials are not configured on this server") from None
     except AbdmUnavailable:
