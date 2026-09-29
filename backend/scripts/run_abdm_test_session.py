@@ -17,6 +17,8 @@ from sqlalchemy import select, text
 
 from app.common.config import get_settings
 from app.common.db import SessionLocal
+from app.integrations.abdm import job_runner
+from app.integrations.abdm.hip.linking import release_links_refused_before
 from app.integrations.abdm.job_runner import run_once
 from app.integrations.abdm.jobs import AbdmJob
 from app.users.models import Facility
@@ -75,6 +77,12 @@ async def run_session(*, facility_id, service_id, since, execute):
     )
     if not execute:
         return
+    # Scrubbed gateway refusals, e.g. which field ABDM-9999 objected to.
+    job_runner.refusal_listener = lambda detail: print(json.dumps({"refusal": detail}), flush=True)
+    async with SessionLocal() as db:
+        released = await release_links_refused_before(db, facility_id=facility_id)
+    if released:
+        print(json.dumps({"refused_links_released": released}), flush=True)
     while True:
         await check_scope(facility_id, service_id)
         claimed = await run_once(facility_id=facility_id, created_since=since)
