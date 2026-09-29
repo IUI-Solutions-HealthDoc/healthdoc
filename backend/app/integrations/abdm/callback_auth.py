@@ -52,7 +52,16 @@ log = logging.getLogger("healthdoc.abdm")
 CALLBACK_SECRET_HEADER = "X-HealthDoc-Callback-Secret"
 
 _PLACEHOLDER = "change-me"
-_MAX_CLOCK_SKEW = timedelta(minutes=10)
+#: How old a callback's TIMESTAMP may be. NHA's sandbox delivered a genuine
+#: on-generate-token 16 minutes after stamping it (29 Sep 2026: stamped 12:31:19,
+#: delivered 12:47:21, REQUEST-ID 46b3d102-0bc9-48bf-ad84-8c8774ad1f71), and the
+#: former symmetric 10-minute window discarded the link token. Replays are refused
+#: by the durable state below each callback (for example, a token is accepted only
+#: for a pending link with no token whose outbound request id matches), not by
+#: this window, which only bounds how stale a first delivery may be.
+_MAX_CALLBACK_AGE = timedelta(minutes=60)
+#: A timestamp from the future is clock skew or forgery; keep that bound tight.
+_MAX_FUTURE_SKEW = timedelta(minutes=5)
 # This key is a short processing lock, not the durable idempotency record.  A
 # gateway retry while the first request is still running is coalesced, but a
 # failed handler must be allowed to run again.  The database transaction/state
@@ -224,6 +233,7 @@ async def _verify_gateway_headers(
     recipient_header: str | None,
     expected_recipient: str | None,
     require_cm_id: bool = True,
+    replay_scope: str | None = None,
 ) -> GatewayCallback:
     """Validate ABDM's documented callback headers and reject replays.
 
@@ -283,7 +293,8 @@ async def _verify_gateway_headers(
         raise HTTPException(401, {"code": "invalid_cm_id", "message": "Unauthorised"})
 
     timestamp = _parse_timestamp(raw_timestamp)
-    if abs(datetime.now(UTC) - timestamp) > _MAX_CLOCK_SKEW:
+    age = datetime.now(UTC) - timestamp
+    if age > _MAX_CALLBACK_AGE or age < -_MAX_FUTURE_SKEW:
         raise HTTPException(
             400,
             {
@@ -292,7 +303,7 @@ async def _verify_gateway_headers(
             },
         )
 
-    replay_scope = recipient_header.lower() if recipient_header else "profile-share"
+    replay_scope = replay_scope or (recipient_header.lower() if recipient_header else "profile-share")
     replay_key = f"abdm:callback:{replay_scope}:{request.url.path}:{request_id}"
     try:
         first_seen = await get_redis().set(replay_key, "1", ex=_REPLAY_TTL_SECONDS, nx=True)
@@ -374,16 +385,29 @@ async def verify_hip_link_gateway_callback(request: Request) -> GatewayCallback:
 
 
 async def verify_profile_gateway_callback(request: Request) -> GatewayCallback:
-    """Validate Scan-and-Share, whose published callback has no X-HIP-ID.
+    """Validate Scan-and-Share, whose two header sets disagree in practice.
 
-    The addressed HIP is carried in ``metaData.hipId`` and is checked by the
-    route after Pydantic has validated the body.  Requiring a header which the
-    gateway does not send made an otherwise valid profile share impossible.
+    The published collection (14 Aug 2025) sends X-CM-ID and no X-HIP-ID. The
+    live sandbox on 29 Sep 2026 sent X-HIP-ID and no X-CM-ID (receipt
+    f2ce31a9, REQUEST-ID 1119f666-8561-4630-888d-18435f238efa), and requiring
+    X-CM-ID refused a genuine share. Accept either: an X-HIP-ID must be ours,
+    an X-CM-ID must match, and one of them must be present. The addressed HIP
+    in ``metaData.hipId`` is still checked by the route. Both variants share one
+    replay scope, so a redelivery in the other shape is still a replay.
     """
+    if request.headers.get("X-HIP-ID"):
+        return await _verify_gateway_headers(
+            request,
+            recipient_header="X-HIP-ID",
+            expected_recipient=get_settings().abdm_hip_id,
+            require_cm_id=False,
+            replay_scope="profile-share",
+        )
     return await _verify_gateway_headers(
         request,
         recipient_header=None,
         expected_recipient=None,
+        replay_scope="profile-share",
     )
 
 

@@ -339,7 +339,7 @@ async def test_event_callback_still_requires_exact_recipient_and_freshness(
     with pytest.raises(HTTPException) as caught:
         await verify(
             _event_request(
-                family, path, TIMESTAMP=(datetime.now(UTC) - timedelta(minutes=11)).isoformat()
+                family, path, TIMESTAMP=(datetime.now(UTC) - timedelta(minutes=61)).isoformat()
             )
         )
     assert caught.value.detail["code"] == "stale_callback"
@@ -402,7 +402,7 @@ async def test_link_callback_preserves_routing_guards(gateway_settings, name, va
 
 async def test_link_callback_preserves_freshness(gateway_settings):
     headers = _gateway_headers(cm=False)
-    headers["TIMESTAMP"] = (datetime.now(UTC) - timedelta(minutes=11)).isoformat()
+    headers["TIMESTAMP"] = (datetime.now(UTC) - timedelta(minutes=61)).isoformat()
     with pytest.raises(HTTPException) as caught:
         await callback_auth.verify_hip_link_gateway_callback(_request(**headers))
     assert caught.value.detail["code"] == "stale_callback"
@@ -503,3 +503,78 @@ async def test_a_successful_handler_keeps_the_lock_to_coalesce_a_retry(gateway_s
     retry = await retry_gen.__anext__()
     assert retry.replayed is True
     await retry_gen.aclose()
+
+
+# ------------------------------------------------ Scan-and-Share: the live header set
+# 29 Sep 2026: the sandbox's real profile share carried X-HIP-ID and no X-CM-ID
+# (receipt f2ce31a9, REQUEST-ID 1119f666-...), the reverse of the published
+# collection, and was refused 400 missing_abdm_headers.
+async def test_profile_share_accepts_the_live_sandbox_header_set(gateway_settings):
+    verified = await callback_auth.verify_profile_gateway_callback(
+        _request(**_gateway_headers(hip=True, cm=False))
+    )
+    assert verified.replayed is False
+    assert verified.recipient_id == "SBXID_TEST_HIP"
+
+
+async def test_profile_share_with_someone_elses_hip_is_refused(gateway_settings):
+    headers = _gateway_headers(hip=True, cm=False)
+    headers["X-HIP-ID"] = "SOMEONE_ELSES_HIP"
+    with pytest.raises(HTTPException) as caught:
+        await callback_auth.verify_profile_gateway_callback(_request(**headers))
+    assert caught.value.status_code == 404
+
+
+async def test_profile_share_needs_one_routing_header(gateway_settings):
+    with pytest.raises(HTTPException) as caught:
+        await callback_auth.verify_profile_gateway_callback(
+            _request(**_gateway_headers(hip=False, cm=False))
+        )
+    assert caught.value.status_code == 400
+
+
+async def test_profile_share_with_both_headers_still_checks_the_cm(gateway_settings):
+    headers = _gateway_headers(hip=True, cm=True)
+    headers["X-CM-ID"] = "not-sbx"
+    with pytest.raises(HTTPException) as caught:
+        await callback_auth.verify_profile_gateway_callback(_request(**headers))
+    assert caught.value.status_code == 401
+
+
+async def test_profile_share_redelivery_in_the_other_shape_is_a_replay(gateway_settings):
+    published = _gateway_headers(hip=False, cm=True)
+    live = {**_gateway_headers(hip=True, cm=False), "REQUEST-ID": published["REQUEST-ID"]}
+    assert (await callback_auth.verify_profile_gateway_callback(_request(**published))).replayed is False
+    assert (await callback_auth.verify_profile_gateway_callback(_request(**live))).replayed is True
+
+
+
+# ------------------------------------------------ freshness: late delivery vs stale
+# 29 Sep 2026: NHA stamped on-generate-token at 12:31:19 and delivered it at
+# 12:47:21. The old symmetric 10-minute window answered 400 stale_callback and the
+# link token was lost. Late delivery is accepted; very old or future stamps are not.
+async def test_link_callback_delivered_sixteen_minutes_late_is_accepted(gateway_settings):
+    headers = _gateway_headers(cm=False)
+    headers["TIMESTAMP"] = (datetime.now(UTC) - timedelta(minutes=16)).isoformat()
+    verified = await callback_auth.verify_hip_link_gateway_callback(_request(**headers))
+    assert verified.replayed is False
+
+
+@pytest.mark.parametrize(
+    ("offset", "accepted"),
+    [
+        (timedelta(minutes=-59), True),
+        (timedelta(minutes=-61), False),
+        (timedelta(minutes=4), True),
+        (timedelta(minutes=6), False),
+    ],
+)
+async def test_callback_age_and_future_skew_bounds(gateway_settings, offset, accepted):
+    headers = _gateway_headers()
+    headers["TIMESTAMP"] = (datetime.now(UTC) + offset).isoformat()
+    if accepted:
+        assert (await callback_auth.verify_hip_gateway_callback(_request(**headers))).replayed is False
+    else:
+        with pytest.raises(HTTPException) as caught:
+            await callback_auth.verify_hip_gateway_callback(_request(**headers))
+        assert caught.value.detail["code"] == "stale_callback"
