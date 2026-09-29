@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import uuid
+from contextlib import contextmanager
 from datetime import date
-from typing import Annotated
+from typing import Iterator
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.appointments import service
-from app.appointments.models import Appointment
 from app.appointments.schemas import (
     AppointmentCheckInRequest,
     AppointmentCheckInResult,
@@ -28,6 +29,7 @@ from app.common.idempotency import (
     hash_request_body,
     record_idempotent_response,
 )
+from app.queue.service import require_initial_priority_allowed
 from app.users.models import Facility
 
 router = APIRouter(prefix="/appointments", tags=["appointments"])
@@ -43,6 +45,41 @@ async def _get_facility_code_and_timezone(
     if row is None:
         raise HTTPException(status_code=404, detail="Facility not found")
     return row.code, row.timezone
+
+
+def _require_key(idempotency_key: str | None) -> str:
+    if not idempotency_key:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Idempotency-Key header is required")
+    return idempotency_key
+
+
+async def _replay(
+    db: AsyncSession, key: str, endpoint: str, payload: BaseModel, user_id: uuid.UUID
+) -> dict | None:
+    cached = await check_idempotency(db, key, endpoint, hash_request_body(payload), user_id=user_id)
+    return cached.response_body if cached is not None else None
+
+
+@contextmanager
+def _service_errors() -> Iterator[None]:
+    try:
+        yield
+    except service.AppointmentNotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except service.AppointmentValidationError as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            {"code": "appointment_invalid", "message": str(exc)},
+        ) from exc
+    except service.AppointmentConflictError as exc:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            {"code": "appointment_conflict", "message": str(exc)},
+        ) from exc
+    except service.AppointmentStateError as exc:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, {"code": exc.code, "message": str(exc)},
+        ) from exc
 
 
 @router.get(
@@ -71,32 +108,19 @@ async def create_service(
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
     """Create a new service entry in the facility's scheduling catalogue."""
+    key = _require_key(idempotency_key)
     endpoint = "POST /appointments/services"
-    if idempotency_key:
-        cached = await check_idempotency(
-            db,
-            idempotency_key,
-            endpoint,
-            hash_request_body(payload),
-            user_id=current_user.id,
-        )
-        if cached is not None:
-            return cached.response_body
+    cached = await _replay(db, key, endpoint, payload, current_user.id)
+    if cached is not None:
+        return cached
 
-    svc = await service.create_service(db, current_user.facility_id, payload)
-    await db.commit()
+    with _service_errors():
+        svc = await service.create_service(db, current_user.facility_id, payload)
     res = AppointmentServiceOut.model_validate(svc)
-
-    if idempotency_key:
-        await record_idempotent_response(
-            db,
-            idempotency_key,
-            endpoint,
-            status.HTTP_201_CREATED,
-            res.model_dump(mode="json"),
-            user_id=current_user.id,
-        )
-        await db.commit()
+    await record_idempotent_response(
+        db, key, endpoint, status.HTTP_201_CREATED, res.model_dump(mode="json"), user_id=current_user.id,
+    )
+    await db.commit()
     return res
 
 
@@ -141,58 +165,28 @@ async def create_appointment(
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
     """Book a new appointment with conflict checking and explicit teleconsult status."""
+    key = _require_key(idempotency_key)
     endpoint = "POST /appointments"
-    if idempotency_key:
-        cached = await check_idempotency(
-            db,
-            idempotency_key,
-            endpoint,
-            hash_request_body(payload),
-            user_id=current_user.id,
-        )
-        if cached is not None:
-            return cached.response_body
+    cached = await _replay(db, key, endpoint, payload, current_user.id)
+    if cached is not None:
+        return cached
 
-    try:
+    with _service_errors():
         appt = await service.create_appointment(
             db,
             facility_id=current_user.facility_id,
             actor_id=current_user.id,
             payload=payload,
         )
-        await db.commit()
-    except service.AppointmentConflictError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"code": "appointment_conflict", "message": str(exc)},
-        ) from exc
+        detail = await service.get_appointment_detail(db, current_user.facility_id, appt.id)
+    final_res = AppointmentOut.model_validate(detail)
 
-    results = await service.list_appointments(
-        db,
-        current_user.facility_id,
-        date_from=appt.appointment_date,
-        date_to=appt.appointment_date,
-        patient_id=appt.patient_id,
+    # The booking and its receipt commit together: a crash between two commits
+    # left the key "in progress" forever and the desk unable to retry.
+    await record_idempotent_response(
+        db, key, endpoint, status.HTTP_201_CREATED, final_res.model_dump(mode="json"), user_id=current_user.id,
     )
-    final_res = None
-    for res in results:
-        if res["id"] == appt.id:
-            final_res = AppointmentOut.model_validate(res)
-            break
-    if final_res is None:
-        final_res = AppointmentOut.model_validate(appt)
-
-    if idempotency_key:
-        await record_idempotent_response(
-            db,
-            idempotency_key,
-            endpoint,
-            status.HTTP_201_CREATED,
-            final_res.model_dump(mode="json"),
-            user_id=current_user.id,
-        )
-        await db.commit()
-
+    await db.commit()
     return final_res
 
 
@@ -207,22 +201,8 @@ async def get_appointment(
     db: AsyncSession = Depends(get_db),
 ):
     """Get appointment detail."""
-    try:
-        appt = await service.get_appointment(db, current_user.facility_id, appointment_id)
-    except service.AppointmentNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-    results = await service.list_appointments(
-        db,
-        current_user.facility_id,
-        date_from=appt.appointment_date,
-        date_to=appt.appointment_date,
-        patient_id=appt.patient_id,
-    )
-    for res in results:
-        if res["id"] == appt.id:
-            return res
-    return appt
+    with _service_errors():
+        return await service.get_appointment_detail(db, current_user.facility_id, appointment_id)
 
 
 @router.patch(
@@ -235,31 +215,30 @@ async def update_appointment(
     payload: AppointmentUpdate,
     current_user: CurrentDbUser,
     db: AsyncSession = Depends(get_db),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
-    """Update or reschedule or cancel an appointment."""
-    try:
-        appt = await service.update_appointment(
+    """Confirm, cancel, mark no-show or reschedule an appointment."""
+    key = _require_key(idempotency_key)
+    endpoint = f"PATCH /appointments/{appointment_id}"
+    cached = await _replay(db, key, endpoint, payload, current_user.id)
+    if cached is not None:
+        return cached
+
+    with _service_errors():
+        await service.update_appointment(
             db,
             facility_id=current_user.facility_id,
             actor_id=current_user.id,
             appointment_id=appointment_id,
             payload=payload,
         )
-        await db.commit()
-    except service.AppointmentNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-    results = await service.list_appointments(
-        db,
-        current_user.facility_id,
-        date_from=appt.appointment_date,
-        date_to=appt.appointment_date,
-        patient_id=appt.patient_id,
+        detail = await service.get_appointment_detail(db, current_user.facility_id, appointment_id)
+    res = AppointmentOut.model_validate(detail)
+    await record_idempotent_response(
+        db, key, endpoint, status.HTTP_200_OK, res.model_dump(mode="json"), user_id=current_user.id,
     )
-    for res in results:
-        if res["id"] == appt.id:
-            return res
-    return appt
+    await db.commit()
+    return res
 
 
 @router.post(
@@ -274,23 +253,18 @@ async def check_in_appointment(
     db: AsyncSession = Depends(get_db),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
-    """Check in an appointment: atomically creates OPD visit and queue token under HD-05 policy."""
+    """Check in an appointment: creates the OPD visit and, when a queue is open, its token."""
+    key = _require_key(idempotency_key)
+    require_initial_priority_allowed(payload.priority, current_user.roles)
     endpoint = f"POST /appointments/{appointment_id}/check-in"
-    if idempotency_key:
-        cached = await check_idempotency(
-            db,
-            idempotency_key,
-            endpoint,
-            hash_request_body(payload),
-            user_id=current_user.id,
-        )
-        if cached is not None:
-            return cached.response_body
+    cached = await _replay(db, key, endpoint, payload, current_user.id)
+    if cached is not None:
+        return cached
 
     facility_code, facility_tz = await _get_facility_code_and_timezone(
         db, current_user.facility_id
     )
-    try:
+    with _service_errors():
         result = await service.check_in_appointment(
             db,
             facility_id=current_user.facility_id,
@@ -300,18 +274,8 @@ async def check_in_appointment(
             facility_code=facility_code,
             facility_timezone=facility_tz,
         )
-        await db.commit()
-
-        if idempotency_key:
-            await record_idempotent_response(
-                db,
-                idempotency_key,
-                endpoint,
-                status.HTTP_200_OK,
-                result.model_dump(mode="json"),
-                user_id=current_user.id,
-            )
-            await db.commit()
-        return result
-    except service.AppointmentNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await record_idempotent_response(
+        db, key, endpoint, status.HTTP_200_OK, result.model_dump(mode="json"), user_id=current_user.id,
+    )
+    await db.commit()
+    return result

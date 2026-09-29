@@ -92,4 +92,6 @@ export interface AppointmentCheckInResult {
   visit_number: string;
   token_id?: string | null;
   token_display?: string | null;
+  token_status: "issued" | "not_issued";
+  token_not_issued_reason?: string | null;
 }
