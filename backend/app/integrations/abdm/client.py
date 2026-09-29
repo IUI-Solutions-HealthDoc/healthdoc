@@ -93,10 +93,15 @@ class AbdmError(Exception):
         status_code: int | None = None,
         stage: str | None = None,
         error_codes: tuple[str, ...] = (),
+        body_shape: str | None = None,
     ):
         self.status_code = status_code
         self.stage = stage
         self.error_codes = error_codes
+        #: Field names of the gateway's error body, never values. Recorded so
+        #: an undocumented refusal (no ABDM-NNNN or 9009xx code) still says
+        #: what NHA actually sent back.
+        self.body_shape = body_shape
         super().__init__(message)
 
 
@@ -184,6 +189,33 @@ def _safe_error_codes(body: Any) -> tuple[str, ...]:
     return tuple(sorted(codes)[:3])
 
 
+_SHAPE_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,30}")
+
+
+def _body_shape(body: Any) -> str:
+    """Structure of an error body: field names only, never values.
+
+    `{"error": {"code": "X", "message": "Y"}}` becomes `json{error{code,message}}`.
+    Names that do not look like schema field names are dropped, since a body
+    keyed by data (an address, a number) must not leak that data here.
+    """
+    def fields(node: dict, depth: int) -> str:
+        parts = []
+        for key in sorted(k for k in node if isinstance(k, str) and _SHAPE_KEY.fullmatch(k))[:8]:
+            value = node[key]
+            parts.append(f"{key}{{{fields(value, depth + 1)}}}" if isinstance(value, dict) and depth < 1 else key)
+        return ",".join(parts)
+
+    if body is None or body in ("", b""):
+        return "empty"
+    if isinstance(body, dict):
+        return f"json{{{fields(body, 0)}}}"
+    if isinstance(body, list):
+        first = body[0] if body else None
+        return f"list[{fields(first, 0) if isinstance(first, dict) else ''}]"
+    return "text"
+
+
 def safe_failure_summary(exc: Exception) -> str:
     """Bounded operational evidence, never arbitrary gateway messages/values."""
     parts = [type(exc).__name__]
@@ -197,7 +229,11 @@ def safe_failure_summary(exc: Exception) -> str:
             if isinstance(exc, AbdmRejected)
             else [{"code": code} for code in exc.error_codes[:3]]
         )
-        parts.extend(_safe_error_codes(body))
+        codes = _safe_error_codes(body)
+        parts.extend(codes)
+        shape = _body_shape(exc.detail) if isinstance(exc, AbdmRejected) else exc.body_shape
+        if not codes and shape:
+            parts.append(f"shape={shape}")
     return ":".join(parts)[:100]
 
 
@@ -327,6 +363,7 @@ class AbdmClient:
                 status_code=resp.status_code,
                 stage="session",
                 error_codes=_safe_error_codes(_safe_body(resp)),
+                body_shape=_body_shape(_safe_body(resp)),
             )
         if resp.status_code >= 500:
             log.warning("ABDM session %s returned %s", request_id, resp.status_code)
@@ -335,6 +372,7 @@ class AbdmClient:
                 status_code=resp.status_code,
                 stage="session",
                 error_codes=_safe_error_codes(_safe_body(resp)),
+                body_shape=_body_shape(_safe_body(resp)),
             )
         if resp.status_code >= 400:
             raise AbdmRejected(resp.status_code, _safe_body(resp), request_id, stage="session")
@@ -417,6 +455,7 @@ class AbdmClient:
                     status_code=401,
                     stage="request",
                     error_codes=_safe_error_codes(_safe_body(resp)),
+                    body_shape=_body_shape(_safe_body(resp)),
                 )
 
         if resp.status_code == 403:
@@ -425,6 +464,7 @@ class AbdmClient:
                 status_code=403,
                 stage="request",
                 error_codes=_safe_error_codes(_safe_body(resp)),
+                body_shape=_body_shape(_safe_body(resp)),
             )
         if resp.status_code >= 500:
             raise AbdmUnavailable(
@@ -432,6 +472,7 @@ class AbdmClient:
                 status_code=resp.status_code,
                 stage="request",
                 error_codes=_safe_error_codes(_safe_body(resp)),
+                body_shape=_body_shape(_safe_body(resp)),
             )
         if resp.status_code >= 400:
             raise AbdmRejected(resp.status_code, _safe_body(resp), rid)
