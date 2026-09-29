@@ -80,6 +80,17 @@ export interface AppointmentUpdate {
   notes?: string | null;
 }
 
+export interface BookableProvider {
+  staff_user_id: string;
+  staff_name: string;
+  department_id: string;
+}
+
+export interface BookableProviders {
+  service_date: string;
+  items: BookableProvider[];
+}
+
 export interface AppointmentCheckInRequest {
   queue_id?: string | null;
   priority?: "normal" | "urgent" | "vip" | "emergency";

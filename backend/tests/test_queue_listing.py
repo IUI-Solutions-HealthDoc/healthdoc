@@ -190,6 +190,56 @@ async def test_opening_options_are_named_facility_scoped_available_roster_rows(d
     assert await service.list_queue_opening_options(db, dept.facility_id, TODAY) == []
 
 
+async def test_bookable_providers_follow_the_booking_date_not_open_queues(db, seed):
+    """Appointments are booked ahead. The picker must list the doctor rostered
+    on the booking date even when their queue is already open, and nobody
+    rostered on another date, unavailable, or at another facility."""
+    dept, room, doctor = seed
+    future = TODAY + timedelta(days=3)
+    unavailable = User(
+        id=uuid.uuid4(), keycloak_sub=f"off-{uuid.uuid4()}",
+        username=f"offdoc{uuid.uuid4().hex[:6]}", full_name="Dr. Off",
+        facility_id=dept.facility_id,
+    )
+    other_facility = Facility(
+        id=uuid.uuid4(), code=f"BP{uuid.uuid4().hex[:3].upper()}",
+        name="Elsewhere", state_code="TS",
+    )
+    db.add_all([unavailable, other_facility])
+    await db.flush()
+    other_dept = Department(
+        id=uuid.uuid4(), code="BPD", name="Elsewhere Dept", facility_id=other_facility.id,
+    )
+    db.add(other_dept)
+    await db.flush()
+    db.add_all([
+        Roster(id=uuid.uuid4(), staff_user_id=doctor.id, department_id=dept.id,
+               room_id=room.id, shift="morning", roster_date=future, is_available=True),
+        Roster(id=uuid.uuid4(), staff_user_id=doctor.id, department_id=dept.id,
+               room_id=room.id, shift="evening", roster_date=future, is_available=True),
+        Roster(id=uuid.uuid4(), staff_user_id=doctor.id, department_id=dept.id,
+               room_id=room.id, shift="morning", roster_date=TODAY, is_available=True),
+        Roster(id=uuid.uuid4(), staff_user_id=unavailable.id, department_id=dept.id,
+               room_id=None, shift="morning", roster_date=future, is_available=False),
+        Roster(id=uuid.uuid4(), staff_user_id=doctor.id, department_id=other_dept.id,
+               room_id=None, shift="night", roster_date=future, is_available=True),
+    ])
+    await db.flush()
+    await service.create_queue(db, dept.id, doctor.id, room.id, None, TODAY, dept.facility_id)
+
+    expected = [{
+        "staff_user_id": doctor.id, "staff_name": doctor.full_name, "department_id": dept.id,
+    }]
+    assert await service.list_bookable_providers(db, dept.facility_id, future) == expected
+    assert await service.list_bookable_providers(db, dept.facility_id, TODAY) == expected
+    assert await service.list_bookable_providers(
+        db, dept.facility_id, future, department_id=other_dept.id
+    ) == []
+    assert await service.list_bookable_providers(
+        db, dept.facility_id, TODAY + timedelta(days=1)
+    ) == []
+
+
 async def test_shortest_queue_first(db, seed, queue, opd_visit):
     """The order a receptionist reads it in."""
     dept, _room, _doctor = seed
