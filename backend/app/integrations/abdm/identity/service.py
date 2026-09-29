@@ -994,6 +994,9 @@ async def fetch_abha_profile(
     )
 
 
+_CARD_ACCEPT = "image/png, image/jpeg, application/pdf, */*;q=0.5"
+
+
 async def fetch_abha_card(
     *, profile_token: str, token_kind: str = AbhaProfileTokenKind.ABHA.value
 ) -> AbhaCard:
@@ -1002,7 +1005,10 @@ async def fetch_abha_card(
     response = await _call(
         "GET",
         settings.abdm_path_phr_card if phr else settings.abdm_path_profile_abha_card,
-        extra_headers={"X-Token": _bearer(profile_token)},
+        # The client defaults to Accept: application/json. The card is an image,
+        # so NHA answers that with 406 "Could not find acceptable representation"
+        # (surfaced as 400 on the PHR card, 29 Sep 2026). Ask for what it sends.
+        extra_headers={"X-Token": _bearer(profile_token), "Accept": _CARD_ACCEPT},
         parse_json=False,
     )
     content = response.body if isinstance(response.body, bytes | bytearray) else b""

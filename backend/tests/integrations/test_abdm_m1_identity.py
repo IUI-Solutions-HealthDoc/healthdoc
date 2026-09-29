@@ -965,4 +965,17 @@ async def test_phr_profile_and_card_use_the_phr_endpoints(monkeypatch, rsa_key):
     assert profile.abha_number is None and profile.kyc_verified is True
     card = await service.fetch_abha_card(profile_token="phr-x-token", token_kind="phr")
     assert gw.calls[1][:2] == ("GET", "https://abha.test/abha/api/v3/phr/web/login/profile/abha/phr-card")
+    # 29 Sep 2026: with the client's default Accept: application/json, NHA answered
+    # the card with 406 "Could not find acceptable representation".
+    assert "image/png" in gw.calls[1][2]["Accept"]
     assert card.media_type == "image/jpeg" and card.content == b"\x89card"
+
+
+
+async def test_abha_number_card_asks_for_an_image_not_json(monkeypatch, rsa_key):
+    gw = _gateway(monkeypatch, [b"\x89PNG-card"])
+    card = await service.fetch_abha_card(profile_token="abha-x-token")
+    assert gw.calls[0][0] == "https://abha.test/abha/api/v3/profile/account/abha-card"
+    accept = gw.headers[0]["Accept"]
+    assert "image/png" in accept and not accept.startswith("application/json")
+    assert card.content == b"\x89PNG-card"
