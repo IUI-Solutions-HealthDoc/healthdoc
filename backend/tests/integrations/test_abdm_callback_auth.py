@@ -503,3 +503,46 @@ async def test_a_successful_handler_keeps_the_lock_to_coalesce_a_retry(gateway_s
     retry = await retry_gen.__anext__()
     assert retry.replayed is True
     await retry_gen.aclose()
+
+
+# ------------------------------------------------ Scan-and-Share: the live header set
+# 29 Sep 2026: the sandbox's real profile share carried X-HIP-ID and no X-CM-ID
+# (receipt f2ce31a9, REQUEST-ID 1119f666-...), the reverse of the published
+# collection, and was refused 400 missing_abdm_headers.
+async def test_profile_share_accepts_the_live_sandbox_header_set(gateway_settings):
+    verified = await callback_auth.verify_profile_gateway_callback(
+        _request(**_gateway_headers(hip=True, cm=False))
+    )
+    assert verified.replayed is False
+    assert verified.recipient_id == "SBXID_TEST_HIP"
+
+
+async def test_profile_share_with_someone_elses_hip_is_refused(gateway_settings):
+    headers = _gateway_headers(hip=True, cm=False)
+    headers["X-HIP-ID"] = "SOMEONE_ELSES_HIP"
+    with pytest.raises(HTTPException) as caught:
+        await callback_auth.verify_profile_gateway_callback(_request(**headers))
+    assert caught.value.status_code == 404
+
+
+async def test_profile_share_needs_one_routing_header(gateway_settings):
+    with pytest.raises(HTTPException) as caught:
+        await callback_auth.verify_profile_gateway_callback(
+            _request(**_gateway_headers(hip=False, cm=False))
+        )
+    assert caught.value.status_code == 400
+
+
+async def test_profile_share_with_both_headers_still_checks_the_cm(gateway_settings):
+    headers = _gateway_headers(hip=True, cm=True)
+    headers["X-CM-ID"] = "not-sbx"
+    with pytest.raises(HTTPException) as caught:
+        await callback_auth.verify_profile_gateway_callback(_request(**headers))
+    assert caught.value.status_code == 401
+
+
+async def test_profile_share_redelivery_in_the_other_shape_is_a_replay(gateway_settings):
+    published = _gateway_headers(hip=False, cm=True)
+    live = {**_gateway_headers(hip=True, cm=False), "REQUEST-ID": published["REQUEST-ID"]}
+    assert (await callback_auth.verify_profile_gateway_callback(_request(**published))).replayed is False
+    assert (await callback_auth.verify_profile_gateway_callback(_request(**live))).replayed is True

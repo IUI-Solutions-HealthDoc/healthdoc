@@ -224,6 +224,7 @@ async def _verify_gateway_headers(
     recipient_header: str | None,
     expected_recipient: str | None,
     require_cm_id: bool = True,
+    replay_scope: str | None = None,
 ) -> GatewayCallback:
     """Validate ABDM's documented callback headers and reject replays.
 
@@ -292,7 +293,7 @@ async def _verify_gateway_headers(
             },
         )
 
-    replay_scope = recipient_header.lower() if recipient_header else "profile-share"
+    replay_scope = replay_scope or (recipient_header.lower() if recipient_header else "profile-share")
     replay_key = f"abdm:callback:{replay_scope}:{request.url.path}:{request_id}"
     try:
         first_seen = await get_redis().set(replay_key, "1", ex=_REPLAY_TTL_SECONDS, nx=True)
@@ -374,16 +375,29 @@ async def verify_hip_link_gateway_callback(request: Request) -> GatewayCallback:
 
 
 async def verify_profile_gateway_callback(request: Request) -> GatewayCallback:
-    """Validate Scan-and-Share, whose published callback has no X-HIP-ID.
+    """Validate Scan-and-Share, whose two header sets disagree in practice.
 
-    The addressed HIP is carried in ``metaData.hipId`` and is checked by the
-    route after Pydantic has validated the body.  Requiring a header which the
-    gateway does not send made an otherwise valid profile share impossible.
+    The published collection (14 Aug 2025) sends X-CM-ID and no X-HIP-ID. The
+    live sandbox on 29 Sep 2026 sent X-HIP-ID and no X-CM-ID (receipt
+    f2ce31a9, REQUEST-ID 1119f666-8561-4630-888d-18435f238efa), and requiring
+    X-CM-ID refused a genuine share. Accept either: an X-HIP-ID must be ours,
+    an X-CM-ID must match, and one of them must be present. The addressed HIP
+    in ``metaData.hipId`` is still checked by the route. Both variants share one
+    replay scope, so a redelivery in the other shape is still a replay.
     """
+    if request.headers.get("X-HIP-ID"):
+        return await _verify_gateway_headers(
+            request,
+            recipient_header="X-HIP-ID",
+            expected_recipient=get_settings().abdm_hip_id,
+            require_cm_id=False,
+            replay_scope="profile-share",
+        )
     return await _verify_gateway_headers(
         request,
         recipient_header=None,
         expected_recipient=None,
+        replay_scope="profile-share",
     )
 
 
