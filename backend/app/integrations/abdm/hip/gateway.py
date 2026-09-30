@@ -31,6 +31,7 @@ response to something the gateway asked us; the rest are requests we start.
 from __future__ import annotations
 
 import logging
+import unicodedata
 import uuid
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
@@ -118,6 +119,49 @@ def validate_hi_types(hi_types: Sequence[str]) -> list[str]:
     return list(hi_types)
 
 
+#: Dash look-alikes become "-" instead of being dropped, so
+#: "OPConsultation — 2026-09-29" still reads as a label and a date.
+_DASHES = dict.fromkeys(map(ord, "‐‑‒–—―−"), "-")
+
+
+def wire_display(text: str) -> str:
+    """The `display` text to send, in characters NHA accepts.
+
+    The sandbox refused `link/carecontext` with 400 ABDM-9999 "Invalid display"
+    on 30 September 2026 (REQUEST-ID b796a8e9-ffc9-5099-b93c-3b18a250663a) for
+    a care context whose label carried an em dash; another integrator's public
+    code records the same refusal for an en dash. NHA does not publish the
+    allowed set, so only what is known to be refused changes: dashes become
+    "-", accents fold ("José" -> "Jose"), and anything else outside printable
+    ASCII is dropped. Stored labels keep their typography.
+
+    A label with nothing left, such as a name written only in Devanagari, is
+    refused rather than replaced with an invented one.
+    """
+    folded = unicodedata.normalize("NFKD", text.translate(_DASHES))
+    kept = "".join(ch for ch in folded if " " <= ch <= "~" or ch.isspace())
+    cleaned = " ".join(kept.split())
+    if not cleaned:
+        raise ValueError("Display has no characters ABDM accepts")
+    return cleaned
+
+
+def _wire_group(group: Mapping[str, Any]) -> dict[str, Any]:
+    """A stored `patient[]` group with its displays made sendable.
+
+    Stored discovery and link-confirm replies are compared with a fresh
+    recomputation before replay, so they keep the original text and are
+    cleaned only here, on the way out.
+    """
+    return {
+        **group,
+        "display": wire_display(group["display"]),
+        "careContexts": [
+            {**c, "display": wire_display(c["display"])} for c in group["careContexts"]
+        ],
+    }
+
+
 def care_context_payload(
     *,
     abha_address: str,
@@ -133,11 +177,12 @@ def care_context_payload(
     empty link.
     """
     contexts = [
-        {"referenceNumber": c["referenceNumber"], "display": c["display"]} for c in care_contexts
+        {"referenceNumber": c["referenceNumber"], "display": wire_display(c["display"])}
+        for c in care_contexts
     ]
     return {
         "referenceNumber": abha_address,
-        "display": display,
+        "display": wire_display(display),
         "careContexts": contexts,
         "hiType": hi_type,
         "count": len(contexts),
@@ -377,7 +422,7 @@ async def respond_to_discovery_groups(
         settings.abdm_path_hip_on_discover,
         {
             "transactionId": transaction_id,
-            "patient": [dict(group) for group in patient_groups],
+            "patient": [_wire_group(group) for group in patient_groups],
             "matchedBy": list(matched_by),
             "response": {"requestId": gateway_request_id},
         },
@@ -489,7 +534,7 @@ async def respond_to_link_confirm_groups(
     return await _post(
         settings.abdm_path_hip_on_link_confirm,
         {
-            "patient": [dict(group) for group in patient_groups],
+            "patient": [_wire_group(group) for group in patient_groups],
             "response": {"requestId": gateway_request_id},
         },
         extra_headers={"X-HIP-ID": hip_id()},
