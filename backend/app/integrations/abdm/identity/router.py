@@ -16,7 +16,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,6 +25,7 @@ from app.audit.service import write_audit_log
 from app.auth.deps import CurrentDbUser, require_roles
 from app.common.config import get_settings
 from app.common.db import get_db
+from app.common.enums import IdentityStatus
 from app.common.security import current_aes_key_version, decrypt_pii, encrypt_pii
 from app.integrations.abdm.client import (
     AbdmAuthError,
@@ -207,6 +208,18 @@ async def get_abha(
     return AbhaOut(patient_id=patient.id, abha_number=patient.abha_number)
 
 
+class AbhaUnlinkRequest(BaseModel):
+    reason: str = Field(min_length=10, max_length=500)
+
+    @field_validator("reason")
+    @classmethod
+    def _reason_has_content(cls, value: str) -> str:
+        value = value.strip()
+        if len(value) < 10:
+            raise ValueError("reason must be at least 10 characters")
+        return value
+
+
 @router.delete(
     "/patients/{patient_id}/abha",
     response_model=AbhaOut,
@@ -214,6 +227,7 @@ async def get_abha(
 )
 async def unlink_abha(
     patient_id: uuid.UUID,
+    payload: AbhaUnlinkRequest,
     current_db_user: CurrentDbUser,
     db: DbSession,
 ) -> AbhaOut:
@@ -225,8 +239,23 @@ async def unlink_abha(
     half-record state 0030's both-or-neither CHECK exists to prevent, and a
     DPDP problem besides: we would be retaining an identity credential after
     the relationship it belonged to was severed.
+
+    "verified" came from that ABHA's OTP proof, so it goes with the link. The
+    audit row records who unlinked and why, but not the ABHA number: audit_logs
+    is append-only, and an identifier copied there could never be erased.
     """
-    patient = await _get_patient_or_404(db, patient_id, current_db_user.facility_id)
+    patient = (
+        await db.execute(
+            select(Patient)
+            .where(
+                Patient.id == patient_id,
+                Patient.facility_id == current_db_user.facility_id,
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if patient is None:
+        raise HTTPException(404, {"code": "patient_not_found"})
 
     if patient.abha_number is None:
         raise HTTPException(
@@ -237,6 +266,7 @@ async def unlink_abha(
             },
         )
 
+    old_identity_status = patient.identity_status
     patient.abha_number = None
     patient.abha_address = None
     patient.abha_linking_token_encrypted = None
@@ -244,8 +274,23 @@ async def unlink_abha(
     patient.abha_profile_token_encrypted = None
     patient.abha_profile_token_key_version = None
     patient.abha_linked_at = None
+    if patient.identity_status == IdentityStatus.VERIFIED.value:
+        patient.identity_status = IdentityStatus.IDENTITY_UNVERIFIED.value
     patient.updated_by = current_db_user.id
     await db.flush()
+
+    await write_audit_log(
+        db,
+        facility_id=current_db_user.facility_id,
+        action=AuditAction.UPDATE,
+        resource_type="patients",
+        user_id=current_db_user.id,
+        resource_id=patient.id,
+        patient_id=patient.id,
+        old_value={"abha_linked": True, "identity_status": old_identity_status},
+        new_value={"abha_linked": False, "identity_status": patient.identity_status},
+        reason=f"ABHA unlinked: {payload.reason}",
+    )
 
     await enqueue(
         db,
@@ -486,20 +531,32 @@ async def _persist_verified_identity(
     patient_id = uuid.UUID(session.patient_id)
     patient = await _get_patient_or_404(db, patient_id, current_db_user.facility_id)
     normalised = _normalise_abha(issued.abha_number)
-    clash = (
+    clash_facility_id = (
         await db.execute(
-            select(Patient.id).where(
+            select(Patient.facility_id).where(
                 Patient.abha_number == normalised,
                 Patient.id != patient.id,
             )
         )
     ).scalar_one_or_none()
-    if clash is not None:
+    if clash_facility_id == patient.facility_id:
         raise HTTPException(
             409,
             {
                 "code": "duplicate_abha",
                 "message": "This ABHA number is already linked to another patient",
+            },
+        )
+    if clash_facility_id is not None:
+        # abha_number is unique across the installation, so the link cannot
+        # succeed. Saying "linked to another patient" here would confirm that
+        # another facility treats this person, which this desk has no right
+        # to learn.
+        raise HTTPException(
+            409,
+            {
+                "code": "abha_link_unavailable",
+                "message": "This ABHA number cannot be linked at this facility",
             },
         )
 

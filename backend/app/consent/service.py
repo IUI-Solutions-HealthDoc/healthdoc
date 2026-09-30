@@ -21,6 +21,7 @@ insert, trigger-flipped, FOR UPDATE guarded against double-withdrawal).
 from __future__ import annotations
 
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -39,6 +40,7 @@ from app.consent.models import (
     ConsentRenewalReminder,
     ConsentWithdrawal,
 )
+from app.common.patient_scope import require_patient_scope, require_visit_scope
 from app.dpdp.models import ConsentManager
 from app.patients.models import Patient
 
@@ -48,6 +50,12 @@ from app.patients.models import Patient
 _LEGAL_DIRECT_TRANSITIONS: dict[str, set[str]] = {
     ConsentStatus.REQUESTED.value: {ConsentStatus.GRANTED.value, ConsentStatus.DENIED.value},
 }
+
+# A consent requested through a consent manager is the patient's decision in
+# that manager. Recording its outcome here is a clinical/administrative act,
+# not a front-desk one: a receptionist or nurse marking it granted would let
+# the desk manufacture the patient's approval.
+CONSENT_MANAGER_DECISION_ROLES = frozenset({"admin", "doctor"})
 
 # Not specified anywhere in the schema doc -- best guess, confirm before
 # merge. Only used when a withdrawn consent actually had a scope to act on.
@@ -239,6 +247,9 @@ async def create_consent_record(
     consent_artefact_signature: str | None = None,
     consent_manager_id: uuid.UUID | None = None,
 ) -> ConsentRecord:
+    await require_patient_scope(db, patient_id, facility_id)
+    await require_visit_scope(db, visit_id, patient_id, facility_id)
+
     purpose = await db.get(ConsentPurpose, purpose_id)
     if purpose is None:
         raise HTTPException(404, "Consent purpose not found")
@@ -329,8 +340,19 @@ async def transition_consent_status(
     reason: str | None,
     facility_id: uuid.UUID,
     updated_by: uuid.UUID,
+    actor_roles: Collection[str],
 ) -> ConsentRecord:
     record = await get_consent_record(db, consent_id, facility_id=facility_id)
+    if record.channel == ConsentChannel.ABDM_CONSENT_MANAGER.value and not (
+        CONSENT_MANAGER_DECISION_ROLES & set(actor_roles)
+    ):
+        raise HTTPException(
+            403,
+            detail={
+                "code": "consent_manager_decision_forbidden",
+                "message": "Only an admin or doctor can record a consent manager's decision",
+            },
+        )
     allowed = _LEGAL_DIRECT_TRANSITIONS.get(record.status, set())
     if new_status not in allowed:
         hint = (
@@ -360,6 +382,9 @@ async def transition_consent_status(
         audit.new_value = {"status": new_status}
         audit.reason = reason
         await db.flush()
+        # updated_at is server-generated on UPDATE and expires on flush; an
+        # async session cannot lazy-load it while the response is serialised.
+        await db.refresh(record)
 
     return record
 

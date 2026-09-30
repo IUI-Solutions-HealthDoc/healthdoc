@@ -2221,6 +2221,8 @@ export const en = {
   "admin.abdm.linkedAbha": "Linked ABHA",
   "admin.abdm.noAbhaLinked": "No ABHA linked",
   "admin.abdm.unlinkAbha": "Unlink ABHA",
+  "admin.abdm.unlinkReasonLabel": "Reason for unlinking",
+  "admin.abdm.unlinkReasonHint": "Recorded in the audit log. At least 10 characters.",
   "admin.abdm.jobs.title": "ABDM delivery jobs",
   "admin.abdm.jobs.hint":
     "Fix the reported configuration or connection problem before retrying. The dedicated worker must be running. Requeueing does not renew expired consent, keys or link tokens; those require a new clinical request.",

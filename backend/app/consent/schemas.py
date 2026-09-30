@@ -72,7 +72,6 @@ class ConsentRecordCreate(BaseModel):
     purpose_id: uuid.UUID
     visit_id: uuid.UUID | None = None
     granted_by_type: GrantedByType
-    granted_by_user_id: uuid.UUID | None = None
     guardian_name: str | None = None
     guardian_relationship: str | None = None
     expires_at: datetime | None = None  # nullable per issue spec
@@ -97,7 +96,6 @@ class ConsentWithdrawalCreate(BaseModel):
     # GrantedByType, not the wider DB CHECK -- 'system_expiry' is
     # reserved for the automated expiry sweep, not this manual endpoint.
     withdrawn_by_type: GrantedByType
-    withdrawn_by_user_id: uuid.UUID | None = None
     reason: str | None = None
 
 

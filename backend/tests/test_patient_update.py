@@ -254,3 +254,83 @@ async def test_update_patient_only_changed_fields_in_diff():
     assert set(capture.old_value.keys()) == {"full_name"}
     assert set(capture.new_value.keys()) == {"full_name"}
     assert "mobile" not in capture.old_value
+
+
+# ---------------------------------------------------------------------------
+# ABHA, clearing and date-of-birth rules
+# ---------------------------------------------------------------------------
+
+_TODAY = date(2026, 9, 30)
+
+
+def test_abha_number_cannot_be_patched():
+    with pytest.raises(Exception, match="ABHA verification"):
+        PatientUpdate.model_validate({"abha_number": "91111122223333"})
+    assert "abha_number" not in _PATIENT_UPDATEABLE_FIELDS
+
+
+@pytest.mark.parametrize("field", ["full_name", "sex"])
+def test_required_fields_cannot_be_cleared(field):
+    with pytest.raises(Exception, match="cannot be cleared"):
+        PatientUpdate.model_validate({field: None})
+
+
+@pytest.mark.parametrize("age", [-1, 131])
+def test_age_outside_0_to_130_is_refused(age):
+    with pytest.raises(Exception, match="between 0 and 130"):
+        PatientUpdate(age_years=age)
+
+
+async def _apply(patient, payload: dict):
+    db = AsyncMock()
+    db.get = AsyncMock(return_value=patient)
+    capture = _FakeAuditCapture()
+    with patch("app.patients.service.audited_mutation",
+               return_value=_FakeAuditedMutation(capture)), \
+         patch("app.patients.service.facility_today", AsyncMock(return_value=_TODAY)):
+        await update_patient(
+            db, patient_id=patient.id, facility_id=patient.facility_id,
+            payload=PatientUpdate.model_validate(payload), updated_by=uuid.uuid4(),
+        )
+    return capture
+
+
+@pytest.mark.asyncio
+async def test_an_explicit_null_clears_an_optional_field():
+    patient = _make_patient(mobile="+919876543210", guardian_name="Vikram")
+    capture = await _apply(patient, {"mobile": None})
+    assert patient.mobile is None
+    assert patient.guardian_name == "Vikram"
+    assert capture.old_value == {"mobile": "+919876543210"}
+    assert capture.new_value == {"mobile": None}
+
+
+@pytest.mark.asyncio
+async def test_a_future_dob_is_refused_on_the_facility_date():
+    patient = _make_patient()
+    with pytest.raises(ValueError, match="dob_in_future"):
+        await _apply(patient, {"dob": "2026-10-01"})
+    assert patient.dob == date(1990, 1, 1)
+
+
+@pytest.mark.asyncio
+async def test_a_new_dob_recomputes_age():
+    patient = _make_patient(dob=None, age_years=40)
+    await _apply(patient, {"dob": "1990-10-01"})
+    assert patient.dob == date(1990, 10, 1)
+    assert patient.age_years == 35
+
+
+@pytest.mark.asyncio
+async def test_an_age_replaces_a_stale_dob():
+    patient = _make_patient(dob=date(1990, 1, 1), age_years=36)
+    await _apply(patient, {"age_years": 50})
+    assert patient.age_years == 50
+    assert patient.dob is None
+
+
+@pytest.mark.asyncio
+async def test_clearing_dob_without_an_age_is_refused():
+    patient = _make_patient(dob=date(1990, 1, 1), age_years=None)
+    with pytest.raises(ValueError, match="dob_or_age_required"):
+        await _apply(patient, {"dob": None})

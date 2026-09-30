@@ -59,7 +59,6 @@ export type ConsentRecordCreate = {
   purpose_id: string;
   visit_id?: string | null;
   granted_by_type: GrantedByType;
-  granted_by_user_id?: string | null;
   guardian_name?: string | null;
   guardian_relationship?: string | null;
   expires_at?: string | null;
@@ -77,8 +76,20 @@ export type ConsentStatusTransitionIn = {
 
 export type ConsentWithdrawalCreate = {
   withdrawn_by_type: GrantedByType;
-  withdrawn_by_user_id?: string | null;
   reason?: string | null;
+};
+
+/** Mirrors ConsentWithdrawalOut. */
+export type ConsentWithdrawal = {
+  id: string;
+  consent_id: string;
+  withdrawn_by_type: string;
+  withdrawn_by_user_id: string | null;
+  withdrawn_at: string;
+  reason: string | null;
+  cascaded_actions: Record<string, string> | null;
+  cascade_deadline: string | null;
+  cascade_completed_at: string | null;
 };
 
 export type DataAccessLog = {

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import func, or_, select, text, update
@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.actions import AuditAction
 from app.audit.service import audited_mutation
+from app.common.patient_scope import facility_today
 from app.common.security import (
     aadhaar_blind_index,
     aadhaar_blind_indexes_all_versions,
@@ -33,6 +34,7 @@ from app.patients.models import (
     PatientMergeLog,
     PatientPortalBinding,
 )
+from app.patients.schemas import PATIENT_UPDATE_FIELDS
 
 if TYPE_CHECKING:
     from app.patients.schemas import PatientUpdate
@@ -231,9 +233,10 @@ async def search_patients(
     page: int = 1,
     page_size: int = 20,
 ):
-    """Returns (page_of_(patient, score, matched_on), total_count).
+    """Returns (page_of_(patient, score, matched_on, merged_from), total_count).
     Exact-match paths (aadhaar/abha/uhid/mobile) run first; fuzzy name+dob fills in.
-    A patient found via multiple paths keeps its highest-scoring match."""
+    A patient found via multiple paths keeps its highest-scoring match.
+    merged_from is the retired UHID/THID when the match came through a merge."""
     matches: dict = {}
     # facility_id is required (PR review blocker 4) — cross-facility search
     # is a separate, consent-gated operation, never a default. Unconditional
@@ -259,14 +262,14 @@ async def search_patients(
             )
         )
         for patient in (await db.execute(stmt)).scalars().all():
-            matches[patient.id] = (patient, 1.0, "aadhaar")
+            matches[patient.id] = (patient, 1.0, "aadhaar", None)
 
     if abha_number:
         stmt = select(Patient).where(Patient.abha_number == abha_number, *base_filter)
         for patient in (await db.execute(stmt)).scalars().all():
             existing = matches.get(patient.id)
             if not existing or existing[1] < 1.0:
-                matches[patient.id] = (patient, 1.0, "abha")
+                matches[patient.id] = (patient, 1.0, "abha", None)
 
     if uhid:
         stmt = select(Patient).where(or_(Patient.uhid == uhid, Patient.thid == uhid), *base_filter)
@@ -286,7 +289,14 @@ async def search_patients(
             for merged_patient in (await db.execute(merged_stmt)).scalars().all():
                 if merged_patient.merged_into_patient_id:
                     canonical = await db.get(Patient, merged_patient.merged_into_patient_id)
-                    if canonical and canonical.deleted_at is None and canonical.status != "merged":
+                    # The surviving record is re-scoped: a merge must never
+                    # become a way to reach another facility's patient.
+                    if (
+                        canonical
+                        and canonical.facility_id == facility_id
+                        and canonical.deleted_at is None
+                        and canonical.status != "merged"
+                    ):
                         matches[canonical.id] = (
                             canonical,
                             1.0,
@@ -299,7 +309,7 @@ async def search_patients(
         for patient in (await db.execute(stmt)).scalars().all():
             existing = matches.get(patient.id)
             if not existing or existing[1] < 1.0:
-                matches[patient.id] = (patient, 1.0, "mobile")
+                matches[patient.id] = (patient, 1.0, "mobile", None)
 
     if full_name and dob:
         # Should-fix (PR review): use the native % (similarity) operator
@@ -322,7 +332,7 @@ async def search_patients(
             boosted = min(1.0, float(score) + 0.3)
             existing = matches.get(patient.id)
             if not existing or existing[1] < boosted:
-                matches[patient.id] = (patient, boosted, "name_dob")
+                matches[patient.id] = (patient, boosted, "name_dob", None)
 
     # Pagination is intentionally in Python here (should-fix, PR review):
     # search_patients() runs up to 5 independent DB queries (aadhaar, abha,
@@ -365,14 +375,14 @@ async def find_duplicate_by_aadhaar(
 
 
 # Columns that PATCH /patients/{id} is allowed to change.
-# identity_path / identity_status / status / uhid / thid are deliberately
-# excluded — those travel through dedicated workflows (ABHA verification,
-# merge, UHID generation), not a generic update.
-_PATIENT_UPDATEABLE_FIELDS: tuple[str, ...] = (
-    "full_name", "sex", "dob", "age_years", "mobile", "abha_number",
-    "guardian_name", "guardian_relationship",
-    "address_line", "village_town", "district", "state_code", "pincode",
-)
+# abha_number / identity_path / identity_status / status / uhid / thid are
+# deliberately excluded — those travel through dedicated workflows (ABHA
+# verification, merge, UHID generation), not a generic update.
+_PATIENT_UPDATEABLE_FIELDS: tuple[str, ...] = PATIENT_UPDATE_FIELDS
+
+
+def _age_on(dob: date, today: date) -> int:
+    return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
 
 
 async def update_patient(
@@ -412,11 +422,36 @@ async def update_patient(
     if patient.status == "merged":
         raise ValueError("cannot_update_merged_patient")
 
-    # Capture only the fields that are actually being changed, for old/new diff.
+    # Fields present in the body, including explicit nulls that clear a value.
+    new_values = {
+        f: getattr(payload, f)
+        for f in _PATIENT_UPDATEABLE_FIELDS
+        if f in payload.model_fields_set
+    }
+    # A date of birth is the source of truth for age: store the age it implies
+    # on the facility's own date. An age alone means the DOB is unknown, so a
+    # stale DOB must not survive next to it and contradict it.
+    if new_values.get("dob") is not None:
+        today = await facility_today(db, patient.facility_id)
+        if new_values["dob"] > today:
+            raise ValueError("dob_in_future")
+        age = _age_on(new_values["dob"], today)
+        if age > 130:
+            raise ValueError("age_out_of_range")
+        new_values["age_years"] = age
+    elif new_values.get("age_years") is not None:
+        new_values["dob"] = None
+    dob_after = new_values.get("dob", patient.dob)
+    age_after = new_values.get("age_years", patient.age_years)
+    if dob_after is None and age_after is None:
+        raise ValueError("dob_or_age_required")
+
+    # Capture only the fields that actually change, for the old/new diff.
     fields_being_changed = [
-        f for f in _PATIENT_UPDATEABLE_FIELDS
-        if getattr(payload, f, None) is not None
+        f for f, value in new_values.items() if getattr(patient, f) != value
     ]
+    if not fields_being_changed:
+        return patient
 
     async with audited_mutation(
         db,
@@ -430,7 +465,7 @@ async def update_patient(
         audit.reason = reason
 
         for field in fields_being_changed:
-            setattr(patient, field, getattr(payload, field))
+            setattr(patient, field, new_values[field])
 
         patient.updated_by = updated_by
         patient.row_version += 1

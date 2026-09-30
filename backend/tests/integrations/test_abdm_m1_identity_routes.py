@@ -12,7 +12,8 @@ import uuid
 import httpx
 import pytest
 import pytest_asyncio
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from sqlalchemy import select
 
 from app.auth.deps import AuthUser, DbUser, get_current_db_user, get_current_user
 from app.common.db import get_db
@@ -174,3 +175,110 @@ async def test_declined_enrolment_consent_is_400_and_does_not_call_abdm(desk):
     assert response.json()["detail"]["code"] == "enrolment_consent_refused"
     assert desk["gateway"].calls == []
     assert AADHAAR not in response.text
+
+
+LINKED_ABHA = "91111122223333"
+
+
+async def test_unlink_needs_a_reason_and_is_audited_without_the_number(desk, db):
+    from app.audit.models import AuditLog
+    from app.patients.models import Patient
+
+    patient = desk["patient"]
+    patient.abha_number = LINKED_ABHA
+    patient.identity_status = "verified"
+    await db.commit()
+    url = f"/abdm/abha/patients/{patient.id}/abha"
+
+    for body in (None, {"reason": "short"}, {"reason": "         x          "}):
+        refused = await desk["client"].request("DELETE", url, json=body)
+        assert refused.status_code == 422, refused.text
+    await db.refresh(patient)
+    assert patient.abha_number == LINKED_ABHA
+
+    unlinked = await desk["client"].request(
+        "DELETE", url, json={"reason": "Linked to the wrong chart at the desk"}
+    )
+    assert unlinked.status_code == 200, unlinked.text
+    stored = (await db.execute(select(Patient).where(Patient.id == patient.id))).scalar_one()
+    await db.refresh(stored)
+    assert stored.abha_number is None
+    assert stored.identity_status == "identity_unverified"
+
+    audit = (
+        await db.execute(
+            select(AuditLog).where(
+                AuditLog.resource_type == "patients", AuditLog.resource_id == patient.id
+            )
+        )
+    ).scalars().all()
+    assert len(audit) == 1
+    row = audit[0]
+    assert row.reason == "ABHA unlinked: Linked to the wrong chart at the desk"
+    assert row.old_value == {"abha_linked": True, "identity_status": "verified"}
+    assert row.new_value == {"abha_linked": False, "identity_status": "identity_unverified"}
+    assert str(row.user_id) == str(desk["staff"].id)
+    assert LINKED_ABHA not in json.dumps([row.old_value, row.new_value, row.reason])
+
+
+async def _link_through_otp(monkeypatch, db, caller_patient, staff):
+    from app.auth.deps import DbUser
+    from app.integrations.abdm.identity import router as identity_module
+
+    class _Session:
+        patient_id = str(caller_patient.id)
+
+    async def _bound(*_args, **_kwargs):
+        return _Session()
+
+    monkeypatch.setattr(identity_module, "_bound_otp_session", _bound)
+    caller = DbUser(id=staff.id, keycloak_sub=staff.keycloak_sub, username=staff.username,
+                    facility_id=caller_patient.facility_id, roles=["receptionist"])
+    issued = service.AbhaIssued(
+        abha_number=LINKED_ABHA, abha_address=None, linking_token=None,
+        name=None, gender=None, date_of_birth=None,
+    )
+    return await identity_module._persist_verified_identity(
+        db=db, current_db_user=caller, session_id="s", purpose=otp_session.OtpPurpose.LOGIN_BY_ABHA,
+        issued=issued, consume_session=False,
+    )
+
+
+async def test_an_abha_held_at_another_facility_is_refused_without_naming_a_patient(
+    desk, db, monkeypatch
+):
+    from app.patients.models import Patient
+    from app.users.models import Facility
+
+    other_facility = Facility(id=uuid.uuid4(), name="Elsewhere", code=f"ELS{uuid.uuid4().hex[:4].upper()}",
+                              state_code="MH")
+    db.add(other_facility)
+    await db.flush()
+    db.add(Patient(
+        id=uuid.uuid4(), facility_id=other_facility.id, uhid=f"UHID-ELS-{uuid.uuid4().hex[:6]}",
+        full_name="Someone Else", sex="female", age_years=40, status="active",
+        identity_path="demographics_only", created_by=desk["staff"].id, abha_number=LINKED_ABHA,
+    ))
+    await db.commit()
+
+    with pytest.raises(HTTPException) as refused:
+        await _link_through_otp(monkeypatch, db, desk["patient"], desk["staff"])
+    assert refused.value.status_code == 409
+    assert refused.value.detail["code"] == "abha_link_unavailable"
+    assert "patient" not in refused.value.detail["message"].lower()
+
+
+async def test_an_abha_held_at_this_facility_still_says_duplicate(desk, db, monkeypatch):
+    from app.patients.models import Patient
+
+    db.add(Patient(
+        id=uuid.uuid4(), facility_id=desk["patient"].facility_id, uhid=f"UHID-DUP-{uuid.uuid4().hex[:6]}",
+        full_name="First Chart", sex="female", age_years=40, status="active",
+        identity_path="demographics_only", created_by=desk["staff"].id, abha_number=LINKED_ABHA,
+    ))
+    await db.commit()
+
+    with pytest.raises(HTTPException) as refused:
+        await _link_through_otp(monkeypatch, db, desk["patient"], desk["staff"])
+    assert refused.value.status_code == 409
+    assert refused.value.detail["code"] == "duplicate_abha"

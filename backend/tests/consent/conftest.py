@@ -163,6 +163,26 @@ async def user_id(engine: AsyncEngine, facility_id: uuid.UUID) -> AsyncGenerator
 
 
 @pytest_asyncio.fixture
+async def patient_id(
+    engine: AsyncEngine, facility_id: uuid.UUID, user_id: uuid.UUID
+) -> AsyncGenerator[uuid.UUID, None]:
+    """A patient at facility_id. Consent creation refuses a patient that is
+    not in the caller's facility, so a random UUID is no longer enough."""
+    pid = uuid.uuid4()
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO patients (id, full_name, sex, identity_path, facility_id, "
+                "created_by, age_years, uhid) "
+                "VALUES (:id, 'Consent Test Patient', 'other', 'demographics_only', "
+                ":facility_id, :created_by, 30, :uhid)"
+            ),
+            {"id": pid, "facility_id": facility_id, "created_by": user_id, "uhid": f"UHID{pid.hex[:8]}"},
+        )
+    yield pid
+
+
+@pytest_asyncio.fixture
 async def purpose_id(engine: AsyncEngine) -> AsyncGenerator[uuid.UUID, None]:
     """One throwaway consent_purposes row per test — needed by
     B7-W4-02's CRUD tests (consent_records.purpose_id FK). Not needed
