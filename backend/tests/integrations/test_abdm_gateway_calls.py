@@ -159,6 +159,9 @@ async def test_link_care_contexts_sends_the_link_token_header(stub):
     assert patient["count"] == 1
 
 
+_ACCEPTED = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -()/")
+
+
 @pytest.mark.parametrize(
     ("stored", "sent"),
     [
@@ -167,17 +170,34 @@ async def test_link_care_contexts_sends_the_link_token_header(stub):
         ("Glucose − fasting", "Glucose - fasting"),
         ("José  Test", "Jose Test"),
         ("Synthetic Test\n", "Synthetic Test"),
-        ("Blood Test", "Blood Test"),
+        ("Blood Test (fasting)", "Blood Test (fasting)"),
+        ("Wellness; synthetic, not advice", "Wellness synthetic not advice"),
+        ("Dr. D'Souza & Co: note", "Dr D Souza Co note"),
     ],
 )
-async def test_displays_are_sent_in_characters_nha_accepts(stored, sent):
+async def test_displays_keep_only_what_nha_has_accepted(stored, sent):
     assert hip_gw.wire_display(stored) == sent
     assert hip_gw.wire_display(sent) == sent
 
 
-async def test_the_label_nha_refused_is_linked_as_ascii(stub):
+@pytest.mark.parametrize(
+    "stored",
+    [
+        " ".join(["Synthetic"] * 12),
+        "X" * 80,
+        "Discharge Summary - 2026-07-18 - Rehabilitation Centre (V) follow-up",
+    ],
+)
+async def test_long_displays_are_cut_to_fifty_characters(stored):
+    sent = hip_gw.wire_display(stored)
+    assert 0 < len(sent) <= 50
+    assert set(sent) <= _ACCEPTED
+    assert stored.startswith(sent)  # a prefix: nothing reordered or invented
+
+
+async def test_the_label_nha_refused_twice_is_linked_in_accepted_form(stub):
     """30 September 2026: NHA answered this label with 400 ABDM-9999
-    "Invalid display". The em dash was the only non-ASCII character in it."""
+    "Invalid display" with its em dash, and again with the dash replaced."""
     label = (
         "ABDM SANDBOX TEST — SYNTHETIC WellnessRecord; "
         "fabricated observation, not clinical advice"
@@ -192,7 +212,7 @@ async def test_the_label_nha_refused_is_linked_as_ascii(stub):
     patient = stub.last["json"]["patient"][0]
     assert patient["display"] == "Jose Test"
     assert patient["careContexts"] == [
-        {"referenceNumber": "wellness/1", "display": label.replace("—", "-")}
+        {"referenceNumber": "wellness/1", "display": "ABDM SANDBOX TEST - SYNTHETIC WellnessRecord"}
     ]
 
 
