@@ -439,11 +439,16 @@ export const hi = {
   "receptionist.toastStaleReconciledTitle": "पुरानी विज़िट सुलझाई गईं",
   "receptionist.toastStaleReconciledBody": "{reconciled} विज़िट सफलतापूर्वक सुलझाईं ({skipped} छोड़ी/छूट)।",
   "receptionist.errReconcileStale": "पुरानी विज़िट सुलझाई नहीं जा सकीं",
+  "receptionist.reconcileReasonLabel": "इन विज़िट को बंद करने का कारण",
+  "receptionist.reconcileReasonHint": "हर विज़िट के साथ ऑडिट लॉग में दर्ज होता है। कम से कम 10 अक्षर।",
+  "receptionist.reconcileConfirm": "सुलझाने की पुष्टि करें",
+  "receptionist.errLoadVisitsAwaiting": "टोकन की प्रतीक्षा वाली विज़िट लोड नहीं हो सकीं",
+  "receptionist.errLoadStaleVisits": "पुरानी विज़िट लोड नहीं हो सकीं",
   "receptionist.visitsAwaitingHint": "आज की विज़िट जहाँ कतार टोकन जारी करना रुका या छूट गया।",
   "receptionist.issueTokenHeading": "{name} ({visit}) के लिए टोकन जारी करें",
   "receptionist.staleReviewTitle": "पुरानी विज़िट समीक्षा और सुलझान ({count})",
   "receptionist.staleReviewDescription":
-    "पिछले दिनों की बंद न हुई OPD विज़िट ({cutoff} से पहले)। आपात और IPD छूट। बिना परामर्श LWBS, परामर्श वाली बंद; लाइव टोकन रद्द — इतिहास और बिलिंग सुरक्षित।",
+    "पिछले दिनों की बंद न हुई OPD विज़िट ({cutoff} से पहले)। आपात और IPD छूट। बिना परामर्श LWBS, परामर्श वाली बंद; लाइव टोकन नो-शो पर बंद — इतिहास और बिलिंग सुरक्षित।",
   "receptionist.staleVisitsEmpty":
     "पिछले कार्य दिनों की कोई पुरानी बंद न हुई विज़िट नहीं। सभी पिछली OPD विज़िट और टोकन साफ़ हैं।",
   "receptionist.encounterNotesCount": "{count} नोट",

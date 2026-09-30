@@ -321,6 +321,11 @@ export interface StaleVisitsReport {
   candidates: StaleVisitCandidate[];
 }
 
+/** The reviewed visit ids, or an explicit `all`; the server refuses neither. */
+export type StaleVisitsReconcileRequest =
+  | { visit_ids: string[]; reason: string }
+  | { all: true; reason: string };
+
 export interface StaleVisitsReconcileResult {
   reconciled_count: number;
   skipped_count: number;

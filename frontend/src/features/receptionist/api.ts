@@ -21,6 +21,7 @@ import type {
   VisitCreate,
   VisitWithoutToken,
   StaleVisitsReport,
+  StaleVisitsReconcileRequest,
   StaleVisitsReconcileResult,
 } from "./types";
 import {
@@ -284,10 +285,12 @@ export function listQueueTokens(queueId: string): Promise<QueueTokenList> {
 export function updateTokenPriority(
   tokenId: string,
   payload: TokenPriorityUpdate,
+  idempotencyKey: string,
 ): Promise<QueueToken> {
   return api<QueueToken>(`/queue/tokens/${tokenId}/priority`, {
     method: "PATCH",
     body: JSON.stringify(payload),
+    idempotencyKey,
   });
 }
 
@@ -355,16 +358,13 @@ export function getStaleVisits(): Promise<StaleVisitsReport> {
 
 /** HD-12: Reconcile stale visits (e.g. mark LWBS/closed). */
 export function reconcileStaleVisits(
-  visitIds?: string[],
-  reason?: string,
+  request: StaleVisitsReconcileRequest,
+  idempotencyKey: string,
 ): Promise<StaleVisitsReconcileResult> {
   return api<StaleVisitsReconcileResult>("/queue/reconcile-stale-visits", {
     method: "POST",
-    idempotencyKey: crypto.randomUUID(),
-    body: JSON.stringify({
-      visit_ids: visitIds && visitIds.length > 0 ? visitIds : null,
-      reason: reason || "Authorized end-of-day stale visit reconciliation (LWBS / no-show)",
-    }),
+    idempotencyKey,
+    body: JSON.stringify(request),
   });
 }
 

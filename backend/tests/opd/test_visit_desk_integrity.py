@@ -7,7 +7,7 @@ token that ends with it.
 """
 
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import httpx
 import pytest
@@ -206,11 +206,12 @@ async def test_reception_cannot_move_a_visit_into_clinical_states(db, world, tar
     assert resp.json()["detail"]["code"] == "visit_status_not_permitted"
 
 
-async def test_reception_cancel_ends_the_live_queue_token(db, world):
+async def test_reception_cancel_ends_the_live_queue_token(db, world, roster_on_duty):
     visit = await _visit(db, world)
+    await roster_on_duty(world["dept"].id, world["actor"].id)
     queue = await queue_service.create_queue(
         db, department_id=world["dept"].id, doctor_user_id=world["actor"].id, room_id=world["room"].id,
-        display_label="Q", service_date=datetime.now(UTC).date(), caller_facility_id=world["dept"].facility_id,
+        display_label="Q", service_date=date.today(), caller_facility_id=world["dept"].facility_id,
     )
     token = await queue_service.create_token(
         db, queue_id=queue.id, visit_id=visit.id, priority="normal",
@@ -248,11 +249,12 @@ def test_status_update_no_longer_asks_the_client_for_an_actor():
     VisitStatusUpdate(status="cancelled", reason="duplicate")
 
 
-async def test_completed_tokens_are_left_alone(db, world):
+async def test_completed_tokens_are_left_alone(db, world, roster_on_duty):
     visit = await _visit(db, world)
+    await roster_on_duty(world["dept"].id, world["actor"].id)
     queue = await queue_service.create_queue(
         db, department_id=world["dept"].id, doctor_user_id=world["actor"].id, room_id=None,
-        display_label="Q2", service_date=datetime.now(UTC).date(), caller_facility_id=world["dept"].facility_id,
+        display_label="Q2", service_date=date.today(), caller_facility_id=world["dept"].facility_id,
     )
     token = await queue_service.create_token(
         db, queue_id=queue.id, visit_id=visit.id, priority="normal",
