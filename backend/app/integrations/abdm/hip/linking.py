@@ -98,6 +98,16 @@ async def initiate(
             raise DocumentUnavailable("Idempotency key was already used for different documents")
         return existing  # Never reset old attempts or enqueue a replacement generation.
 
+    # Checked before the token job exists: NHA grants three link tokens per
+    # ABHA address a day, and a token spent on an unsendable label is lost.
+    try:
+        for label in (patient.full_name, *(context.display for context in contexts)):
+            gateway.wire_display(label)
+    except ValueError:
+        raise DocumentUnavailable(
+            "The patient name or a document label has no characters ABDM accepts"
+        ) from None
+
     link = AbdmCareContextLink(
         id=ident,
         facility_id=patient.facility_id,

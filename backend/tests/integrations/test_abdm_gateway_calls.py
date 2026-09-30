@@ -159,6 +159,92 @@ async def test_link_care_contexts_sends_the_link_token_header(stub):
     assert patient["count"] == 1
 
 
+@pytest.mark.parametrize(
+    ("stored", "sent"),
+    [
+        ("OPConsultation — 2026-09-29", "OPConsultation - 2026-09-29"),
+        ("OP Consultation – 5/6/2026", "OP Consultation - 5/6/2026"),
+        ("Glucose − fasting", "Glucose - fasting"),
+        ("José  Test", "Jose Test"),
+        ("Synthetic Test\n", "Synthetic Test"),
+        ("Blood Test", "Blood Test"),
+    ],
+)
+async def test_displays_are_sent_in_characters_nha_accepts(stored, sent):
+    assert hip_gw.wire_display(stored) == sent
+    assert hip_gw.wire_display(sent) == sent
+
+
+async def test_the_label_nha_refused_is_linked_as_ascii(stub):
+    """30 September 2026: NHA answered this label with 400 ABDM-9999
+    "Invalid display". The em dash was the only non-ASCII character in it."""
+    label = (
+        "ABDM SANDBOX TEST — SYNTHETIC WellnessRecord; "
+        "fabricated observation, not clinical advice"
+    )
+    await hip_gw.link_care_contexts(
+        abha_address="test@sbx",
+        link_token="SYNTHETIC",
+        display="José Test",
+        care_contexts=[{"referenceNumber": "wellness/1", "display": label}],
+        hi_type="WellnessRecord",
+    )
+    patient = stub.last["json"]["patient"][0]
+    assert patient["display"] == "Jose Test"
+    assert patient["careContexts"] == [
+        {"referenceNumber": "wellness/1", "display": label.replace("—", "-")}
+    ]
+
+
+async def test_stored_reply_groups_are_cleaned_only_on_the_way_out(stub):
+    group = {
+        "referenceNumber": "IN-TEST-1",
+        "display": "José Test",
+        "careContexts": [
+            {"referenceNumber": "encounter/1", "display": "OPConsultation — 2026-09-29"}
+        ],
+        "hiType": "OPConsultation",
+        "count": 1,
+    }
+    await hip_gw.respond_to_discovery_groups(
+        transaction_id="T-1",
+        gateway_request_id="G-1",
+        patient_groups=[group],
+        matched_by=["ABHA_ADDRESS"],
+    )
+    discovered = stub.last["json"]["patient"]
+    await hip_gw.respond_to_link_confirm_groups(gateway_request_id="G-2", patient_groups=[group])
+    confirmed = stub.last["json"]["patient"]
+    for sent in (discovered, confirmed):
+        assert sent == [
+            {
+                "referenceNumber": "IN-TEST-1",
+                "display": "Jose Test",
+                "careContexts": [
+                    {"referenceNumber": "encounter/1", "display": "OPConsultation - 2026-09-29"}
+                ],
+                "hiType": "OPConsultation",
+                "count": 1,
+            }
+        ]
+    # A stored reply is compared with a recomputation before replay; the
+    # stored copy must keep its original text.
+    assert group["careContexts"][0]["display"] == "OPConsultation — 2026-09-29"
+
+
+@pytest.mark.parametrize("label", ["राम", " \t ", "​"])
+async def test_a_label_with_nothing_sendable_is_refused_before_the_wire(stub, label):
+    with pytest.raises(ValueError):
+        await hip_gw.link_care_contexts(
+            abha_address="test@sbx",
+            link_token="SYNTHETIC",
+            display="Synthetic Test",
+            care_contexts=[{"referenceNumber": "C1", "display": label}],
+            hi_type="WellnessRecord",
+        )
+    assert stub.calls == []
+
+
 async def test_mixed_hi_types_share_one_authenticated_link_request(stub):
     groups = {
         kind: [{"referenceNumber": f"test-{kind}", "display": "Synthetic record"}]

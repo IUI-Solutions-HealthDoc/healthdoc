@@ -172,6 +172,20 @@ async def test_changed_type_selection_cannot_reuse_an_idempotency_key(db, link_c
     assert len((await db.execute(select(AbdmCareContextLink))).scalars().all()) == 1
 
 
+async def test_an_unsendable_label_is_refused_before_a_token_is_requested(db, link_case):
+    """NHA grants three link tokens per address a day; refusing after the
+    token arrives would spend one on a request that cannot be sent."""
+    patient, contexts = link_case
+    contexts[0].display = "राम"
+    with pytest.raises(linking.DocumentUnavailable):
+        await linking.initiate(
+            db, patient=patient, context_ids=[contexts[0].id], idempotency_key="unsendable"
+        )
+    assert (await db.execute(select(AbdmCareContextLink))).scalars().all() == []
+    token_jobs = select(jobs.AbdmJob).where(jobs.AbdmJob.kind == "link_token")
+    assert (await db.execute(token_jobs)).scalars().all() == []
+
+
 async def test_legacy_per_type_replay_keeps_original_ids_and_attempts(db, link_case):
     patient, contexts = link_case
     old_ids = []
