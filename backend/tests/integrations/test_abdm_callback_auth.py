@@ -385,7 +385,6 @@ async def test_hip_link_callback_accepts_documented_headers_without_cm(gateway_s
         ("REQUEST-ID", "invalid", 400, "invalid_request_id"),
         ("TIMESTAMP", "", 400, "missing_abdm_headers"),
         ("TIMESTAMP", "invalid", 400, "invalid_timestamp"),
-        ("TIMESTAMP", "2026-09-11T00:00:00", 400, "invalid_timestamp"),
         ("X-CM-ID", "other-cm", 401, "invalid_cm_id"),
         ("X-CM-ID", "", 401, "invalid_cm_id"),
     ],
@@ -398,6 +397,23 @@ async def test_link_callback_preserves_routing_guards(gateway_settings, name, va
     assert caught.value.status_code == status
     assert caught.value.detail["code"] == code
     assert not gateway_settings.keys
+
+
+async def test_link_result_with_a_zoneless_timestamp_is_read_as_utc(gateway_settings):
+    """NHA sent link/on_carecontext with TIMESTAMP "2026-09-30T17:53:23.379539"
+    on 30 September 2026. Refusing it discarded a genuine link result."""
+    headers = _gateway_headers(cm=False)
+    headers["TIMESTAMP"] = datetime.now(UTC).replace(tzinfo=None).isoformat()
+    verified = await callback_auth.verify_hip_link_gateway_callback(_request(**headers))
+    assert verified.replayed is False
+
+
+async def test_a_zoneless_timestamp_still_has_to_be_fresh(gateway_settings):
+    headers = _gateway_headers(cm=False)
+    headers["TIMESTAMP"] = "2026-09-11T00:00:00"
+    with pytest.raises(HTTPException) as caught:
+        await callback_auth.verify_hip_link_gateway_callback(_request(**headers))
+    assert caught.value.detail["code"] == "stale_callback"
 
 
 async def test_link_callback_preserves_freshness(gateway_settings):

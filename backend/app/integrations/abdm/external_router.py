@@ -1090,6 +1090,7 @@ async def consent_on_fetch(
         return _accepted()
     if (
         detail.patient.id != request_row.abha_address
+        or detail.hiu is None
         or detail.hiu.id != callback.recipient_id
         or not detail.hi_types
         or not set(detail.hi_types).issubset(request_row.hi_types)
