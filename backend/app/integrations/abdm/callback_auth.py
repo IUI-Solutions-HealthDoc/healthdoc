@@ -221,9 +221,12 @@ def _parse_timestamp(raw: str) -> datetime:
             400, {"code": "invalid_timestamp", "message": "Invalid TIMESTAMP"}
         ) from exc
     if value.tzinfo is None:
-        raise HTTPException(
-            400, {"code": "invalid_timestamp", "message": "TIMESTAMP must include a timezone"}
-        )
+        # NHA's link/on_carecontext sends TIMESTAMP with no zone
+        # ("2026-09-30T17:53:23.379539", 24 ms before it arrived here in UTC)
+        # while its other callbacks carry "+00:00". Refusing it discarded a
+        # genuine link result. Read it as UTC: a zone guessed wrong lands hours
+        # away and still fails the freshness window below.
+        value = value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
 
 
