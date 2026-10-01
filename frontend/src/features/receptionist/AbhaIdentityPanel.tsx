@@ -7,6 +7,7 @@ import { useLocale } from "@/lib/i18n";
 
 import {
   downloadNhaAbhaCard,
+  getAbhaEnrolmentDeclaration,
   requestAbhaEnrolmentOtp,
   requestAbhaLoginOtp,
   requestEnrolmentMobileOtp,
@@ -18,17 +19,25 @@ import {
   verifyEnrolmentMobileOtp,
 } from "./api";
 import { digitsOnly, isValidAbhaInput, normaliseIndianMobileInput } from "./patientValidation";
-import type { AbhaIdentityLinked, AbhaLoginIdentifier } from "./types";
+import type { AbhaDeclaration, AbhaIdentityLinked, AbhaLoginIdentifier } from "./types";
 
-/** Official M1 collection grant. Hindi legal text is not shipped until NHA-approved copy exists. */
+/** Official M1 collection grant. The statements shown beside it are NHA's
+ *  published consent, rendered by the server for this patient and facility;
+ *  Hindi legal text is not shipped until NHA-approved copy exists. */
 const ENROLMENT_CONSENT = {
   granted: true,
   code: "abha-enrollment",
   version: "1.4",
   language: "en" as const,
 };
-const ENROLMENT_CONSENT_TEXT =
-  "I confirm the patient agrees to share Aadhaar demographic information with the National Health Authority for the sole purpose of creating an ABHA. Consent code abha-enrollment, version 1.4.";
+
+/** Required statements ticked and "a document other than Aadhaar" not. */
+function declarationAccepted(declaration: AbhaDeclaration | null, ticks: Record<string, boolean>): boolean {
+  return declaration !== null && declaration.statements.every((statement) =>
+    statement.required === true ? ticks[statement.id] === true
+      : statement.required === false ? ticks[statement.id] !== true
+        : true);
+}
 
 type Flow = "existing" | "new";
 /** How an existing ABHA is proven: OTP to its linked mobile, or through Aadhaar. */
@@ -66,7 +75,9 @@ function PatientAbhaIdentity({ patient }: Props) {
   const [otp, setOtp] = useState("");
   const [mobile, setMobile] = useState("");
   const [linked, setLinked] = useState<AbhaIdentityLinked | null>(null);
-  const [consentGranted, setConsentGranted] = useState(false);
+  const [declaration, setDeclaration] = useState<AbhaDeclaration | null>(null);
+  const [declarationError, setDeclarationError] = useState<string | null>(null);
+  const [ticks, setTicks] = useState<Record<string, boolean>>({});
   const [enrolPhase, setEnrolPhase] = useState<"aadhaar" | "mobile" | "address">("aadhaar");
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [selectedAddress, setSelectedAddress] = useState("");
@@ -99,6 +110,27 @@ function PatientAbhaIdentity({ patient }: Props) {
     return () => clearInterval(timer);
   }, [resendAvailableAt]);
 
+  const needsDeclaration = flow === "new" && !sessionId && !declaration && !declarationError;
+  useEffect(() => {
+    if (!needsDeclaration) return;
+    let disposed = false;
+    getAbhaEnrolmentDeclaration(patient.id).then(
+      (shown) => {
+        if (disposed) return;
+        setDeclaration(shown);
+        // NHA's published form shows statements 1, 3, 4 and 5 ticked; the
+        // patient may untick the optional ones, and both confirmations start empty.
+        setTicks(Object.fromEntries(shown.statements.map((statement) => [statement.id, statement.ticked])));
+      },
+      (reason: unknown) => {
+        if (!disposed) {
+          setDeclarationError(reason instanceof ApiError ? reason.message : "The ABHA consent could not be loaded.");
+        }
+      },
+    );
+    return () => { disposed = true; };
+  }, [needsDeclaration, patient.id]);
+
   function beginRequest(): number | null {
     if (!lifecycle.current.active || lifecycle.current.pending) return null;
     lifecycle.current.pending = true;
@@ -125,7 +157,9 @@ function PatientAbhaIdentity({ patient }: Props) {
     setEnrolPhase("aadhaar");
     setSuggestions([]);
     setSelectedAddress("");
-    setConsentGranted(false);
+    setDeclaration(null);
+    setDeclarationError(null);
+    setTicks({});
     setAccounts([]);
     setSelectedAccount("");
     communicationMobile.current = null;
@@ -173,8 +207,11 @@ function PatientAbhaIdentity({ patient }: Props) {
   }
 
   async function requestOtp() {
-    if (flow === "new" && !consentGranted) {
-      setError("Confirm the patient's enrolment consent before creating an ABHA.");
+    const enrolmentConsent = flow === "new" && declaration && declarationAccepted(declaration, ticks)
+      ? { ...ENROLMENT_CONSENT, statements: ticks, declaration_sha256: declaration.sha256 }
+      : null;
+    if (flow === "new" && !enrolmentConsent) {
+      setError("Complete the patient's ABHA consent before creating an ABHA.");
       return;
     }
     if (!identifierValid) {
@@ -193,9 +230,10 @@ function PatientAbhaIdentity({ patient }: Props) {
           ? { abha_address: identifier.trim() }
           : { abha_number: identifier };
     try {
-      const result = flow === "existing"
-        ? await requestAbhaLoginOtp(patient.id, loginIdentifier, newIdempotencyKey())
-        : await requestAbhaEnrolmentOtp(patient.id, identifier, ENROLMENT_CONSENT, newIdempotencyKey());
+      // A consent exists only in the new flow, and the new flow cannot reach here without one.
+      const result = enrolmentConsent
+        ? await requestAbhaEnrolmentOtp(patient.id, identifier, enrolmentConsent, newIdempotencyKey())
+        : await requestAbhaLoginOtp(patient.id, loginIdentifier, newIdempotencyKey());
       if (!isCurrent(generation)) return;
       requestedIdentifier.current = loginIdentifier;
       applyRequested(result);
@@ -501,12 +539,35 @@ function PatientAbhaIdentity({ patient }: Props) {
             />
           </label>
           {flow === "new" ? (
-            <label className="flex items-start gap-2 text-sm">
-              <input type="checkbox" checked={consentGranted} onChange={(event) => setConsentGranted(event.target.checked)} />
-              <span>{ENROLMENT_CONSENT_TEXT}</span>
-            </label>
+            <fieldset className="space-y-2 rounded-md border border-border p-3 text-sm">
+              <legend className="px-1 font-medium">ABHA consent</legend>
+              {declarationError ? (
+                <p role="alert" className="text-danger">{declarationError}</p>
+              ) : !declaration ? (
+                <p role="status" className="text-muted-foreground">Loading the ABHA consent…</p>
+              ) : (
+                <>
+                  <p>{declaration.intro}</p>
+                  {declaration.statements.map((statement) => (
+                    <label key={statement.id} className={`flex items-start gap-2 ${statement.id === "health_worker" || statement.id === "beneficiary" ? "pl-6" : ""}`}>
+                      <input
+                        type="checkbox"
+                        name={statement.id}
+                        checked={ticks[statement.id] === true}
+                        onChange={(event) => setTicks((current) => ({ ...current, [statement.id]: event.target.checked }))}
+                      />
+                      <span>{statement.text}</span>
+                    </label>
+                  ))}
+                  {ticks.other_document ? (
+                    <p role="alert" className="text-warning">The patient chose a document other than Aadhaar. No Aadhaar OTP is sent while this is ticked.</p>
+                  ) : null}
+                  <p className="text-xs text-muted-foreground">NHA advises showing this consent to the patient on a screen facing them.</p>
+                </>
+              )}
+            </fieldset>
           ) : null}
-          <button type="button" disabled={busy || !identifierValid || (flow === "new" && !consentGranted)} onClick={() => void requestOtp()} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{busy ? t("receptionist.abha.requestingOtp") : t("receptionist.abha.sendOtp")}</button>
+          <button type="button" disabled={busy || !identifierValid || (flow === "new" && !declarationAccepted(declaration, ticks))} onClick={() => void requestOtp()} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{busy ? t("receptionist.abha.requestingOtp") : t("receptionist.abha.sendOtp")}</button>
         </div>
       ) : enrolPhase === "mobile" ? (
         <div className="space-y-3">
