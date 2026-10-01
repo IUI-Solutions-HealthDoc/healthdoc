@@ -71,12 +71,16 @@ def validate_requester(value: object) -> dict:
 def uses_sandbox_test_requester(user: User) -> bool:
     """True only for an allowlisted dev.* account against the NHA sandbox."""
     settings = get_settings()
+    allowed = settings.abdm_sandbox_test_requester_user_ids
+    # An empty allowlist decides before the account is looked at, so callers
+    # passing a partial staff object never reach the attribute reads.
     return (
-        settings.environment == "dev"
+        bool(allowed)
+        and settings.environment == "dev"
         and settings.abdm_gateway_base_url == "https://dev.abdm.gov.in"
         and settings.abdm_x_cm_id == "sbx"
-        and user.id in settings.abdm_sandbox_test_requester_user_ids
-        and user.username.startswith("dev.")
+        and getattr(user, "id", None) in allowed
+        and str(getattr(user, "username", "") or "").startswith("dev.")
     )
 
 
