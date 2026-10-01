@@ -163,11 +163,15 @@ async def create_consent_record(
     if existing is not None:
         return ConsentRecordOut.model_validate(existing.response_body)
 
+    # granted_by_user_id / withdrawn_by_user_id name the staff member who took
+    # the patient's decision. They were client-supplied, so any caller could
+    # attribute a consent to a colleague.
     record = await service.create_consent_record(
         db,
         patient_id=patient_id,
         facility_id=user.facility_id,
         created_by=user.id,
+        granted_by_user_id=user.id,
         **payload.model_dump(),
     )
     response = ConsentRecordOut.model_validate(record)
@@ -196,7 +200,17 @@ async def transition_consent_status(
     payload: ConsentStatusTransitionIn,
     user: CurrentDbUser,
     db: DbSession,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> ConsentRecordOut:
+    if not idempotency_key:
+        raise HTTPException(400, "Idempotency-Key header is required")
+    endpoint = f"PATCH /consent/records/{consent_id}/status"
+    existing = await check_idempotency(
+        db, idempotency_key, endpoint, hash_request_body(payload), user.id
+    )
+    if existing is not None:
+        return ConsentRecordOut.model_validate(existing.response_body)
+
     record = await service.transition_consent_status(
         db,
         consent_id,
@@ -204,8 +218,13 @@ async def transition_consent_status(
         reason=payload.reason,
         facility_id=user.facility_id,
         updated_by=user.id,
+        actor_roles=user.roles,
     )
-    return ConsentRecordOut.model_validate(record)
+    response = ConsentRecordOut.model_validate(record)
+    await record_idempotent_response(
+        db, idempotency_key, endpoint, 200, response.model_dump(mode="json"), user_id=user.id
+    )
+    return response
 
 
 @router.post(
@@ -223,13 +242,27 @@ async def withdraw_consent(
     payload: ConsentWithdrawalCreate,
     user: CurrentDbUser,
     db: DbSession,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> ConsentWithdrawalOut:
+    if not idempotency_key:
+        raise HTTPException(400, "Idempotency-Key header is required")
+    endpoint = f"POST /consent/records/{consent_id}/withdraw"
+    existing = await check_idempotency(
+        db, idempotency_key, endpoint, hash_request_body(payload), user.id
+    )
+    if existing is not None:
+        return ConsentWithdrawalOut.model_validate(existing.response_body)
+
     withdrawal = await service.withdraw_consent(
         db,
         consent_id,
         withdrawn_by_type=payload.withdrawn_by_type,
-        withdrawn_by_user_id=payload.withdrawn_by_user_id,
+        withdrawn_by_user_id=user.id,
         reason=payload.reason,
         facility_id=user.facility_id,
     )
-    return ConsentWithdrawalOut.model_validate(withdrawal)
+    response = ConsentWithdrawalOut.model_validate(withdrawal)
+    await record_idempotent_response(
+        db, idempotency_key, endpoint, 201, response.model_dump(mode="json"), user_id=user.id
+    )
+    return response

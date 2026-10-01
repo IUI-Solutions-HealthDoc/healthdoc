@@ -262,12 +262,7 @@ async def search_patients_endpoint(
         page_size=payload.page_size,
     )
     items = []
-    for item in results:
-        if len(item) == 4:
-            patient, score, matched_on, merged_from = item
-        else:
-            patient, score, matched_on = item
-            merged_from = None
+    for patient, score, matched_on, merged_from in results:
         items.append(
             PatientSearchResult(
                 id=patient.id,
@@ -321,7 +316,16 @@ async def update_patient_endpoint(
             raise HTTPException(404, {"code": "patient_not_found"})
         if code == "cannot_update_merged_patient":
             raise HTTPException(409, {"code": "cannot_update_merged_patient"})
+        if code in _PATIENT_UPDATE_REFUSALS:
+            raise HTTPException(422, {"code": code, "message": _PATIENT_UPDATE_REFUSALS[code]})
         raise HTTPException(400, str(e))
+
+
+_PATIENT_UPDATE_REFUSALS = {
+    "dob_in_future": "Date of birth cannot be after today",
+    "age_out_of_range": "Date of birth gives an age above 130",
+    "dob_or_age_required": "A patient needs either a date of birth or an age",
+}
 
 
 @router.post(

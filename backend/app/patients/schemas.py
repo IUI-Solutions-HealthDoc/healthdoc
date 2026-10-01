@@ -168,8 +168,24 @@ class PatientCreate(BaseModel):
         return self
 
 
+PATIENT_UPDATE_FIELDS: tuple[str, ...] = (
+    "full_name", "sex", "dob", "age_years", "mobile",
+    "guardian_name", "guardian_relationship",
+    "address_line", "village_town", "district", "state_code", "pincode",
+)
+# Sending null for one of these clears it. full_name and sex are never
+# cleared, and dob/age_years are replaced by each other rather than blanked.
+PATIENT_CLEARABLE_FIELDS: frozenset[str] = frozenset({
+    "mobile", "guardian_name", "guardian_relationship",
+    "address_line", "village_town", "district", "state_code", "pincode",
+})
+
+
 class PatientUpdate(BaseModel):
-    """PATCH /patients/{id} — all fields optional, only supplied fields written.
+    """PATCH /patients/{id} — only the fields present in the body are written.
+
+    A field sent as null is cleared if it is in PATIENT_CLEARABLE_FIELDS; an
+    omitted field is left alone.
 
     `reason` is not stored on the patient row — it is forwarded to the
     audit log's `reason` column so reviewers know WHY a field changed,
@@ -180,7 +196,6 @@ class PatientUpdate(BaseModel):
     dob: date | None = None
     age_years: int | None = None
     mobile: str | None = None
-    abha_number: str | None = None
     guardian_name: str | None = None
     guardian_relationship: str | None = None
     address_line: str | None = None
@@ -195,20 +210,34 @@ class PatientUpdate(BaseModel):
     # editing — which is the more likely path for bad data anyway, since
     # corrections are where people paste.
     _validate_mobile = field_validator("mobile")(_normalise_mobile)
-    _validate_abha = field_validator("abha_number")(_normalise_abha)
     _validate_name = field_validator("full_name")(_validate_full_name)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _abha_is_not_a_demographic(cls, data: object) -> object:
+        # An ABHA number is an identity asserted by NHA. Accepting it here
+        # would let any desk edit attach someone else's health account to
+        # this patient without OTP verification.
+        if isinstance(data, dict) and "abha_number" in data:
+            raise ValueError(
+                "abha_number cannot be edited; link or unlink it through ABHA verification"
+            )
+        return data
 
     @model_validator(mode="after")
     def _at_least_one_field(self) -> PatientUpdate:
-        updateable = (
-            "full_name", "sex", "dob", "age_years", "mobile", "abha_number",
-            "guardian_name", "guardian_relationship",
-            "address_line", "village_town", "district", "state_code", "pincode",
-        )
-        if not any(getattr(self, f) is not None for f in updateable):
+        supplied = self.model_fields_set & set(PATIENT_UPDATE_FIELDS)
+        if not supplied:
             raise ValueError("At least one patient field must be supplied for update")
+        for field in supplied - PATIENT_CLEARABLE_FIELDS:
+            if getattr(self, field) is None and field not in ("dob", "age_years"):
+                raise ValueError(f"{field} cannot be cleared")
         if self.dob is not None and self.age_years is not None:
             raise ValueError("dob and age_years cannot both be supplied")
+        if {"dob", "age_years"} <= supplied and self.dob is None and self.age_years is None:
+            raise ValueError("dob and age_years cannot both be cleared")
+        if self.age_years is not None and not 0 <= self.age_years <= 130:
+            raise ValueError("age_years must be between 0 and 130")
         return self
 
 

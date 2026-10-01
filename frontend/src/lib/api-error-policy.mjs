@@ -28,6 +28,8 @@ export function userFacingApiError(code, payload) {
     user_deactivated: "Your HealthDoc staff account is deactivated. Contact your facility administrator.",
     abdm_rejected: "ABDM declined this request. Check the details before retrying; contact support if it continues.",
     duplicate_abha: "This ABHA number is already linked to another patient. Open that record instead of linking it here.",
+    abha_link_unavailable: "This ABHA number cannot be linked at this facility. Contact your facility administrator.",
+    consent_manager_decision_forbidden: "Only an admin or doctor can record a consent manager's decision.",
     enrolment_consent_required: "Confirm the patient's enrolment consent before creating an ABHA.",
     enrolment_consent_refused: "ABHA enrolment stops when the patient does not consent.",
     enrolment_consent_language_unavailable: "Hindi enrolment consent is not available until an approved translation is loaded.",

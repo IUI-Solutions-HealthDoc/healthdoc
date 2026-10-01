@@ -88,14 +88,13 @@ async def _seed_consent_manager(engine: AsyncEngine) -> uuid.UUID:
 
 class TestCreateConsentRecord:
     async def test_creates_a_record_and_writes_an_audit_row(
-        self, session_factory, engine: AsyncEngine, facility_id, user_id, purpose_id
+        self, session_factory, engine: AsyncEngine, facility_id, user_id, purpose_id, patient_id
     ):
         """The ticket's own acceptance criterion: audit log written on
         mutations. consent_records has no facility_id column, so this is
         the one place that proves audited_mutation() actually ran rather
         than being silently skipped like listeners.py would for a table
         missing __audit_facility_id_field__."""
-        patient_id = uuid.uuid4()
         async with session_factory() as db:
             record = await service.create_consent_record(
                 db,
@@ -117,13 +116,13 @@ class TestCreateConsentRecord:
         assert audit_row.new_value["status"] == "granted"
 
     async def test_nonexistent_purpose_id_raises_404(
-        self, session_factory, facility_id, user_id
+        self, session_factory, facility_id, user_id, patient_id
     ):
         async with session_factory() as db:
             with pytest.raises(HTTPException) as exc_info:
                 await service.create_consent_record(
                     db,
-                    patient_id=uuid.uuid4(),
+                    patient_id=patient_id,
                     facility_id=facility_id,
                     created_by=user_id,
                     purpose_id=uuid.uuid4(),  # doesn't exist
@@ -131,9 +130,64 @@ class TestCreateConsentRecord:
                     channel="verbal",
                 )
         assert exc_info.value.status_code == 404
+        assert exc_info.value.detail == "Consent purpose not found"
+
+    async def test_another_facilitys_patient_is_not_found(
+        self, session_factory, engine: AsyncEngine, second_facility_id, user_id, purpose_id
+    ):
+        foreign_user = uuid.uuid4()
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO users (id, keycloak_sub, username, full_name, facility_id) "
+                    "VALUES (:id, :sub, :sub, 'Other Facility User', :facility_id)"
+                ),
+                {"id": foreign_user, "sub": f"consent-test-{foreign_user}", "facility_id": second_facility_id},
+            )
+        foreign_patient = await _seed_patient(
+            engine, facility_id=second_facility_id, created_by=foreign_user
+        )
+        async with session_factory() as db:
+            caller_facility = (
+                await db.execute(text("SELECT facility_id FROM users WHERE id = :id"), {"id": user_id})
+            ).scalar_one()
+            with pytest.raises(HTTPException) as exc_info:
+                await service.create_consent_record(
+                    db, patient_id=foreign_patient, facility_id=caller_facility,
+                    created_by=user_id, purpose_id=purpose_id,
+                    granted_by_type="patient", channel="verbal",
+                )
+        assert exc_info.value.status_code == 404
+        assert exc_info.value.detail == "Patient not found"
+
+    async def test_a_visit_of_another_patient_is_not_found(
+        self, session_factory, engine: AsyncEngine, facility_id, user_id, purpose_id, patient_id
+    ):
+        other_patient = await _seed_patient(engine, facility_id=facility_id, created_by=user_id)
+        visit_id = uuid.uuid4()
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO visits (id, visit_number, patient_id, facility_id, visit_type, "
+                    "visit_date, created_by) VALUES (:id, :number, :patient, :facility, 'opd', "
+                    "now(), :user)"
+                ),
+                {
+                    "id": visit_id, "number": f"CV-{visit_id.hex[:10]}",
+                    "patient": other_patient, "facility": facility_id, "user": user_id,
+                },
+            )
+        async with session_factory() as db:
+            with pytest.raises(HTTPException) as exc_info:
+                await service.create_consent_record(
+                    db, patient_id=patient_id, facility_id=facility_id, created_by=user_id,
+                    purpose_id=purpose_id, granted_by_type="patient", channel="verbal",
+                    visit_id=visit_id,
+                )
+        assert exc_info.value.status_code == 404
 
     async def test_nullable_expires_at_and_scope_round_trip(
-        self, session_factory, facility_id, user_id, purpose_id
+        self, session_factory, facility_id, user_id, purpose_id, patient_id
     ):
         """Proves the two fields the ticket title calls out by name:
         nullable expiry (None is accepted, not coerced to a default) and
@@ -141,7 +195,7 @@ class TestCreateConsentRecord:
         async with session_factory() as db:
             record = await service.create_consent_record(
                 db,
-                patient_id=uuid.uuid4(),
+                patient_id=patient_id,
                 facility_id=facility_id,
                 created_by=user_id,
                 purpose_id=purpose_id,
@@ -180,7 +234,7 @@ class TestTransitionConsentStatus:
         async with session_factory() as db:
             updated = await service.transition_consent_status(
                 db, consent_id, new_status="granted", reason="patient approved in app",
-                facility_id=facility_id, updated_by=user_id,
+                facility_id=facility_id, updated_by=user_id, actor_roles=["doctor"],
             )
             await db.commit()
 
@@ -190,6 +244,39 @@ class TestTransitionConsentStatus:
         audit_row = await _audit_row_for(engine, resource_type="consent_records", resource_id=consent_id)
         assert audit_row.action == "update"
         assert audit_row.reason == "patient approved in app"
+
+    @pytest.mark.parametrize("roles", [["receptionist"], ["nurse"], ["receptionist", "nurse"]])
+    async def test_desk_roles_cannot_record_a_consent_managers_decision(
+        self, session_factory, engine: AsyncEngine, facility_id, user_id, purpose_id, roles
+    ):
+        patient_id = await _seed_patient(engine, facility_id=facility_id, created_by=user_id)
+        consent_manager_id = await _seed_consent_manager(engine)
+        async with session_factory() as db:
+            record = await service.create_consent_record(
+                db, patient_id=patient_id, facility_id=facility_id, created_by=user_id,
+                purpose_id=purpose_id, granted_by_type="patient",
+                channel="abdm_consent_manager", status="requested",
+                consent_manager_id=consent_manager_id,
+            )
+            await db.commit()
+            consent_id = record.id
+
+        async with session_factory() as db:
+            with pytest.raises(HTTPException) as exc_info:
+                await service.transition_consent_status(
+                    db, consent_id, new_status="granted", reason=None,
+                    facility_id=facility_id, updated_by=user_id, actor_roles=roles,
+                )
+        assert exc_info.value.status_code == 403
+        assert exc_info.value.detail["code"] == "consent_manager_decision_forbidden"
+
+        async with engine.begin() as conn:
+            status = (
+                await conn.execute(
+                    text("SELECT status FROM consent_records WHERE id = :id"), {"id": consent_id}
+                )
+            ).scalar_one()
+        assert status == "requested"
 
     async def test_granted_to_revoked_directly_is_rejected(
         self, session_factory, engine: AsyncEngine, facility_id, user_id, purpose_id
@@ -210,7 +297,7 @@ class TestTransitionConsentStatus:
             with pytest.raises(HTTPException) as exc_info:
                 await service.transition_consent_status(
                     db, consent_id, new_status="revoked", reason=None,
-                    facility_id=facility_id, updated_by=user_id,
+                    facility_id=facility_id, updated_by=user_id, actor_roles=["admin"],
                 )
         assert exc_info.value.status_code == 409
 

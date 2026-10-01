@@ -25,6 +25,8 @@ export default function Page() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [unlinkReason, setUnlinkReason] = useState("");
+  const unlinkReasonValid = unlinkReason.trim().length >= 10;
 
   async function search(event: React.FormEvent) {
     event.preventDefault();
@@ -62,6 +64,7 @@ export default function Page() {
     setBusy(true);
     setSelected(patient);
     setLink(null);
+    setUnlinkReason("");
     setError(null);
     setMessage(null);
     try {
@@ -74,7 +77,7 @@ export default function Page() {
   }
 
   async function removeLink() {
-    if (!selected || !link?.abha_number) return;
+    if (!selected || !link?.abha_number || !unlinkReasonValid) return;
     const confirmed = window.confirm(
       t("admin.abdm.unlinkConfirm", {
         abha: link.abha_number,
@@ -86,7 +89,8 @@ export default function Page() {
     setBusy(true);
     setError(null);
     try {
-      setLink(await unlinkAbha(selected.id));
+      setLink(await unlinkAbha(selected.id, unlinkReason.trim()));
+      setUnlinkReason("");
       setMessage(t("admin.abdm.unlinkSuccess"));
     } catch (reason) {
       setError(reason instanceof ApiError ? reason.message : t("admin.abdm.unlinkFailed"));
@@ -162,8 +166,22 @@ export default function Page() {
               <p className="text-xs uppercase tracking-wide text-muted-foreground">{t("admin.abdm.linkedAbha")}</p>
               <p className="mt-1 font-medium">{link.abha_number ?? t("admin.abdm.noAbhaLinked")}</p>
             </div>
-            {link.abha_number ? <button type="button" disabled={busy} onClick={() => void removeLink()} className="rounded-md bg-danger px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{t("admin.abdm.unlinkAbha")}</button> : null}
+            {link.abha_number ? <button type="button" disabled={busy || !unlinkReasonValid} onClick={() => void removeLink()} className="rounded-md bg-danger px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{t("admin.abdm.unlinkAbha")}</button> : null}
           </div>
+          {link.abha_number ? (
+            <label className="mt-4 block space-y-1 text-sm">
+              <span className="text-muted-foreground">{t("admin.abdm.unlinkReasonLabel")}</span>
+              <textarea
+                className="w-full rounded-md border border-border px-3 py-2"
+                rows={2}
+                maxLength={500}
+                value={unlinkReason}
+                onChange={(event) => setUnlinkReason(event.target.value)}
+                aria-describedby="unlink-reason-hint"
+              />
+              <span id="unlink-reason-hint" className="block text-xs text-muted-foreground">{t("admin.abdm.unlinkReasonHint")}</span>
+            </label>
+          ) : null}
         </section>
       ) : null}
     </div>

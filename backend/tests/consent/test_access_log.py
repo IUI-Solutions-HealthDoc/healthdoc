@@ -107,9 +107,8 @@ class TestConsentLinking:
 
     async def test_active_consent_populates_consent_id_and_verified_true(
         self, engine: AsyncEngine, bind_access_log_to_test_engine, session_factory,
-        user_id, facility_id, purpose_id,
+        user_id, facility_id, purpose_id, patient_id,
     ):
-        patient_id = uuid.uuid4()
         async with engine.begin() as conn:
             purpose_code = (
                 await conn.execute(

@@ -1824,6 +1824,8 @@ export const hi = {
   "admin.abdm.linkedAbha": "लिंक्ड ABHA",
   "admin.abdm.noAbhaLinked": "कोई ABHA लिंक नहीं",
   "admin.abdm.unlinkAbha": "ABHA अनलिंक",
+  "admin.abdm.unlinkReasonLabel": "अनलिंक करने का कारण",
+  "admin.abdm.unlinkReasonHint": "ऑडिट लॉग में दर्ज होता है। कम से कम 10 अक्षर।",
   "admin.abdm.jobs.title": "ABDM डिलीवरी जॉब",
   "admin.abdm.jobs.hint":
     "पुनः प्रयास से पहले रिपोर्टेड कॉन्फ़िग या कनेक्शन समस्या ठीक करें। समर्पित worker चलना चाहिए। requeue से समाप्त सहमति, keys या link tokens नवीनीकृत नहीं होते; नया clinical अनुरोध चाहिए।",
