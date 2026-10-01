@@ -48,6 +48,7 @@ export default function Page() {
             </div>
           </div>
           <StartVisit
+            key={`visit-${selected.id}`}
             patient={{
               id: selected.id,
               full_name: selected.full_name,

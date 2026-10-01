@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import HTTPException, status
@@ -10,7 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.patients.models import Patient
-from app.common.patient_scope import require_patient_scope
+from app.common.patient_scope import facility_today, require_patient_scope
 from app.programs.models import CareProgram, ProgramEnrolment, ProgramVisit
 from app.programs.schemas import (
     CareProgramOut,
@@ -126,7 +126,7 @@ async def enrol_patient(
     ).scalar_one_or_none()
     program_name = prog.program_name if prog else body.program_code
 
-    enrolment_date = body.enrolment_date or date.today()
+    enrolment_date = body.enrolment_date or await facility_today(db, facility_id)
 
     enrolment = ProgramEnrolment(
         id=uuid.uuid4(),
@@ -295,7 +295,7 @@ async def record_program_visit(
             detail=f"Program enrolment {enrolment_id} not found.",
         )
 
-    completed_date = body.completed_date or date.today()
+    completed_date = body.completed_date or await facility_today(db, facility_id)
 
     visit = ProgramVisit(
         id=uuid.uuid4(),

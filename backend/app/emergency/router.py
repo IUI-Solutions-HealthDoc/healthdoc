@@ -16,7 +16,8 @@ from app.audit.actions import AuditAction
 from app.audit.context import AuditActor
 from app.audit.deps import get_current_actor_dependency
 from app.audit.service import write_audit_log
-from app.auth.deps import CurrentDbUser, require_roles
+from app.auth.deps import CurrentDbUser, DbUser, require_roles
+from app.common.clinical_write import ClinicalWriteKey, clinical_write
 from app.common.db import get_db
 from app.emergency.schemas import (
     EmergencyMetricsOut, EmergencyPatientCreate, EmergencyPatientOut,
@@ -60,18 +61,35 @@ async def ping() -> dict:
 async def register_emergency_patient(
     payload: EmergencyPatientCreate,
     current_db_user: CurrentDbUser,
+    idempotency_key: ClinicalWriteKey,
     db: AsyncSession = Depends(get_db),
-) -> Patient:
+) -> EmergencyPatientOut:
     """Register an unidentified/critical patient with a THID.
 
     facility_id is sourced from current_db_user — never from the request
     payload, so a nurse at facility A cannot register into facility B.
     full_name defaults to 'Unknown (<thid>)' when not supplied.
+
+    The patient, its audit row and the retry receipt commit together. A desk
+    that loses the response and resends gets the same THID back instead of a
+    second unidentified patient for one person.
     """
     facility = await db.get(Facility, current_db_user.facility_id)
     if not facility:
         raise HTTPException(404, "Facility not found")
+    return await clinical_write(
+        db, idempotency_key, "POST /emergency/patients", payload, current_db_user,
+        EmergencyPatientOut,
+        lambda: _create_emergency_patient(db, payload, current_db_user, facility),
+    )
 
+
+async def _create_emergency_patient(
+    db: AsyncSession,
+    payload: EmergencyPatientCreate,
+    current_db_user: DbUser,
+    facility: Facility,
+) -> EmergencyPatientOut:
     thid = await generate_thid(
         db,
         facility_code=facility.code,
@@ -128,7 +146,7 @@ async def register_emergency_patient(
             "identity_status": patient.identity_status,
         },
     )
-    return patient
+    return EmergencyPatientOut.model_validate(patient)
 
 
 @router.post(

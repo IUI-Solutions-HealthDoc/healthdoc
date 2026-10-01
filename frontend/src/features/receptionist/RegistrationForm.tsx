@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Printer } from "lucide-react";
 
 import { ApiError, newIdempotencyKey } from "@/lib/api";
@@ -13,16 +13,31 @@ import { StartVisit } from "./StartVisit";
 import { PatientCardModal } from "./PatientCardModal";
 import type { Patient, PatientCreate } from "./types";
 import {
+  INDIAN_STATES,
+  PHOTO_MIME_TYPES,
   deriveAgeFromDob,
   digitsOnly,
   isValidAbhaInput,
   isValidPatientName,
+  isValidPincodeInput,
+  isValidStateCode,
+  localToday,
   normaliseIndianMobileInput,
 } from "./patientValidation";
 
 const SEXES = ["male", "female", "other"] as const;
+const SEX_LABEL_KEYS = {
+  male: "common.sexMale",
+  female: "common.sexFemale",
+  other: "common.sexOther",
+} as const;
+const MAX_PHOTO_BYTES = 2 * 1024 * 1024;
 
 type AgeMode = "dob" | "age";
+type PhotoStatus = "idle" | "uploading" | "failed";
+
+const noSubscription = () => () => {};
+const noServerDate = () => undefined;
 
 export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient) => void }) {
   const { t } = useLocale();
@@ -47,6 +62,13 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
   // Patient Photo (HD-08)
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [photoStatus, setPhotoStatus] = useState<PhotoStatus>("idle");
+  // One key per patient and file, kept across Retry so a resend after a lost
+  // response replays the stored photo instead of uploading a second copy.
+  const photoAttempt = useRef<{ patientId: string; file: File; key: string } | null>(null);
+  // Read on the client only: the server renders in UTC and would disagree
+  // with the browser's date for five and a half hours every night.
+  const today = useSyncExternalStore(noSubscription, localToday, noServerDate);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -72,19 +94,31 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
   const abhaValid = !abha.trim() || isValidAbhaInput(abha);
   const ageValid =
     ageMode === "dob"
-      ? Boolean(dob && dob <= new Date().toISOString().slice(0, 10))
+      ? Boolean(dob && (!today || dob <= today))
       : Boolean(ageYears && Number.isInteger(Number(ageYears)) && Number(ageYears) >= 0 && Number(ageYears) <= 130);
-  const canSubmit = fullNameValid && sex !== "" && ageProvided && ageValid && mobileValid && abhaValid && !busy;
+  const pincodeValid = !pincode.trim() || isValidPincodeInput(pincode);
+  const stateValid = !stateCode || isValidStateCode(stateCode);
+  const canSubmit =
+    fullNameValid && sex !== "" && ageProvided && ageValid && mobileValid && abhaValid &&
+    pincodeValid && stateValid && !busy;
   const inputClass = (invalid: boolean) =>
     `w-full rounded-md border px-3 py-2 ${invalid ? "border-danger" : "border-border"}`;
 
   const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (file.size > 2 * 1024 * 1024) {
-        setError("Patient photo must be smaller than 2MB.");
+      if (!PHOTO_MIME_TYPES.includes(file.type)) {
+        setError(t("receptionist.photoTypeInvalid"));
+        e.target.value = "";
         return;
       }
+      if (file.size > MAX_PHOTO_BYTES) {
+        setError(t("receptionist.photoTooLarge"));
+        e.target.value = "";
+        return;
+      }
+      setError(null);
+      if (photoPreview) URL.revokeObjectURL(photoPreview);
       setPhotoFile(file);
       const previewUrl = URL.createObjectURL(file);
       setPhotoPreview(previewUrl);
@@ -98,6 +132,28 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
       setPhotoPreview(null);
     }
   };
+
+  async function uploadPhoto(patient: Patient, file: File): Promise<Patient> {
+    const attempt = photoAttempt.current;
+    if (!attempt || attempt.patientId !== patient.id || attempt.file !== file) {
+      photoAttempt.current = { patientId: patient.id, file, key: newIdempotencyKey() };
+    }
+    setPhotoStatus("uploading");
+    try {
+      const saved = await uploadPatientPhoto(patient.id, file, photoAttempt.current!.key);
+      setPhotoStatus("idle");
+      return { ...patient, photo_file_id: saved.photo_file_id };
+    } catch {
+      // The registration stands; the desk is told and offered a retry.
+      setPhotoStatus("failed");
+      return patient;
+    }
+  }
+
+  async function retryPhoto() {
+    if (!registered || !photoFile || photoStatus === "uploading") return;
+    setRegistered(await uploadPhoto(registered, photoFile));
+  }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -129,20 +185,9 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
     setError(null);
     try {
       const patient = await registerPatient(payload, idempotencyKey);
-      
-      // If photo was selected, upload it to the patient record
-      if (photoFile) {
-        try {
-          const photoRes = await uploadPatientPhoto(patient.id, photoFile);
-          patient.photo_file_id = photoRes.photo_file_id;
-        } catch {
-          // Photo failure should not fail patient creation, but let desk know
-          console.warn("Patient registered, but photo upload encountered an issue.");
-        }
-      }
-
-      setRegistered(patient);
-      onRegistered?.(patient);
+      const saved = photoFile ? await uploadPhoto(patient, photoFile) : patient;
+      setRegistered(saved);
+      onRegistered?.(saved);
     } catch (reason) {
       setError(
         reason instanceof ApiError
@@ -168,8 +213,27 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
           <p className="text-sm text-muted-foreground">Registered Patient</p>
           <p className="font-mono text-3xl font-bold">{registered.uhid ?? registered.thid}</p>
           <p className="text-xl font-medium">{registered.full_name}</p>
+          {photoStatus === "uploading" ? (
+            <p role="status" className="text-xs text-muted-foreground">{t("receptionist.photoUploading")}</p>
+          ) : null}
+          {photoStatus === "failed" ? (
+            <div role="alert" className="flex flex-wrap items-center justify-center gap-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              <span>{t("receptionist.photoUploadFailed")}</span>
+              <button
+                type="button"
+                onClick={() => void retryPhoto()}
+                className="rounded-md border border-amber-400 bg-white px-3 py-1 text-xs font-semibold hover:bg-amber-100"
+              >
+                {t("receptionist.retryPhotoUpload")}
+              </button>
+            </div>
+          ) : null}
           <p className="text-sm text-muted-foreground">
-            <span className="capitalize">{registered.sex}</span>
+            <span>
+              {registered.sex in SEX_LABEL_KEYS
+                ? t(SEX_LABEL_KEYS[registered.sex as keyof typeof SEX_LABEL_KEYS])
+                : registered.sex}
+            </span>
             {registered.age_years !== null ? ` · ${registered.age_years} years` : ""}
             {registered.dob ? ` (DOB: ${registered.dob})` : ""}
           </p>
@@ -198,11 +262,11 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
           </div>
         </div>
 
-        <AbhaIdentityPanel patient={registered} />
+        <AbhaIdentityPanel key={`abha-${registered.id}`} patient={registered} />
 
         {/* A UHID on its own does nothing for the patient standing at the desk.
             The visit is what starts billing; the token is what gets them seen. */}
-        <StartVisit patient={registered} />
+        <StartVisit key={`visit-${registered.id}`} patient={registered} />
 
         <div className="text-center">
           <button
@@ -257,7 +321,7 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
             <option value="">{t("common.select")}…</option>
             {SEXES.map((value) => (
               <option key={value} value={value}>
-                {value}
+                {t(SEX_LABEL_KEYS[value])}
               </option>
             ))}
           </select>
@@ -293,7 +357,7 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
                 aria-invalid={Boolean(dob) && !ageValid}
                 value={dob}
                 onChange={(e) => setDob(e.target.value)}
-                max={new Date().toISOString().slice(0, 10)}
+                max={today}
                 required
               />
             ) : (
@@ -348,6 +412,9 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
           <div className="flex items-center gap-4 pt-1">
             {photoPreview ? (
               <div className="relative">
+                {/* A local blob: preview of a file not yet uploaded; the Next image
+                    optimizer cannot fetch blob URLs, so next/image adds nothing here. */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={photoPreview}
                   alt="Patient preview"
@@ -364,7 +431,7 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
             ) : null}
             <input
               type="file"
-              accept="image/jpeg,image/png,image/webp"
+              accept={PHOTO_MIME_TYPES.join(",")}
               onChange={handlePhotoChange}
               className="text-xs text-muted-foreground file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-foreground hover:file:bg-muted/80"
             />
@@ -442,25 +509,34 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
 
             <label className="space-y-1 text-sm">
               <span className="text-muted-foreground">{t("field.state")}</span>
-              <input
-                maxLength={4}
-                className={inputClass(false)}
+              <select
+                className={inputClass(!stateValid)}
+                aria-invalid={!stateValid}
                 value={stateCode}
-                onChange={(e) => setStateCode(e.target.value.toUpperCase())}
-                placeholder={t("receptionist.phState")}
-              />
+                onChange={(e) => setStateCode(e.target.value)}
+              >
+                <option value="">{t("receptionist.selectState")}</option>
+                {INDIAN_STATES.map((state) => (
+                  <option key={state.code} value={state.code}>
+                    {state.code} — {state.name}
+                  </option>
+                ))}
+              </select>
+              {!stateValid ? <span className="text-xs text-danger">{t("receptionist.errState")}</span> : null}
             </label>
 
             <label className="space-y-1 text-sm">
               <span className="text-muted-foreground">{t("field.pincode")}</span>
               <input
                 maxLength={6}
-                className={inputClass(false)}
+                className={inputClass(!pincodeValid)}
+                aria-invalid={!pincodeValid}
                 value={pincode}
-                onChange={(e) => setPincode(e.target.value)}
+                onChange={(e) => setPincode(digitsOnly(e.target.value))}
                 placeholder={t("receptionist.phPincode")}
                 inputMode="numeric"
               />
+              {!pincodeValid ? <span className="text-xs text-danger">{t("receptionist.errPincode")}</span> : null}
             </label>
           </div>
         )}

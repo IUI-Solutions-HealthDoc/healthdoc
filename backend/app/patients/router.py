@@ -1,18 +1,20 @@
 """patients module router — registration, search, update, merge endpoints."""
+import hashlib
+import ipaddress
 import uuid
 from typing import Annotated
 
-from datetime import date
-
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, UploadFile
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.actions import AuditAction
 from app.audit.context import AuditActor
 from app.audit.deps import get_current_actor_dependency
 from app.audit.service import write_audit_log
-from app.auth.deps import CurrentDbUser, require_roles
+from app.auth.deps import CurrentDbUser, DbUser, require_roles
 from app.common.db import get_db
+from app.common.patient_scope import facility_today
 from app.common.idempotency import (
     check_idempotency, hash_request_body, record_idempotent_response,
 )
@@ -34,6 +36,15 @@ from app.users.models import Facility
 router = APIRouter(prefix="/patients", tags=["patients"])
 
 _REGISTER_ENDPOINT = "POST /patients"
+_PHOTO_CONTENT_TYPES = frozenset({"image/jpeg", "image/png"})
+
+
+class _PhotoFingerprint(BaseModel):
+    sha256: str
+
+
+class _NoBody(BaseModel):
+    pass
 
 
 async def _require_idempotency_key(
@@ -124,8 +135,14 @@ async def register_patient(
         identity_path = "demographics_only"
 
     computed_age_years = payload.age_years
+    if payload.dob is not None:
+        today = await facility_today(db, facility.id)
+        if payload.dob > today:
+            raise HTTPException(422, {
+                "code": "dob_in_future",
+                "message": "Date of birth cannot be after today at this facility",
+            })
     if payload.dob is not None and computed_age_years is None:
-        today = date.today()
         computed_age_years = (today.year - payload.dob.year) - (
             (today.month, today.day) < (payload.dob.month, payload.dob.day)
         )
@@ -689,10 +706,17 @@ async def get_patient_consents(
 
 
 def _extract_ip(request: Request) -> str | None:
+    # The column is inet and X-Forwarded-For is client-supplied: an unparsable
+    # value must be dropped, not allowed to turn the photo write into a 500.
     forwarded_for = request.headers.get("x-forwarded-for")
-    if forwarded_for:
-        return forwarded_for.split(",")[0].strip()
-    return request.client.host if request.client else None
+    candidate = (
+        forwarded_for.split(",")[0].strip() if forwarded_for
+        else request.client.host if request.client else None
+    )
+    try:
+        return str(ipaddress.ip_address(candidate)) if candidate else None
+    except ValueError:
+        return None
 
 
 @router.post(
@@ -706,6 +730,7 @@ async def upload_patient_photo(
     request: Request,
     current_db_user: CurrentDbUser,
     db: AsyncSession = Depends(get_db),
+    idempotency_key: str = Depends(_require_idempotency_key),
 ) -> PatientPhotoOut:
     patient = await db.get(Patient, patient_id)
     if patient is None or patient.deleted_at is not None:
@@ -713,6 +738,21 @@ async def upload_patient_photo(
     if patient.facility_id != current_db_user.facility_id:
         raise HTTPException(404, {"code": "patient_not_found"})
 
+    data = await upload.read()
+    await upload.seek(0)
+    # The generic file allow-list also admits PDF and DICOM; neither can be
+    # shown on a registration card or used to recognise a patient at the desk.
+    if files_service.sniff_content_type(data) not in _PHOTO_CONTENT_TYPES:
+        raise HTTPException(422, {"code": "photo_must_be_image",
+            "message": "Patient photo must be a JPEG or PNG image"})
+
+    endpoint = f"POST /patients/{patient_id}/photo"
+    request_hash = hash_request_body(_PhotoFingerprint(sha256=hashlib.sha256(data).hexdigest()))
+    existing = await check_idempotency(db, idempotency_key, endpoint, request_hash, current_db_user.id)
+    if existing is not None:
+        return PatientPhotoOut.model_validate(existing.response_body)
+
+    previous_photo_id = patient.photo_file_id
     file_record = await files_service.upload_file(
         db,
         upload=upload,
@@ -726,7 +766,19 @@ async def upload_patient_photo(
     patient.photo_file_id = file_record.id
     await db.flush()
     await db.refresh(patient)
-    return PatientPhotoOut(photo_file_id=file_record.id, status="uploaded")
+    await _audit_photo_change(db, patient, current_db_user, previous_photo_id, file_record.id)
+
+    response = PatientPhotoOut(photo_file_id=file_record.id, status="uploaded")
+    await record_idempotent_response(
+        db, idempotency_key, endpoint, 200, response.model_dump(mode="json"), current_db_user.id,
+    )
+    if previous_photo_id is not None:
+        # A replaced photograph is still this person's likeness; unlinking it
+        # without erasing would leave it readable by id with no owner screen.
+        await _erase_photo(
+            db, previous_photo_id, current_db_user, request, reason="Patient photo replaced",
+        )
+    return response
 
 
 @router.get(
@@ -764,15 +816,68 @@ async def get_patient_photo(
 )
 async def delete_patient_photo(
     patient_id: uuid.UUID,
+    request: Request,
     current_db_user: CurrentDbUser,
     db: AsyncSession = Depends(get_db),
+    idempotency_key: str = Depends(_require_idempotency_key),
 ) -> dict:
     patient = await db.get(Patient, patient_id)
     if patient is None or patient.deleted_at is not None:
         raise HTTPException(404, {"code": "patient_not_found"})
     if patient.facility_id != current_db_user.facility_id:
         raise HTTPException(404, {"code": "patient_not_found"})
+
+    endpoint = f"DELETE /patients/{patient_id}/photo"
+    existing = await check_idempotency(
+        db, idempotency_key, endpoint, hash_request_body(_NoBody()), current_db_user.id,
+    )
+    if existing is not None:
+        return existing.response_body
+    if patient.photo_file_id is None:
+        raise HTTPException(404, {"code": "photo_not_found", "message": "Patient has no photo attached"})
+
+    previous_photo_id = patient.photo_file_id
     patient.photo_file_id = None
     await db.flush()
-    return {"status": "deleted"}
+    await _audit_photo_change(db, patient, current_db_user, previous_photo_id, None)
+
+    response = {"status": "deleted"}
+    await record_idempotent_response(db, idempotency_key, endpoint, 200, response, current_db_user.id)
+    await _erase_photo(db, previous_photo_id, current_db_user, request, reason="Patient photo removed")
+    return response
+
+
+async def _erase_photo(
+    db: AsyncSession, file_id: uuid.UUID, user: DbUser, request: Request, *, reason: str,
+) -> None:
+    # Last step of the request on purpose: the stored object cannot be put
+    # back, so nothing that could still roll the pointer back may follow it.
+    try:
+        await files_service.erase_file(
+            db, file_id, facility_id=user.facility_id, user_id=user.id,
+            reason=reason, ip_address=_extract_ip(request),
+        )
+    except files_service.FileAlreadyErased:
+        pass
+
+
+async def _audit_photo_change(
+    db: AsyncSession,
+    patient: Patient,
+    user: DbUser,
+    old_file_id: uuid.UUID | None,
+    new_file_id: uuid.UUID | None,
+) -> None:
+    # File ids only: the image itself is personal data and audit_logs is append-only.
+    await write_audit_log(
+        db,
+        facility_id=patient.facility_id,
+        action=AuditAction.UPDATE,
+        resource_type="patients",
+        user_id=user.id,
+        resource_id=patient.id,
+        patient_id=patient.id,
+        old_value={"photo_file_id": str(old_file_id) if old_file_id else None},
+        new_value={"photo_file_id": str(new_file_id) if new_file_id else None},
+    )
 

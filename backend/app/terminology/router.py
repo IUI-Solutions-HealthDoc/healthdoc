@@ -35,7 +35,11 @@ router = APIRouter()
 DbSession = Annotated[AsyncSession, Depends(get_db)]
 
 
-@terminology_router.get("/search", response_model=list[TerminologySearchItem])
+@terminology_router.get(
+    "/search",
+    response_model=list[TerminologySearchItem],
+    dependencies=[Depends(require_roles("doctor", "nurse", "admin"))],
+)
 async def search_clinical_terms(
     q: Annotated[str, Query(min_length=1, description="Search query term or code")],
     system: Annotated[str, Query(description="Coding system: all, icd10, icd11, snomed")] = "all",
@@ -86,18 +90,16 @@ async def record_encounter_specialty_assessment(
     """Record or update structured specialty clinical findings for an encounter."""
     # Scope encounter to clinician's facility
     stmt = (
-        select(Encounter, Visit.patient_id, Visit.facility_id)
-        .join(Visit, Visit.id == Encounter.visit_id)
+        select(Visit.patient_id)
+        .join(Encounter, Visit.id == Encounter.visit_id)
         .where(Encounter.id == encounter_id, Encounter.facility_id == current_user.facility_id,
                Visit.facility_id == current_user.facility_id)
     )
-    row = (await db.execute(stmt)).first()
-    if row is None:
+    patient_id = (await db.execute(stmt)).scalar_one_or_none()
+    # Another facility's encounter is filtered out above and reads as absent:
+    # 404, never 403, so the id cannot be probed for existence.
+    if patient_id is None:
         raise HTTPException(status_code=404, detail={"code": "encounter_not_found", "message": "Encounter not found"})
-
-    encounter, patient_id, facility_id = row
-    if current_user.facility_id != facility_id:
-        raise HTTPException(status_code=403, detail={"code": "facility_mismatch", "message": "Access outside user facility"})
     await require_patient_access(db, patient_id, current_user)
 
     tpl = service.get_specialty_template(payload.specialty_type)
@@ -130,18 +132,14 @@ async def get_encounter_specialty_assessments(
 ) -> list[SpecialtyEncounterOut]:
     """Retrieve recorded specialty clinical findings for an encounter."""
     stmt = (
-        select(Encounter, Visit.facility_id, Visit.patient_id)
-        .join(Visit, Visit.id == Encounter.visit_id)
+        select(Visit.patient_id)
+        .join(Encounter, Visit.id == Encounter.visit_id)
         .where(Encounter.id == encounter_id, Encounter.facility_id == current_user.facility_id,
                Visit.facility_id == current_user.facility_id)
     )
-    row = (await db.execute(stmt)).first()
-    if row is None:
+    patient_id = (await db.execute(stmt)).scalar_one_or_none()
+    if patient_id is None:
         raise HTTPException(status_code=404, detail={"code": "encounter_not_found", "message": "Encounter not found"})
-
-    encounter, facility_id, patient_id = row
-    if current_user.facility_id != facility_id:
-        raise HTTPException(status_code=403, detail={"code": "facility_mismatch", "message": "Access outside user facility"})
     await require_patient_access(db, patient_id, current_user)
 
     records = await service.get_specialty_encounters(db, encounter_id=encounter_id, patient_id=patient_id)

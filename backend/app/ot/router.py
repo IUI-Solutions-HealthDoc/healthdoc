@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import CurrentDbUser, require_roles
 from app.common.db import get_db
+from app.common.patient_scope import facility_today
 from app.ot import service
 from app.ot.schemas import (
     OtRecordCreate,
@@ -194,7 +195,7 @@ async def get_day_list(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, list[OtScheduleOut]]:
     """Get all surgical cases for the day grouped by operating theatre room."""
-    day = target_date or date.today()
+    day = target_date or await facility_today(db, current_db_user.facility_id)
     return await service.get_theatre_day_list(
         db=db,
         facility_id=current_db_user.facility_id,

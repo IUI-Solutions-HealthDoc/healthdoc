@@ -21,6 +21,7 @@ import type {
   VisitCreate,
   VisitWithoutToken,
   StaleVisitsReport,
+  StaleVisitsReconcileRequest,
   StaleVisitsReconcileResult,
 } from "./types";
 import {
@@ -253,6 +254,10 @@ export function createVisit(
   });
 }
 
+export function getVisit(visitId: string): Promise<Visit> {
+  return api<Visit>(`/visits/${visitId}`);
+}
+
 /** Today's queues at the caller's facility, shortest first. */
 export function listQueues(): Promise<QueueSummary[]> {
   return api<QueueSummary[]>("/queue/queues");
@@ -284,10 +289,12 @@ export function listQueueTokens(queueId: string): Promise<QueueTokenList> {
 export function updateTokenPriority(
   tokenId: string,
   payload: TokenPriorityUpdate,
+  idempotencyKey: string,
 ): Promise<QueueToken> {
   return api<QueueToken>(`/queue/tokens/${tokenId}/priority`, {
     method: "PATCH",
     body: JSON.stringify(payload),
+    idempotencyKey,
   });
 }
 
@@ -312,11 +319,13 @@ export function listVisitsWithoutTokens(limit = 50): Promise<VisitWithoutToken[]
 export async function uploadPatientPhoto(
   patientId: string,
   file: File,
+  idempotencyKey: string,
 ): Promise<{ photo_file_id: string; status: string }> {
   const formData = new FormData();
   formData.append("upload", file);
   return api<{ photo_file_id: string; status: string }>(`/patients/${patientId}/photo`, {
     method: "POST",
+    idempotencyKey,
     body: formData,
   });
 }
@@ -331,9 +340,13 @@ export function getPatientPhoto(
 }
 
 /** Remove patient photograph. */
-export function deletePatientPhoto(patientId: string): Promise<{ status: string }> {
+export function deletePatientPhoto(
+  patientId: string,
+  idempotencyKey: string,
+): Promise<{ status: string }> {
   return api<{ status: string }>(`/patients/${patientId}/photo`, {
     method: "DELETE",
+    idempotencyKey,
   });
 }
 
@@ -341,9 +354,11 @@ export function deletePatientPhoto(patientId: string): Promise<{ status: string 
 export function updatePatientDemographics(
   patientId: string,
   payload: Partial<PatientCreate> & { reason?: string },
+  idempotencyKey: string,
 ): Promise<Patient> {
   return api<Patient>(`/patients/${patientId}`, {
     method: "PATCH",
+    idempotencyKey,
     body: JSON.stringify(payload),
   });
 }
@@ -355,16 +370,13 @@ export function getStaleVisits(): Promise<StaleVisitsReport> {
 
 /** HD-12: Reconcile stale visits (e.g. mark LWBS/closed). */
 export function reconcileStaleVisits(
-  visitIds?: string[],
-  reason?: string,
+  request: StaleVisitsReconcileRequest,
+  idempotencyKey: string,
 ): Promise<StaleVisitsReconcileResult> {
   return api<StaleVisitsReconcileResult>("/queue/reconcile-stale-visits", {
     method: "POST",
-    idempotencyKey: crypto.randomUUID(),
-    body: JSON.stringify({
-      visit_ids: visitIds && visitIds.length > 0 ? visitIds : null,
-      reason: reason || "Authorized end-of-day stale visit reconciliation (LWBS / no-show)",
-    }),
+    idempotencyKey,
+    body: JSON.stringify(request),
   });
 }
 
@@ -417,12 +429,14 @@ export function getScanShareTicket(reference: string): Promise<ScanShareTicketIt
 export function checkInScanShareTicket(
   ticketId: string,
   counter: string,
+  idempotencyKey: string,
 ): Promise<ScanShareCheckInResponse> {
   return api<ScanShareCheckInResponse>(
     `/abdm/scan-share/tickets/${encodeURIComponent(ticketId)}/check-in`,
     {
       method: "POST",
       // Server locks the ticket; identical retries preserve the original check-in.
+      idempotencyKey,
       body: JSON.stringify({ counter: counter.trim() }),
     },
   );

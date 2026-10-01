@@ -30,6 +30,7 @@ from app.users.models import Facility, User
 from app.integrations.abdm.fhir.models import FhirBundleTransaction
 from app.outbox.models import OutboxEvent
 from app.queue import service
+from app.queue.models import Roster
 from sqlalchemy import ARRAY, Column, Table, event
 
 _test_chain_seq_counter = count(1)
@@ -252,8 +253,32 @@ async def nursing_seed(db, seed, opd_visit):
 
 
 @pytest_asyncio.fixture
-async def queue(db, seed):
+async def roster_on_duty(db):
+    """Factory for an available roster row.
+
+    create_queue refuses a doctor who is not rostered in that department on
+    that day, so every queue a test opens needs one first.
+    """
+    async def make(department_id, staff_user_id, roster_date=None, shift="morning"):
+        entry = Roster(
+            id=uuid.uuid4(),
+            staff_user_id=staff_user_id,
+            department_id=department_id,
+            shift=shift,
+            roster_date=roster_date or date.today(),
+            is_available=True,
+        )
+        db.add(entry)
+        await db.flush()
+        return entry
+
+    return make
+
+
+@pytest_asyncio.fixture
+async def queue(db, seed, roster_on_duty):
     dept, room, doctor = seed
+    await roster_on_duty(dept.id, doctor.id)
     q = await service.create_queue(
         db,
         department_id=dept.id,

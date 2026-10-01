@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 
 import {
   createEmergencyVisit,
@@ -23,7 +23,7 @@ import {
   type EmergencyDisposition,
 } from "@/features/emergency/api";
 import { PageHeading } from "@/components/common/PageHeading";
-import { ApiError, formatDateTime } from "@/lib/api";
+import { ApiError, formatDateTime, newIdempotencyKey } from "@/lib/api";
 import { useLocale } from "@/lib/i18n";
 
 const initial: EmergencyPatientInput = {
@@ -71,6 +71,10 @@ export default function Page() {
   const [worklistLoading, setWorklistLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [visitBusy, setVisitBusy] = useState(false);
+  // A resend of the same unchanged form keeps its key so the server replays
+  // the THID it already issued; any edit is a different registration.
+  const registrationAttempt = useRef<{ fingerprint: string; key: string } | null>(null);
+  const registrationInFlight = useRef(false);
 
   // Triage board & Metrics states (HD-18)
   const [triages, setTriages] = useState<EmergencyTriageOut[]>([]);
@@ -136,20 +140,29 @@ export default function Page() {
 
   async function submitRegistration(event: React.FormEvent) {
     event.preventDefault();
+    if (registrationInFlight.current) return;
+    const payload: EmergencyPatientInput = {
+      ...form,
+      full_name: form.full_name?.trim() || undefined,
+      mobile: form.mobile?.trim() || undefined,
+    };
+    const fingerprint = JSON.stringify(payload);
+    if (registrationAttempt.current?.fingerprint !== fingerprint) {
+      registrationAttempt.current = { fingerprint, key: newIdempotencyKey() };
+    }
+    registrationInFlight.current = true;
     setBusy(true);
     setError(null);
     setCreatedVisit(null);
     try {
-      const patient = await registerEmergencyPatient({
-        ...form,
-        full_name: form.full_name?.trim() || undefined,
-        mobile: form.mobile?.trim() || undefined,
-      });
+      const patient = await registerEmergencyPatient(payload, registrationAttempt.current.key);
+      registrationAttempt.current = null;
       setCreated(patient);
       setForm(initial);
     } catch (reason) {
       setError(reason instanceof ApiError ? reason.message : t("emergency.errRegistrationFailed"));
     } finally {
+      registrationInFlight.current = false;
       setBusy(false);
     }
   }

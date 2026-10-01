@@ -102,7 +102,7 @@ async def create_order(payload: OrderCreate, current_db_user: CurrentDbUser,
 
 
 @router.get("", response_model=OrderListOut,
-            dependencies=[Depends(require_roles("doctor", "nurse", "receptionist", "admin"))])
+            dependencies=[Depends(require_roles("doctor", "nurse", "admin"))])
 async def list_orders(
     current_db_user: CurrentDbUser,
     encounter_id: UUID = Query(...),
@@ -209,6 +209,11 @@ async def create_external_result(
             status_code=http_status.HTTP_409_CONFLICT,
             detail={"code": exc.code},
         ) from exc
+    except service.ExternalResultInvalid as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": exc.code},
+        ) from exc
     except service.ExternalResultFileInvalid as exc:
         if exc.code == "result_file_not_found":
             raise HTTPException(
@@ -256,7 +261,7 @@ async def get_external_results(
 
 
 @router.get("/{order_id}", response_model=OrderOut,
-            dependencies=[Depends(require_roles("doctor", "nurse", "receptionist", "admin"))])
+            dependencies=[Depends(require_roles("doctor", "nurse", "admin"))])
 async def get_order(order_id: UUID, current_db_user: CurrentDbUser,
                      db: AsyncSession = Depends(get_db)) -> OrderOut:
     order = await service.get_order(db, order_id)

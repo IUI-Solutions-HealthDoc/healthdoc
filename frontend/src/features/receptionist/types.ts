@@ -189,10 +189,10 @@ export const VISIT_TYPE_LABELS: Record<VisitType, string> = {
   direct_service: "Direct Service — Walk-in Lab / Pharmacy",
 };
 
+/** The server stamps `visit_date` itself; none is sent. */
 export interface VisitCreate {
   patient_id: string;
   visit_type: VisitType;
-  visit_date: string;
   department_id?: string | null;
 }
 
@@ -320,6 +320,11 @@ export interface StaleVisitsReport {
   cutoff_date: string;
   candidates: StaleVisitCandidate[];
 }
+
+/** The reviewed visit ids, or an explicit `all`; the server refuses neither. */
+export type StaleVisitsReconcileRequest =
+  | { visit_ids: string[]; reason: string }
+  | { all: true; reason: string };
 
 export interface StaleVisitsReconcileResult {
   reconciled_count: number;

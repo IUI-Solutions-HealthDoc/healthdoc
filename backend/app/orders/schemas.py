@@ -7,6 +7,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.common.business_date import latest_date_anywhere
+
 
 class OrderCreate(BaseModel):
     encounter_id: UUID
@@ -82,7 +84,7 @@ class ExternalResultCreate(BaseModel):
     @field_validator("observed_on")
     @classmethod
     def observed_date_cannot_be_future(cls, value: date | None) -> date | None:
-        if value is not None and value > date.today():
+        if value is not None and value > latest_date_anywhere():
             raise ValueError("observed_on cannot be in the future")
         return value
 
