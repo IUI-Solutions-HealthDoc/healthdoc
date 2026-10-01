@@ -23,10 +23,11 @@ from app.patients.models import Patient
 from app.queue import service
 from app.queue.models import Queue, QueueToken, Roster
 from app.users.models import Facility, User
+from tests.business_day import business_today
 
 pytestmark = pytest.mark.asyncio
 
-TODAY = date.today()
+TODAY = business_today()
 
 
 async def _token(db, queue, opd_visit, visit_id=None):
@@ -285,7 +286,7 @@ async def test_the_doctor_worklist_is_todays_only(db, seed, queue, opd_visit):
         doctor_user_id=doctor.id,
         room_id=queue.room_id,
         display_label="Yesterday",
-        service_date=date.today() - timedelta(days=1),
+        service_date=business_today() - timedelta(days=1),
     )
     stale_visit = await opd_visit()
     stale_token = QueueToken(
