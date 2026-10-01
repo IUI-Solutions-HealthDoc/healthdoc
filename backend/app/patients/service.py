@@ -596,6 +596,9 @@ REPOINTED_ON_MERGE: frozenset[str] = frozenset(
         "abdm_care_contexts",
         "abdm_care_context_links",
         "abdm_consent_requests",
+        # A recent demographic discovery a link-init may still quote; it must
+        # name the same chart as the links it starts (0091).
+        "abdm_discovery_matches",
     }
 )
 
@@ -1056,7 +1059,7 @@ async def _repoint_vitals(db: AsyncSession, *, source: Patient, target: Patient)
 
 
 async def _repoint_abdm_records(db: AsyncSession, *, source: Patient, target: Patient) -> None:
-    """Moves source's ABDM care contexts, links and consent requests onto target.
+    """Moves source's ABDM care contexts, links, consent requests and discovery matches onto target.
 
     WHY THIS IS NOT THREE PLAIN UPDATES
 
@@ -1088,7 +1091,12 @@ async def _repoint_abdm_records(db: AsyncSession, *, source: Patient, target: Pa
         ),
         {"target_id": target.id, "source_id": source.id},
     )
-    for table in ("abdm_care_contexts", "abdm_care_context_links", "abdm_consent_requests"):
+    for table in (
+        "abdm_care_contexts",
+        "abdm_care_context_links",
+        "abdm_consent_requests",
+        "abdm_discovery_matches",
+    ):
         await db.execute(
             text(f"UPDATE {table} SET patient_id = :target_id WHERE patient_id = :source_id"),
             {"target_id": target.id, "source_id": source.id},

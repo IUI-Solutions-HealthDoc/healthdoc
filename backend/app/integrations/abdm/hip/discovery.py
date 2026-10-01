@@ -129,3 +129,152 @@ async def match_by_demographics(
     if len(candidates) == 1:
         return candidates[0], ["MOBILE"]
     return None, []
+
+
+#: How long a demographic match stays quotable by a link-init.
+MATCH_TTL_MINUTES = 30
+
+
+def match_id(facility_id: uuid.UUID, transaction_id: str) -> uuid.UUID:
+    return uuid.uuid5(facility_id, f"abdm-discovery:{transaction_id}")
+
+
+def verified_abha_number(wire: DiscoveryPatient) -> str | None:
+    numbers = {
+        digits
+        for value in _identifiers(wire, _ABHA_NUMBER_TYPES, True)
+        if len(digits := "".join(ch for ch in value if ch.isdigit())) == 14
+    }
+    return numbers.pop() if len(numbers) == 1 else None
+
+
+async def record_match(
+    db: AsyncSession,
+    *,
+    facility_id: uuid.UUID,
+    transaction_id: str,
+    wire: DiscoveryPatient,
+    patient: Patient,
+    references: list[str],
+    matched_by: list[str],
+    now,
+) -> None:
+    """Keep what a link-init for this transaction may quote. First write wins."""
+    from datetime import timedelta
+
+    from app.integrations.abdm.hip.models import AbdmDiscoveryMatch
+
+    ident = match_id(facility_id, transaction_id)
+    if await db.get(AbdmDiscoveryMatch, ident) is not None:
+        return
+    db.add(
+        AbdmDiscoveryMatch(
+            id=ident,
+            facility_id=facility_id,
+            patient_id=patient.id,
+            transaction_id=transaction_id,
+            abha_address=wire.id,
+            abha_number=verified_abha_number(wire),
+            care_context_references=sorted(references),
+            matched_by=matched_by,
+            expires_at=now + timedelta(minutes=MATCH_TTL_MINUTES),
+        )
+    )
+    await db.flush()
+
+
+async def discovered_patient(
+    db: AsyncSession,
+    *,
+    facility_id: uuid.UUID,
+    transaction_id: str,
+    abha_address: str,
+    requested: set[str],
+    now,
+) -> Patient | None:
+    """The chart a recent demographic discovery matched for this exact ask."""
+    from app.integrations.abdm.hip.models import AbdmDiscoveryMatch
+
+    match = await db.get(AbdmDiscoveryMatch, match_id(facility_id, transaction_id))
+    expires = match.expires_at if match else None
+    if (
+        match is None
+        or match.facility_id != facility_id
+        or match.abha_address != abha_address
+        or not requested
+        or not requested <= set(match.care_context_references)
+        or (expires if expires.tzinfo else expires.replace(tzinfo=now.tzinfo)) <= now
+    ):
+        return None
+    patient = await db.get(Patient, match.patient_id)
+    if (
+        patient is None
+        or patient.facility_id != facility_id
+        or patient.deleted_at is not None
+        or patient.merged_into_patient_id is not None
+        or patient.abha_address not in (None, abha_address)
+    ):
+        return None
+    return patient
+
+
+async def link_began_from_match(db: AsyncSession, link) -> bool:
+    """True when this link's transaction is a demographic discovery of its chart."""
+    from app.integrations.abdm.hip.models import AbdmDiscoveryMatch
+
+    if not link.transaction_id:
+        return False
+    match = await db.get(AbdmDiscoveryMatch, match_id(link.facility_id, link.transaction_id))
+    return (
+        match is not None
+        and match.facility_id == link.facility_id
+        and match.patient_id == link.patient_id
+        and match.abha_address == link.abha_address
+    )
+
+
+async def bind_confirmed_identity(
+    db: AsyncSession, *, patient: Patient, abha_address: str, transaction_id: str | None, now
+) -> bool:
+    """Record the ABHA a confirmed, OTP-verified link proved for a mobile-only chart.
+
+    M2 HIP_INIT_NOTIFY_HIECM: "After being linked, the record must be visible
+    in their HIMS along with the ABHA Address and ABHA Number." The CM verified
+    the address; the HIP's OTP went to the mobile this chart holds. Nothing is
+    recorded if the chart already holds an address, or if another chart holds
+    this address or number: both are unique, and overwriting either is a desk
+    decision, not a callback's.
+    """
+    from app.integrations.abdm.hip.models import AbdmDiscoveryMatch
+
+    if patient.abha_address is not None:
+        return False
+    held = (
+        await db.execute(
+            select(Patient.id).where(Patient.abha_address == abha_address, Patient.id != patient.id)
+        )
+    ).first()
+    if held is not None:
+        return False
+    match = (
+        await db.get(AbdmDiscoveryMatch, match_id(patient.facility_id, transaction_id))
+        if transaction_id
+        else None
+    )
+    number = match.abha_number if match and match.patient_id == patient.id else None
+    if number is not None and (
+        (patient.abha_number not in (None, number))
+        or (
+            await db.execute(
+                select(Patient.id).where(Patient.abha_number == number, Patient.id != patient.id)
+            )
+        ).first()
+        is not None
+    ):
+        number = None
+    patient.abha_address = abha_address
+    if number is not None:
+        patient.abha_number = number
+    patient.abha_linked_at = now
+    await db.flush()
+    return True
