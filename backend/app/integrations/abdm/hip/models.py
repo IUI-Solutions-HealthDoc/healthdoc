@@ -92,6 +92,44 @@ class AbdmCareContext(Base, UUIDPk, Timestamps, Blame):
     )
 
 
+class AbdmDiscoveryMatch(Base, UUIDPk, Timestamps):
+    """A PHR discovery that matched a chart by mobile and demographics.
+
+    That chart holds no ABHA address, so the link-init that follows cannot find
+    it by address. This row is the durable fact that discovery transaction T,
+    asked by address A, matched chart P with these care contexts. The reply
+    snapshot that carried the same facts is erased once delivered. id is
+    uuid5(facility_id, transaction_id); a link-init must quote the same
+    transaction and address before the row expires.
+    """
+
+    __tablename__ = "abdm_discovery_matches"
+
+    facility_id = Column(
+        UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False
+    )
+    patient_id = Column(
+        UUID(as_uuid=True), ForeignKey("patients.id", ondelete="RESTRICT"), nullable=False
+    )
+    transaction_id = Column(String(120), nullable=False)
+    abha_address = Column(String(120), nullable=False)
+    #: The ABHA number the CM verified for the asking user, if it sent one;
+    #: recorded on the chart only after a confirmed link.
+    abha_number = Column(String(17), nullable=True)
+    care_context_references = Column(JSONB, nullable=False)
+    matched_by = Column(JSONB, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+
+    __audit_resource_type__ = "abdm_discovery_matches"
+    __audit_facility_id_field__ = "facility_id"
+    __audit_patient_id_field__ = "patient_id"
+
+    __table_args__ = (
+        UniqueConstraint("facility_id", "transaction_id", name="uq_abdm_discovery_matches_txn"),
+        Index("ix_abdm_discovery_matches_patient_id", "patient_id"),
+    )
+
+
 class AbdmCareContextLink(Base, UUIDPk, Timestamps):
     """An ABHA address's claim on this facility's care contexts.
 
