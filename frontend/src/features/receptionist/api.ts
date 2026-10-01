@@ -254,6 +254,10 @@ export function createVisit(
   });
 }
 
+export function getVisit(visitId: string): Promise<Visit> {
+  return api<Visit>(`/visits/${visitId}`);
+}
+
 /** Today's queues at the caller's facility, shortest first. */
 export function listQueues(): Promise<QueueSummary[]> {
   return api<QueueSummary[]>("/queue/queues");

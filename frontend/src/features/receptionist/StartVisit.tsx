@@ -1,15 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { ApiError, newIdempotencyKey } from "@/lib/api";
+import { apiErrorCode } from "@/lib/api-error-policy.mjs";
 import { canRoleAccessPath } from "@/lib/auth/routes";
 import { useLocale, type MessageKey } from "@/lib/i18n";
 import { useAuth } from "@/providers/auth-provider";
-import { useDeskCounter } from "./useDeskCounter";
 
-import { createVisit, issueToken, listQueues } from "./api";
+import { createVisit, getVisit, issueToken, listQueues } from "./api";
 import {
   BED_OCCUPYING_VISIT_TYPES,
   TOKEN_ISSUING_VISIT_TYPES,
@@ -25,6 +25,14 @@ type VisitPatient = Pick<Patient, "id" | "full_name" | "uhid" | "thid">;
 
 const RECEPTION_PRIORITIES = ["normal", "senior_citizen", "pregnant", "follow_up_recall"] as const;
 
+/** The server's 409 when this patient already has an open visit of this type today. */
+function existingOpenVisitId(reason: unknown): string | null {
+  if (!(reason instanceof ApiError) || reason.code !== 409) return null;
+  if (apiErrorCode(reason.payload) !== "open_visit_exists") return null;
+  const payload = reason.payload as { visit_id?: unknown } | undefined;
+  return typeof payload?.visit_id === "string" ? payload.visit_id : null;
+}
+
 /**
  * Register → visit → token, the rest of the OPD entry point.
  *
@@ -36,33 +44,45 @@ const RECEPTION_PRIORITIES = ["normal", "senior_citizen", "pregnant", "follow_up
 export function StartVisit({ patient }: { patient: VisitPatient }) {
   const { t } = useLocale();
   const { user } = useAuth();
-  const { counter } = useDeskCounter();
   const canAccessBilling = canRoleAccessPath(user?.role ?? null, "/billing");
   const canAccessEmergency = canRoleAccessPath(user?.role ?? null, "/emergency");
   const canAccessIpd = canRoleAccessPath(user?.role ?? null, "/ipd");
   const [queues, setQueues] = useState<QueueSummary[] | null>(null);
+  const [queueLoadError, setQueueLoadError] = useState<string | null>(null);
+  const [queueLoadFailed, setQueueLoadFailed] = useState(false);
   const [queueId, setQueueId] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [tokenFailed, setTokenFailed] = useState(false);
+  const [reusedVisit, setReusedVisit] = useState(false);
   const [token, setToken] = useState<QueueToken | null>(null);
   const [visit, setVisit] = useState<Visit | null>(null);
   const [priority, setPriority] = useState("normal");
-  // Optional desk observations (HD-10) — off by default
-  const [enableDeskObs, setEnableDeskObs] = useState(false);
-  const [deskPulse, setDeskPulse] = useState("");
-  const [deskBpSys, setDeskBpSys] = useState("");
-  const [deskBpDia, setDeskBpDia] = useState("");
-  const [deskTemp, setDeskTemp] = useState("");
   // Was hardcoded to "opd", so a hospital with wards could not admit anyone
   // from the desk (REC-03). OPD stays the default because it is the common
   // case, not because it was the only one.
   const [visitType, setVisitType] = useState<VisitType>("opd");
 
-  // One key per patient, for the same reason the registration form holds one:
-  // a retried click must replay the visit, not open a second one and bill a
-  // second registration fee.
-  const visitKey = useMemo(() => newIdempotencyKey(), []);
-  const tokenKey = useMemo(() => newIdempotencyKey(), []);
+  // Keys belong to one patient. The parent also remounts this component per
+  // patient, but a key that outlived a patient switch would replay the
+  // previous patient's visit onto the new one, so they are dropped here too.
+  // A retried click must replay the visit, not open a second one and bill a
+  // second registration fee; a token for a different queue or priority is a
+  // different request and gets its own key.
+  const keys = useRef<{ patientId: string; visit: string; tokens: Map<string, string> } | null>(null);
+  if (keys.current?.patientId !== patient.id) {
+    keys.current = { patientId: patient.id, visit: newIdempotencyKey(), tokens: new Map() };
+  }
+  function tokenKeyFor(visitId: string): string {
+    const scope = `${visitId}|${queueId}|${priority}`;
+    const tokens = keys.current!.tokens;
+    let key = tokens.get(scope);
+    if (!key) {
+      key = newIdempotencyKey();
+      tokens.set(scope, key);
+    }
+    return key;
+  }
 
   // Only an outpatient waits for a number to be called. This screen used to
   // run the OPD pipeline for every visit type: it issued a corridor token to
@@ -71,6 +91,8 @@ export function StartVisit({ patient }: { patient: VisitPatient }) {
   // EMERGENCY or teleconsult visit at all on a day nobody had opened one.
   const needsToken = TOKEN_ISSUING_VISIT_TYPES.includes(visitType);
 
+  // Runs once. Depending on `t` re-ran it on a language switch and reset the
+  // doctor the desk had already chosen back to the first queue.
   useEffect(() => {
     let cancelled = false;
     listQueues()
@@ -82,31 +104,37 @@ export function StartVisit({ patient }: { patient: VisitPatient }) {
         if (rows.length > 0) setQueueId(rows[0].id);
       })
       .catch((reason: unknown) => {
-        if (!cancelled) {
-          setError(reason instanceof ApiError ? reason.message : t("receptionist.errLoadQueuesStartVisit"));
-        }
+        if (cancelled) return;
+        setQueueLoadFailed(true);
+        setQueueLoadError(reason instanceof ApiError ? reason.message : null);
       });
     return () => {
       cancelled = true;
     };
-  }, [t]);
+  }, []);
+
+  async function openOrReuseVisit(): Promise<Visit> {
+    try {
+      return await createVisit({ patient_id: patient.id, visit_type: visitType }, keys.current!.visit);
+    } catch (reason) {
+      const existingId = existingOpenVisitId(reason);
+      if (!existingId) throw reason;
+      const existing = await getVisit(existingId);
+      setReusedVisit(true);
+      return existing;
+    }
+  }
 
   async function start() {
-    if (needsToken && !queueId) return;
+    if (busy || (needsToken && !queueId)) return;
     let visitReady = Boolean(visit);
     setBusy(true);
     setError(null);
+    setTokenFailed(false);
     try {
       let activeVisit = visit;
       if (!activeVisit) {
-        activeVisit = await createVisit(
-          {
-            patient_id: patient.id,
-            visit_type: visitType,
-            visit_date: new Date().toISOString(),
-          },
-          visitKey,
-        );
+        activeVisit = await openOrReuseVisit();
         setVisit(activeVisit);
         visitReady = true;
       }
@@ -114,10 +142,11 @@ export function StartVisit({ patient }: { patient: VisitPatient }) {
       if (!needsToken) return;
       const issued = await issueToken(
         { queue_id: queueId, visit_id: activeVisit.id, priority },
-        tokenKey,
+        tokenKeyFor(activeVisit.id),
       );
       setToken(issued);
     } catch (reason) {
+      if (visitReady) setTokenFailed(true);
       setError(
         reason instanceof ApiError
           ? reason.message
@@ -221,13 +250,28 @@ export function StartVisit({ patient }: { patient: VisitPatient }) {
       <p className="text-sm text-muted-foreground">{t("startVisit.counterFlowHint")}</p>
 
       {visit ? (
-        <p className="rounded-md border border-warning/30 bg-warning-muted p-3 text-sm">
-          {t("startVisit.visitRetryTokenOnly", { visitNumber: visit.visit_number })}
-        </p>
+        <div className="space-y-1 rounded-md border border-warning/30 bg-warning-muted p-3 text-sm">
+          {reusedVisit && <p>{t("startVisit.reusedOpenVisit", { visitNumber: visit.visit_number })}</p>}
+          <p>{t("startVisit.visitRetryTokenOnly", { visitNumber: visit.visit_number })}</p>
+          {tokenFailed && (
+            <p>
+              {t("startVisit.tokenRecoveryHint")}{" "}
+              <Link href="/receptionist/queue" className="font-medium underline">
+                {t("startVisit.visitsAwaitingToken")}
+              </Link>
+            </p>
+          )}
+        </div>
       ) : null}
 
-      {needsToken && queues === null && !error && (
+      {needsToken && queues === null && !queueLoadFailed && (
         <p className="text-sm text-muted-foreground">{t("startVisit.loadingQueues")}</p>
+      )}
+
+      {needsToken && queueLoadFailed && (
+        <p role="alert" className="text-sm text-danger">
+          {queueLoadError ?? t("receptionist.errLoadQueuesStartVisit")}
+        </p>
       )}
 
       {!needsToken && (
@@ -261,7 +305,7 @@ export function StartVisit({ patient }: { patient: VisitPatient }) {
               className="w-full rounded-md border border-border px-3 py-2"
               value={queueId}
               onChange={(e) => setQueueId(e.target.value)}
-              disabled={Boolean(visit)}
+              disabled={busy}
             >
               {queues.map((q) => (
                 <option key={q.id} value={q.id}>
@@ -279,7 +323,7 @@ export function StartVisit({ patient }: { patient: VisitPatient }) {
               className="w-full rounded-md border border-border px-3 py-2"
               value={priority}
               onChange={(event) => setPriority(event.target.value)}
-              disabled={Boolean(visit)}
+              disabled={busy}
             >
               {RECEPTION_PRIORITIES.map((value) => (
                 <option key={value} value={value}>
@@ -303,74 +347,6 @@ export function StartVisit({ patient }: { patient: VisitPatient }) {
           </button>
         </>
       )}
-
-      {/* Desk Observations (HD-10) — Off by default */}
-      <div className="border-t border-border/80 pt-3.5">
-        <button
-          type="button"
-          onClick={() => setEnableDeskObs((prev) => !prev)}
-          className="text-xs text-muted-foreground hover:text-foreground font-medium underline"
-        >
-          {enableDeskObs ? "− Hide Desk Observations" : "+ Optional Desk Observations (Trained Staff Only)"}
-        </button>
-        {enableDeskObs && (
-          <div className="mt-2.5 rounded-lg border border-border bg-muted/20 p-3.5 space-y-2.5">
-            <p className="text-[11px] text-muted-foreground">
-              Counter vitals entry requires authorized clinical training. Units: Pulse (bpm), BP (mmHg), Temp (°F).
-            </p>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              <label className="text-xs space-y-1">
-                <span className="text-muted-foreground">Pulse (bpm)</span>
-                <input
-                  type="number"
-                  placeholder="72"
-                  value={deskPulse}
-                  onChange={(e) => setDeskPulse(e.target.value)}
-                  className="w-full rounded border border-border bg-card px-2 py-1 text-xs"
-                />
-              </label>
-              <label className="text-xs space-y-1">
-                <span className="text-muted-foreground">BP Systolic</span>
-                <input
-                  type="number"
-                  placeholder="120"
-                  value={deskBpSys}
-                  onChange={(e) => setDeskBpSys(e.target.value)}
-                  className="w-full rounded border border-border bg-card px-2 py-1 text-xs"
-                />
-              </label>
-              <label className="text-xs space-y-1">
-                <span className="text-muted-foreground">BP Diastolic</span>
-                <input
-                  type="number"
-                  placeholder="80"
-                  value={deskBpDia}
-                  onChange={(e) => setDeskBpDia(e.target.value)}
-                  className="w-full rounded border border-border bg-card px-2 py-1 text-xs"
-                />
-              </label>
-              <label className="text-xs space-y-1">
-                <span className="text-muted-foreground">Temp (°F)</span>
-                <input
-                  type="number"
-                  step="0.1"
-                  placeholder="98.6"
-                  value={deskTemp}
-                  onChange={(e) => setDeskTemp(e.target.value)}
-                  className="w-full rounded border border-border bg-card px-2 py-1 text-xs"
-                />
-              </label>
-            </div>
-            <p className="text-[10px] text-muted-foreground">
-              {t("startVisit.recordedBy")}{" "}
-              <span className="font-medium text-foreground">
-                {user?.name || t("startVisit.receptionStaff")}
-              </span>{" "}
-              ({counter})
-            </p>
-          </div>
-        )}
-      </div>
 
       {error && (
         <p role="alert" className="text-sm text-danger">

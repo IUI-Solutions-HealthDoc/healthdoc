@@ -189,10 +189,10 @@ export const VISIT_TYPE_LABELS: Record<VisitType, string> = {
   direct_service: "Direct Service — Walk-in Lab / Pharmacy",
 };
 
+/** The server stamps `visit_date` itself; none is sent. */
 export interface VisitCreate {
   patient_id: string;
   visit_type: VisitType;
-  visit_date: string;
   department_id?: string | null;
 }
 
