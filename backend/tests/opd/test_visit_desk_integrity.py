@@ -26,6 +26,7 @@ from app.opd.schemas import VisitStatusUpdate
 from app.patients.models import Patient
 from app.queue import service as queue_service
 from app.users.models import Facility
+from tests.business_day import business_today
 
 
 def _patient(facility_id, created_by) -> Patient:
@@ -211,7 +212,7 @@ async def test_reception_cancel_ends_the_live_queue_token(db, world, roster_on_d
     await roster_on_duty(world["dept"].id, world["actor"].id)
     queue = await queue_service.create_queue(
         db, department_id=world["dept"].id, doctor_user_id=world["actor"].id, room_id=world["room"].id,
-        display_label="Q", service_date=date.today(), caller_facility_id=world["dept"].facility_id,
+        display_label="Q", service_date=business_today(), caller_facility_id=world["dept"].facility_id,
     )
     token = await queue_service.create_token(
         db, queue_id=queue.id, visit_id=visit.id, priority="normal",
@@ -254,7 +255,7 @@ async def test_completed_tokens_are_left_alone(db, world, roster_on_duty):
     await roster_on_duty(world["dept"].id, world["actor"].id)
     queue = await queue_service.create_queue(
         db, department_id=world["dept"].id, doctor_user_id=world["actor"].id, room_id=None,
-        display_label="Q2", service_date=date.today(), caller_facility_id=world["dept"].facility_id,
+        display_label="Q2", service_date=business_today(), caller_facility_id=world["dept"].facility_id,
     )
     token = await queue_service.create_token(
         db, queue_id=queue.id, visit_id=visit.id, priority="normal",
