@@ -432,9 +432,15 @@ async def receive_bundle(
 
     digest_bytes = hashlib.sha256(plaintext.encode()).digest()
     digest_hex = digest_bytes.hex()
+    # ABDM's data-flow specification makes entries[].checksum the MD5 of the
+    # content before encryption; SHA-256 is still accepted from senders that
+    # used it. Either is an integrity check only: AES-GCM authenticated it.
+    md5_bytes = hashlib.md5(plaintext.encode(), usedforsecurity=False).digest()
     if declared_checksum and declared_checksum not in {
         digest_hex,
         base64.b64encode(digest_bytes).decode(),
+        md5_bytes.hex(),
+        base64.b64encode(md5_bytes).decode(),
     }:
         await _record_rejection(
             db,

@@ -233,6 +233,32 @@ async def test_failure_notice_without_a_care_context_is_not_sent(db, transfer_ca
     worker._notify_gateway.assert_not_awaited()
 
 
+async def test_a_refused_push_records_the_hius_status_and_code(monkeypatch):
+    """1 October 2026: ABDM's PHR refused a page with 400 ABDM-9999 and the
+    worker kept only "failed after bounded retries"."""
+    import httpx
+
+    def refuse(request):
+        return httpx.Response(
+            400,
+            json={
+                "code": "ABDM-9999: ",
+                "message": "Could not read encrypted content from input encoded key spec",
+            },
+        )
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        worker.httpx,
+        "AsyncClient",
+        lambda **kw: real_client(transport=httpx.MockTransport(refuse), **kw),
+    )
+    monkeypatch.setattr(worker.asyncio, "sleep", AsyncMock())
+    with pytest.raises(worker.TransientTransferError) as caught:
+        await worker._post_page("https://hiu.example/transfer", {"entries": []})
+    assert str(caught.value) == "HIU data push failed (HIU returned HTTP 400 ABDM-9999)"
+
+
 async def test_unknown_document_dates_are_not_substituted_with_visit_dates(db, transfer_case):
     payload, callback, contexts, pushes = transfer_case
     contexts[1].document_at = None

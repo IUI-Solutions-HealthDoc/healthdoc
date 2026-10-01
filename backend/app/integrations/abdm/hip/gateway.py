@@ -659,10 +659,20 @@ async def notify_hi_transfer(
     """HIP -> gateway. Report what happened to a data push.
 
     `status_responses` is per care context: `careContextReference`, `hiStatus`
-    ("OK" / "ERRORED") and a short `description`. The gateway shows this to the
-    patient, so the description must describe the transfer and never the
-    clinical content.
+    and a short `description`. The gateway shows this to the patient, so the
+    description must describe the transfer and never the clinical content.
+
+    ABDM's data-flow specification gives the HIP its own values: session
+    TRANSFERRED or FAILED, and per care context DELIVERED or ERRORED. "OK" and
+    RECEIVED are the HIU's, and the HIU notice refuses the HIP's in turn.
     """
+    if session_status not in {"TRANSFERRED", "FAILED"}:
+        raise ValueError("A HIP reports TRANSFERRED or FAILED")
+    if not status_responses or any(
+        s.get("hiStatus") not in {"DELIVERED", "ERRORED"} or not s.get("careContextReference")
+        for s in status_responses
+    ):
+        raise ValueError("Each care context is DELIVERED or ERRORED and named")
     settings = get_settings()
     return await _post(
         settings.abdm_path_hip_hi_notify,

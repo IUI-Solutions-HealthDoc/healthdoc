@@ -309,7 +309,9 @@ def encrypt_bundle_for_hiu(
 ) -> tuple[str, dict, str]:
     """Encrypt one FHIR bundle for the requesting HIU.
 
-    Returns (ciphertext_b64, our_key_material_wire, sha256_of_plaintext).
+    Returns (ciphertext_b64, our_key_material_wire, md5_of_plaintext). The
+    checksum is MD5 of the content before encryption, as ABDM's data-flow
+    specification requires of `entries[].checksum`.
 
     A fresh keypair PER BUNDLE. Reusing one across a transfer would mean a
     single compromised ephemeral key opens every record in it, and the cost of
@@ -324,10 +326,12 @@ def encrypt_bundle_for_hiu(
         peer_nonce_b64=hiu_nonce_b64,
     )
     ciphertext = hi_crypto.encrypt(plaintext, aes_key=aes_key, iv=iv)
-    digest = hashlib.sha256(plaintext.encode()).hexdigest()
+    # An integrity checksum ABDM names, not a security control: the content is
+    # already authenticated by AES-GCM.
+    digest = hashlib.md5(plaintext.encode(), usedforsecurity=False).hexdigest()
     # `ours.private_key` goes out of scope here and is never returned, stored
     # or logged. The HIP side of the exchange is genuinely ephemeral.
-    return ciphertext, ours.to_wire(), digest
+    return ciphertext, ours.to_wire(x509=True), digest
 
 
 async def record_hi_request(

@@ -27,6 +27,7 @@ from app.admissions.models import Admission, Discharge
 from app.allergies.models import Allergy
 from app.common.config import get_settings
 from app.common.db import SessionLocal
+from app.integrations.abdm.client import safe_rejection_message
 from app.integrations.abdm.fhir.builder import build_clinical_bundle
 from app.integrations.abdm.hip import gateway as hip_gateway
 from app.integrations.abdm.hip import service as hip_service
@@ -474,12 +475,33 @@ async def _post_page(url: str, payload: dict[str, Any]) -> None:
                 response = await client.post(url, json=payload)
                 if 200 <= response.status_code < 300:
                     return
-                last_error = TransferError(f"HIU returned HTTP {response.status_code}")
+                last_error = TransferError(_push_refusal(response))
             except httpx.HTTPError as exc:
                 last_error = exc
             if attempt + 1 < _MAX_ATTEMPTS:
                 await asyncio.sleep(0.25 * (2**attempt))
-    raise TransientTransferError("HIU data push failed after bounded retries") from last_error
+    reason = str(last_error) if isinstance(last_error, TransferError) else type(last_error).__name__
+    raise TransientTransferError(f"HIU data push failed ({reason})") from last_error
+
+
+def _push_refusal(response: httpx.Response) -> str:
+    """Status and ABDM code of a refused push; its message goes to the log only.
+
+    The worker used to keep only "failed after bounded retries", and the
+    reason ABDM's PHR refused a page (our key encoding, 1 October 2026) had to
+    be recovered by replaying the page by hand.
+    """
+    try:
+        body = response.json()
+    except ValueError:
+        body = None
+    error = body.get("error", body) if isinstance(body, dict) else None
+    code = error.get("code") if isinstance(error, dict) else None
+    code = str(code).strip().rstrip(":").strip()[:20] if code else ""
+    message = safe_rejection_message(body) if body is not None else None
+    if message:
+        log.warning("HIU refused a data push: HTTP %s %s %s", response.status_code, code, message)
+    return f"HIU returned HTTP {response.status_code}" + (f" {code}" if code else "")
 
 
 async def _notify_gateway(
@@ -651,7 +673,7 @@ async def transfer_transaction(transaction_id: str, *, retry_transport: bool = F
                 statuses.append(
                     {
                         "careContextReference": reference,
-                        "hiStatus": "OK",
+                        "hiStatus": "DELIVERED",
                         "description": "FHIR document transferred",
                     }
                 )
@@ -663,7 +685,7 @@ async def transfer_transaction(transaction_id: str, *, retry_transport: bool = F
             await db.commit()
         except Exception as exc:
             if retry_transport and isinstance(exc, TransientTransferError):
-                row.failure_reason = "Data push pending retry"
+                row.failure_reason = f"Data push pending retry: {exc}"[:500]
                 await db.commit()
                 raise
             safe_reason = (
@@ -700,7 +722,7 @@ async def notify_transaction(request_id: uuid.UUID) -> None:
         statuses = [
             {
                 "careContextReference": p.payload["entries"][0]["careContextReference"],
-                "hiStatus": "OK" if p.delivered_at else "ERRORED",
+                "hiStatus": "DELIVERED" if p.delivered_at else "ERRORED",
                 "description": "FHIR document transferred"
                 if p.delivered_at
                 else "Document not transferred",
