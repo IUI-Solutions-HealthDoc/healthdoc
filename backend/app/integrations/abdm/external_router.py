@@ -284,6 +284,9 @@ async def discover(
         subject_ids=[c["referenceNumber"] for g in patient_groups for c in g["careContexts"]],
         response_data={
             "abha_address": payload.patient.id,
+            # What the matched chart held when discovered: the same address,
+            # or None for a mobile-and-demographics match.
+            "chart_address": patient.abha_address if patient else None,
             "wire": {
                 "transaction_id": payload.transaction_id,
                 "patient_groups": patient_groups,

@@ -274,3 +274,55 @@ async def test_discovery_writes_nothing_to_the_patient(db, mobile_only, monkeypa
     assert patient.abha_address is None
     stored = (await db.execute(select(Patient.abha_address).where(Patient.id == patient.id))).scalar()
     assert stored is None
+
+
+def _dispatchable(db, monkeypatch):
+    """Let the real reply job run against this session, as the mediated fixture does."""
+    from types import SimpleNamespace
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.integrations.abdm.hiu import worker as hiu_worker
+
+    monkeypatch.setattr(
+        callback_replies, "SessionLocal", async_sessionmaker(db.bind, expire_on_commit=False)
+    )
+    monkeypatch.setattr(
+        hiu_worker, "get_settings", lambda: SimpleNamespace(abdm_hfr_facility_id="TEST-HFR")
+    )
+
+
+async def test_the_discovery_answer_for_a_mobile_only_chart_is_actually_sent(
+    db, mobile_only, monkeypatch
+):
+    """The committed reply goes through the real dispatcher, which re-checks the
+    chart's binding before sending. A chart with no ABHA address must pass."""
+    patient, contexts, _ = mobile_only
+    _dispatchable(db, monkeypatch)
+    answer = AsyncMock()
+    monkeypatch.setattr(gateway, "respond_to_discovery_groups", answer)
+    await external_router.discover(_discover(), callback(), db)
+    await db.commit()
+    job = (await db.execute(select(jobs.AbdmJob).where(jobs.AbdmJob.kind == "callback_ack"))).scalar_one()
+    await job_runner.run_once(job.id)
+    await db.refresh(job)
+    assert job.status == "done", job.last_error
+    sent = answer.await_args.kwargs
+    assert sent["matched_by"] == ["MOBILE"]
+    found = {c["referenceNumber"] for g in sent["patient_groups"] for c in g["careContexts"]}
+    assert found == {context.reference for context in contexts}
+
+
+async def test_a_chart_bound_elsewhere_after_discovery_is_not_answered(
+    db, mobile_only, monkeypatch
+):
+    patient, _, _ = mobile_only
+    _dispatchable(db, monkeypatch)
+    answer = AsyncMock()
+    monkeypatch.setattr(gateway, "respond_to_discovery_groups", answer)
+    await external_router.discover(_discover(), callback(), db)
+    patient.abha_address = "someone.else@sbx"
+    await db.commit()
+    job = (await db.execute(select(jobs.AbdmJob).where(jobs.AbdmJob.kind == "callback_ack"))).scalar_one()
+    await job_runner.run_once(job.id)
+    answer.assert_not_awaited()

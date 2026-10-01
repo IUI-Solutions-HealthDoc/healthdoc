@@ -57,12 +57,16 @@ async def dispatch(db, reply, job):
         await gateway.respond_to_link_init(**common, **data["wire"])
         return
     patient = await db.get(Patient, reply.target_id) if reply.target_id else None
+    # A demographic discovery matched a chart holding no ABHA address. It may
+    # since have been bound to the address that asked, but to no other.
+    # Snapshots written before `chart_address` existed matched by address.
+    allowed = {data.get("chart_address", data["abha_address"]), data["abha_address"]}
     if reply.target_id and (
         patient is None
         or patient.facility_id != job.facility_id
         or patient.deleted_at is not None
         or patient.merged_into_patient_id is not None
-        or patient.abha_address != data["abha_address"]
+        or patient.abha_address not in allowed
     ):
         raise ValueError("M2 patient binding changed")
     if reply.kind == "hip_discover":
