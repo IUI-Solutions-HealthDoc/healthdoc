@@ -756,6 +756,17 @@ async def verify_login_otp(
         return issued
     accounts = body.get("accounts")
     if not isinstance(accounts, list) or not accounts:
+        # NHA's expected wording for an identifier with no ABHA behind it.
+        if session.login_hint == "mobile":
+            raise AbdmIdentityError(
+                "abha_not_found_for_mobile",
+                "ABHA Number not found. We did not find any ABHA number linked to this "
+                "mobile number. Please use ABHA linked mobile number",
+            )  # VRFY_ABHA_302
+        if session.login_hint == "aadhaar":
+            raise AbdmIdentityError(
+                "abha_not_found_for_aadhaar", "NO ABHA user registered with this Aadhaar Number"
+            )  # VRFY_ABHA_403
         raise AbdmIdentityError("abdm_account_selection_required", "ABDM did not return a verified account")
     choices: list[tuple[str, str | None]] = []
     for account in accounts:
