@@ -156,6 +156,68 @@ async def test_retry_reuses_frozen_ciphertext_and_does_not_rebuild(db, transfer_
     assert (await db.get(AbdmHipHealthInformationRequest, request_id)).status == "delivered"
 
 
+async def _transfer_failing_on_its_last_attempt(db, transfer_case):
+    payload, callback, _, pushes = transfer_case
+    await external_router.hip_health_information_request(payload, BackgroundTasks(), callback, db)
+    await job_runner.run_once()  # Acknowledge, then schedule transfer.
+    pushes.side_effect = worker.TransientTransferError(
+        "HIU data push failed (HIU returned HTTP 400 ABDM-9999)"
+    )
+    job = (
+        await db.execute(select(jobs.AbdmJob).where(jobs.AbdmJob.kind == "hip_transfer"))
+    ).scalar_one()
+    job.attempts = 4  # The next failure is the fifth: the job goes dead.
+    job_ident = job.id
+    await db.commit()
+    assert await job_runner.run_once(job_ident)
+    db.expire_all()
+    return job_ident
+
+
+async def test_an_exhausted_transfer_fails_and_tells_abdm(db, transfer_case):
+    """1 October 2026: request fa9976b2 stayed "transferring" after its push
+    job died, and ABDM was never told the transfer had failed."""
+    job_ident = await _transfer_failing_on_its_last_attempt(db, transfer_case)
+    assert (await db.get(jobs.AbdmJob, job_ident)).status == "dead"
+    row = (await db.execute(select(AbdmHipHealthInformationRequest))).scalar_one()
+    assert row.status == "failed"
+    assert row.failure_reason == (
+        "Data push abandoned after retries: "
+        "HIU data push failed (HIU returned HTTP 400 ABDM-9999)"
+    )
+    notify = (
+        await db.execute(select(jobs.AbdmJob).where(jobs.AbdmJob.kind == "hip_notify"))
+    ).scalar_one()
+    assert notify.status == "pending"
+
+
+async def test_stranded_transfers_are_reconciled_once(db, transfer_case, monkeypatch):
+    real = worker.abandon_transfer
+    monkeypatch.setattr(worker, "abandon_transfer", AsyncMock(return_value=False))
+    await _transfer_failing_on_its_last_attempt(db, transfer_case)
+    monkeypatch.setattr(worker, "abandon_transfer", real)
+    row = (await db.execute(select(AbdmHipHealthInformationRequest))).scalar_one()
+    request_ident, facility_ident = row.id, row.facility_id
+    assert row.status == "transferring"  # Stranded, as before the fix.
+    assert await worker.abandon_exhausted_transfers(facility_ident) == 1
+    assert await worker.abandon_exhausted_transfers(facility_ident) == 0
+    db.expire_all()
+    assert (await db.get(AbdmHipHealthInformationRequest, request_ident)).status == "failed"
+
+
+async def test_a_delivered_transfer_is_never_abandoned(db, transfer_case):
+    payload, callback, _, _ = transfer_case
+    await external_router.hip_health_information_request(payload, BackgroundTasks(), callback, db)
+    await job_runner.run_once()
+    await job_runner.run_once()
+    row = (await db.execute(select(AbdmHipHealthInformationRequest))).scalar_one()
+    request_ident = row.id
+    assert row.status == "delivered"
+    assert await worker.abandon_transfer(request_ident) is False
+    db.expire_all()
+    assert (await db.get(AbdmHipHealthInformationRequest, request_ident)).status == "delivered"
+
+
 async def test_notification_retry_does_not_repeat_clinical_transfer(db, transfer_case, monkeypatch):
     payload, callback, _, pushes = transfer_case
     await external_router.hip_health_information_request(payload, BackgroundTasks(), callback, db)

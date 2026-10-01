@@ -190,6 +190,16 @@ async def run_once(
         finished = await jobs.finish(db, job, error=error, deferred=deferred, terminal=terminal)
         if finished and refused:
             await linking.release_refused_link(db, link_id=job.target_id, reason=error or "")
+        exhausted = (
+            finished
+            and job.kind == "hip_transfer"
+            and error is not None
+            and not deferred
+            and await db.scalar(select(jobs.AbdmJob.status).where(jobs.AbdmJob.id == job.id))
+            == "dead"
+        )
+    if exhausted:
+        await worker.abandon_transfer(job.target_id)
     return True
 
 
