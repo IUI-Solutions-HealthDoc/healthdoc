@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,7 +17,9 @@ from app.immunization.schemas import (
     PatientImmunizationScheduleOut,
 )
 from app.patients.models import Patient
-from app.common.patient_scope import actor_facility, require_patient_scope, facility_timezone
+from app.common.patient_scope import (
+    actor_facility, require_patient_scope, facility_timezone, facility_today,
+)
 
 DEFAULT_NATIONAL_VACCINES = [
     {
@@ -162,7 +164,7 @@ async def get_patient_schedule(db: AsyncSession, patient_id: uuid.UUID) -> Patie
     cat = await get_catalogue(db)
     due_items: list[DueVaccineItem] = []
 
-    today = date.today()
+    today = await facility_today(db, patient.facility_id)
     dob = patient.dob
     age_days = (today - dob).days if dob else None
 

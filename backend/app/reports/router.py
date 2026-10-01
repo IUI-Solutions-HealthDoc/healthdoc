@@ -30,12 +30,13 @@ router = APIRouter(prefix="/reports", tags=["reports"])
 _REPORT_ROLES = ("supervisor", "admin", "auditor", "receptionist", "doctor", "nurse", "billing")
 
 
-def _window(period: str, date_from: date | None, date_to: date | None) -> tuple[date, date]:
-    """Resolve the requested window."""
+def _window(
+    period: str, date_from: date | None, date_to: date | None, today: date
+) -> tuple[date, date]:
+    """Resolve the requested window, ending on the facility's business day."""
     if date_from and date_to:
         return date_from, date_to
 
-    today = date.today()
     spans = {"daily": 1, "weekly": 7, "monthly": 30, "quarterly": 90, "yearly": 365}
     return today - timedelta(days=spans.get(period, 30)), today
 
@@ -59,7 +60,9 @@ async def list_kpis(
     db: AsyncSession = Depends(get_db),
 ) -> KpiListOut:
     """Stored KPI snapshots for this facility, within a window."""
-    start, end = _window(period, date_from, date_to)
+    start, end = _window(
+        period, date_from, date_to, await facility_today(db, current_db_user.facility_id)
+    )
 
     query = select(KpiSnapshot).where(
         KpiSnapshot.facility_id == current_db_user.facility_id,

@@ -209,6 +209,11 @@ async def create_external_result(
             status_code=http_status.HTTP_409_CONFLICT,
             detail={"code": exc.code},
         ) from exc
+    except service.ExternalResultInvalid as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": exc.code},
+        ) from exc
     except service.ExternalResultFileInvalid as exc:
         if exc.code == "result_file_not_found":
             raise HTTPException(

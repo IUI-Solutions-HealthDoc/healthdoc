@@ -80,12 +80,11 @@ TOKEN_ELIGIBLE_VISIT_STATUSES = OPEN_VISIT_STATUSES
 _NOT_FOUND = HTTPException(404, "Queue not found")
 
 
-def _patient_age(dob: date | None, age_years: int | None) -> int:
+def _patient_age(dob: date | None, age_years: int | None, today: date) -> int:
     if age_years is not None:
         return age_years
     if dob is None:
         return 0
-    today = date.today()
     return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
 
 
@@ -145,6 +144,7 @@ async def get_doctor_worklist(
         )
 
     rows = (await db.execute(query)).all()
+    today = await get_business_date(db, caller_facility_id)
     return [
         {
             "id": token.id,
@@ -160,7 +160,7 @@ async def get_doctor_worklist(
             "patient_id": patient_id,
             "full_name": full_name,
             "uhid": uhid or thid or "—",
-            "age_years": _patient_age(dob, age_years),
+            "age_years": _patient_age(dob, age_years, today),
             "sex": sex,
             "provider_user_id": doctor_user_id,
             "provider_name": provider_name,

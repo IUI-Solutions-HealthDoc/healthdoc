@@ -51,6 +51,11 @@ class ExternalResultFileInvalid(Exception):
         self.code = code
 
 
+class ExternalResultInvalid(Exception):
+    def __init__(self, code: str) -> None:
+        self.code = code
+
+
 #: Which optional module fulfils each order type (§2 v3.3, ModuleCode).
 #:
 #: `procedure` is absent ON PURPOSE and must stay absent. ProcedureSetting is
@@ -198,6 +203,10 @@ async def record_external_result(
         raise ExternalResultConflict("order_not_external_referral")
     if order.status == OrderStatus.CANCELLED.value:
         raise ExternalResultConflict("order_cancelled")
+    if payload.observed_on is not None:
+        facility = await db.get(Facility, facility_id)
+        if facility is not None and payload.observed_on > _business_date(facility.timezone):
+            raise ExternalResultInvalid("observed_on_in_future")
 
     if payload.result_file_id is not None:
         file_record = await db.get(FileRecord, payload.result_file_id)

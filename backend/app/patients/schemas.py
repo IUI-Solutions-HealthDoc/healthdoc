@@ -7,6 +7,7 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.common.business_date import latest_date_anywhere
 from app.common.enums import Sex
 
 
@@ -160,7 +161,7 @@ class PatientCreate(BaseModel):
     def _dob_or_age_required(self) -> PatientCreate:
         if (self.dob is None) == (self.age_years is None):
             raise ValueError("Exactly one of dob or age_years is required")
-        if self.dob is not None and self.dob > date.today():
+        if self.dob is not None and self.dob > latest_date_anywhere():
             raise ValueError("dob cannot be in the future")
         if self.age_years is not None and (self.age_years < 0 or self.age_years > 130):
             raise ValueError("age_years must be between 0 and 130")
