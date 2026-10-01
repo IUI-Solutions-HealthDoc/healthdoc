@@ -450,12 +450,35 @@ async def test_hi_transfer_notification_identifies_us_as_the_hip(stub):
         consent_id="C-1",
         transaction_id="T-1",
         session_status="TRANSFERRED",
-        status_responses=[{"careContextReference": "V-1", "hiStatus": "OK", "description": "sent"}],
+        status_responses=[
+            {"careContextReference": "V-1", "hiStatus": "DELIVERED", "description": "sent"}
+        ],
     )
     n = stub.last["json"]["notification"]
     assert n["notifier"] == {"type": "HIP", "id": "SBXID_TEST_HIP"}
     assert n["statusNotification"]["hipId"] == "SBXID_TEST_HIP"
     assert stub.last["path"] == "/api/hiecm/data-flow/v3/health-information/notify"
+
+
+@pytest.mark.parametrize(
+    ("session_status", "entry"),
+    [
+        ("RECEIVED", {"careContextReference": "V-1", "hiStatus": "DELIVERED"}),
+        ("TRANSFERRED", {"careContextReference": "V-1", "hiStatus": "OK"}),
+        ("FAILED", {"careContextReference": "", "hiStatus": "ERRORED"}),
+    ],
+)
+async def test_hip_notification_sends_only_the_hips_own_values(stub, session_status, entry):
+    """ABDM's data-flow specification: a HIP reports TRANSFERRED or FAILED and
+    DELIVERED or ERRORED per named care context. OK and RECEIVED are the HIU's."""
+    with pytest.raises(ValueError):
+        await hip_gw.notify_hi_transfer(
+            consent_id="C-1",
+            transaction_id="T-1",
+            session_status=session_status,
+            status_responses=[entry],
+        )
+    assert stub.calls == []
 
 
 # =============================================================================
