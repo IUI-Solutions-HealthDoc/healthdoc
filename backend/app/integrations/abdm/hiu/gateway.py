@@ -39,13 +39,44 @@ from typing import Any
 
 from app.common.config import get_settings
 from app.integrations.abdm.client import AbdmProtocolError, AbdmResponse, get_abdm_client
-from app.integrations.abdm.hip.gateway import HI_TYPES, validate_hi_types
 from app.integrations.abdm.hiu.requester import validate_requester
 
 log = logging.getLogger("healthdoc.abdm")
 
+#: What an HIU may ASK for: all seven HI types ABDM's M3 cases name
+#: (HIU_FLOW_102: "all or any of the 7 Health Info types"; 111 is
+#: ImmunizationRecord, 112 HealthDocumentRecord). Deliberately not the HIP
+#: vocabulary in hip/gateway.py: that is what HealthDoc can BUILD, while
+#: another HIP's immunization or scanned-document records must still be
+#: requestable and viewable here.
+REQUESTABLE_HI_TYPES: frozenset[str] = frozenset(
+    {
+        "OPConsultation",
+        "Prescription",
+        "DiagnosticReport",
+        "DischargeSummary",
+        "ImmunizationRecord",
+        "HealthDocumentRecord",
+        "WellnessRecord",
+    }
+)
+
+
+def validate_requestable_hi_types(hi_types: Sequence[str]) -> list[str]:
+    unknown = sorted(set(hi_types) - REQUESTABLE_HI_TYPES)
+    if unknown:
+        raise ValueError(
+            f"Unknown ABDM health-information type(s): {', '.join(unknown)}. "
+            f"Allowed: {', '.join(sorted(REQUESTABLE_HI_TYPES))}"
+        )
+    if not hi_types:
+        raise ValueError("At least one health-information type is required")
+    return list(hi_types)
+
+
 __all__ = [
-    "HI_TYPES",
+    "REQUESTABLE_HI_TYPES",
+    "validate_requestable_hi_types",
     "HiuIdentityNotConfigured",
     "DataPushUrlNotConfigured",
     "hiu_id",
@@ -168,7 +199,7 @@ async def request_consent(
     example sends (`"hip": null`).
     """
     settings = get_settings()
-    validate_hi_types(hi_types)
+    validate_requestable_hi_types(hi_types)
     if date_to < date_from:
         raise ValueError("date_to is before date_from")
     verified_requester = validate_requester(requester)

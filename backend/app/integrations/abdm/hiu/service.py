@@ -102,10 +102,10 @@ async def create_consent_request(
         raise HiuError("no_hi_types", "At least one health-information type is required")
     if date_range_to < date_range_from:
         raise HiuError("invalid_range", "The requested period ends before it starts")
-    from app.integrations.abdm.fhir.builder import RECORD_TYPES
+    from app.integrations.abdm.hiu.gateway import REQUESTABLE_HI_TYPES
     from app.patients.models import Patient
 
-    if not set(hi_types).issubset(RECORD_TYPES):
+    if not set(hi_types).issubset(REQUESTABLE_HI_TYPES):
         raise HiuError("unsupported_hi_type", "This record type is not supported")
     if _aware(requested_expiry) <= datetime.now(UTC):
         raise HiuError("invalid_expiry", "Consent expiry must be in the future")
