@@ -6,8 +6,10 @@ is what recovers accepted work after an API process dies or reloads.
 
 import argparse
 import asyncio
+import json
 import logging
 import uuid
+from collections.abc import Callable
 from contextlib import suppress
 from datetime import UTC, datetime
 
@@ -16,7 +18,13 @@ from sqlalchemy import or_, select
 from app.common.config import get_settings
 from app.common.db import SessionLocal
 from app.integrations.abdm import jobs
-from app.integrations.abdm.client import AbdmAuthError, AbdmProtocolError, safe_failure_summary
+from app.integrations.abdm.client import (
+    AbdmAuthError,
+    AbdmProtocolError,
+    AbdmRejected,
+    safe_failure_summary,
+    safe_rejection_message,
+)
 from app.integrations.abdm.hip import gateway, linking, worker
 from app.integrations.abdm.hip.documents import DocumentUnavailable, resolve_context_document
 from app.integrations.abdm.hip.models import (
@@ -130,9 +138,17 @@ async def _heartbeat(ident: uuid.UUID, token: uuid.UUID) -> None:
                 raise RuntimeError("ABDM job lease lost")
 
 
-async def run_once(ident: uuid.UUID | None = None) -> bool:
+async def run_once(
+    ident: uuid.UUID | None = None,
+    *,
+    facility_id: uuid.UUID | None = None,
+    created_since: datetime | None = None,
+) -> bool:
     async with SessionLocal() as db:
-        job = await jobs.claim(db, ident=ident)
+        scope = {}
+        if facility_id is not None or created_since is not None:
+            scope = {"facility_id": facility_id, "created_since": created_since}
+        job = await jobs.claim(db, ident=ident, **scope)
     if job is None:
         return False
     task = asyncio.create_task(_dispatch(job))
@@ -140,6 +156,7 @@ async def run_once(ident: uuid.UUID | None = None) -> bool:
     error = None
     deferred = False
     terminal = False
+    refused = False
     try:
         done, _ = await asyncio.wait({task, heartbeat}, return_when=asyncio.FIRST_COMPLETED)
         if heartbeat in done:
@@ -155,7 +172,14 @@ async def run_once(ident: uuid.UUID | None = None) -> bool:
         # link token, and must not consume the token-generation quota.
         # An unexpected response is not evidence that repeating the operation
         # is safe either. Preserve the diagnostic for deliberate reconciliation.
-        terminal = isinstance(exc, AbdmAuthError | AbdmProtocolError)
+        terminal = isinstance(exc, AbdmAuthError | AbdmProtocolError) or (
+            # A link token is single-use at the gateway: a refused link request
+            # has spent it, so a retry can only earn a 401 (29 Sep 2026).
+            job.kind == "link_context" and isinstance(exc, AbdmRejected)
+        )
+        refused = job.kind == "link_context" and isinstance(exc, AbdmRejected | AbdmAuthError)
+        if isinstance(exc, AbdmRejected):
+            _report_refusal(job, exc, error)
         log.warning("ABDM job failed (%s)", error)
     finally:
         for pending in (task, heartbeat):
@@ -163,9 +187,42 @@ async def run_once(ident: uuid.UUID | None = None) -> bool:
             with suppress(asyncio.CancelledError, Exception):
                 await pending
     async with SessionLocal() as db:
-        await jobs.finish(db, job, error=error, deferred=deferred, terminal=terminal)
+        finished = await jobs.finish(db, job, error=error, deferred=deferred, terminal=terminal)
+        if finished and refused:
+            await linking.release_refused_link(db, link_id=job.target_id, reason=error or "")
+        exhausted = (
+            finished
+            and job.kind == "hip_transfer"
+            and error is not None
+            and not deferred
+            and await db.scalar(select(jobs.AbdmJob.status).where(jobs.AbdmJob.id == job.id))
+            == "dead"
+        )
+    if exhausted:
+        await worker.abandon_transfer(job.target_id)
     return True
 
+
+
+#: Where scrubbed gateway refusals are reported. The session runner prints them,
+#: because it disables logging (library logs can carry request parameters);
+#: without a listener they go to the log. Never written to the database.
+refusal_listener: Callable[[dict], None] | None = None
+
+
+def _report_refusal(job, exc: AbdmRejected, summary: str) -> None:
+    detail = {
+        "job_kind": job.kind,
+        "job_id": str(job.id),
+        "request_id": exc.request_id,
+        "http_status": exc.status_code,
+        "summary": summary,
+        "message": safe_rejection_message(exc.detail),
+    }
+    if refusal_listener is not None:
+        refusal_listener(detail)
+    else:
+        log.warning("ABDM refused a request %s", json.dumps(detail))
 
 async def cleanup_expired_keys() -> int:
     """Run even without new callbacks. Lock the same request rows as reception."""
@@ -222,17 +279,26 @@ async def cleanup_expired_keys() -> int:
             if link.status == "pending":
                 link.status = "expired"
                 link.failure_reason = "Link credential use window expired; start linking again"
-        replies = list((await db.execute(
-            select(jobs.AbdmCallbackReply).where(
-                jobs.AbdmCallbackReply.response_encrypted.is_not(None),
-                or_(
-                    jobs.AbdmCallbackReply.response_expires_at <= now,
-                    jobs.AbdmCallbackReply.id.in_(select(jobs.AbdmJob.target_id).where(
-                        jobs.AbdmJob.kind == "callback_ack", jobs.AbdmJob.status == "done",
-                    )),
-                ),
-            ).with_for_update(skip_locked=True)
-        )).scalars())
+        replies = list(
+            (
+                await db.execute(
+                    select(jobs.AbdmCallbackReply)
+                    .where(
+                        jobs.AbdmCallbackReply.response_encrypted.is_not(None),
+                        or_(
+                            jobs.AbdmCallbackReply.response_expires_at <= now,
+                            jobs.AbdmCallbackReply.id.in_(
+                                select(jobs.AbdmJob.target_id).where(
+                                    jobs.AbdmJob.kind == "callback_ack",
+                                    jobs.AbdmJob.status == "done",
+                                )
+                            ),
+                        ),
+                    )
+                    .with_for_update(skip_locked=True)
+                )
+            ).scalars()
+        )
         for reply in replies:
             reply.response_encrypted = None
         from app.integrations.abdm.callback_evidence import expire_receipts
@@ -293,7 +359,9 @@ async def _poll_jobs() -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode", choices=["all", "cleanup"], default="all")
-    parser.add_argument("--once", action="store_true", help="Run cleanup once; fail nonzero on errors")
+    parser.add_argument(
+        "--once", action="store_true", help="Run cleanup once; fail nonzero on errors"
+    )
     options = parser.parse_args()
     if options.once and options.mode != "cleanup":
         parser.error("--once requires --mode cleanup")

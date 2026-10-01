@@ -27,6 +27,7 @@ from app.admissions.models import Admission, Discharge
 from app.allergies.models import Allergy
 from app.common.config import get_settings
 from app.common.db import SessionLocal
+from app.integrations.abdm.client import safe_rejection_message
 from app.integrations.abdm.fhir.builder import build_clinical_bundle
 from app.integrations.abdm.hip import gateway as hip_gateway
 from app.integrations.abdm.hip import service as hip_service
@@ -37,7 +38,7 @@ from app.integrations.abdm.hip.models import (
     AbdmHipHealthInformationRequest,
     AbdmHipTransferPage,
 )
-from app.integrations.abdm.jobs import enqueue, job_id
+from app.integrations.abdm.jobs import AbdmJob, enqueue, job_id
 from app.nursing.models import Vitals
 from app.opd.models import Diagnosis
 from app.orders.models import Order, Prescription, PrescriptionItem
@@ -474,12 +475,33 @@ async def _post_page(url: str, payload: dict[str, Any]) -> None:
                 response = await client.post(url, json=payload)
                 if 200 <= response.status_code < 300:
                     return
-                last_error = TransferError(f"HIU returned HTTP {response.status_code}")
+                last_error = TransferError(_push_refusal(response))
             except httpx.HTTPError as exc:
                 last_error = exc
             if attempt + 1 < _MAX_ATTEMPTS:
                 await asyncio.sleep(0.25 * (2**attempt))
-    raise TransientTransferError("HIU data push failed after bounded retries") from last_error
+    reason = str(last_error) if isinstance(last_error, TransferError) else type(last_error).__name__
+    raise TransientTransferError(f"HIU data push failed ({reason})") from last_error
+
+
+def _push_refusal(response: httpx.Response) -> str:
+    """Status and ABDM code of a refused push; its message goes to the log only.
+
+    The worker used to keep only "failed after bounded retries", and the
+    reason ABDM's PHR refused a page (our key encoding, 1 October 2026) had to
+    be recovered by replaying the page by hand.
+    """
+    try:
+        body = response.json()
+    except ValueError:
+        body = None
+    error = body.get("error", body) if isinstance(body, dict) else None
+    code = error.get("code") if isinstance(error, dict) else None
+    code = str(code).strip().rstrip(":").strip()[:20] if code else ""
+    message = safe_rejection_message(body) if body is not None else None
+    if message:
+        log.warning("HIU refused a data push: HTTP %s %s %s", response.status_code, code, message)
+    return f"HIU returned HTTP {response.status_code}" + (f" {code}" if code else "")
 
 
 async def _notify_gateway(
@@ -651,7 +673,7 @@ async def transfer_transaction(transaction_id: str, *, retry_transport: bool = F
                 statuses.append(
                     {
                         "careContextReference": reference,
-                        "hiStatus": "OK",
+                        "hiStatus": "DELIVERED",
                         "description": "FHIR document transferred",
                     }
                 )
@@ -663,7 +685,7 @@ async def transfer_transaction(transaction_id: str, *, retry_transport: bool = F
             await db.commit()
         except Exception as exc:
             if retry_transport and isinstance(exc, TransientTransferError):
-                row.failure_reason = "Data push pending retry"
+                row.failure_reason = f"Data push pending retry: {exc}"[:500]
                 await db.commit()
                 raise
             safe_reason = (
@@ -677,6 +699,55 @@ async def transfer_transaction(transaction_id: str, *, retry_transport: bool = F
             await enqueue(db, kind="hip_notify", target_id=row.id, facility_id=row.facility_id)
             await db.commit()
             log.error("ABDM transfer failed (%s)", type(exc).__name__)
+
+
+async def abandon_transfer(request_id: uuid.UUID) -> bool:
+    """Close a transfer whose push job ran out of retries, and tell ABDM.
+
+    A dead hip_transfer job used to leave its request "transferring" with no
+    notice (1 October 2026, request fa9976b2): the HIU waited for data that
+    would never come. Mark it failed with the last push reason and queue the
+    FAILED notification. Delivered or already-failed requests are left alone.
+    """
+    async with SessionLocal() as db:
+        row = (
+            await db.execute(
+                select(AbdmHipHealthInformationRequest)
+                .where(AbdmHipHealthInformationRequest.id == request_id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if row is None or row.status != "transferring":
+            return False
+        reason = (row.failure_reason or "").removeprefix("Data push pending retry: ")
+        row.status = "failed"
+        row.failure_reason = f"Data push abandoned after retries: {reason or 'no detail'}"[:500]
+        row.completed_at = datetime.now(UTC)
+        await enqueue(db, kind="hip_notify", target_id=row.id, facility_id=row.facility_id)
+        await db.commit()
+        return True
+
+
+async def abandon_exhausted_transfers(facility_id: uuid.UUID) -> int:
+    """Reconcile transfers stranded by a dead push job before abandon_transfer existed."""
+    async with SessionLocal() as db:
+        stranded = (
+            (
+                await db.execute(
+                    select(AbdmHipHealthInformationRequest.id)
+                    .join(AbdmJob, AbdmJob.target_id == AbdmHipHealthInformationRequest.id)
+                    .where(
+                        AbdmHipHealthInformationRequest.facility_id == facility_id,
+                        AbdmHipHealthInformationRequest.status == "transferring",
+                        AbdmJob.kind == "hip_transfer",
+                        AbdmJob.status == "dead",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    return sum([await abandon_transfer(ident) for ident in stranded])
 
 
 async def notify_transaction(request_id: uuid.UUID) -> None:
@@ -700,7 +771,7 @@ async def notify_transaction(request_id: uuid.UUID) -> None:
         statuses = [
             {
                 "careContextReference": p.payload["entries"][0]["careContextReference"],
-                "hiStatus": "OK" if p.delivered_at else "ERRORED",
+                "hiStatus": "DELIVERED" if p.delivered_at else "ERRORED",
                 "description": "FHIR document transferred"
                 if p.delivered_at
                 else "Document not transferred",
@@ -708,12 +779,30 @@ async def notify_transaction(request_id: uuid.UUID) -> None:
             for p in pages
         ]
         if not statuses:
+            # Refused before any page was built (no authorised author, say).
+            # NHA kept refusing this notice when it named care context "", so
+            # report each care context the consent covered. With none to
+            # name, there is no valid notice to send.
+            artefact = (
+                await db.execute(
+                    select(AbdmHipConsentArtefact).where(
+                        AbdmHipConsentArtefact.consent_artefact_id == row.consent_artefact_id,
+                        AbdmHipConsentArtefact.facility_id == row.facility_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            references = hip_service.consented_care_contexts(
+                artefact.raw_artefact if artefact else None
+            )
+            if not references:
+                raise TransferError("Failed transfer has no care context to report against")
             statuses = [
                 {
-                    "careContextReference": "",
+                    "careContextReference": reference,
                     "hiStatus": "ERRORED",
                     "description": "Health information transfer failed",
                 }
+                for reference in references
             ]
         await _notify_gateway(
             row,

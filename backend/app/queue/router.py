@@ -20,6 +20,8 @@ from app.common.idempotency import check_idempotency, hash_request_body, record_
 from app.common.redis import publish_event, queue_channel, subscribe
 from app.queue import reconciliation, service
 from app.queue.schemas import (
+    BookableProviderOut,
+    BookableProvidersOut,
     CompleteAdvanceOut,
     DepartmentWorkloadOut,
     DoctorWorklistItemOut,
@@ -254,6 +256,25 @@ async def list_queue_opening_options(
 
 
 @router.get(
+    "/bookable-providers",
+    dependencies=[Depends(require_roles("receptionist", "admin"))],
+)
+async def list_bookable_providers(
+    current_db_user: CurrentDbUser,
+    service_date: date = Query(...),
+    department_id: uuid.UUID | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    rows = await service.list_bookable_providers(
+        db, current_db_user.facility_id, service_date, department_id
+    )
+    return BookableProvidersOut(
+        service_date=service_date,
+        items=[BookableProviderOut(**row) for row in rows],
+    ).model_dump(mode="json")
+
+
+@router.get(
     "/visits-without-tokens",
     response_model=list[VisitWithoutTokenOut],
     dependencies=[Depends(require_roles("receptionist", "nurse", "emergency", "doctor", "admin"))],
@@ -373,8 +394,21 @@ async def elevate_priority(
     user: CurrentUser,
     current_db_user: CurrentDbUser,
     db: AsyncSession = Depends(get_db),
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
     actor: AuditActor = Depends(get_current_actor_dependency),
 ) -> dict:
+    # A retried change would otherwise answer 422 "already <priority>" after
+    # the first attempt succeeded, which the desk reads as a failure.
+    if not idempotency_key:
+        raise HTTPException(400, "Idempotency-Key header is required")
+    endpoint = f"PATCH /queue/tokens/{token_id}/priority"
+    request_hash = hash_request_body(payload)
+    existing = await check_idempotency(
+        db, idempotency_key, endpoint, request_hash, current_db_user.id
+    )
+    if existing is not None:
+        return existing.response_body
+
     caller_facility_id = current_db_user.facility_id
     token = await service.elevate_priority(
         db,
@@ -386,7 +420,11 @@ async def elevate_priority(
         caller_amr=user.amr,
         caller_facility_id=caller_facility_id,
     )
-    return QueueTokenOut.model_validate(token).model_dump(mode="json")
+    response_body = QueueTokenOut.model_validate(token).model_dump(mode="json")
+    await record_idempotent_response(
+        db, idempotency_key, endpoint, 200, response_body, user_id=current_db_user.id,
+    )
+    return response_body
 
 
 # ---------------- LIST QUEUE TOKENS ----------------
@@ -752,36 +790,35 @@ async def reconcile_stale_visits(
 ):
     """Safely reconcile stale visits (e.g. mark LWBS, close consultations, cancel live tokens)."""
     endpoint = "POST /queue/reconcile-stale-visits"
-    if idempotency_key:
-        cached = await check_idempotency(
-            db,
-            idempotency_key,
-            endpoint,
-            hash_request_body(payload),
-            user_id=current_db_user.id,
-        )
-        if cached is not None:
-            return cached.response_body
+    if not idempotency_key:
+        raise HTTPException(400, "Idempotency-Key header is required")
+    cached = await check_idempotency(
+        db,
+        idempotency_key,
+        endpoint,
+        hash_request_body(payload),
+        user_id=current_db_user.id,
+    )
+    if cached is not None:
+        return cached.response_body
 
     result = await reconciliation.reconcile_stale_visits(
         db,
         facility_id=current_db_user.facility_id,
         actor_id=current_db_user.id,
-        visit_ids=payload.visit_ids,
         reason=payload.reason,
+        visit_ids=None if payload.all else payload.visit_ids,
+    )
+    # One commit: the status changes, their audit rows and the receipt land
+    # together, so a retry after a lost response replays instead of re-running.
+    await record_idempotent_response(
+        db,
+        idempotency_key,
+        endpoint,
+        200,
+        result.model_dump(mode="json"),
+        user_id=current_db_user.id,
     )
     await db.commit()
-
-    if idempotency_key:
-        await record_idempotent_response(
-            db,
-            idempotency_key,
-            endpoint,
-            200,
-            result.model_dump(mode="json"),
-            user_id=current_db_user.id,
-        )
-        await db.commit()
-
     return result
 

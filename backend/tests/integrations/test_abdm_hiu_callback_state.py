@@ -239,7 +239,7 @@ async def test_late_grant_does_not_reopen_consent(hiu_db, callback_case, state):
     assert (await hiu_db.execute(select(jobs.AbdmCallbackReply))).scalar_one().kind == "hiu_consent"
 
 
-@pytest.mark.parametrize("change", ["patient", "hiu", "type", "from", "to", "expiry"])
+@pytest.mark.parametrize("change", ["patient", "hiu", "no_hiu", "type", "from", "to", "expiry"])
 async def test_fetched_grant_cannot_change_patient_or_widen_request(hiu_db, callback_case, change):
     request, artefact, _, callback = callback_case
     payload = fetch_payload(request, artefact)
@@ -248,6 +248,10 @@ async def test_fetched_grant_cannot_change_patient_or_widen_request(hiu_db, call
         detail.patient.id = "not-this-patient@sbx"
     elif change == "hiu":
         detail.hiu.id = "NOT-THIS-HIU"
+    elif change == "no_hiu":
+        # Optional on the wire since NHA's HIP notification omits it; an HIU
+        # grant without one is still not ours to accept.
+        detail.hiu = None
     elif change == "type":
         detail.hi_types = ["Prescription"]
     elif change == "from":

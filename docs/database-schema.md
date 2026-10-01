@@ -207,6 +207,7 @@ do not merge out of order.**
 | 0086 | catalogue_hindi_labels | ALTER facilities: name_hi; ALTER departments: name_hi; ALTER wards: name_hi; ALTER charge_master: description_hi | Optional Hindi catalogue labels; English remains the fallback. Widens the existing profile-token kind to varchar(50) for local schema parity. |
 | 0087 | appointment_service_hindi | ALTER appointment_services: name_hi | Optional Hindi appointment-service label; English remains the fallback. |
 | 0088 | abdm_frozen_delivery_jobs | abdm_jobs | Widens the status CHECK with `frozen` for historical jobs held during a service-ID cutover; the delivery worker and operator retry must not dispatch them. |
+| 0089 | uuid_pk_defaults_visit_status | ALTER appointment_services: id; ALTER appointments: id; ALTER clinical_dispositions: id; ALTER admission_checklist_tasks: id; ALTER emergency_triages: id; ALTER emergency_triage_logs: id; ALTER lab_analytes: id; ALTER visits: status | Restores the `uuid_generate_v4()` id default 0074–0076 omitted (every insert failed on PostgreSQL) and widens the visit status CHECK with `in_consultation` and `closed`, which the OPD state machine writes. |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.

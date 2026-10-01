@@ -48,6 +48,9 @@ def test_stale_visits_reconcile_schemas():
     assert req.visit_ids == [v1]
     assert req.reason == "Daily review reconciliation"
 
+    everything = StaleVisitsReconcileRequest(all=True, reason="Month-end clean-up of open visits")
+    assert everything.visit_ids is None
+
     res = StaleVisitsReconcileResult(
         reconciled_count=1,
         skipped_count=0,
@@ -56,3 +59,19 @@ def test_stale_visits_reconcile_schemas():
     )
     assert res.reconciled_count == 1
     assert res.reconciled_visits == [v1]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"reason": "Daily review reconciliation"},  # neither list nor all
+        {"visit_ids": [], "reason": "Daily review reconciliation"},
+        {"visit_ids": [str(uuid.uuid4())], "all": True, "reason": "Daily review reconciliation"},
+        {"visit_ids": [str(uuid.uuid4())]},  # no reason
+        {"visit_ids": [str(uuid.uuid4())], "reason": "   short   "},
+    ],
+)
+def test_reconcile_request_needs_an_explicit_scope_and_a_reason(body):
+    """An omitted list used to reconcile every stale visit in the facility."""
+    with pytest.raises(ValidationError):
+        StaleVisitsReconcileRequest.model_validate(body)
