@@ -440,7 +440,9 @@ _CLIENT_IDENTITY_CODES = {
 }
 
 
-async def _declaration_for(db: AsyncSession, actor: CurrentDbUser, patient: Patient) -> dict:
+async def _declaration_for(
+    db: AsyncSession, actor: CurrentDbUser, patient: Patient, language: str = "en"
+) -> dict:
     """NHA's ABHA consent as this desk must show it for this patient."""
     facility = await db.get(Facility, actor.facility_id)
     staff = await db.get(User, actor.id)
@@ -449,6 +451,7 @@ async def _declaration_for(db: AsyncSession, actor: CurrentDbUser, patient: Pati
             ownership=facility.ownership if facility else None,
             health_worker=staff.full_name if staff else "",
             beneficiary=patient.full_name or "",
+            language=language.strip().lower(),
         )
     except DeclarationRefused as exc:
         raise _declaration_refused(exc) from None
@@ -725,7 +728,7 @@ async def enrol_request_otp(
     Consent is required before the gateway is contacted.
     """
     patient = await _get_patient_or_404(db, payload.patient_id, current_db_user.facility_id)
-    shown = await _declaration_for(db, current_db_user, patient)
+    shown = await _declaration_for(db, current_db_user, patient, payload.consent.language)
     if payload.consent.declaration_sha256 != shown["sha256"]:
         raise HTTPException(
             409,
@@ -946,7 +949,7 @@ async def enrol_by_demographics(
     number with its default address (Case 1 and Case 3 of CRT_ABHA_305).
     """
     patient = await _get_patient_or_404(db, payload.patient_id, current_db_user.facility_id)
-    shown = await _declaration_for(db, current_db_user, patient)
+    shown = await _declaration_for(db, current_db_user, patient, payload.consent.language)
     if payload.consent.declaration_sha256 != shown["sha256"]:
         raise HTTPException(
             409,
@@ -1052,6 +1055,7 @@ async def enrol_consent_copy(
     patient_id: Annotated[uuid.UUID, Query()],
     current_db_user: CurrentDbUser,
     db: DbSession,
+    language: Annotated[str, Query(pattern=r"^(en|hi)$")] = "en",
 ) -> dict:
     """NHA's published ABHA consent for this patient, as the desk must show it.
 
@@ -1059,7 +1063,7 @@ async def enrol_consent_copy(
     scoped like any patient read: another facility's patient is a 404.
     """
     patient = await _get_patient_or_404(db, patient_id, current_db_user.facility_id)
-    return consent_metadata(await _declaration_for(db, current_db_user, patient))
+    return consent_metadata(await _declaration_for(db, current_db_user, patient, language))
 
 
 async def _enrolment_continuation_session(

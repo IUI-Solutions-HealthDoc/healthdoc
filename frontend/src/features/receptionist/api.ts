@@ -6,6 +6,7 @@ import type {
   PatientSearchRequest,
   PatientSearchResponse,
   AbhaDeclaration,
+  ConsentLanguage,
   AbhaEnrolmentConsent,
   AbhaIdentityLinked,
   AbhaLoginIdentifier,
@@ -113,9 +114,12 @@ export function verifyAbhaLoginOtp(
   });
 }
 
-export async function getAbhaEnrolmentDeclaration(patientId: string): Promise<AbhaDeclaration> {
+export async function getAbhaEnrolmentDeclaration(
+  patientId: string,
+  language: ConsentLanguage = "en",
+): Promise<AbhaDeclaration> {
   const result = await api<{ declaration: AbhaDeclaration }>(
-    `/abdm/abha/enrol/consent?patient_id=${encodeURIComponent(patientId)}`,
+    `/abdm/abha/enrol/consent?patient_id=${encodeURIComponent(patientId)}&language=${language}`,
   );
   return result.declaration;
 }

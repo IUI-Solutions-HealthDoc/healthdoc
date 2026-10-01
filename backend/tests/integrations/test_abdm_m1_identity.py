@@ -673,10 +673,11 @@ async def test_enrolment_without_a_grant_never_reaches_the_gateway(monkeypatch):
     assert gw.calls == []
 
 
-async def test_a_declined_or_unapproved_consent_is_refused(monkeypatch):
+async def test_a_declined_or_untranslated_consent_is_refused(monkeypatch):
     gw = _gateway(monkeypatch, [{"txnId": "must-not-be-used"}])
     declined = EnrolmentConsent(False, ENROLMENT_CONSENT_CODE, ENROLMENT_CONSENT_VERSION, "en")
-    hindi = EnrolmentConsent(True, ENROLMENT_CONSENT_CODE, ENROLMENT_CONSENT_VERSION, "hi")
+    # English and Hindi are offered; any other language has no consent text.
+    hindi = EnrolmentConsent(True, ENROLMENT_CONSENT_CODE, ENROLMENT_CONSENT_VERSION, "ta")
     with pytest.raises(service.AbdmIdentityError) as declined_exc:
         await service.request_aadhaar_otp(
             aadhaar=AADHAAR, facility_id=FACILITY_A, started_by=STAFF, consent=declined,

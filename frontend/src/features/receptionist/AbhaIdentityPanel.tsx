@@ -21,16 +21,15 @@ import {
 import { AbhaConsentDeclaration, declarationAccepted, defaultTicks } from "./AbhaConsentDeclaration";
 import { DemographicAbhaEnrolment } from "./DemographicAbhaEnrolment";
 import { digitsOnly, isValidAbhaInput, normaliseIndianMobileInput } from "./patientValidation";
-import type { AbhaDeclaration, AbhaIdentityLinked, AbhaLoginIdentifier } from "./types";
+import type { AbhaDeclaration, AbhaIdentityLinked, AbhaLoginIdentifier, ConsentLanguage } from "./types";
 
 /** Official M1 collection grant. The statements shown beside it are NHA's
- *  published consent, rendered by the server for this patient and facility;
- *  Hindi legal text is not shipped until NHA-approved copy exists. */
+ *  published consent (or HealthDoc's labelled Hindi translation), rendered by
+ *  the server for this patient and facility. */
 const ENROLMENT_CONSENT = {
   granted: true,
   code: "abha-enrollment",
   version: "1.4",
-  language: "en" as const,
 };
 
 
@@ -79,6 +78,7 @@ function PatientAbhaIdentity({ patient }: Props) {
   const [declaration, setDeclaration] = useState<AbhaDeclaration | null>(null);
   const [declarationError, setDeclarationError] = useState<string | null>(null);
   const [ticks, setTicks] = useState<Record<string, boolean>>({});
+  const [consentLanguage, setConsentLanguage] = useState<ConsentLanguage>("en");
   const [enrolPhase, setEnrolPhase] = useState<"aadhaar" | "mobile" | "address">("aadhaar");
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [selectedAddress, setSelectedAddress] = useState("");
@@ -115,7 +115,7 @@ function PatientAbhaIdentity({ patient }: Props) {
   useEffect(() => {
     if (!needsDeclaration) return;
     let disposed = false;
-    getAbhaEnrolmentDeclaration(patient.id).then(
+    getAbhaEnrolmentDeclaration(patient.id, consentLanguage).then(
       (shown) => {
         if (disposed) return;
         setDeclaration(shown);
@@ -130,7 +130,7 @@ function PatientAbhaIdentity({ patient }: Props) {
       },
     );
     return () => { disposed = true; };
-  }, [needsDeclaration, patient.id]);
+  }, [needsDeclaration, patient.id, consentLanguage]);
 
   function beginRequest(): number | null {
     if (!lifecycle.current.active || lifecycle.current.pending) return null;
@@ -209,7 +209,7 @@ function PatientAbhaIdentity({ patient }: Props) {
 
   async function requestOtp() {
     const enrolmentConsent = flow === "new" && declaration && declarationAccepted(declaration, ticks)
-      ? { ...ENROLMENT_CONSENT, statements: ticks, declaration_sha256: declaration.sha256 }
+      ? { ...ENROLMENT_CONSENT, language: declaration.language, statements: ticks, declaration_sha256: declaration.sha256 }
       : null;
     if (flow === "new" && !enrolmentConsent) {
       setError("Complete the patient's ABHA consent before creating an ABHA.");
@@ -551,6 +551,14 @@ function PatientAbhaIdentity({ patient }: Props) {
               error={declarationError}
               ticks={ticks}
               onTick={(id, checked) => setTicks((current) => ({ ...current, [id]: checked }))}
+              language={consentLanguage}
+              onLanguage={(next) => {
+                if (next === consentLanguage) return;
+                setConsentLanguage(next);
+                setDeclaration(null);
+                setDeclarationError(null);
+                setTicks({});
+              }}
             />
           ) : null}
           <button type="button" disabled={busy || !identifierValid || (flow === "new" && !declarationAccepted(declaration, ticks))} onClick={() => void requestOtp()} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{busy ? t("receptionist.abha.requestingOtp") : t("receptionist.abha.sendOtp")}</button>
