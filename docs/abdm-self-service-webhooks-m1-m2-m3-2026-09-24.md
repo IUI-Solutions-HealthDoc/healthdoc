@@ -5,6 +5,12 @@ no live milestone transaction is inferred from them.
 Audience: the HealthDoc owner, a facility administrator and the authorized test clinician.
 This is an execution guide, **not a certificate or a claim that all milestones pass**.
 
+**For today's M1/M2 run, start with the [26 September Postman/browser execution
+guide](abdm-postman-browser-m1-m2-execution-2026-09-26.md).** It includes the new
+read-only inbox and facility/cutoff-scoped delivery runner. Missing M3
+requester details do not block M1 or HIP-initiated M2 linking; document-author,
+PHR-consent and SMS/discovery prerequisites remain separate.
+
 **Later correction — 24 September, after the corrected screenshot:** use
 **IN0910034387 — HealthDoc Facility**, not the earlier IN0911638718.
 The screenshot shows hspsbx.abdm.gov.in software linkage, and NHA sandbox
@@ -45,9 +51,16 @@ Full completion additionally needs the assigned NHA workbook and NHA review.
 
 ## 2. Where you can check webhooks
 
-### A. Incoming NHA/HIP requests — use Terminal
+### A. Incoming NHA/HIP requests — local viewer, Postman or Terminal
 
-There is currently **no browser webhook-inbox page**. Incoming evidence is deliberately operator-only, not exposed to every facility admin.
+The new operator-only viewer runs at **http://127.0.0.1:8766** using
+`python3 scripts/abdm_webhook_console.py` from the current worktree. It offers
+redacted receipt inspection, original REQUEST-ID filtering and auto-refresh;
+it is not a public/facility-admin API. The new Postman inspector reads the
+same console and was verified with HTTP200. Browser rendering remains
+unverified because Chrome automation returned `ERR_BLOCKED_BY_CLIENT`.
+See the current guide above for startup and import instructions. Never
+tunnel/expose this operator console. Terminal inspection remains available:
 
 After the backend is running, open Terminal and run:
 
@@ -230,7 +243,7 @@ Send **02 Read bridge and services**, then **03 Read IN0910034387**. Compare wit
 - service `isHip`, `isHiu` and `active`: all **true**.
 
 The old `SBXID_053401_HIP` and `SBXID_053401_HIU` entries also remain active.
-They are historical/current-runtime identities, not substitutes for the corrected
+They are historical identities, not current-runtime substitutes for the corrected
 facility. Preserve them until old operations and local configuration are reconciled.
 
 If the callback URL already matches, **do not PATCH it**. Never replace it with webhook.site or a public capture URL; that would redirect real callbacks and possibly tokens/health information away from HealthDoc.
@@ -324,7 +337,7 @@ The reviewed M3 contract requires requester fields; it does **not** by itself es
 docker exec healthdoc-backend-1 python -m scripts.abdm_operational_status
 docker exec healthdoc-backend-1 alembic current
 ```
-8. Arrange controlled delivery per Appendix A before queuing M2/M3 work. **Do not start the general worker with the 23 old jobs unchecked.**
+8. Arrange controlled delivery before queuing M2/M3 work. Use the new guide's facility/cutoff-scoped session runner. **Do not start the general worker: 22 historical jobs are frozen, and the unrelated facility's pending job is outside this session.**
 9. Use only approved synthetic clinical documents for this consenting sandbox participant. A real identity does not authorize inventing medical history.
 
 ## 7. M1 — identity, card and Scan-and-Share
@@ -445,6 +458,11 @@ For support: exact sandbox endpoint, method, UTC time, REQUEST-ID/transaction ID
 ## Appendix A. Delivery controls for the 24 September local snapshot
 
 **Read this before clicking M2/M3 actions.**
+The cutover procedure below is an execution record/reference, **not an
+instruction to freeze or migrate again**. The 26 September guide now provides
+a runner for newly created jobs in the approved facility only. Its cutoff and
+facility filters apply inside the atomic claim; the original global-worker
+procedure at the end remains unsuitable while other work is unreconciled.
 Some callback handlers have a post-commit fast path, but the durable worker is
 required for reliable recovery. The general worker was stopped in the 24
 September snapshot; recheck its process and queue before dispatching any job.
