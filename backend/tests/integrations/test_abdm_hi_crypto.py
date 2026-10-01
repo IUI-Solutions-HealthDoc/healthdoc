@@ -154,3 +154,37 @@ def test_every_generated_keypair_is_fresh():
     materials = [hi_crypto.generate_key_material() for _ in range(10)]
     assert len({m.public_key_b64 for m in materials}) == 10
     assert len({m.nonce_b64 for m in materials}) == 10
+
+
+def test_the_x509_form_is_the_same_key_as_the_raw_point():
+    """ABDM's PHR refused a HIP data push carrying the raw point ("encoded key
+    spec not recognized", 1 October 2026). The X.509 form a HIP now sends must
+    open exactly the exchange the raw point opens."""
+    hip, hiu = _pair()
+    by_raw = _keys_for(hiu, hip)
+    by_x509 = hi_crypto.derive_shared_key(
+        private_key=hiu.private_key,
+        peer_public_key_b64=hip.public_key_x509_b64,
+        our_nonce_b64=hiu.nonce_b64,
+        peer_nonce_b64=hip.nonce_b64,
+    )
+    assert by_x509 == by_raw
+    assert base64.b64decode(hip.public_key_x509_b64)[0] == 0x30  # DER SEQUENCE
+    assert hip.to_wire(x509=True)["dhPublicKey"]["keyValue"] == hip.public_key_x509_b64
+    # A HIU's request keeps the raw point, as ABDM's own PHR sends it.
+    assert hip.to_wire()["dhPublicKey"]["keyValue"] == hip.public_key_b64
+
+
+def test_a_hip_push_sends_the_x509_key_and_an_md5_checksum():
+    import hashlib
+
+    from app.integrations.abdm.hip import service as hip_service
+
+    hiu = hi_crypto.generate_key_material()
+    bundle = {"resourceType": "Bundle", "entry": []}
+    _, wire, checksum = hip_service.encrypt_bundle_for_hiu(
+        bundle, hiu_public_key_b64=hiu.public_key_b64, hiu_nonce_b64=hiu.nonce_b64
+    )
+    assert base64.b64decode(wire["dhPublicKey"]["keyValue"])[0] == 0x30
+    plaintext = json.dumps(bundle, separators=(",", ":"), sort_keys=True)
+    assert checksum == hashlib.md5(plaintext.encode(), usedforsecurity=False).hexdigest()

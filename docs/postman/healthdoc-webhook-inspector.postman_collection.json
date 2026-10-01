@@ -1,0 +1,28 @@
+{
+  "info": {
+    "name": "HealthDoc — Local Webhook Inspector (26 Sep)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Read-only loopback view of redacted NHA/HIP callback receipts. Start python3 scripts/abdm_webhook_console.py first. No NHA writes, patient identifiers, tokens, saved responses or clinical payloads. Use the browser console at http://127.0.0.1:8766 for live refresh and copyable evidence. Do not expose this console through a tunnel."
+  },
+  "variable": [{"key": "receipt_id", "value": "REPLACE_WITH_RECEIPT_UUID", "type": "string"}, {"key": "original_request_id", "value": "REPLACE_WITH_ORIGINAL_REQUEST_UUID", "type": "string"}],
+  "auth": {"type": "noauth"},
+  "event": [
+    {"listen": "prerequest", "script": {"type": "text/javascript", "exec": [
+      "const url = pm.variables.replaceIn(pm.request.url.toString());",
+      "const destinations = ['http://127.0.0.1:8766/api/receipts', 'http://127.0.0.1:8766/api/receipt', 'http://127.0.0.1:8766/api/status'];",
+      "if (pm.request.method !== 'GET' || !destinations.includes(url.split('?')[0]) || url.includes('REPLACE_WITH')) {",
+      "  pm.execution.skipRequest(); throw new Error('Use the local console and replace only the required UUID. Request skipped.');",
+      "}"
+    ]}},
+    {"listen": "test", "script": {"type": "text/javascript", "exec": [
+      "pm.test('Inspector HTTP 200', () => pm.response.to.have.status(200));",
+      "pm.test('Private response is not cached', () => pm.expect(pm.response.headers.get('Cache-Control')).to.equal('no-store'));"
+    ]}}
+  ],
+  "item": [
+    {"name": "01 Latest 50 webhook receipts", "request": {"method": "GET", "header": [{"key": "X-HealthDoc-Operator-View", "value": "1"}], "url": "http://127.0.0.1:8766/api/receipts"}, "protocolProfileBehavior": {"followRedirects": false}, "response": []},
+    {"name": "02 Correlate original REQUEST-ID", "request": {"method": "GET", "header": [{"key": "X-HealthDoc-Operator-View", "value": "1"}], "url": "http://127.0.0.1:8766/api/receipts?request_id={{original_request_id}}"}, "protocolProfileBehavior": {"followRedirects": false}, "response": []},
+    {"name": "03 Inspect one redacted callback and reply", "request": {"method": "GET", "header": [{"key": "X-HealthDoc-Operator-View", "value": "1"}], "url": "http://127.0.0.1:8766/api/receipt?id={{receipt_id}}"}, "protocolProfileBehavior": {"followRedirects": false}, "response": []},
+    {"name": "04 Queue and received-content counts", "request": {"method": "GET", "header": [{"key": "X-HealthDoc-Operator-View", "value": "1"}], "url": "http://127.0.0.1:8766/api/status"}, "protocolProfileBehavior": {"followRedirects": false}, "response": []}
+  ]
+}

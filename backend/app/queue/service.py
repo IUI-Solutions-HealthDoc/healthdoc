@@ -276,6 +276,41 @@ async def create_queue(
     return queue
 
 
+async def list_bookable_providers(
+    db: AsyncSession,
+    caller_facility_id: uuid.UUID,
+    service_date: date,
+    department_id: uuid.UUID | None = None,
+) -> list[dict]:
+    """Staff rostered and available on a date, whether or not a queue is open.
+
+    Appointments are booked for future days, so the picker cannot come from
+    queue opening options: those cover one day and drop every doctor whose
+    queue is already open, which is exactly the doctor a patient asks for.
+    """
+    stmt = (
+        select(Roster.staff_user_id, User.full_name, Roster.department_id)
+        .join(User, User.id == Roster.staff_user_id)
+        .join(Department, Department.id == Roster.department_id)
+        .where(
+            Department.facility_id == caller_facility_id,
+            User.facility_id == caller_facility_id,
+            Roster.roster_date == service_date,
+            Roster.is_available.is_(True),
+            User.is_active.is_(True),
+        )
+        .distinct()
+        .order_by(User.full_name, Roster.staff_user_id, Roster.department_id)
+    )
+    if department_id is not None:
+        stmt = stmt.where(Roster.department_id == department_id)
+    rows = (await db.execute(stmt)).all()
+    return [
+        {"staff_user_id": staff_user_id, "staff_name": staff_name, "department_id": dept_id}
+        for staff_user_id, staff_name, dept_id in rows
+    ]
+
+
 async def list_queue_opening_options(
     db: AsyncSession,
     caller_facility_id: uuid.UUID,
@@ -411,7 +446,7 @@ async def list_visits_without_tokens(
         .where(
             Visit.facility_id == caller_facility_id,
             Visit.visit_type.in_(VisitType.token_issuing()),
-            Visit.status.in_(["registered", "active"]),
+            Visit.status == "registered",
             QueueToken.id.is_(None),
         )
         .order_by(Visit.visit_date.desc())

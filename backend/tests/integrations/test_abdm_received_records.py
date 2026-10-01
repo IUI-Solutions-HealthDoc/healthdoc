@@ -112,6 +112,34 @@ async def receive(case, payload=None):
     return await external_router.receive_health_information(payload or push(case), case.db)
 
 
+@pytest.mark.parametrize("encoding", ["hex", "base64"])
+async def test_an_md5_checksum_as_abdm_specifies_is_accepted(received_case, encoding):
+    """ABDM's data-flow specification: entries[].checksum is the MD5 of the
+    content before encryption. Accepting only SHA-256 refused compliant HIPs."""
+    import base64
+    import hashlib
+
+    case = received_case
+    payload = push(case)
+    digest = hashlib.md5(json.dumps(case.bundle).encode(), usedforsecurity=False).digest()
+    payload.entries[0].checksum = (
+        digest.hex() if encoding == "hex" else base64.b64encode(digest).decode()
+    )
+    await receive(case, payload)
+    receipt = (await case.db.execute(select(AbdmReceivedBundle))).scalar_one()
+    assert receipt.content_encrypted is not None
+
+
+async def test_a_wrong_md5_checksum_is_still_refused(received_case):
+    case = received_case
+    payload = push(case)
+    payload.entries[0].checksum = "0" * 32
+    with pytest.raises(HTTPException):
+        await receive(case, payload)
+    receipts = (await case.db.execute(select(AbdmReceivedBundle))).scalars().all()
+    assert all(row.content_encrypted is None for row in receipts)
+
+
 async def test_received_content_is_encrypted_and_never_enters_general_outbox(received_case):
     case = received_case
     await receive(case)
