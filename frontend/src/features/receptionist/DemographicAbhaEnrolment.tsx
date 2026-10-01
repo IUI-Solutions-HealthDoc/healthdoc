@@ -140,7 +140,7 @@ export function DemographicAbhaEnrolment({ patient, onLinked }: {
         <span className="text-muted-foreground">Aadhaar number</span>
         <input name="aadhaar" value={form.aadhaar} onChange={(e) => change("aadhaar", e.target.value)} inputMode="numeric" autoComplete="off" maxLength={14}
           aria-invalid={Boolean(form.aadhaar) && !aadhaarValid} className={input} />
-        {form.aadhaar && !aadhaarValid ? <span role="alert" className="text-danger">Aadhaar number must be 12 digits.</span> : null}
+        {form.aadhaar && !aadhaarValid ? <span role="alert" className="text-danger">Aadhaar Number is not valid</span> : null}
       </label>
       <div className="grid gap-3 md:grid-cols-2">
         <label className="block space-y-1 text-sm"><span className="text-muted-foreground">Name as on Aadhaar</span>
