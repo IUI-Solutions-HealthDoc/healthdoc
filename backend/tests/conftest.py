@@ -28,6 +28,7 @@ from app.opd.models import Visit
 from app.patients.models import Patient
 from app.users.models import Facility, User
 from app.integrations.abdm.fhir.models import FhirBundleTransaction
+from tests.business_day import business_today
 from app.outbox.models import OutboxEvent
 from app.queue import service
 from app.queue.models import Roster
@@ -58,8 +59,16 @@ def fake_redis(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def fake_business_date(monkeypatch):
+    """The facility's date in its own timezone, as production computes it."""
+    from sqlalchemy import select
+
+    from fastapi import HTTPException
+
     async def fake_get_business_date(db, facility_id):
-        return date.today()
+        timezone = await db.scalar(select(Facility.timezone).where(Facility.id == facility_id))
+        if timezone is None:
+            raise HTTPException(404, "Facility not found")
+        return business_today(timezone)
  
     monkeypatch.setattr("app.queue.service.get_business_date", fake_get_business_date)
 
@@ -265,7 +274,7 @@ async def roster_on_duty(db):
             staff_user_id=staff_user_id,
             department_id=department_id,
             shift=shift,
-            roster_date=roster_date or date.today(),
+            roster_date=roster_date or business_today(),
             is_available=True,
         )
         db.add(entry)
@@ -285,7 +294,7 @@ async def queue(db, seed, roster_on_duty):
         doctor_user_id=doctor.id,
         room_id=room.id,
         display_label="Test Queue",
-        service_date=date.today(),
+        service_date=business_today(),
         caller_facility_id=dept.facility_id,
     )
     return q
