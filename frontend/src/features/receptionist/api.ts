@@ -5,6 +5,7 @@ import type {
   PatientCreate,
   PatientSearchRequest,
   PatientSearchResponse,
+  AbhaDeclaration,
   AbhaEnrolmentConsent,
   AbhaIdentityLinked,
   AbhaLoginIdentifier,
@@ -110,6 +111,13 @@ export function verifyAbhaLoginOtp(
     body: JSON.stringify({ session_id: sessionId, otp }),
     idempotencyKey,
   });
+}
+
+export async function getAbhaEnrolmentDeclaration(patientId: string): Promise<AbhaDeclaration> {
+  const result = await api<{ declaration: AbhaDeclaration }>(
+    `/abdm/abha/enrol/consent?patient_id=${encodeURIComponent(patientId)}`,
+  );
+  return result.declaration;
 }
 
 export function requestAbhaEnrolmentOtp(
