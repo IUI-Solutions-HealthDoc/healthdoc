@@ -172,6 +172,20 @@ async def test_changed_type_selection_cannot_reuse_an_idempotency_key(db, link_c
     assert len((await db.execute(select(AbdmCareContextLink))).scalars().all()) == 1
 
 
+async def test_an_unsendable_label_is_refused_before_a_token_is_requested(db, link_case):
+    """NHA grants three link tokens per address a day; refusing after the
+    token arrives would spend one on a request that cannot be sent."""
+    patient, contexts = link_case
+    contexts[0].display = "राम"
+    with pytest.raises(linking.DocumentUnavailable):
+        await linking.initiate(
+            db, patient=patient, context_ids=[contexts[0].id], idempotency_key="unsendable"
+        )
+    assert (await db.execute(select(AbdmCareContextLink))).scalars().all() == []
+    token_jobs = select(jobs.AbdmJob).where(jobs.AbdmJob.kind == "link_token")
+    assert (await db.execute(token_jobs)).scalars().all() == []
+
+
 async def test_legacy_per_type_replay_keeps_original_ids_and_attempts(db, link_case):
     patient, contexts = link_case
     old_ids = []
@@ -502,6 +516,9 @@ async def test_link_authorization_failure_stops_but_transport_failure_remains_re
     assert row.status == "dead" and row.attempts == 2
     assert row.last_error == "AbdmAuthError:request:403:900908"
     assert await job_runner.run_once(ident) is False
+    await db.refresh(link)
+    assert link.status == "failed", "a definitive refusal releases the documents"
+    assert link.link_token_encrypted is None
 
 
 async def test_unexpected_link_response_is_not_done_and_is_not_replayed(db, link_case):
@@ -526,3 +543,78 @@ async def test_unexpected_link_response_is_not_done_and_is_not_replayed(db, link
     gateway.link_care_contexts.assert_awaited_once()
     await db.refresh(link)
     assert link.status == "pending", "HTTP delivery must never impersonate the link callback"
+
+
+
+# ------------------------------------------------ refused link requests (29 Sep 2026)
+# link/carecontext answered 400 ABDM-9999; the runner retried and, the link token
+# being single-use, earned a 401. The link stayed pending and the document stayed
+# locked in the doctor's picker. A refusal is now final, releases the documents,
+# and reports NHA's scrubbed reason.
+async def test_refused_link_request_is_final_and_releases_the_documents(db, link_case, monkeypatch):
+    import json
+
+    from app.integrations.abdm.client import AbdmRejected
+
+    patient, contexts = link_case
+    link = (
+        await linking.initiate(
+            db, patient=patient, context_ids=[contexts[0].id], idempotency_key="link-refused"
+        )
+    )[0]
+    await linking.accept_token(db, link, "synthetic-token", patient.abha_address)
+    ident = jobs.job_id("link_context", link.id)
+    await db.commit()
+    reported = []
+    monkeypatch.setattr(job_runner, "refusal_listener", reported.append)
+    gateway.link_care_contexts.side_effect = AbdmRejected(
+        400,
+        {"code": "ABDM-9999", "message": "Invalid referenceNumber 'wellness/x' for link-test@sbx"},
+        "req-400",
+    )
+
+    assert await job_runner.run_once(ident)
+
+    row = await db.get(jobs.AbdmJob, ident)
+    await db.refresh(row)
+    assert row.status == "dead" and row.attempts == 1
+    assert row.last_error == "AbdmRejected:request:400:ABDM-9999"
+    assert await job_runner.run_once(ident) is False
+    gateway.link_care_contexts.assert_awaited_once()
+    await db.refresh(link)
+    assert link.status == "failed" and link.link_token_encrypted is None
+    assert reported and reported[0]["request_id"] == "req-400"
+    assert reported[0]["message"] == "Invalid referenceNumber <value> for <address>"
+    assert "link-test@sbx" not in json.dumps(reported)
+
+
+async def test_only_definitive_refusals_recorded_earlier_are_reconciled(db, link_case):
+    patient, contexts = link_case
+    refused = (
+        await linking.initiate(
+            db, patient=patient, context_ids=[contexts[0].id], idempotency_key="old-refusal"
+        )
+    )[0]
+    ambiguous = (
+        await linking.initiate(
+            db, patient=patient, context_ids=[contexts[1].id], idempotency_key="old-302"
+        )
+    )[0]
+    for link, error in (
+        (refused, "AbdmAuthError:request:401:shape=empty"),
+        (ambiguous, "AbdmProtocolError:request:302"),
+    ):
+        ident = await jobs.enqueue(
+            db, kind="link_context", target_id=link.id, facility_id=link.facility_id
+        )
+        row = await db.get(jobs.AbdmJob, ident)
+        row.status, row.attempts, row.last_error = "dead", 2, error
+    await db.commit()
+
+    released = await linking.release_links_refused_before(db, facility_id=patient.facility_id)
+
+    assert released == 1
+    await db.refresh(refused)
+    await db.refresh(ambiguous)
+    assert refused.status == "failed"
+    assert ambiguous.status == "pending", "an ambiguous response may still be confirmed by NHA"

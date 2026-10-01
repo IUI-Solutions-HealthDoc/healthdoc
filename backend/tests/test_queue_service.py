@@ -79,9 +79,10 @@ async def other_doctor(db, seed):
 # FACILITY SCOPING (Blocker 1)
 # --------------------------------------------------------------------------- #
 
-async def test_create_queue_derives_facility_from_department(db, seed):
+async def test_create_queue_derives_facility_from_department(db, seed, roster_on_duty):
     dept, room, doctor = seed
     from datetime import date
+    await roster_on_duty(dept.id, doctor.id)
     queue = await service.create_queue(db, dept.id, doctor.id, room.id, "label", date.today(), dept.facility_id)
     assert queue.facility_id == dept.facility_id
 
@@ -189,7 +190,7 @@ async def test_token_display_sequence_within_one_queue(db, queue, opd_visit):
     assert t2.token_display.endswith("-002")
 
 
-async def test_two_doctors_same_department_share_counter_no_collision(db, seed, opd_visit):
+async def test_two_doctors_same_department_share_counter_no_collision(db, seed, opd_visit, roster_on_duty):
     """THE core Blocker 3 test. Two different doctors, same department,
     same day -- their tokens must NOT both be "-001"."""
     from datetime import date
@@ -201,6 +202,8 @@ async def test_two_doctors_same_department_share_counter_no_collision(db, seed, 
     )
     db.add(doctor_b)
     await db.flush()
+    await roster_on_duty(dept.id, doctor_a.id)
+    await roster_on_duty(dept.id, doctor_b.id)
 
     queue_a = await service.create_queue(db, dept.id, doctor_a.id, room.id, "Queue A", date.today(), dept.facility_id)
     queue_b = await service.create_queue(db, dept.id, doctor_b.id, room.id, "Queue B", date.today(), dept.facility_id)

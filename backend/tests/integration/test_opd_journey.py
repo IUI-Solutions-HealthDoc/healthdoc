@@ -48,50 +48,40 @@ class TestOPDCoreJourney:
 
         # --- Step 1: registration (opd/router.py -> POST /api/v1/visits) ---
         client = client_as(RECEPTIONIST)
+        visit_body = {
+            "patient_id": patient_id,
+            "created_by": str(uuid.uuid5(uuid.NAMESPACE_OID, RECEPTIONIST.sub)),
+            "facility_id": str(TEST_FACILITY_ID),
+            "department_id": str(TEST_DEPARTMENT_ID),
+            "visit_type": "opd",
+            "visit_date": "2026-08-12T09:00:00Z",
+        }
+        same_key = str(uuid.uuid4())
         visit_resp = client.post(
-            "/api/v1/visits",
-            headers={"Idempotency-Key": str(uuid.uuid4())},
-            json={
-                "patient_id": patient_id,
-                "created_by": str(uuid.uuid5(uuid.NAMESPACE_OID, RECEPTIONIST.sub)),
-                "facility_id": str(TEST_FACILITY_ID),
-                "department_id": str(TEST_DEPARTMENT_ID),
-                "visit_type": "opd",
-                "visit_date": "2026-08-12T09:00:00Z",
-            },
+            "/api/v1/visits", headers={"Idempotency-Key": same_key}, json=visit_body,
         )
         assert visit_resp.status_code == 201, visit_resp.text
         visit = visit_resp.json()["data"]
         visit_id = visit["id"]
         assert visit["status"] in ("registered", "waiting")
 
-        same_key = str(uuid.uuid4())
-        first = client.post(
-            "/api/v1/visits", headers={"Idempotency-Key": same_key},
-            json={
-                "patient_id": patient_id,
-                "created_by": str(uuid.uuid5(uuid.NAMESPACE_OID, RECEPTIONIST.sub)),
-                "facility_id": str(TEST_FACILITY_ID),
-                "department_id": str(TEST_DEPARTMENT_ID),
-                "visit_type": "opd",
-                "visit_date": "2026-08-12T09:05:00Z",
-            },
+        replay = client.post(
+            "/api/v1/visits", headers={"Idempotency-Key": same_key}, json=visit_body,
         )
-        second = client.post(
-            "/api/v1/visits", headers={"Idempotency-Key": same_key},
-            json={
-                "patient_id": patient_id,
-                "created_by": str(uuid.uuid5(uuid.NAMESPACE_OID, RECEPTIONIST.sub)),
-                "facility_id": str(TEST_FACILITY_ID),
-                "department_id": str(TEST_DEPARTMENT_ID),
-                "visit_type": "opd",
-                "visit_date": "2026-08-12T09:05:00Z",
-            },
-        )
-        assert first.json()["data"]["id"] == second.json()["data"]["id"], (
+        assert replay.json()["data"]["id"] == visit_id, (
             "Idempotency-Key replay failed — a retried registration created "
             "a second visit instead of returning the stored response."
         )
+
+        duplicate = client.post(
+            "/api/v1/visits", headers={"Idempotency-Key": str(uuid.uuid4())}, json=visit_body,
+        )
+        assert duplicate.status_code == 409, (
+            "a second desk registration of the same open visit must not raise a second invoice"
+        )
+        refusal = duplicate.json()["error"]["message"]
+        assert refusal["code"] == "open_visit_exists"
+        assert refusal["visit_id"] == visit_id
 
         # --- Step 2: consultation (encounters/router.py -> POST /api/v1/encounters) ---
         client = client_as(DOCTOR)

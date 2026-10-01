@@ -301,7 +301,7 @@ async def get_emergency_worklist(
         .where(
             Visit.facility_id == facility_id,
             Visit.visit_type == "emergency",
-            Visit.status.in_(["created", "active", "in_progress", "admitted"]),
+            Visit.status.in_(["registered", "in_consultation"]),
         )
         .order_by(Visit.created_at.desc())
     )

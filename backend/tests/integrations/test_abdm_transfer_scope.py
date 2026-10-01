@@ -189,6 +189,76 @@ async def test_worker_refuses_an_old_request_with_unknown_scope(db, transfer_cas
     assert row.failure_reason == "Original transfer scope is unavailable; request data again"
 
 
+async def _refused_before_any_page(db, transfer_case):
+    payload, callback, _, _ = transfer_case
+    tasks = BackgroundTasks()
+    await external_router.hip_health_information_request(payload, tasks, callback, db)
+    row = (await db.execute(select(AbdmHipHealthInformationRequest))).scalar_one()
+    row.requested_from = row.requested_to = row.requested_hi_types = None
+    await db.commit()
+    await tasks()
+    db.expire_all()
+    row = (await db.execute(select(AbdmHipHealthInformationRequest))).scalar_one()
+    assert row.status == "failed"
+    worker._notify_gateway.reset_mock()
+    return row
+
+
+async def test_failure_notice_names_the_consented_care_contexts(db, transfer_case):
+    """30 September 2026: a transfer refused before any page was built was
+    reported with careContextReference "", and NHA refused that notice."""
+    references = [c.reference for c in transfer_case[2]]
+    row = await _refused_before_any_page(db, transfer_case)
+    await worker.notify_transaction(row.id)
+    worker._notify_gateway.assert_awaited_once()
+    sent = worker._notify_gateway.await_args.kwargs
+    assert sent["session_status"] == "FAILED"
+    assert [s["careContextReference"] for s in sent["statuses"]] == references
+    assert {s["hiStatus"] for s in sent["statuses"]} == {"ERRORED"}
+
+
+async def test_failure_notice_without_a_care_context_is_not_sent(db, transfer_case):
+    row = await _refused_before_any_page(db, transfer_case)
+    artefact = (
+        await db.execute(
+            select(AbdmHipConsentArtefact).where(
+                AbdmHipConsentArtefact.consent_artefact_id == row.consent_artefact_id
+            )
+        )
+    ).scalar_one()
+    artefact.raw_artefact = {"consentDetail": {"careContexts": []}}
+    await db.commit()
+    with pytest.raises(worker.TransferError):
+        await worker.notify_transaction(row.id)
+    worker._notify_gateway.assert_not_awaited()
+
+
+async def test_a_refused_push_records_the_hius_status_and_code(monkeypatch):
+    """1 October 2026: ABDM's PHR refused a page with 400 ABDM-9999 and the
+    worker kept only "failed after bounded retries"."""
+    import httpx
+
+    def refuse(request):
+        return httpx.Response(
+            400,
+            json={
+                "code": "ABDM-9999: ",
+                "message": "Could not read encrypted content from input encoded key spec",
+            },
+        )
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        worker.httpx,
+        "AsyncClient",
+        lambda **kw: real_client(transport=httpx.MockTransport(refuse), **kw),
+    )
+    monkeypatch.setattr(worker.asyncio, "sleep", AsyncMock())
+    with pytest.raises(worker.TransientTransferError) as caught:
+        await worker._post_page("https://hiu.example/transfer", {"entries": []})
+    assert str(caught.value) == "HIU data push failed (HIU returned HTTP 400 ABDM-9999)"
+
+
 async def test_unknown_document_dates_are_not_substituted_with_visit_dates(db, transfer_case):
     payload, callback, contexts, pushes = transfer_case
     contexts[1].document_at = None

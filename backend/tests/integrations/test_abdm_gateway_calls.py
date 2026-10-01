@@ -159,6 +159,112 @@ async def test_link_care_contexts_sends_the_link_token_header(stub):
     assert patient["count"] == 1
 
 
+_ACCEPTED = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -()/")
+
+
+@pytest.mark.parametrize(
+    ("stored", "sent"),
+    [
+        ("OPConsultation — 2026-09-29", "OPConsultation - 2026-09-29"),
+        ("OP Consultation – 5/6/2026", "OP Consultation - 5/6/2026"),
+        ("Glucose − fasting", "Glucose - fasting"),
+        ("José  Test", "Jose Test"),
+        ("Synthetic Test\n", "Synthetic Test"),
+        ("Blood Test (fasting)", "Blood Test (fasting)"),
+        ("Wellness; synthetic, not advice", "Wellness synthetic not advice"),
+        ("Dr. D'Souza & Co: note", "Dr D Souza Co note"),
+    ],
+)
+async def test_displays_keep_only_what_nha_has_accepted(stored, sent):
+    assert hip_gw.wire_display(stored) == sent
+    assert hip_gw.wire_display(sent) == sent
+
+
+@pytest.mark.parametrize(
+    "stored",
+    [
+        " ".join(["Synthetic"] * 12),
+        "X" * 80,
+        "Discharge Summary - 2026-07-18 - Rehabilitation Centre (V) follow-up",
+    ],
+)
+async def test_long_displays_are_cut_to_fifty_characters(stored):
+    sent = hip_gw.wire_display(stored)
+    assert 0 < len(sent) <= 50
+    assert set(sent) <= _ACCEPTED
+    assert stored.startswith(sent)  # a prefix: nothing reordered or invented
+
+
+async def test_the_label_nha_refused_twice_is_linked_in_accepted_form(stub):
+    """30 September 2026: NHA answered this label with 400 ABDM-9999
+    "Invalid display" with its em dash, and again with the dash replaced."""
+    label = (
+        "ABDM SANDBOX TEST — SYNTHETIC WellnessRecord; "
+        "fabricated observation, not clinical advice"
+    )
+    await hip_gw.link_care_contexts(
+        abha_address="test@sbx",
+        link_token="SYNTHETIC",
+        display="José Test",
+        care_contexts=[{"referenceNumber": "wellness/1", "display": label}],
+        hi_type="WellnessRecord",
+    )
+    patient = stub.last["json"]["patient"][0]
+    assert patient["display"] == "Jose Test"
+    assert patient["careContexts"] == [
+        {"referenceNumber": "wellness/1", "display": "ABDM SANDBOX TEST - SYNTHETIC WellnessRecord"}
+    ]
+
+
+async def test_stored_reply_groups_are_cleaned_only_on_the_way_out(stub):
+    group = {
+        "referenceNumber": "IN-TEST-1",
+        "display": "José Test",
+        "careContexts": [
+            {"referenceNumber": "encounter/1", "display": "OPConsultation — 2026-09-29"}
+        ],
+        "hiType": "OPConsultation",
+        "count": 1,
+    }
+    await hip_gw.respond_to_discovery_groups(
+        transaction_id="T-1",
+        gateway_request_id="G-1",
+        patient_groups=[group],
+        matched_by=["ABHA_ADDRESS"],
+    )
+    discovered = stub.last["json"]["patient"]
+    await hip_gw.respond_to_link_confirm_groups(gateway_request_id="G-2", patient_groups=[group])
+    confirmed = stub.last["json"]["patient"]
+    for sent in (discovered, confirmed):
+        assert sent == [
+            {
+                "referenceNumber": "IN-TEST-1",
+                "display": "Jose Test",
+                "careContexts": [
+                    {"referenceNumber": "encounter/1", "display": "OPConsultation - 2026-09-29"}
+                ],
+                "hiType": "OPConsultation",
+                "count": 1,
+            }
+        ]
+    # A stored reply is compared with a recomputation before replay; the
+    # stored copy must keep its original text.
+    assert group["careContexts"][0]["display"] == "OPConsultation — 2026-09-29"
+
+
+@pytest.mark.parametrize("label", ["राम", " \t ", "​"])
+async def test_a_label_with_nothing_sendable_is_refused_before_the_wire(stub, label):
+    with pytest.raises(ValueError):
+        await hip_gw.link_care_contexts(
+            abha_address="test@sbx",
+            link_token="SYNTHETIC",
+            display="Synthetic Test",
+            care_contexts=[{"referenceNumber": "C1", "display": label}],
+            hi_type="WellnessRecord",
+        )
+    assert stub.calls == []
+
+
 async def test_mixed_hi_types_share_one_authenticated_link_request(stub):
     groups = {
         kind: [{"referenceNumber": f"test-{kind}", "display": "Synthetic record"}]
@@ -344,12 +450,35 @@ async def test_hi_transfer_notification_identifies_us_as_the_hip(stub):
         consent_id="C-1",
         transaction_id="T-1",
         session_status="TRANSFERRED",
-        status_responses=[{"careContextReference": "V-1", "hiStatus": "OK", "description": "sent"}],
+        status_responses=[
+            {"careContextReference": "V-1", "hiStatus": "DELIVERED", "description": "sent"}
+        ],
     )
     n = stub.last["json"]["notification"]
     assert n["notifier"] == {"type": "HIP", "id": "SBXID_TEST_HIP"}
     assert n["statusNotification"]["hipId"] == "SBXID_TEST_HIP"
     assert stub.last["path"] == "/api/hiecm/data-flow/v3/health-information/notify"
+
+
+@pytest.mark.parametrize(
+    ("session_status", "entry"),
+    [
+        ("RECEIVED", {"careContextReference": "V-1", "hiStatus": "DELIVERED"}),
+        ("TRANSFERRED", {"careContextReference": "V-1", "hiStatus": "OK"}),
+        ("FAILED", {"careContextReference": "", "hiStatus": "ERRORED"}),
+    ],
+)
+async def test_hip_notification_sends_only_the_hips_own_values(stub, session_status, entry):
+    """ABDM's data-flow specification: a HIP reports TRANSFERRED or FAILED and
+    DELIVERED or ERRORED per named care context. OK and RECEIVED are the HIU's."""
+    with pytest.raises(ValueError):
+        await hip_gw.notify_hi_transfer(
+            consent_id="C-1",
+            transaction_id="T-1",
+            session_status=session_status,
+            status_responses=[entry],
+        )
+    assert stub.calls == []
 
 
 # =============================================================================

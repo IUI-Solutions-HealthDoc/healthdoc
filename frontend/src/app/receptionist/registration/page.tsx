@@ -45,20 +45,21 @@ export default function Page() {
               <div>
                 <p className="font-medium">{t("patient.usingExisting")}</p>
                 <p className="text-sm text-muted-foreground">
-                  {selected.full_name} · {selected.uhid ?? t("patient.uhidPending")}
+                  {selected.full_name} · {selected.uhid ?? selected.thid ?? t("patient.uhidPending")}
                 </p>
               </div>
               <button type="button" className="text-sm underline" onClick={() => setSelected(null)}>
                 {t("patient.chooseAnother")}
               </button>
             </div>
-            <AbhaIdentityPanel patient={selected} />
+            <AbhaIdentityPanel key={`abha-${selected.id}`} patient={selected} />
             <StartVisit
+              key={`visit-${selected.id}`}
               patient={{
                 id: selected.id,
                 full_name: selected.full_name,
                 uhid: selected.uhid,
-                thid: null,
+                thid: selected.thid ?? null,
               }}
             />
           </div>

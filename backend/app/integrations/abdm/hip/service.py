@@ -156,6 +156,22 @@ async def authorise_hi_request(
     )
 
 
+def consented_care_contexts(raw_artefact: dict | None) -> list[str]:
+    """The care-context references a stored consent artefact names, in order.
+
+    Stored artefacts are the gateway's notification (``notification.
+    consentDetail``); older rows hold the detail at the top level.
+    """
+    raw = raw_artefact or {}
+    detail = raw.get("notification", {}).get("consentDetail") or raw.get("consentDetail") or {}
+    references: list[str] = []
+    for item in detail.get("careContexts") or []:
+        reference = item.get("careContextReference")
+        if reference and str(reference) not in references:
+            references.append(str(reference))
+    return references
+
+
 async def record_consent_notification(
     db: AsyncSession,
     *,
@@ -251,13 +267,7 @@ async def list_care_contexts_for_transfer(
     # The artefact names the exact care contexts the patient authorised. A
     # valid consent for one consultation is not authority for every linked
     # consultation at this facility.
-    raw = authorisation.artefact.raw_artefact or {}
-    detail = raw.get("notification", {}).get("consentDetail") or raw.get("consentDetail") or {}
-    consented_references = {
-        str(item.get("careContextReference"))
-        for item in (detail.get("careContexts") or [])
-        if item.get("careContextReference")
-    }
+    consented_references = set(consented_care_contexts(authorisation.artefact.raw_artefact))
     # References are unique per patient, not per facility. Keep the verified
     # patient binding when intersecting references so a collision cannot share
     # a different patient's record.
@@ -299,7 +309,9 @@ def encrypt_bundle_for_hiu(
 ) -> tuple[str, dict, str]:
     """Encrypt one FHIR bundle for the requesting HIU.
 
-    Returns (ciphertext_b64, our_key_material_wire, sha256_of_plaintext).
+    Returns (ciphertext_b64, our_key_material_wire, md5_of_plaintext). The
+    checksum is MD5 of the content before encryption, as ABDM's data-flow
+    specification requires of `entries[].checksum`.
 
     A fresh keypair PER BUNDLE. Reusing one across a transfer would mean a
     single compromised ephemeral key opens every record in it, and the cost of
@@ -314,10 +326,12 @@ def encrypt_bundle_for_hiu(
         peer_nonce_b64=hiu_nonce_b64,
     )
     ciphertext = hi_crypto.encrypt(plaintext, aes_key=aes_key, iv=iv)
-    digest = hashlib.sha256(plaintext.encode()).hexdigest()
+    # An integrity checksum ABDM names, not a security control: the content is
+    # already authenticated by AES-GCM.
+    digest = hashlib.md5(plaintext.encode(), usedforsecurity=False).hexdigest()
     # `ours.private_key` goes out of scope here and is never returned, stored
     # or logged. The HIP side of the exchange is genuinely ephemeral.
-    return ciphertext, ours.to_wire(), digest
+    return ciphertext, ours.to_wire(x509=True), digest
 
 
 async def record_hi_request(

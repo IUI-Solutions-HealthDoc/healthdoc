@@ -16,7 +16,7 @@ from app.common.security import decrypt_pii, encrypt_pii
 from app.integrations.abdm.hip import gateway
 from app.integrations.abdm.hip.documents import DocumentUnavailable, resolve_context_document
 from app.integrations.abdm.hip.models import AbdmCareContext, AbdmCareContextLink
-from app.integrations.abdm.jobs import enqueue, job_id
+from app.integrations.abdm.jobs import AbdmJob, enqueue, job_id
 from app.patients.models import Patient
 
 
@@ -97,6 +97,16 @@ async def initiate(
         ):
             raise DocumentUnavailable("Idempotency key was already used for different documents")
         return existing  # Never reset old attempts or enqueue a replacement generation.
+
+    # Checked before the token job exists: NHA grants three link tokens per
+    # ABHA address a day, and a token spent on an unsendable label is lost.
+    try:
+        for label in (patient.full_name, *(context.display for context in contexts)):
+            gateway.wire_display(label)
+    except ValueError:
+        raise DocumentUnavailable(
+            "The patient name or a document label has no characters ABDM accepts"
+        ) from None
 
     link = AbdmCareContextLink(
         id=ident,
@@ -185,3 +195,54 @@ async def send_link(db: AsyncSession, link: AbdmCareContextLink) -> None:
         **selection,
         request_id=link.gateway_request_id,
     )
+
+
+#: Job summaries that record a synchronous gateway refusal of the link request.
+_REFUSAL_PREFIXES = ("AbdmRejected:", "AbdmAuthError:")
+
+
+async def release_refused_link(db: AsyncSession, *, link_id: uuid.UUID, reason: str) -> bool:
+    """Close a link whose request the gateway refused outright.
+
+    NHA spends the single-use link token on the first attempt and sends no
+    on_carecontext for a refused request, so a pending link would lock its
+    documents in the doctor's picker for good (29 Sep 2026). Only definitive
+    refusals (4xx, 401/403) come here. An ambiguous response keeps the link
+    pending, because the gateway may still act on it and call back.
+    """
+    link = (
+        await db.execute(
+            select(AbdmCareContextLink)
+            .where(AbdmCareContextLink.id == link_id)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if link is None or link.status != "pending":
+        return False
+    link.status = "failed"
+    link.failure_reason = f"Gateway refused the link request ({reason[:100]})"
+    link.link_token_encrypted = None
+    link.token_use_until = None
+    await db.commit()
+    return True
+
+
+async def release_links_refused_before(db: AsyncSession, *, facility_id: uuid.UUID) -> int:
+    """Reconcile links left pending by a refusal recorded before the release existed."""
+    rows = (
+        await db.execute(
+            select(AbdmCareContextLink.id, AbdmJob.last_error)
+            .join(AbdmJob, AbdmJob.target_id == AbdmCareContextLink.id)
+            .where(
+                AbdmCareContextLink.facility_id == facility_id,
+                AbdmCareContextLink.status == "pending",
+                AbdmJob.kind == "link_context",
+                AbdmJob.status == "dead",
+            )
+        )
+    ).all()
+    released = 0
+    for link_id, error in rows:
+        if (error or "").startswith(_REFUSAL_PREFIXES):
+            released += await release_refused_link(db, link_id=link_id, reason=error)
+    return released
