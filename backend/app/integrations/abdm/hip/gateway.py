@@ -31,6 +31,8 @@ response to something the gateway asked us; the rest are requests we start.
 from __future__ import annotations
 
 import logging
+import string
+import unicodedata
 import uuid
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
@@ -118,6 +120,64 @@ def validate_hi_types(hi_types: Sequence[str]) -> list[str]:
     return list(hi_types)
 
 
+#: Dash look-alikes become "-" instead of being dropped, so
+#: "OPConsultation \u2014 2026-09-29" still reads as a label and a date.
+_DASHES = dict.fromkeys(map(ord, "\u2010\u2011\u2012\u2013\u2014\u2015\u2212"), "-")
+
+#: Characters seen in displays NHA accepted: other integrators' linked labels
+#: such as "OP Consultation - 5/6/2026" and "Discharge Summary - 2026-07-18 -
+#: Rehabilitation Centre (V)", and NHA's own mock HIP ("Sugar Test").
+_ACCEPTED = frozenset(string.ascii_letters + string.digits + " -()/")
+
+#: The longest display seen accepted is 58 characters; stay inside it.
+_MAX_DISPLAY = 50
+
+
+def wire_display(text: str) -> str:
+    """The `display` text to send, limited to what NHA is known to accept.
+
+    `link/carecontext` answered 400 ABDM-9999 "Invalid display" twice on
+    30 September 2026: first for a label carrying an em dash (REQUEST-ID
+    b796a8e9-ffc9-5099-b93c-3b18a250663a), then, with the dash replaced, for
+    the same 89-character label still carrying ";" and "," (REQUEST-ID
+    8c96dd5b-cc3a-563e-89df-dee1a932ca0d). NHA does not publish the rule, so
+    the wire copy keeps only characters and lengths seen accepted: accents
+    fold ("Jos\u00e9" -> "Jose"), dashes become "-", anything else becomes a
+    space, and a longer label is cut at a word boundary. Stored labels keep
+    their text.
+
+    A label with nothing left, such as a name written only in Devanagari, is
+    refused rather than replaced with an invented one.
+    """
+    folded = unicodedata.normalize("NFKD", text.translate(_DASHES))
+    kept = "".join(ch if ch in _ACCEPTED else " " for ch in folded if not unicodedata.combining(ch))
+    words = kept.split()
+    if not words:
+        raise ValueError("Display has no characters ABDM accepts")
+    cleaned = words[0][:_MAX_DISPLAY]
+    for word in words[1:]:
+        if len(cleaned) + 1 + len(word) > _MAX_DISPLAY:
+            break
+        cleaned += " " + word
+    return cleaned
+
+
+def _wire_group(group: Mapping[str, Any]) -> dict[str, Any]:
+    """A stored `patient[]` group with its displays made sendable.
+
+    Stored discovery and link-confirm replies are compared with a fresh
+    recomputation before replay, so they keep the original text and are
+    cleaned only here, on the way out.
+    """
+    return {
+        **group,
+        "display": wire_display(group["display"]),
+        "careContexts": [
+            {**c, "display": wire_display(c["display"])} for c in group["careContexts"]
+        ],
+    }
+
+
 def care_context_payload(
     *,
     abha_address: str,
@@ -133,11 +193,12 @@ def care_context_payload(
     empty link.
     """
     contexts = [
-        {"referenceNumber": c["referenceNumber"], "display": c["display"]} for c in care_contexts
+        {"referenceNumber": c["referenceNumber"], "display": wire_display(c["display"])}
+        for c in care_contexts
     ]
     return {
         "referenceNumber": abha_address,
-        "display": display,
+        "display": wire_display(display),
         "careContexts": contexts,
         "hiType": hi_type,
         "count": len(contexts),
@@ -377,7 +438,7 @@ async def respond_to_discovery_groups(
         settings.abdm_path_hip_on_discover,
         {
             "transactionId": transaction_id,
-            "patient": [dict(group) for group in patient_groups],
+            "patient": [_wire_group(group) for group in patient_groups],
             "matchedBy": list(matched_by),
             "response": {"requestId": gateway_request_id},
         },
@@ -489,7 +550,7 @@ async def respond_to_link_confirm_groups(
     return await _post(
         settings.abdm_path_hip_on_link_confirm,
         {
-            "patient": [dict(group) for group in patient_groups],
+            "patient": [_wire_group(group) for group in patient_groups],
             "response": {"requestId": gateway_request_id},
         },
         extra_headers={"X-HIP-ID": hip_id()},
@@ -598,10 +659,20 @@ async def notify_hi_transfer(
     """HIP -> gateway. Report what happened to a data push.
 
     `status_responses` is per care context: `careContextReference`, `hiStatus`
-    ("OK" / "ERRORED") and a short `description`. The gateway shows this to the
-    patient, so the description must describe the transfer and never the
-    clinical content.
+    and a short `description`. The gateway shows this to the patient, so the
+    description must describe the transfer and never the clinical content.
+
+    ABDM's data-flow specification gives the HIP its own values: session
+    TRANSFERRED or FAILED, and per care context DELIVERED or ERRORED. "OK" and
+    RECEIVED are the HIU's, and the HIU notice refuses the HIP's in turn.
     """
+    if session_status not in {"TRANSFERRED", "FAILED"}:
+        raise ValueError("A HIP reports TRANSFERRED or FAILED")
+    if not status_responses or any(
+        s.get("hiStatus") not in {"DELIVERED", "ERRORED"} or not s.get("careContextReference")
+        for s in status_responses
+    ):
+        raise ValueError("Each care context is DELIVERED or ERRORED and named")
     settings = get_settings()
     return await _post(
         settings.abdm_path_hip_hi_notify,

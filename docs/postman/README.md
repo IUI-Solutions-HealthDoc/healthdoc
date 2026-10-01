@@ -1,4 +1,9 @@
-# HealthDoc Postman readiness pack — updated 25 September 2026
+# HealthDoc Postman readiness pack — updated 26 September 2026
+
+**Start with the [M1/M2 execution guide](../abdm-postman-browser-m1-m2-execution-2026-09-26.md).**
+M1 and HIP-initiated M2 linking can proceed while the M3 requester fields are
+pending. M2 still needs actual transfer/PHR rendering and any assigned
+discovery cases; those require their own prerequisites.
 
 The collection is a non-clinical readiness aid, not an M1–M3 certification
 collection. Earlier on 25 September, the public callback returned **502**
@@ -32,8 +37,8 @@ Relevant allowlisted service-response excerpt:
 ```
 
 No service registration was changed. **Do not re-register this service.**
-The old HIP/HIU entries still exist; reconcile their historical operations
-before changing application identity.
+The old HIP/HIU entries still exist. Their historical operations are preserved;
+new tests use the corrected IN-number after the approved cutover below.
 
 The new HPID is masked, ending 6184, and the screenshot's professional/council
 application is **Draft**. Do not guess the full number or treat registration
@@ -43,16 +48,18 @@ completeness as verified clinician authority.
 
 | Setting | Last inspected local configuration | Correct registered service to plan against |
 |---|---|---|
-| ABDM_HIP_ID | SBXID_053401_HIP | IN0910034387 |
-| ABDM_HIU_ID | SBXID_053401_HIU | IN0910034387 |
+| ABDM_HIP_ID | IN0910034387 | IN0910034387 |
+| ABDM_HIU_ID | IN0910034387 | IN0910034387 |
 | ABDM_HFR_FACILITY_ID | IN0910034387 | IN0910034387 |
 
 After the owner explicitly confirmed the replacement ID, the local facility
 row and backend HFR setting were updated to **IN0910034387**, with a validated
-database backup. The HIP/HIU sender IDs have **not** been switched: 21
-`context_notify` and one `link_context` jobs for this facility remain pending
-under the older identity. Reconcile those jobs before a service-ID cutover.
-No clinician-profile write or historical-job rewrite was performed.
+database backup. On 26 September, the owner approved switching **new** tests
+and freezing old work: HIP/HIU sender IDs now also use **IN0910034387**.
+The 21 historical `context_notify` and one `link_context` jobs are **frozen**,
+not pending. An unrelated facility's pending job was left untouched.
+No clinician-profile write or historical-payload rewrite was performed.
+Use the new session-scoped runner in the execution guide, not global delivery.
 
 ## Imported collection
 
@@ -108,10 +115,33 @@ Official sources:
 [Local Vault](https://learning.postman.com/docs/use/postman-vault/use-vault-secrets),
 [script access](https://learning.postman.com/docs/tests-and-scripts/write-scripts/postman-sandbox-reference/pm-vault/).
 
-## Incoming webhook evidence
+## Incoming webhook evidence — Postman and local browser viewer
 
 Postman is a sender, **not HealthDoc's incoming webhook inbox**. Do not move
 the registered bridge URL to a public Postman/webhook capture endpoint.
+
+The new [inspector collection](healthdoc-webhook-inspector.postman_collection.json)
+is imported as **HealthDoc — Local Webhook Inspector (26 Sep)**. It reads
+HealthDoc's existing redacted receipts through a local, read-only console.
+Its latest-receipts and status requests returned **200 in desktop Postman**.
+
+```sh
+cd /Users/ritikkumar/Desktop/healthdoc/.local-archive/worktrees/next-phase-20260926
+python3 scripts/abdm_webhook_console.py
+```
+
+Open **http://127.0.0.1:8766** for auto-refresh, original REQUEST-ID filtering,
+Inspect and Copy redacted evidence. POST-only defaults on; disable it to see
+GET probes. Keep the process open; do not tunnel or expose the console.
+Chrome automation was blocked (`ERR_BLOCKED_BY_CLIENT`), so the rendered page
+still needs user verification; the HTTP API and Postman path are verified.
+
+For Postman set collection `receipt_id` or `original_request_id` to the actual
+UUID and send the corresponding inspector request. The collection supplies
+the local operator header; no NHA token is required. A receipt's HTTP status
+is **HealthDoc's reply to the callback**, not NHA's earlier response.
+
+Terminal remains an alternative:
 
 ```sh
 docker exec healthdoc-backend-1 python -m scripts.abdm_callback_receipts --limit 20
@@ -134,6 +164,9 @@ Synthetic GET/invalid-POST receipts are not successful M2/M3 evidence.
 | Local Vault | Client-secret entry and allowed domain now visible; secret value not inspected |
 | Postman session/registration GETs | Session and both read-only registration GETs previously returned **200** after the user configured Local Vault; retain a fresh redacted run for milestone evidence |
 | Local health in Postman | An independent local GET returned **200** after recovery; rerun in Postman for its own evidence |
+| 26 September public routing | All 16 callback GETs returned **405 + receipt ID** in a separate script check; token GET also refreshed in Postman |
+| Local inspector in Postman | Imported; receipt-list and status requests returned **200** |
+| New session delivery runner | Dry-run verified against corrected facility; execute mode not started by setup |
 | M1/M2/M3 acceptance | Not established by these readiness checks |
 
 ## Actual clinical workflows
@@ -153,9 +186,12 @@ readiness pack.
 
 ```sh
 node docs/postman/validate-collection.mjs
+node docs/postman/validate-inspector.mjs
 ```
 
 Passed for **21 requests / 42 scripts**, including destination guards,
 one-shot session arming, refusal without Vault access, token validation and
 negative mutations of callback receipts and service-registration assertions.
-This test performs no network requests and is not live Postman or milestone evidence.
+The inspector validator also passed for **4 requests**, with destination,
+method and unresolved-placeholder refusals. These tests perform no network
+requests and are not live Postman or milestone evidence.

@@ -119,6 +119,17 @@ class QueueOpeningOptionsOut(BaseModel):
     items: list[QueueOpeningOptionOut]
 
 
+class BookableProviderOut(BaseModel):
+    staff_user_id: uuid.UUID
+    staff_name: str
+    department_id: uuid.UUID
+
+
+class BookableProvidersOut(BaseModel):
+    service_date: date
+    items: list[BookableProviderOut]
+
+
 class QueueTokenListItemOut(QueueTokenOut):
     doctor_name: str
     room_number: str | None

@@ -4,7 +4,16 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
+
+#: 00:00-23:59. `\d{2}:\d{2}` let "25:00" through to a 500 in calc_end_time.
+TIME_PATTERN = r"^([01]\d|2[0-3]):[0-5]\d$"
+
+AppointmentStatus = Literal[
+    "booked", "confirmed", "checked_in", "completed", "cancelled", "no_show", "rescheduled",
+]
 
 
 class AppointmentServiceCreate(BaseModel):
@@ -36,7 +45,7 @@ class AppointmentCreate(BaseModel):
     service_name: str = "Consultation"
     duration_minutes: int = Field(default=15, ge=5, le=240)
     appointment_date: date
-    start_time: str = Field(..., pattern=r"^\d{2}:\d{2}$")
+    start_time: str = Field(..., pattern=TIME_PATTERN)
     is_walk_in: bool = False
     is_teleconsult: bool = False
     notes: str | None = None
@@ -45,11 +54,11 @@ class AppointmentCreate(BaseModel):
 
 class AppointmentUpdate(BaseModel):
     appointment_date: date | None = None
-    start_time: str | None = Field(None, pattern=r"^\d{2}:\d{2}$")
+    start_time: str | None = Field(None, pattern=TIME_PATTERN)
     duration_minutes: int | None = Field(None, ge=5, le=240)
     doctor_user_id: uuid.UUID | None = None
-    status: str | None = None
-    cancellation_reason: str | None = None
+    status: AppointmentStatus | None = None
+    cancellation_reason: str | None = Field(None, max_length=500)
     notes: str | None = None
 
 
@@ -65,6 +74,10 @@ class AppointmentCheckInResult(BaseModel):
     visit_number: str
     token_id: uuid.UUID | None = None
     token_display: str | None = None
+    #: "not_issued" means the visit exists and still needs a token from the
+    #: queue desk; token_not_issued_reason says why (e.g. "no_open_queue").
+    token_status: Literal["issued", "not_issued"] = "not_issued"
+    token_not_issued_reason: str | None = None
 
 
 class AppointmentOut(BaseModel):

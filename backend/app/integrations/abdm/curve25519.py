@@ -70,14 +70,21 @@ class PrivateKey:
         return shared
 
 
-def generate() -> tuple[PrivateKey, bytes]:
+def generate() -> tuple[PrivateKey, bytes, bytes]:
+    """A new key pair: (private key, raw uncompressed point, X.509 SubjectPublicKeyInfo).
+
+    Both public forms are Bouncy Castle's encodings of the same key, as
+    fidelius-cli emits them (`publicKey` and `x509PublicKey`).
+    """
     result = invoke("generate")
-    if len(result) != 2:
+    if len(result) != 3:
         raise CurveError("Malformed ECDH key material")
-    scalar, public = (base64.b64decode(value, validate=True) for value in result)
+    scalar, public, x509 = (base64.b64decode(value, validate=True) for value in result)
     if len(scalar) != 32 or len(public) != 65 or public[0] != 4:
         raise CurveError("Malformed ECDH key material")
-    return PrivateKey(scalar), public
+    if not 65 < len(x509) <= 512 or x509[0] != 0x30:
+        raise CurveError("Malformed ECDH key material")
+    return PrivateKey(scalar), public, x509
 
 
 def serialize(key: PrivateKey) -> str:
