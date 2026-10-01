@@ -164,8 +164,81 @@ test("switching patient discards the remembered identifier and open session", as
   assert.doesNotMatch(content(other), /999988887777/);
 });
 
+/** NHA's published statements, as the server renders them (texts shortened). */
+const DECLARATION = {
+  version: "nha-consent-language-1", ownership: "government", intro: "I hereby declare that:", sha256: "a".repeat(64),
+  statements: [
+    { id: "aadhaar_sharing", text: "I am voluntarily sharing my Aadhaar Number", ticked: true, required: true },
+    { id: "other_document", text: "using document other than Aadhaar.", ticked: false, required: false },
+    { id: "link_records", text: "linking of my legacy (past) government health records", ticked: true, required: null },
+    { id: "share_for_care", text: "I authorize the sharing of all my health records", ticked: true, required: null },
+    { id: "anonymised_use", text: "anonymization and subsequent use of my government health records", ticked: true, required: null },
+    { id: "health_worker", text: "I, Synthetic Receptionist, confirm that I have duly informed", ticked: false, required: true },
+    { id: "beneficiary", text: "I, Synthetic Patient, have been explained about the consent", ticked: false, required: true },
+  ],
+};
+const tick = (tree, id, checked = true) =>
+  find(tree, (n) => n.type === "input" && n.props.type === "checkbox" && n.props.name === id).props.onChange({ target: { checked } });
+
+async function openNewAbha(d) {
+  let tree = d.render();
+  button(tree, "Create ABHA").props.onClick();
+  d.render(); await flush();
+  tree = d.render();
+  input(tree).props.onChange({ target: { value: "999988887777" } });
+  return d.render();
+}
+
+test("the desk shows NHA's published consent and sends only once both confirmations are ticked", async () => {
+  const d = desk({
+    getAbhaEnrolmentDeclaration: async () => DECLARATION,
+    requestAbhaEnrolmentOtp: async () => ({ session_id: "s1", masked_mobile: null, resends_remaining: 3 }),
+  });
+  let tree = await openNewAbha(d);
+  assert.deepEqual(d.calls[0], { name: "getAbhaEnrolmentDeclaration", args: ["patient-A"] });
+  assert.match(content(tree), /I hereby declare that:/);
+  for (const statement of DECLARATION.statements) assert.ok(content(tree).includes(statement.text));
+  const ticked = (id) => find(tree, (n) => n.type === "input" && n.props.name === id).props.checked;
+  assert.deepEqual(DECLARATION.statements.map((s) => ticked(s.id)), [true, false, true, true, true, false, false],
+    "NHA's form ticks 1, 3, 4 and 5; the confirmations start empty");
+  assert.equal(button(tree, "Send OTP").props.disabled, true);
+  tick(tree, "health_worker"); tree = d.render();
+  assert.equal(button(tree, "Send OTP").props.disabled, true, "the patient's own confirmation is still missing");
+  tick(tree, "beneficiary"); tree = d.render();
+  tick(tree, "anonymised_use", false); tree = d.render();
+  assert.equal(button(tree, "Send OTP").props.disabled, false, "optional statements may be declined");
+
+  tick(tree, "other_document"); tree = d.render();
+  assert.equal(button(tree, "Send OTP").props.disabled, true);
+  assert.match(alertText(tree), /document other than Aadhaar/);
+  tick(tree, "other_document", false); tree = d.render();
+
+  await button(tree, "Send OTP").props.onClick(); await flush();
+  const sent = d.calls.find((c) => c.name === "requestAbhaEnrolmentOtp").args[2];
+  assert.equal(sent.code, "abha-enrollment");
+  assert.equal(sent.declaration_sha256, DECLARATION.sha256);
+  assert.deepEqual(sent.statements, {
+    aadhaar_sharing: true, other_document: false, link_records: true, share_for_care: true,
+    anonymised_use: false, health_worker: true, beneficiary: true,
+  });
+});
+
+test("a consent that cannot be loaded is a refusal, not a blank form", async () => {
+  const d = desk({
+    getAbhaEnrolmentDeclaration: async () => {
+      throw new TestApiError(409, "Record whether this facility is government or private before creating ABHAs", { code: "facility_ownership_unset" });
+    },
+    requestAbhaEnrolmentOtp: async () => { throw new Error("must not be sent"); },
+  });
+  const tree = await openNewAbha(d);
+  assert.match(alertText(tree), /government or private/);
+  assert.equal(button(tree, "Send OTP").props.disabled, true);
+  assert.equal(d.calls.filter((c) => c.name === "requestAbhaEnrolmentOtp").length, 0);
+});
+
 test("creating an ABHA requires consent and does not preselect one of several addresses", async () => {
   const d = desk({
+    getAbhaEnrolmentDeclaration: async () => DECLARATION,
     requestAbhaLoginOtp: async () => { throw new Error("not this flow"); },
     requestAbhaEnrolmentOtp: async () => ({ session_id: "s1", masked_mobile: null, resends_remaining: 3 }),
     verifyAbhaEnrolmentOtp: async () => ({
@@ -185,20 +258,16 @@ test("creating an ABHA requires consent and does not preselect one of several ad
     verifyAbhaLoginOtp: async () => { throw new Error("unused"); },
     downloadNhaAbhaCard: async () => { throw new Error("unused"); },
   });
-  let tree = d.render();
-  button(tree, "Create ABHA").props.onClick();
-  tree = d.render();
-  input(tree).props.onChange({ target: { value: "999988887777" } });
-  tree = d.render();
+  let tree = await openNewAbha(d);
   assert.equal(button(tree, "Send OTP").props.disabled, true);
-  const consent = find(tree, (n) => n.type === "input" && n.props.type === "checkbox");
-  consent.props.onChange({ target: { checked: true } });
-  tree = d.render();
+  tick(tree, "health_worker"); tree = d.render();
+  tick(tree, "beneficiary"); tree = d.render();
   assert.equal(button(tree, "Send OTP").props.disabled, false);
   await button(tree, "Send OTP").props.onClick(); await flush();
   tree = d.render();
-  assert.equal(d.calls[0].args[2].code, "abha-enrollment");
-  assert.equal(d.calls[0].args[2].granted, true);
+  const enrolment = d.calls.find((c) => c.name === "requestAbhaEnrolmentOtp");
+  assert.equal(enrolment.args[2].code, "abha-enrollment");
+  assert.equal(enrolment.args[2].granted, true);
   nodes(tree).find((n) => n.props?.autoComplete === "one-time-code").props.onChange({ target: { value: "123456" } });
   tree = d.render();
   await button(tree, "Verify and link").props.onClick(); await flush();

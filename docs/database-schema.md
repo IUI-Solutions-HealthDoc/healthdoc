@@ -208,6 +208,7 @@ do not merge out of order.**
 | 0087 | appointment_service_hindi | ALTER appointment_services: name_hi | Optional Hindi appointment-service label; English remains the fallback. |
 | 0088 | abdm_frozen_delivery_jobs | abdm_jobs | Widens the status CHECK with `frozen` for historical jobs held during a service-ID cutover; the delivery worker and operator retry must not dispatch them. |
 | 0089 | uuid_pk_defaults_visit_status | ALTER appointment_services: id; ALTER appointments: id; ALTER clinical_dispositions: id; ALTER admission_checklist_tasks: id; ALTER emergency_triages: id; ALTER emergency_triage_logs: id; ALTER lab_analytes: id; ALTER visits: status | Restores the `uuid_generate_v4()` id default 0074–0076 omitted (every insert failed on PostgreSQL) and widens the visit status CHECK with `in_consultation` and `closed`, which the OPD state machine writes. |
+| 0090 | facility_ownership | ALTER facilities: ownership | Government or private, CHECK-constrained, NULL until recorded; selects NHA's published ABHA consent wording (CRT_ABHA_102). |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -309,6 +310,7 @@ state_code      varchar(5) NOT NULL              -- e.g. RJ
 district        text
 facility_type   varchar(50)                      -- phc | chc | district_hospital | medical_college
 hfr_facility_id varchar(50)                      -- ABDM Health Facility Registry id
+ownership       varchar(20) NULL                 -- government | private (0090); selects ABDM ABHA consent wording
 timezone        varchar(50) NOT NULL DEFAULT 'Asia/Kolkata'  -- IANA tz; drives ALL business dates
                                                  -- NOT created by 0002 despite being specified
                                                  -- here since v3.0 — added by 0003a. Every

@@ -37,7 +37,13 @@ from app.integrations.abdm.client import (
 from app.integrations.abdm.identity import otp_session
 from app.integrations.abdm.identity import service as identity_service
 from app.integrations.abdm.identity.crypto import AbdmPublicKeyMissing
-from app.integrations.abdm.identity.enrolment_consent import EnrolmentConsent, consent_metadata
+from app.integrations.abdm.identity.enrolment_consent import (
+    DeclarationRefused,
+    EnrolmentConsent,
+    accept_declaration,
+    consent_metadata,
+    declaration,
+)
 from app.integrations.abdm.identity.formatting import hyphenate_abha
 from app.integrations.abdm.identity.otp_session import (
     OtpPurpose,
@@ -46,6 +52,7 @@ from app.integrations.abdm.identity.otp_session import (
 )
 from app.outbox.service import enqueue
 from app.patients.models import Patient
+from app.users.models import Facility, User
 
 log = logging.getLogger("healthdoc.abdm")
 router = APIRouter(prefix="/abdm/abha", tags=["abdm"])
@@ -323,6 +330,12 @@ class EnrolmentConsentIn(BaseModel):
     code: str
     version: str
     language: str = "en"
+    #: The desk's tick on each of NHA's published statements, by id.
+    statements: dict[str, bool]
+    #: Digest of the declaration the desk displayed, from GET /enrol/consent.
+    #: A different digest means the text changed (staff or patient name,
+    #: facility ownership) after it was shown, so the ticks are not recorded.
+    declaration_sha256: str = Field(min_length=64, max_length=64)
 
 
 class AadhaarOtpRequest(BaseModel):
@@ -426,6 +439,26 @@ _CLIENT_IDENTITY_CODES = {
     "abha_not_found_for_mobile",
     "abha_not_found_for_aadhaar",
 }
+
+
+async def _declaration_for(db: AsyncSession, actor: CurrentDbUser, patient: Patient) -> dict:
+    """NHA's ABHA consent as this desk must show it for this patient."""
+    facility = await db.get(Facility, actor.facility_id)
+    staff = await db.get(User, actor.id)
+    try:
+        return declaration(
+            ownership=facility.ownership if facility else None,
+            health_worker=staff.full_name if staff else "",
+            beneficiary=patient.full_name or "",
+        )
+    except DeclarationRefused as exc:
+        raise _declaration_refused(exc) from None
+
+
+def _declaration_refused(exc: DeclarationRefused) -> HTTPException:
+    # Ownership is facility setup, not something the desk can correct.
+    status = 409 if exc.code == "facility_ownership_unset" else 400
+    return HTTPException(status, {"code": exc.code, "message": exc.message})
 
 
 def _identity_error(exc: identity_service.AbdmIdentityError) -> HTTPException:
@@ -682,7 +715,20 @@ async def enrol_request_otp(
     it — not in the OTP session, not in an audit row, not in a log line.
     Consent is required before the gateway is contacted.
     """
-    await _get_patient_or_404(db, payload.patient_id, current_db_user.facility_id)
+    patient = await _get_patient_or_404(db, payload.patient_id, current_db_user.facility_id)
+    shown = await _declaration_for(db, current_db_user, patient)
+    if payload.consent.declaration_sha256 != shown["sha256"]:
+        raise HTTPException(
+            409,
+            {
+                "code": "enrolment_declaration_changed",
+                "message": "The consent text changed after it was shown; show it again",
+            },
+        )
+    try:
+        statements = accept_declaration(shown, payload.consent.statements)
+    except DeclarationRefused as exc:
+        raise _declaration_refused(exc) from None
     try:
         result = await identity_service.request_aadhaar_otp(
             aadhaar=payload.aadhaar,
@@ -727,6 +773,13 @@ async def enrol_request_otp(
             "version": payload.consent.version,
             "language": payload.consent.language,
             "granted": True,
+            # What was shown and what was ticked, for the Health Data
+            # Management Policy record CRT_ABHA_102 asks for. Names live in
+            # the text, which the digest pins; they are not copied here.
+            "declaration_version": shown["version"],
+            "declaration_sha256": shown["sha256"],
+            "ownership": shown["ownership"],
+            "statements": statements,
         },
     )
     return OtpRequestedOut(
@@ -829,9 +882,18 @@ async def enrol_verify_otp(
     "/enrol/consent",
     dependencies=[Depends(require_roles("receptionist", "doctor"))],
 )
-async def enrol_consent_copy() -> dict:
-    """Approved enrolment grant identifiers and English desk copy. No PHI."""
-    return consent_metadata()
+async def enrol_consent_copy(
+    patient_id: Annotated[uuid.UUID, Query()],
+    current_db_user: CurrentDbUser,
+    db: DbSession,
+) -> dict:
+    """NHA's published ABHA consent for this patient, as the desk must show it.
+
+    Carries the patient's and the signed-in staff member's names, so it is
+    scoped like any patient read: another facility's patient is a 404.
+    """
+    patient = await _get_patient_or_404(db, patient_id, current_db_user.facility_id)
+    return consent_metadata(await _declaration_for(db, current_db_user, patient))
 
 
 async def _enrolment_continuation_session(
