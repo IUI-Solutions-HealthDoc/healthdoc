@@ -93,6 +93,7 @@ async def desk(db, monkeypatch):
     monkeypatch.setattr(service, "get_abdm_client", lambda: gateway)
 
     facility, staff, patient, _other = await _setup_suite_8_fixture(db)
+    facility.ownership = "government"
     await db.commit()
     caller = DbUser(id=staff.id, keycloak_sub=staff.keycloak_sub, username=staff.username,
                     facility_id=facility.id, roles=["receptionist"])
@@ -113,7 +114,19 @@ async def desk(db, monkeypatch):
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test",
                                  headers={"Idempotency-Key": str(uuid.uuid4())}) as client:
         yield {"client": client, "gateway": gateway, "redis": redis, "patient": patient, "staff": staff,
-               "other": _other}
+               "other": _other, "facility": facility, "db": db}
+
+
+async def consent_for(desk, **ticks):
+    """What the desk sends after showing NHA's declaration: its own defaults,
+    both confirmations ticked, then any override."""
+    shown = await desk["client"].get(
+        "/abdm/abha/enrol/consent", params={"patient_id": str(desk["patient"].id)})
+    assert shown.status_code == 200, shown.text
+    declaration = shown.json()["declaration"]
+    statements = {row["id"]: row["ticked"] for row in declaration["statements"]}
+    statements.update({"health_worker": True, "beneficiary": True, **ticks})
+    return {**CONSENT, "statements": statements, "declaration_sha256": declaration["sha256"]}
 
 
 async def test_a_refused_otp_is_a_correctable_400_and_keeps_the_session(desk):
@@ -143,7 +156,7 @@ async def test_login_request_refuses_zero_or_two_identifiers(desk):
 async def test_early_resend_is_429_with_retry_after_and_wrong_patient_is_404(desk):
     desk["gateway"].responses = [{"txnId": "abdm-txn-1"}, {"txnId": "abdm-txn-2"}]
     requested = await desk["client"].post("/abdm/abha/enrol/aadhaar/request-otp", json={
-        "patient_id": str(desk["patient"].id), "aadhaar": AADHAAR, "consent": CONSENT})
+        "patient_id": str(desk["patient"].id), "aadhaar": AADHAAR, "consent": await consent_for(desk)})
     assert requested.status_code == 200, requested.text
     session_id = requested.json()["session_id"]
     body = {"session_id": session_id, "patient_id": str(desk["patient"].id), "aadhaar": AADHAAR}
@@ -174,7 +187,7 @@ async def test_declined_enrolment_consent_is_400_and_does_not_call_abdm(desk):
     response = await desk["client"].post("/abdm/abha/enrol/aadhaar/request-otp", json={
         "patient_id": str(desk["patient"].id),
         "aadhaar": AADHAAR,
-        "consent": {**CONSENT, "granted": False},
+        "consent": {**(await consent_for(desk)), "granted": False},
     })
     assert response.status_code == 400, response.text
     assert response.json()["detail"]["code"] == "enrolment_consent_refused"

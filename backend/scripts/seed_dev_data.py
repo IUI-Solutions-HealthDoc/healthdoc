@@ -149,15 +149,19 @@ async def seed(users: list[tuple[str, str]]) -> None:
             text(
                 """
                 INSERT INTO facilities
-                    (id, code, name, name_hi, state_code, timezone, facility_type, is_active)
+                    (id, code, name, name_hi, state_code, timezone, facility_type,
+                     ownership, is_active)
                 VALUES
                     (:id, 'DEV001', 'HealthDoc Development Hospital',
                      'हेल्थडॉक विकास अस्पताल', 'DL',
-                     'Asia/Kolkata', 'hospital', true)
+                     'Asia/Kolkata', 'hospital', 'government', true)
                 ON CONFLICT (id) DO UPDATE SET
                     name = EXCLUDED.name,
                     name_hi = EXCLUDED.name_hi,
                     timezone = EXCLUDED.timezone,
+                    -- HealthDoc targets government hospitals; keep a value an
+                    -- operator recorded deliberately.
+                    ownership = COALESCE(facilities.ownership, EXCLUDED.ownership),
                     is_active = true
                 """
             ),
