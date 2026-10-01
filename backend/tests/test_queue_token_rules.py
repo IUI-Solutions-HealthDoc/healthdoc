@@ -7,7 +7,8 @@ opened for a doctor nobody rostered, and a retried priority change reported
 as a failure.
 """
 import uuid
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
@@ -22,6 +23,7 @@ from app.queue import router as queue_router
 from app.queue import service
 from app.queue.models import Queue, QueueTokenPriorityChange
 from app.users.models import User
+from tests.business_day import FACILITY_TZ, business_today
 
 pytestmark = pytest.mark.asyncio
 
@@ -46,7 +48,7 @@ async def test_a_visit_cannot_hold_two_live_tokens(db, seed, queue, opd_visit, r
     await db.flush()
     await roster_on_duty(dept.id, second_doctor.id)
     other_queue = await service.create_queue(
-        db, dept.id, second_doctor.id, None, None, date.today(), dept.facility_id
+        db, dept.id, second_doctor.id, None, None, business_today(), dept.facility_id
     )
     visit = await opd_visit()
     await _issue(db, queue, visit)
@@ -84,7 +86,7 @@ async def test_yesterdays_queue_takes_no_new_token(db, seed, opd_visit):
     dept, room, doctor = seed
     stale_queue = Queue(
         id=uuid.uuid4(), facility_id=dept.facility_id, department_id=dept.id,
-        doctor_user_id=doctor.id, room_id=room.id, service_date=date.today() - timedelta(days=1),
+        doctor_user_id=doctor.id, room_id=room.id, service_date=business_today() - timedelta(days=1),
         is_open=True,
     )
     db.add(stale_queue)
@@ -120,7 +122,7 @@ async def test_a_visit_for_another_department_is_refused(db, seed, queue, opd_vi
 
 async def test_a_queue_opens_only_for_today(db, seed, roster_on_duty):
     dept, room, doctor = seed
-    tomorrow = date.today() + timedelta(days=1)
+    tomorrow = business_today() + timedelta(days=1)
     await roster_on_duty(dept.id, doctor.id, roster_date=tomorrow)
 
     with pytest.raises(HTTPException) as exc:
@@ -132,7 +134,7 @@ async def test_a_queue_opens_only_for_today(db, seed, roster_on_duty):
 async def test_a_queue_needs_an_available_roster_entry_in_that_department(db, seed, roster_on_duty):
     dept, room, doctor = seed
     with pytest.raises(HTTPException) as exc:
-        await service.create_queue(db, dept.id, doctor.id, room.id, None, date.today(), dept.facility_id)
+        await service.create_queue(db, dept.id, doctor.id, room.id, None, business_today(), dept.facility_id)
     assert _code(exc) == "doctor_not_rostered"
 
     other = Department(id=uuid.uuid4(), code="OTH", name="Other", facility_id=dept.facility_id)
@@ -140,21 +142,21 @@ async def test_a_queue_needs_an_available_roster_entry_in_that_department(db, se
     await db.flush()
     await roster_on_duty(other.id, doctor.id)
     with pytest.raises(HTTPException) as exc:
-        await service.create_queue(db, dept.id, doctor.id, room.id, None, date.today(), dept.facility_id)
+        await service.create_queue(db, dept.id, doctor.id, room.id, None, business_today(), dept.facility_id)
     assert _code(exc) == "doctor_not_rostered", "a roster in another department does not count"
 
     entry = await roster_on_duty(dept.id, doctor.id, shift="evening")
     entry.is_available = False
     await db.flush()
     with pytest.raises(HTTPException) as exc:
-        await service.create_queue(db, dept.id, doctor.id, room.id, None, date.today(), dept.facility_id)
+        await service.create_queue(db, dept.id, doctor.id, room.id, None, business_today(), dept.facility_id)
     assert _code(exc) == "doctor_not_rostered", "an unavailable roster entry does not count"
 
 
 async def test_opening_the_same_clinic_twice_is_a_conflict(db, seed, queue):
     dept, room, doctor = seed
     with pytest.raises(HTTPException) as exc:
-        await service.create_queue(db, dept.id, doctor.id, room.id, None, date.today(), dept.facility_id)
+        await service.create_queue(db, dept.id, doctor.id, room.id, None, business_today(), dept.facility_id)
     assert exc.value.status_code == 409
     assert _code(exc) == "queue_exists"
 
@@ -162,14 +164,18 @@ async def test_opening_the_same_clinic_twice_is_a_conflict(db, seed, queue):
 # ---------------- visits awaiting a token ----------------
 
 async def test_visits_awaiting_a_token_are_todays_registered_visits_only(db, queue, opd_visit):
+    # Inside the facility's business day, in its own timezone. SQLite keeps a
+    # timestamp's wall-clock text without the offset, so a UTC stamp compares
+    # against the IST day bounds as the wrong day between 18:30 and 24:00 UTC.
+    in_today = datetime.combine(business_today(), time(1), tzinfo=ZoneInfo(FACILITY_TZ))
     waiting = await opd_visit()
-    waiting.visit_date = datetime.now(UTC)
+    waiting.visit_date = in_today
     old = await opd_visit()
-    old.visit_date = datetime.now(UTC) - timedelta(days=2)
+    old.visit_date = in_today - timedelta(days=2)
     tokened = await opd_visit()
-    tokened.visit_date = datetime.now(UTC)
+    tokened.visit_date = in_today
     ended = await opd_visit()
-    ended.visit_date = datetime.now(UTC)
+    ended.visit_date = in_today
     ended.status = "lwbs"
     await db.flush()
     await _issue(db, queue, tokened)
