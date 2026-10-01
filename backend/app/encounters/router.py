@@ -100,7 +100,7 @@ async def create_encounter(payload: EncounterCreate, current_db_user: CurrentDbU
 
 
 @router.get("/{encounter_id}", response_model=EncounterOut,
-            dependencies=[Depends(require_roles("doctor", "nurse", "receptionist", "admin"))])
+            dependencies=[Depends(require_roles("doctor", "nurse", "admin"))])
 async def get_encounter(encounter_id: UUID, current_db_user: CurrentDbUser,
                          db: AsyncSession = Depends(get_db)) -> EncounterOut:
     encounter = await _get_scoped_encounter(db, encounter_id, current_db_user.facility_id)
@@ -202,7 +202,7 @@ async def create_diagnosis(encounter_id: UUID, payload: DiagnosisCreate, current
 
 
 @router.get("/{encounter_id}/diagnoses", response_model=list[DiagnosisOut],
-            dependencies=[Depends(require_roles("doctor", "nurse", "receptionist", "admin"))])
+            dependencies=[Depends(require_roles("doctor", "nurse", "admin"))])
 async def list_diagnoses(encounter_id: UUID, current_db_user: CurrentDbUser,
                           db: AsyncSession = Depends(get_db)) -> list[DiagnosisOut]:
     await _get_scoped_encounter(db, encounter_id, current_db_user.facility_id)
@@ -236,7 +236,7 @@ async def create_review(encounter_id: UUID, payload: DoctorReviewCreate, current
 
 
 @router.get("/{encounter_id}/reviews", response_model=list[DoctorReviewOut],
-            dependencies=[Depends(require_roles("doctor", "nurse", "receptionist", "admin"))])
+            dependencies=[Depends(require_roles("doctor", "nurse", "admin"))])
 async def list_reviews(encounter_id: UUID, current_db_user: CurrentDbUser,
                         db: AsyncSession = Depends(get_db)) -> list[DoctorReviewOut]:
     await _get_scoped_encounter(db, encounter_id, current_db_user.facility_id)

@@ -34,15 +34,13 @@ router = APIRouter(tags=["forms"])
 @router.get(
     "/forms/definitions",
     response_model=list[FormDefinitionOut],
-    dependencies=[Depends(require_roles("doctor", "nurse", "admin", "receptionist"))],
+    dependencies=[Depends(require_roles("doctor", "nurse", "admin"))],
 )
 async def list_form_definitions(
     db: DbSession,
-    current_user: CurrentDbUser,
     status_filter: str | None = Query(default="published", alias="status"),
 ) -> list[FormDefinitionOut]:
     """List active published form definitions."""
-    await service.ensure_defaults_seeded(db, current_user.id)
     defs = await service.list_form_definitions(db, status_filter=status_filter)
     return [FormDefinitionOut.model_validate(d) for d in defs]
 
@@ -112,11 +110,9 @@ async def list_patient_form_submissions(
 )
 async def list_order_sets(
     db: DbSession,
-    current_user: CurrentDbUser,
     category: str | None = Query(default=None),
 ) -> list[ClinicalOrderSetOut]:
     """List standard clinical order sets (e.g., Sepsis, ACS, Pre-op)."""
-    await service.ensure_defaults_seeded(db, current_user.id)
     return await service.list_order_sets(db, category=category)
 
 

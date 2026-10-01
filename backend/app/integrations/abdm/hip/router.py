@@ -33,6 +33,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import CurrentDbUser, require_roles
 from app.common.db import get_db
+from app.common.idempotency import (
+    check_idempotency,
+    hash_request_body,
+    record_idempotent_response,
+)
 from app.integrations.abdm.callback_auth import verify_callback
 from app.integrations.abdm.client import AbdmError
 from app.integrations.abdm.hip import gateway, service
@@ -80,6 +85,16 @@ def _require_idempotency_key(
 
 
 IdempotencyKey = Annotated[str, Depends(_require_idempotency_key)]
+
+#: Publishing a care context, notifying the consent manager and linking are
+#: clinical-record decisions, and the only screen that makes or lists them is
+#: the doctor's. The front desk registers patients; it does not decide which
+#: finalized documents an ABHA address may see.
+_HIP_STAFF_ROLES = ("doctor", "admin")
+
+
+class _NoBody(BaseModel):
+    """Fingerprint for a bodyless mutation; its endpoint key names the target."""
 
 
 async def _acknowledge(what: str, coro) -> None:
@@ -149,7 +164,7 @@ class CareContextOut(BaseModel):
     "/care-contexts",
     status_code=201,
     response_model=CareContextOut,
-    dependencies=[Depends(require_roles("doctor", "receptionist", "admin"))],
+    dependencies=[Depends(require_roles(*_HIP_STAFF_ROLES))],
 )
 async def create_care_context(
     payload: CareContextIn,
@@ -209,6 +224,13 @@ async def create_care_context(
                 },
             )
 
+    endpoint = "POST /abdm/hip/care-contexts"
+    replay = await check_idempotency(
+        db, idempotency_key, endpoint, hash_request_body(payload), current_db_user.id
+    )
+    if replay is not None:
+        return CareContextOut.model_validate(replay.response_body)
+
     try:
         source = await resolve_document(
             db,
@@ -228,18 +250,22 @@ async def create_care_context(
         actor_id=current_db_user.id,
         display=payload.display,
     )
-    return CareContextOut(
+    response = CareContextOut(
         id=context.id,
         reference=context.reference,
         display=context.display,
         hi_type=context.hi_type,
     )
+    await record_idempotent_response(
+        db, idempotency_key, endpoint, 201, response.model_dump(mode="json"), current_db_user.id
+    )
+    return response
 
 
 @router.post(
     "/care-contexts/{context_id}/notify",
     status_code=202,
-    dependencies=[Depends(require_roles("doctor", "receptionist", "admin"))],
+    dependencies=[Depends(require_roles(*_HIP_STAFF_ROLES))],
 )
 async def notify_care_context(
     context_id: uuid.UUID,
@@ -268,6 +294,16 @@ async def notify_care_context(
     if context is None:
         # 404 not 403, the same rule as everywhere else here.
         raise HTTPException(404, {"code": "not_found", "message": "No such care context"})
+
+    # A retried notify replays the recorded answer instead of calling the
+    # gateway a second time. A refused or failed attempt rolls its reservation
+    # back with the request, so the retry after an outage really does retry.
+    endpoint = f"POST /abdm/hip/care-contexts/{context_id}/notify"
+    replay = await check_idempotency(
+        db, idempotency_key, endpoint, hash_request_body(_NoBody()), current_db_user.id
+    )
+    if replay is not None:
+        return replay.response_body
 
     try:
         await resolve_context_document(db, context)
@@ -318,7 +354,11 @@ async def notify_care_context(
             },
         ) from exc
 
-    return {"notified": context.reference, "request_id": request_id}
+    response = {"notified": context.reference, "request_id": request_id}
+    await record_idempotent_response(
+        db, idempotency_key, endpoint, 202, response, current_db_user.id
+    )
+    return response
 
 
 class LinkOut(BaseModel):
@@ -337,7 +377,7 @@ class LinkDocumentsIn(BaseModel):
     "/patients/{patient_id}/links",
     status_code=202,
     response_model=list[LinkOut],
-    dependencies=[Depends(require_roles("doctor", "receptionist", "admin"))],
+    dependencies=[Depends(require_roles(*_HIP_STAFF_ROLES))],
 )
 async def initiate_links(
     patient_id: uuid.UUID,
@@ -346,11 +386,6 @@ async def initiate_links(
     idempotency_key: IdempotencyKey,
     db: DbSession,
 ) -> list[LinkOut]:
-    from app.common.idempotency import (
-        check_idempotency,
-        hash_request_body,
-        record_idempotent_response,
-    )
     from app.integrations.abdm.hip.linking import initiate
 
     patient = (
@@ -426,7 +461,7 @@ async def initiate_links(
 @router.get(
     "/patients/{patient_id}/care-contexts",
     response_model=list[CareContextOut],
-    dependencies=[Depends(require_roles("doctor", "receptionist", "admin"))],
+    dependencies=[Depends(require_roles(*_HIP_STAFF_ROLES))],
 )
 async def list_patient_contexts(
     patient_id: uuid.UUID,
@@ -486,7 +521,7 @@ async def list_patient_contexts(
 @router.get(
     "/patients/{patient_id}/links",
     response_model=list[LinkOut],
-    dependencies=[Depends(require_roles("doctor", "receptionist", "admin"))],
+    dependencies=[Depends(require_roles(*_HIP_STAFF_ROLES))],
 )
 async def list_links(
     patient_id: uuid.UUID,
