@@ -127,6 +127,12 @@ class Settings(BaseSettings):
     abdm_path_login_request_otp: str = "/v3/profile/login/request/otp"
     abdm_path_login_verify: str = "/v3/profile/login/verify"
     abdm_path_login_verify_user: str = "/v3/profile/login/verify/user"
+    #: ABHA-address (PHR) login is a separate family with its own scope and
+    #: token (M1 collection, "ABHA Address Verification via Mobile OTP").
+    abdm_path_phr_login_request_otp: str = "/v3/phr/web/login/abha/request/otp"
+    abdm_path_phr_login_verify: str = "/v3/phr/web/login/abha/verify"
+    abdm_path_phr_profile: str = "/v3/phr/web/login/profile/abha-profile"
+    abdm_path_phr_card: str = "/v3/phr/web/login/profile/abha/phr-card"
 
     # ------------------------------------------------------------------
     # M2 (HIP) and M3 (HIU) gateway paths, relative to abdm_gateway_base_url.

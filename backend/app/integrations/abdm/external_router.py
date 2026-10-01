@@ -22,6 +22,7 @@ from app.common.db import get_db
 from app.integrations.abdm import callback_replies
 from app.integrations.abdm.callback_auth import (
     GatewayCallback,
+    hip_ack_callback,
     hip_gateway_callback,
     hip_link_gateway_callback,
     hiu_gateway_callback,
@@ -72,6 +73,7 @@ _PLACEHOLDER = "change-me"
 DbSession = Annotated[AsyncSession, Depends(get_db)]
 HipCallback = Annotated[GatewayCallback, Depends(hip_gateway_callback)]
 HipLinkCallback = Annotated[GatewayCallback, Depends(hip_link_gateway_callback)]
+HipAckCallback = Annotated[GatewayCallback, Depends(hip_ack_callback)]
 HiuCallback = Annotated[GatewayCallback, Depends(hiu_gateway_callback)]
 ProfileCallback = Annotated[GatewayCallback, Depends(profile_gateway_callback)]
 
@@ -102,6 +104,34 @@ async def _facility_id(db: AsyncSession) -> uuid.UUID:
             },
         )
     return facility.id
+
+
+def _shared_address(address: object) -> dict[str, str | None] | None:
+    """Map NHA's profile-share address onto the ticket snapshot.
+
+    The wire object is `{"line", "district", "state", "pinCode"}` (Scan-and-Share
+    collection, 14 Aug 2025) and arrives as a dict. Reading it with attribute
+    access raised AttributeError on any non-empty address, failing the share for
+    the patient at the desk. Only non-blank strings are kept, bounded; anything
+    that is not an object is treated as no address rather than refusing the share.
+    """
+    if not isinstance(address, dict):
+        return None
+
+    def text(*keys: str) -> str | None:
+        for key in keys:
+            value = address.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()[:200]
+        return None
+
+    mapped = {
+        "line": text("line"),
+        "district": text("district"),
+        "state": text("state"),
+        "pincode": text("pinCode", "pincode"),
+    }
+    return mapped if any(mapped.values()) else None
 
 
 async def _patient_by_address(
@@ -530,7 +560,7 @@ async def on_care_context(
 @router.post("/api/v3/links/context/on-notify", status_code=202)
 async def context_notify_ack(
     payload: GenericCallback,
-    callback: HipCallback,
+    callback: HipAckCallback,
 ) -> Response:
     return _accepted()
 
@@ -538,7 +568,7 @@ async def context_notify_ack(
 @router.post("/api/v3/patients/sms/on-notify", status_code=202)
 async def deep_link_sms_notify_ack(
     payload: GenericCallback,
-    callback: HipCallback,
+    callback: HipAckCallback,
 ) -> Response:
     """Receive the gateway acknowledgement for a deep-linking SMS request."""
     return _accepted()
@@ -699,12 +729,7 @@ async def profile_share(
             "age_years": patient.age_years,
             "mobile": patient.mobile,
             "abha_number": patient.abha_number,
-            "address": {
-                "line": shared.address.line if shared.address else None,
-                "district": shared.address.district if shared.address else None,
-                "state": shared.address.state if shared.address else None,
-                "pincode": shared.address.pincode if shared.address else None,
-            } if shared.address else None,
+            "address": _shared_address(shared.address),
         },
         status="active",
         counter=None,
@@ -1067,6 +1092,7 @@ async def consent_on_fetch(
         return _accepted()
     if (
         detail.patient.id != request_row.abha_address
+        or detail.hiu is None
         or detail.hiu.id != callback.recipient_id
         or not detail.hi_types
         or not set(detail.hi_types).issubset(request_row.hi_types)
