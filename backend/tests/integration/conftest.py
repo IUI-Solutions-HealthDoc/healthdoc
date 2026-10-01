@@ -51,8 +51,6 @@ from tests._lab_seed import TEST_DATABASE_URL
 
 TEST_FACILITY_ID = uuid.UUID("00000000-0000-0000-0000-0000000000f2")
 TEST_DEPARTMENT_ID = uuid.UUID("00000000-0000-0000-0000-0000000000d2")
-TEST_PATIENT_ID = uuid.UUID("00000000-0000-0000-0000-0000000000e3")
-
 # Fixed subs (not uuid4()) so uid derived below is stable across test runs —
 # required for ON CONFLICT (id) DO NOTHING to actually match prior rows.
 RECEPTIONIST = AuthUser(sub="opdj-sub-receptionist-0001", username="opdj-reception1", roles=["receptionist"])
@@ -136,7 +134,7 @@ def client_as():
     app.dependency_overrides.pop(get_db, None)
 
 
-async def _seed() -> None:
+async def _seed(patient_id: uuid.UUID) -> None:
     engine = create_async_engine(TEST_DATABASE_URL)
     try:
         async with engine.begin() as conn:
@@ -182,16 +180,20 @@ async def _seed() -> None:
                 "VALUES (:id, 'OPD Journey Test Patient', 'other', 'demographics_only', :fac, "
                 "        :by, 40, :uhid) "
                 "ON CONFLICT (id) DO NOTHING"),
-                {"id": TEST_PATIENT_ID, "fac": TEST_FACILITY_ID, "by": creator,
-                 "uhid": f"IN-DL-OPDJ-2026-{str(TEST_PATIENT_ID)[:6]}"})
+                {"id": patient_id, "fac": TEST_FACILITY_ID, "by": creator,
+                 "uhid": f"IN-DL-OPDJ-2026-{patient_id.hex[:12]}"})
     finally:
         await engine.dispose()
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 def seeded_patient_id() -> str:
-    # Session-scoped and reachable without client_as, so it needs its own guard.
+    # A fresh patient per journey: POST /visits refuses a second open visit of
+    # the same type and department on the same day, so a patient shared across
+    # journeys (or left open by an earlier run today) would collide.
+    # Reachable without client_as, so it needs its own guard.
     _require_postgres()
     import asyncio
-    asyncio.run(_seed())
-    return str(TEST_PATIENT_ID)
+    patient_id = uuid.uuid4()
+    asyncio.run(_seed(patient_id))
+    return str(patient_id)

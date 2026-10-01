@@ -44,6 +44,8 @@ from app.users.models import Facility
 
 router = APIRouter(prefix="/visits", tags=["visits"])
 
+RECEPTION_VISIT_STATUSES = frozenset({"cancelled", "lwbs"})
+
 
 @router.post(
     "",
@@ -101,8 +103,10 @@ async def create_visit(
         created_by=current_db_user.id,
         facility_id=facility_id,
     )
-    await db.commit()
 
+    # The visit and its receipt commit together. Committing the visit first
+    # left a window where a crash produced a visit with no receipt, and the
+    # retry then opened a second visit and a second registration invoice.
     visit_out = VisitOut.model_validate(visit)
     await record_idempotent_response(
         db,
@@ -248,6 +252,19 @@ async def update_visit_status(
     # receptionist could move another facility's visit to cancelled or lwbs.
     if visit is None or visit.facility_id != current_db_user.facility_id:
         raise HTTPException(status_code=404, detail="Visit not found")
+
+    # The front desk may end a visit that never reached a clinician; moving
+    # one into or through consultation is a clinical act.
+    if not ({"doctor", "admin"} & set(current_db_user.roles)) and (
+        payload.status not in RECEPTION_VISIT_STATUSES
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "visit_status_not_permitted",
+                "message": "Reception may only cancel a visit or record that the patient left without being seen",
+            },
+        )
 
     if if_match is None:
         raise HTTPException(

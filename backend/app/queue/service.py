@@ -655,6 +655,46 @@ async def _complete_token_and_advance(
     return token, next_token, pending_event
 
 
+#: Token states that a patient can still be called from or is being seen in.
+LIVE_TOKEN_STATUSES = (
+    QueueTokenStatus.WAITING.value,
+    QueueTokenStatus.CALLED.value,
+    QueueTokenStatus.IN_SERVICE.value,
+    QueueTokenStatus.RECALLED.value,
+    QueueTokenStatus.SKIPPED.value,
+)
+
+
+async def cancel_live_tokens_for_visit(db: AsyncSession, visit_id: uuid.UUID) -> list[QueueToken]:
+    """Cancel the visit's live tokens when the visit ends without care.
+
+    A cancelled or LWBS visit whose token stayed `waiting` kept its place in
+    the doctor's queue, so the next "call next" summoned a patient who had
+    gone home. The queue is not advanced here; the doctor calls the next
+    patient as usual.
+    """
+    tokens = (
+        await db.execute(
+            select(QueueToken)
+            .where(
+                QueueToken.visit_id == visit_id,
+                QueueToken.status.in_(LIVE_TOKEN_STATUSES),
+            )
+            .with_for_update()
+        )
+    ).scalars().all()
+    for token in tokens:
+        queue = (
+            await db.execute(select(Queue).where(Queue.id == token.queue_id).with_for_update())
+        ).scalar_one_or_none()
+        if queue is not None and queue.now_serving_token_id == token.id:
+            queue.now_serving_token_id = None
+        token.status = QueueTokenStatus.CANCELLED.value
+    if tokens:
+        await db.flush()
+    return list(tokens)
+
+
 async def complete_by_visit_id(
     db: AsyncSession, visit_id: uuid.UUID
 ) -> tuple[QueueToken, QueueToken | None, dict | None]:
