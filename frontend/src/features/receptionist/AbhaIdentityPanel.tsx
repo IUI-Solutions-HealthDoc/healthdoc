@@ -178,7 +178,9 @@ function PatientAbhaIdentity({ patient }: Props) {
       return;
     }
     if (!identifierValid) {
-      setError(usesAadhaar ? "Enter a valid 12-digit Aadhaar number." : usesMobile ? "Enter a 10-digit communication mobile." : usesAddress ? "Enter the ABHA address." : "Enter a valid 14-digit ABHA number.");
+      // NHA's expected wording: CRT_ABHA_104/204/304 and VRFY_ABHA_401 for
+      // Aadhaar, VRFY_ABHA_301 for the communication mobile.
+      setError(usesAadhaar ? "Aadhaar Number is not valid" : usesMobile ? "Please enter a valid mobile number" : usesAddress ? "Enter the ABHA address." : "Enter a valid 14-digit ABHA number.");
       return;
     }
     const generation = beginRequest();

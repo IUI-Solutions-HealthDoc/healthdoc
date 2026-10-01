@@ -979,3 +979,23 @@ async def test_abha_number_card_asks_for_an_image_not_json(monkeypatch, rsa_key)
     accept = gw.headers[0]["Accept"]
     assert "image/png" in accept and not accept.startswith("application/json")
     assert card.content == b"\x89PNG-card"
+
+
+@pytest.mark.parametrize(
+    ("identifier", "code", "wording"),
+    [
+        ({"mobile": "9876543210"}, "abha_not_found_for_mobile",
+         "We did not find any ABHA number linked to this mobile number"),
+        ({"aadhaar": AADHAAR}, "abha_not_found_for_aadhaar",
+         "NO ABHA user registered with this Aadhaar Number"),
+    ],
+)
+async def test_an_identifier_with_no_abha_uses_nhas_wording(monkeypatch, rsa_key, identifier, code, wording):
+    """VRFY_ABHA_302 (mobile) and VRFY_ABHA_403 (Aadhaar) name the message the
+    tester looks for when ABDM verifies the OTP but finds no account."""
+    _gateway(monkeypatch, [{"txnId": "login-txn"}, {"authResult": "success", "accounts": []}])
+    requested = await service.request_login_otp(**identifier, facility_id=FACILITY_A, started_by=STAFF)
+    with pytest.raises(service.AbdmIdentityError) as exc:
+        await service.verify_login_otp(session_id=requested.session_id, otp="123456", facility_id=FACILITY_A)
+    assert exc.value.code == code
+    assert wording in exc.value.message

@@ -423,6 +423,8 @@ _CLIENT_IDENTITY_CODES = {
     "abdm_account_selection_required",
     "abdm_no_address_suggestions",
     "abha_account_not_in_selection",
+    "abha_not_found_for_mobile",
+    "abha_not_found_for_aadhaar",
 }
 
 
@@ -1078,7 +1080,10 @@ async def enrol_submit_abha_address(
             400,
             {
                 "code": "abha_address_refused",
-                "message": "ABDM did not accept this ABHA address. Choose another suggestion or try again.",
+                # CRT_ABHA_112 expects an "already exists" refusal; ABDM's status
+                # alone does not prove that was the reason, so both are said.
+                "message": "ABDM did not accept this ABHA address; it may already exist. "
+                "Choose another suggestion or try again.",
             },
         ) from exc
     except identity_service.AbdmIdentityError as exc:
