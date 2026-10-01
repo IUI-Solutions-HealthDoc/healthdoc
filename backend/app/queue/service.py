@@ -6,7 +6,8 @@ Call-next is automatic: a prescription/order created for a visit is the
 Admin has manual overrides for edge cases only.
 """
 import uuid
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
 from sqlalchemy import and_, func, select
@@ -21,11 +22,12 @@ from app.departments.models import Department, Room
 from app.inventory.models import InventoryItem
 from app.notifications.models import NotificationHistory
 from app.opd.models import Visit
+from app.opd.service import OPEN_VISIT_STATUSES
 from app.pathology.models import LabOrderItem
 from app.patients.models import Patient
 from app.pharmacy.models import Indent, IndentItem
 from app.queue.models import Queue, QueueCounter, QueueToken, QueueTokenPriorityChange, Roster
-from app.users.models import User
+from app.users.models import Facility, User
 
 PRIORITY_RANK = {
     QueuePriority.EMERGENCY.value: 0,
@@ -62,6 +64,18 @@ def require_initial_priority_allowed(priority: str, caller_roles: list[str]) -> 
         raise HTTPException(403, f"Your role cannot issue priority '{priority}'")
 
 CALLABLE_STATUSES = (QueueTokenStatus.WAITING.value, QueueTokenStatus.RECALLED.value)
+
+#: Token states that a patient can still be called from or is being seen in.
+#: The complement of the terminal set in uq_queue_tokens_one_live_per_visit.
+LIVE_TOKEN_STATUSES = (
+    QueueTokenStatus.WAITING.value,
+    QueueTokenStatus.CALLED.value,
+    QueueTokenStatus.IN_SERVICE.value,
+    QueueTokenStatus.RECALLED.value,
+    QueueTokenStatus.SKIPPED.value,
+)
+
+TOKEN_ELIGIBLE_VISIT_STATUSES = OPEN_VISIT_STATUSES
 
 _NOT_FOUND = HTTPException(404, "Queue not found")
 
@@ -236,6 +250,18 @@ async def create_queue(
     if department.facility_id != caller_facility_id:
         raise HTTPException(404, "Department not found")
 
+    # A queue opened for another day is invisible to today's desk and still
+    # takes that day's unique slot, so only the facility's business day is open.
+    business_date = await get_business_date(db, caller_facility_id)
+    if service_date != business_date:
+        raise HTTPException(
+            422,
+            detail={
+                "code": "queue_date_not_today",
+                "message": "A queue can only be opened for today",
+            },
+        )
+
     doctor = await db.get(User, doctor_user_id)
     if (
         doctor is None
@@ -244,14 +270,45 @@ async def create_queue(
     ):
         raise HTTPException(404, "Doctor not found")
 
+    # Roles live in Keycloak, not in `users`, so the HOD-approved roster is the
+    # server-side evidence that this person consults in this department today.
+    # Without it any staff id at the facility could be given a clinic.
+    rostered = (
+        await db.execute(
+            select(Roster.id)
+            .where(
+                Roster.staff_user_id == doctor_user_id,
+                Roster.department_id == department_id,
+                Roster.roster_date == service_date,
+                Roster.is_available.is_(True),
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if rostered is None:
+        raise HTTPException(
+            422,
+            detail={
+                "code": "doctor_not_rostered",
+                "message": "This doctor is not rostered in this department today",
+            },
+        )
+
     if room_id is not None:
         room = await db.get(Room, room_id)
         if room is None or room.department_id != department_id or not room.is_active:
             raise HTTPException(422, "Select an active room in this department")
-    
+
+    queue_exists = HTTPException(
+        409,
+        detail={
+            "code": "queue_exists",
+            "message": "A queue is already open for this doctor in this department today",
+        },
+    )
     existing = (
         await db.execute(
-            select(Queue).where(
+            select(Queue.id).where(
                 Queue.department_id == department_id,
                 Queue.doctor_user_id == doctor_user_id,
                 Queue.service_date == service_date,
@@ -259,7 +316,7 @@ async def create_queue(
         )
     ).scalar_one_or_none()
     if existing is not None:
-        raise HTTPException(409, "Queue already exists for this doctor/department/date")
+        raise queue_exists
 
     queue = Queue(
         id=uuid.uuid4(),
@@ -270,8 +327,14 @@ async def create_queue(
         display_label=display_label,
         service_date=service_date,
     )
-    db.add(queue)
-    await db.flush()
+    # Two desks opening the same clinic both pass the read above; the unique
+    # index decides, and the savepoint keeps the loser's transaction usable.
+    try:
+        async with db.begin_nested():
+            db.add(queue)
+            await db.flush()
+    except IntegrityError:
+        raise queue_exists from None
     await db.refresh(queue)
     return queue
 
@@ -410,6 +473,20 @@ async def _allocate_token_number(db: AsyncSession, department_id: uuid.UUID, bus
     return (await db.execute(upsert)).scalar_one()
 
 
+async def _business_day_bounds(
+    db: AsyncSession, facility_id: uuid.UUID
+) -> tuple[datetime, datetime]:
+    """[start, end) of the facility's business day as aware datetimes."""
+    business_date = await get_business_date(db, facility_id)
+    timezone_name = await db.scalar(
+        select(Facility.timezone).where(Facility.id == facility_id)
+    )
+    if timezone_name is None:
+        raise HTTPException(404, "Facility not found")
+    start = datetime.combine(business_date, time.min, tzinfo=ZoneInfo(timezone_name))
+    return start, start + timedelta(days=1)
+
+
 async def list_visits_without_tokens(
     db: AsyncSession,
     caller_facility_id: uuid.UUID,
@@ -419,7 +496,11 @@ async def list_visits_without_tokens(
 
     Allows the desk to recover from a queue/roster failure or attach a token later
     without raising duplicate registration invoices or visits.
+
+    Limited to the facility's business day: tokens can only be issued into
+    today's queues, so an older visit belongs to stale-visit reconciliation.
     """
+    day_start, day_end = await _business_day_bounds(db, caller_facility_id)
     stmt = (
         select(
             Visit.id.label("visit_id"),
@@ -447,6 +528,8 @@ async def list_visits_without_tokens(
             Visit.facility_id == caller_facility_id,
             Visit.visit_type.in_(VisitType.token_issuing()),
             Visit.status == "registered",
+            Visit.visit_date >= day_start,
+            Visit.visit_date < day_end,
             QueueToken.id.is_(None),
         )
         .order_by(Visit.visit_date.desc())
@@ -471,7 +554,12 @@ async def create_token(
     # tell an outpatient from an admission, and never checked whose visit it
     # was. 404 rather than 403 for another facility's row — a 403 confirms the
     # row exists (see the convention note in CLAUDE.md).
-    visit = await db.get(Visit, visit_id)
+    #
+    # The visit row is locked so two desks issuing for the same visit serialise
+    # here and the second sees the first one's live token.
+    visit = (
+        await db.execute(select(Visit).where(Visit.id == visit_id).with_for_update())
+    ).scalar_one_or_none()
     if visit is None or visit.facility_id != caller_facility_id:
         raise HTTPException(404, "Visit not found")
     if visit.visit_type not in VisitType.token_issuing():
@@ -480,12 +568,56 @@ async def create_token(
             f"A {visit.visit_type} visit does not take an OPD counter token. "
             "Only outpatients wait for a consulting room to call a number.",
         )
+    if visit.status not in TOKEN_ELIGIBLE_VISIT_STATUSES:
+        raise HTTPException(
+            409,
+            detail={
+                "code": "visit_not_open",
+                "message": f"A {visit.status} visit cannot be given a queue token",
+            },
+        )
 
     queue = await _get_scoped_queue(db, queue_id, caller_facility_id, for_update=True)
     if not queue.is_open:
         raise HTTPException(409, "Queue is closed")
     if priority not in PRIORITY_RANK:
         raise HTTPException(422, f"Invalid priority '{priority}'")
+
+    business_date = await get_business_date(db, queue.facility_id)
+    if queue.service_date != business_date:
+        raise HTTPException(
+            409,
+            detail={
+                "code": "queue_not_today",
+                "message": "This queue belongs to another day; choose one of today's queues",
+            },
+        )
+    if visit.department_id is not None and visit.department_id != queue.department_id:
+        raise HTTPException(
+            422,
+            detail={
+                "code": "department_mismatch",
+                "message": "The visit is registered to a different department than this queue",
+            },
+        )
+
+    live_token_exists = HTTPException(
+        409,
+        detail={
+            "code": "live_token_exists",
+            "message": "This visit already has a live queue token",
+        },
+    )
+    existing_live = (
+        await db.execute(
+            select(QueueToken.id).where(
+                QueueToken.visit_id == visit_id,
+                QueueToken.status.in_(LIVE_TOKEN_STATUSES),
+            )
+        )
+    ).first()
+    if existing_live is not None:
+        raise live_token_exists
 
     department = await db.get(Department, queue.department_id)
     if department is None:
@@ -507,7 +639,6 @@ async def create_token(
         await db.execute(select(next_seq_expr).where(QueueToken.queue_id == queue_id))
     ).scalar_one()
 
-    business_date = await get_business_date(db, queue.facility_id)
     token_number = await _allocate_token_number(db, queue.department_id, business_date)
 
     token = QueueToken(
@@ -522,8 +653,14 @@ async def create_token(
         priority=priority,
         priority_rank=PRIORITY_RANK[priority],
     )
-    db.add(token)
-    await db.flush()
+    try:
+        async with db.begin_nested():
+            db.add(token)
+            await db.flush()
+    except IntegrityError:
+        # uq_queue_tokens_one_live_per_visit: a live token committed by another
+        # desk that the read above could not yet see.
+        raise live_token_exists from None
     await db.refresh(token)
     return token
 
@@ -655,16 +792,6 @@ async def _complete_token_and_advance(
     return token, next_token, pending_event
 
 
-#: Token states that a patient can still be called from or is being seen in.
-LIVE_TOKEN_STATUSES = (
-    QueueTokenStatus.WAITING.value,
-    QueueTokenStatus.CALLED.value,
-    QueueTokenStatus.IN_SERVICE.value,
-    QueueTokenStatus.RECALLED.value,
-    QueueTokenStatus.SKIPPED.value,
-)
-
-
 async def cancel_live_tokens_for_visit(db: AsyncSession, visit_id: uuid.UUID) -> list[QueueToken]:
     """Cancel the visit's live tokens when the visit ends without care.
 
@@ -673,6 +800,13 @@ async def cancel_live_tokens_for_visit(db: AsyncSession, visit_id: uuid.UUID) ->
     gone home. The queue is not advanced here; the doctor calls the next
     patient as usual.
     """
+    return await end_live_tokens_for_visit(db, visit_id, QueueTokenStatus.CANCELLED.value)
+
+
+async def end_live_tokens_for_visit(
+    db: AsyncSession, visit_id: uuid.UUID, final_status: str
+) -> list[QueueToken]:
+    """Move every live token of the visit to a terminal status, under lock."""
     tokens = (
         await db.execute(
             select(QueueToken)
@@ -689,7 +823,9 @@ async def cancel_live_tokens_for_visit(db: AsyncSession, visit_id: uuid.UUID) ->
         ).scalar_one_or_none()
         if queue is not None and queue.now_serving_token_id == token.id:
             queue.now_serving_token_id = None
-        token.status = QueueTokenStatus.CANCELLED.value
+        token.status = final_status
+        if final_status == QueueTokenStatus.NO_SHOW.value:
+            token.completed_at = datetime.now(UTC)
     if tokens:
         await db.flush()
     return list(tokens)

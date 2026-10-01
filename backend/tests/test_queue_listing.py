@@ -21,7 +21,7 @@ from app.departments.models import Department
 from app.opd.models import Visit
 from app.patients.models import Patient
 from app.queue import service
-from app.queue.models import Roster
+from app.queue.models import Queue, QueueToken, Roster
 from app.users.models import Facility, User
 
 pytestmark = pytest.mark.asyncio
@@ -99,7 +99,7 @@ async def test_reception_queue_identifies_the_patient_attached_to_each_token(db,
     assert result["items"][0]["patient_identifier"] == patient.uhid
 
 
-async def test_another_facilitys_queues_are_not_listed(db, seed, queue):
+async def test_another_facilitys_queues_are_not_listed(db, seed, queue, roster_on_duty):
     """Facility scoping, same rule as every other list in this codebase."""
     other_facility = Facility(
         id=uuid.uuid4(), code=f"OT{uuid.uuid4().hex[:3].upper()}",
@@ -118,6 +118,7 @@ async def test_another_facilitys_queues_are_not_listed(db, seed, queue):
     )
     db.add_all([other_dept, other_doctor])
     await db.flush()
+    await roster_on_duty(other_dept.id, other_doctor.id)
 
     await service.create_queue(
         db, department_id=other_dept.id, doctor_user_id=other_doctor.id,
@@ -240,7 +241,7 @@ async def test_bookable_providers_follow_the_booking_date_not_open_queues(db, se
     ) == []
 
 
-async def test_shortest_queue_first(db, seed, queue, opd_visit):
+async def test_shortest_queue_first(db, seed, queue, opd_visit, roster_on_duty):
     """The order a receptionist reads it in."""
     dept, _room, _doctor = seed
 
@@ -251,6 +252,7 @@ async def test_shortest_queue_first(db, seed, queue, opd_visit):
     )
     db.add(busy_doctor)
     await db.flush()
+    await roster_on_duty(dept.id, busy_doctor.id)
 
     busy_queue = await service.create_queue(
         db, department_id=dept.id, doctor_user_id=busy_doctor.id,
@@ -274,16 +276,34 @@ async def test_the_doctor_worklist_is_todays_only(db, seed, queue, opd_visit):
     _dept, _room, doctor = seed
     today_token = await _token(db, queue, opd_visit)
 
-    yesterday_queue = await service.create_queue(
-        db,
+    # Yesterday's queue and token are history, inserted as rows: neither can be
+    # created through the service any more, which only opens today's queues.
+    yesterday_queue = Queue(
+        id=uuid.uuid4(),
+        facility_id=queue.facility_id,
         department_id=queue.department_id,
         doctor_user_id=doctor.id,
         room_id=queue.room_id,
         display_label="Yesterday",
         service_date=date.today() - timedelta(days=1),
-        caller_facility_id=queue.facility_id,
     )
-    stale_token = await _token(db, yesterday_queue, opd_visit)
+    stale_visit = await opd_visit()
+    stale_token = QueueToken(
+        id=uuid.uuid4(),
+        facility_id=queue.facility_id,
+        queue_id=yesterday_queue.id,
+        visit_id=stale_visit.id,
+        sequence=1,
+        token_display="TST-900",
+        initial_priority=QueuePriority.NORMAL.value,
+        status="waiting",
+        priority=QueuePriority.NORMAL.value,
+        priority_rank=6,
+    )
+    db.add(yesterday_queue)
+    await db.flush()
+    db.add(stale_token)
+    await db.flush()
 
     rows = await service.get_doctor_worklist(db, doctor.id, queue.facility_id, ["doctor"])
     listed = {row["id"] for row in rows}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { toast } from "@/components/ui/toast";
 import { ApiError, formatDateTime, newIdempotencyKey } from "@/lib/api";
@@ -30,6 +30,37 @@ import { useLocale, type MessageKey } from "@/lib/i18n";
 
 const QUEUE_PRIORITIES = ["normal", "senior_citizen", "pregnant", "follow_up_recall"] as const;
 
+type Settled<T> = { ok: true; value: T } | { ok: false; reason: unknown };
+
+function settle<T>(promise: Promise<T>): Promise<Settled<T>> {
+  return promise.then(
+    (value) => ({ ok: true as const, value }),
+    (reason: unknown) => ({ ok: false as const, reason }),
+  );
+}
+
+function LoadFailure({
+  message,
+  retryLabel,
+  onRetry,
+}: {
+  message: string;
+  retryLabel: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div
+      role="alert"
+      className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-danger/40 bg-danger/5 px-4 py-3 text-sm text-danger"
+    >
+      <span>{message}</span>
+      <button type="button" onClick={onRetry} className="font-medium underline">
+        {retryLabel}
+      </button>
+    </div>
+  );
+}
+
 
 /**
  * Reception's view of today's queues (#171).
@@ -58,7 +89,6 @@ export default function Page() {
   const [displayLabel, setDisplayLabel] = useState("");
   const [showOpenQueue, setShowOpenQueue] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [createKey, setCreateKey] = useState(() => newIdempotencyKey());
   const [priorityTokenId, setPriorityTokenId] = useState<string | null>(null);
   const [priority, setPriority] = useState<TokenPriorityUpdate["priority"]>("senior_citizen");
   const [priorityReason, setPriorityReason] = useState("");
@@ -75,39 +105,73 @@ export default function Page() {
   const [showStaleVisits, setShowStaleVisits] = useState(false);
   const [reconciling, setReconciling] = useState(false);
 
+  const [confirmingReconcile, setConfirmingReconcile] = useState(false);
+  const [reconcileReason, setReconcileReason] = useState("");
+
   // HD-36: ABDM Scan & Share modal state
   const [showScanShareModal, setShowScanShareModal] = useState(false);
   const [reconcileResult, setReconcileResult] = useState<StaleVisitsReconcileResult | null>(null);
 
+  // A failed read is kept apart from an empty one: "0 waiting" or "(0)" after
+  // a refused request would tell the desk there is nothing to do.
+  const [loadError, setLoadError] = useState<unknown>(null);
+  const [unassignedError, setUnassignedError] = useState<unknown>(null);
+  const [staleError, setStaleError] = useState<unknown>(null);
+  const [tokensError, setTokensError] = useState<unknown>(null);
+  const [tokensReload, setTokensReload] = useState(0);
+  const loadSeq = useRef(0);
+
+  // One key per unchanged request, kept until it succeeds, so a retry after a
+  // lost response replays the first attempt instead of repeating the write.
+  const retryKeys = useRef(new Map<string, string>());
+  const keyFor = (scope: string) => {
+    let key = retryKeys.current.get(scope);
+    if (!key) {
+      key = newIdempotencyKey();
+      retryKeys.current.set(scope, key);
+    }
+    return key;
+  };
+  const settleKey = (scope: string) => retryKeys.current.delete(scope);
+
+  const describe = (reason: unknown, fallback: MessageKey) =>
+    reason instanceof ApiError ? reason.message : t(fallback);
+
   const load = useCallback(async () => {
-    try {
-      const [rows, options, unassigned, stale] = await Promise.all([
-        listQueues(),
-        listQueueOpeningOptions(),
-        listVisitsWithoutTokens().catch(() => [] as VisitWithoutToken[]),
-        getStaleVisits().catch(() => null),
-      ]);
-      setQueues(rows);
-      setOpeningOptions(options);
-      setUnassignedVisits(unassigned);
-      setStaleReport(stale);
+    const seq = ++loadSeq.current;
+    const [rows, options, unassigned, stale] = await Promise.all([
+      settle(listQueues()),
+      settle(listQueueOpeningOptions()),
+      settle(listVisitsWithoutTokens()),
+      settle(getStaleVisits()),
+    ]);
+    if (seq !== loadSeq.current) return;
+
+    if (rows.ok && options.ok) {
+      setQueues(rows.value);
+      setOpeningOptions(options.value);
       setOptionId((current) =>
-        options.items.some((option) => option.roster_id === current)
+        options.value.items.some((option) => option.roster_id === current)
           ? current
-          : (options.items[0]?.roster_id ?? ""),
+          : (options.value.items[0]?.roster_id ?? ""),
       );
       setSelected((current) =>
-        rows.some((queue) => queue.id === current) ? current : (rows[0]?.id ?? null),
+        rows.value.some((queue) => queue.id === current) ? current : (rows.value[0]?.id ?? null),
       );
-      setError(null);
-    } catch (reason) {
+      setLoadError(null);
+    } else {
       setQueues(null);
       setOpeningOptions(null);
       setSelected(null);
       setTokens(null);
-      setError(reason instanceof ApiError ? reason.message : t("receptionist.errLoadQueues"));
+      setLoadError(rows.ok ? (options.ok ? null : options.reason) : rows.reason);
     }
-  }, [t]);
+
+    setUnassignedVisits(unassigned.ok ? unassigned.value : null);
+    setUnassignedError(unassigned.ok ? null : unassigned.reason);
+    setStaleReport(stale.ok ? stale.value : null);
+    setStaleError(stale.ok ? null : stale.reason);
+  }, []);
 
   useEffect(() => {
     void load();
@@ -117,19 +181,18 @@ export default function Page() {
     if (!selected) return;
     let cancelled = false;
     setTokens(null);
+    setTokensError(null);
     listQueueTokens(selected)
       .then((list) => {
         if (!cancelled) setTokens(list);
       })
       .catch((reason: unknown) => {
-        if (!cancelled) {
-          setError(reason instanceof ApiError ? reason.message : t("receptionist.errLoadTokens"));
-        }
+        if (!cancelled) setTokensError(reason);
       });
     return () => {
       cancelled = true;
     };
-  }, [selected, t]);
+  }, [selected, tokensReload]);
 
   const handleCreateQueue = async () => {
     const option = openingOptions?.items.find((item) => item.roster_id === optionId);
@@ -137,6 +200,9 @@ export default function Page() {
       setError(t("receptionist.errSelectRosterBeforeOpen"));
       return;
     }
+    if (creating) return;
+    const label = displayLabel.trim() || null;
+    const scope = `queue|${option.roster_id}|${openingOptions.service_date}|${label ?? ""}`;
     setCreating(true);
     setError(null);
     try {
@@ -145,55 +211,55 @@ export default function Page() {
           department_id: option.department_id,
           doctor_user_id: option.staff_user_id,
           room_id: option.room_id,
-          display_label: displayLabel.trim() || null,
+          display_label: label,
           service_date: openingOptions.service_date,
         },
-        createKey,
+        keyFor(scope),
       );
+      settleKey(scope);
       toast.success(
         t("receptionist.queueOpened"),
         `${option.staff_name} · ${localizeField(option.department_name, option.department_name_hi)}`,
       );
-      setCreateKey(newIdempotencyKey());
       setDisplayLabel("");
       setShowOpenQueue(false);
       await load();
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : t("receptionist.errOpenQueue"));
+      setError(describe(reason, "receptionist.errOpenQueue"));
     } finally {
       setCreating(false);
     }
   };
 
   const handlePriorityUpdate = async () => {
-    if (!priorityTokenId || !selected) return;
-    if (priorityReason.trim().length < 10) {
+    if (!priorityTokenId || !selected || updatingPriority) return;
+    const reasonText = priorityReason.trim();
+    if (reasonText.length < 10) {
       setError(t("receptionist.errPriorityReasonMinLength"));
       return;
     }
 
+    const scope = `priority|${priorityTokenId}|${priority}|${reasonText}`;
     setUpdatingPriority(true);
     setError(null);
     try {
-      await updateTokenPriority(priorityTokenId, {
-        priority,
-        reason: priorityReason.trim(),
-      });
-      const refreshed = await listQueueTokens(selected);
-      setTokens(refreshed);
+      await updateTokenPriority(priorityTokenId, { priority, reason: reasonText }, keyFor(scope));
+      settleKey(scope);
       setPriorityTokenId(null);
       setPriorityReason("");
       toast.success(t("receptionist.toastPriorityUpdatedTitle"), t("receptionist.toastPriorityUpdatedBody"));
+      setTokensReload((n) => n + 1);
       await load();
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : t("receptionist.errUpdateTokenPriority"));
+      setError(describe(reason, "receptionist.errUpdateTokenPriority"));
     } finally {
       setUpdatingPriority(false);
     }
   };
 
   const handleIssueTokenForVisit = async () => {
-    if (!assigningVisit || !assignQueueId) return;
+    if (!assigningVisit || !assignQueueId || assigningBusy) return;
+    const scope = `token|${assigningVisit.visit_id}|${assignQueueId}|${assignPriority}`;
     setAssigningBusy(true);
     setError(null);
     try {
@@ -203,8 +269,9 @@ export default function Page() {
           visit_id: assigningVisit.visit_id,
           priority: assignPriority,
         },
-        newIdempotencyKey(),
+        keyFor(scope),
       );
+      settleKey(scope);
       toast.success(
         t("receptionist.issueToken"),
         t("receptionist.toastTokenIssued", {
@@ -213,29 +280,29 @@ export default function Page() {
         }),
       );
       setAssigningVisit(null);
+      setTokensReload((n) => n + 1);
       await load();
-      if (selected) {
-        const refreshed = await listQueueTokens(selected);
-        setTokens(refreshed);
-      }
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : t("receptionist.errIssueToken"));
+      setError(describe(reason, "receptionist.errIssueToken"));
     } finally {
       setAssigningBusy(false);
     }
   };
 
-  const handleReconcileAllStale = async () => {
-    if (
-      !window.confirm(t("receptionist.reconcileConfirmMessage"))
-    ) {
-      return;
-    }
+  const handleReconcileStale = async () => {
+    const reasonText = reconcileReason.trim();
+    if (!staleReport || reconciling || reasonText.length < 10) return;
+    // Exactly the rows the reviewer is looking at, never "whatever is stale now".
+    const visitIds = staleReport.candidates.map((candidate) => candidate.visit_id);
+    const scope = `reconcile|${visitIds.join(",")}|${reasonText}`;
     setReconciling(true);
     setError(null);
     try {
-      const res = await reconcileStaleVisits();
+      const res = await reconcileStaleVisits({ visit_ids: visitIds, reason: reasonText }, keyFor(scope));
+      settleKey(scope);
       setReconcileResult(res);
+      setConfirmingReconcile(false);
+      setReconcileReason("");
       toast.success(
         t("receptionist.toastStaleReconciledTitle"),
         t("receptionist.toastStaleReconciledBody", {
@@ -245,7 +312,7 @@ export default function Page() {
       );
       await load();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : t("receptionist.errReconcileStale"));
+      setError(describe(err, "receptionist.errReconcileStale"));
     } finally {
       setReconciling(false);
     }
@@ -320,12 +387,22 @@ export default function Page() {
         </p>
       )}
 
+      {loadError !== null && (
+        <LoadFailure
+          message={describe(loadError, "receptionist.errLoadQueues")}
+          retryLabel={t("common.retry")}
+          onRetry={() => void load()}
+        />
+      )}
+
       {showUnassignedVisits && (
         <section className="surface-card space-y-4 p-5" aria-labelledby="unassigned-visits-title">
           <div className="flex items-center justify-between">
             <div>
               <h2 id="unassigned-visits-title" className="text-lg font-semibold">
-                {t("receptionist.visitsAwaitingHeading", { count: unassignedVisits?.length ?? 0 })}
+                {unassignedVisits
+                  ? t("receptionist.visitsAwaitingHeading", { count: unassignedVisits.length })
+                  : t("receptionist.visitsAwaitingToken")}
               </h2>
               <p className="mt-1 text-sm text-muted-foreground">
                 {t("receptionist.visitsAwaitingHint")}
@@ -333,7 +410,13 @@ export default function Page() {
             </div>
           </div>
 
-          {unassignedVisits && unassignedVisits.length === 0 ? (
+          {unassignedError !== null ? (
+            <LoadFailure
+              message={describe(unassignedError, "receptionist.errLoadVisitsAwaiting")}
+              retryLabel={t("common.retry")}
+              onRetry={() => void load()}
+            />
+          ) : unassignedVisits === null ? null : unassignedVisits.length === 0 ? (
             <p className="text-sm text-muted-foreground">{t("receptionist.noVisitsAwaiting")}</p>
           ) : (
             <div className="overflow-x-auto">
@@ -448,7 +531,9 @@ export default function Page() {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 id="stale-visits-title" className="text-lg font-semibold text-foreground">
-                {t("receptionist.staleReviewTitle", { count: staleReport?.total_stale_count ?? 0 })}
+                {staleReport
+                  ? t("receptionist.staleReviewTitle", { count: staleReport.total_stale_count })
+                  : t("receptionist.staleVisits")}
               </h2>
               <p className="mt-1 text-sm text-muted-foreground">
                 {t("receptionist.staleReviewDescription", {
@@ -456,17 +541,67 @@ export default function Page() {
                 })}
               </p>
             </div>
-            {staleReport && staleReport.total_stale_count > 0 && (
+            {staleReport && staleReport.total_stale_count > 0 && !confirmingReconcile && (
               <button
                 type="button"
                 disabled={reconciling}
-                onClick={() => void handleReconcileAllStale()}
+                onClick={() => setConfirmingReconcile(true)}
                 className="rounded-md bg-rose-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-rose-700 disabled:opacity-50"
               >
-                {reconciling ? t("receptionist.reconciling") : t("receptionist.reconcileAllButton", { count: staleReport.total_stale_count })}
+                {t("receptionist.reconcileAllButton", { count: staleReport.total_stale_count })}
               </button>
             )}
           </div>
+
+          {staleError !== null && (
+            <LoadFailure
+              message={describe(staleError, "receptionist.errLoadStaleVisits")}
+              retryLabel={t("common.retry")}
+              onRetry={() => void load()}
+            />
+          )}
+
+          {confirmingReconcile && staleReport && staleReport.total_stale_count > 0 && (
+            <div className="space-y-3 rounded-lg border border-rose-300 bg-rose-50/60 p-4 text-sm dark:border-rose-900 dark:bg-rose-950/30">
+              <p className="text-foreground">{t("receptionist.reconcileConfirmMessage")}</p>
+              <label className="block space-y-1">
+                <span className="font-medium text-foreground">{t("receptionist.reconcileReasonLabel")} *</span>
+                <textarea
+                  value={reconcileReason}
+                  onChange={(event) => setReconcileReason(event.target.value)}
+                  maxLength={500}
+                  rows={2}
+                  disabled={reconciling}
+                  aria-describedby="reconcile-reason-hint"
+                  className="w-full rounded-md border border-border bg-background px-3 py-2"
+                />
+                <span id="reconcile-reason-hint" className="block text-xs text-muted-foreground">
+                  {t("receptionist.reconcileReasonHint")}
+                </span>
+              </label>
+              <div className="flex flex-wrap justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={reconciling}
+                  onClick={() => {
+                    setConfirmingReconcile(false);
+                    setReconcileReason("");
+                  }}
+                  className="rounded-md border border-border bg-card px-3 py-1.5 font-medium disabled:opacity-50"
+                >
+                  {t("common.cancel")}
+                </button>
+                <button
+                  type="button"
+                  disabled={reconciling || reconcileReason.trim().length < 10}
+                  onClick={() => void handleReconcileStale()}
+                  className="rounded-md bg-rose-600 px-3 py-1.5 font-medium text-white hover:bg-rose-700 disabled:opacity-50"
+                >
+                  {reconciling ? t("receptionist.reconciling") : t("receptionist.reconcileConfirm")}
+                </button>
+              </div>
+            </div>
+          )}
 
           {reconcileResult && (
             <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300">
@@ -478,7 +613,7 @@ export default function Page() {
             </div>
           )}
 
-          {staleReport && staleReport.candidates.length === 0 ? (
+          {staleReport === null ? null : staleReport.candidates.length === 0 ? (
             <div className="rounded-lg border border-border bg-muted/20 p-6 text-center text-sm text-muted-foreground">
               {t("receptionist.staleVisitsEmpty")}
             </div>
@@ -659,6 +794,14 @@ export default function Page() {
             );
           })}
         </div>
+      )}
+
+      {selected && tokensError !== null && (
+        <LoadFailure
+          message={describe(tokensError, "receptionist.errLoadTokens")}
+          retryLabel={t("common.retry")}
+          onRetry={() => setTokensReload((n) => n + 1)}
+        />
       )}
 
       {tokens && (

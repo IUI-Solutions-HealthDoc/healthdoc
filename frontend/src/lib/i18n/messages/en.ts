@@ -510,11 +510,16 @@ export const en = {
   "receptionist.toastStaleReconciledTitle": "Stale visits reconciled",
   "receptionist.toastStaleReconciledBody": "Successfully reconciled {reconciled} visits ({skipped} skipped/exempt).",
   "receptionist.errReconcileStale": "Failed to reconcile stale visits",
+  "receptionist.reconcileReasonLabel": "Reason for closing these visits",
+  "receptionist.reconcileReasonHint": "Recorded in the audit log with each visit. At least 10 characters.",
+  "receptionist.reconcileConfirm": "Confirm reconciliation",
+  "receptionist.errLoadVisitsAwaiting": "Could not load visits awaiting a token",
+  "receptionist.errLoadStaleVisits": "Could not load stale visits",
   "receptionist.visitsAwaitingHint": "Visits created today where queue token issuance was interrupted or skipped.",
   "receptionist.issueTokenHeading": "Issue Token for {name} ({visit})",
   "receptionist.staleReviewTitle": "Stale Visits Review & Reconciliation ({count})",
   "receptionist.staleReviewDescription":
-    "Unclosed OPD visits from previous days (before {cutoff}). Exempts Emergency & IPD visits. Reconciles unconsulted visits to LWBS and consultation visits to Closed, cancelling live queue tokens while preserving all clinical history and billing.",
+    "Unclosed OPD visits from previous days (before {cutoff}). Exempts Emergency & IPD visits. Reconciles unconsulted visits to LWBS and consultation visits to Closed, closing live queue tokens as No-Show while preserving all clinical history and billing.",
   "receptionist.staleVisitsEmpty":
     "No stale unclosed visits found from prior business days. All previous OPD visits and tokens are cleanly resolved.",
   "receptionist.encounterNotesCount": "{count} notes",

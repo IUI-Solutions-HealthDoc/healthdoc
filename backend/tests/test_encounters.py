@@ -136,13 +136,14 @@ async def test_diagnosis_create_and_list(db, visit):
 # in the codebase was a commented-out example.
 # --------------------------------------------------------------------------- #
 
-async def test_closing_an_encounter_completes_the_patients_queue_token(db, visit, seed):
+async def test_closing_an_encounter_completes_the_patients_queue_token(db, visit, seed, roster_on_duty):
     from datetime import date
 
     from app.queue import service as queue_service
 
     v, doctor = visit
     dept, room, _doctor = seed
+    await roster_on_duty(dept.id, doctor.id)
     queue = await queue_service.create_queue(
         db, dept.id, doctor.id, room.id, "Q", date.today(), dept.facility_id)
     token = await queue_service.create_token(db, queue.id, v.id, "normal", queue.facility_id)
@@ -161,7 +162,7 @@ async def test_closing_an_encounter_completes_the_patients_queue_token(db, visit
     )
 
 
-async def test_editing_a_closed_note_does_not_re_advance_the_queue(db, visit, seed):
+async def test_editing_a_closed_note_does_not_re_advance_the_queue(db, visit, seed, roster_on_duty):
     """Only the transition into ended_at triggers the queue, not every PATCH."""
     from datetime import date
 
@@ -169,6 +170,7 @@ async def test_editing_a_closed_note_does_not_re_advance_the_queue(db, visit, se
 
     v, doctor = visit
     dept, room, _doctor = seed
+    await roster_on_duty(dept.id, doctor.id)
     queue = await queue_service.create_queue(
         db, dept.id, doctor.id, room.id, "Q2", date.today(), dept.facility_id)
     first = await queue_service.create_token(db, queue.id, v.id, "normal", queue.facility_id)
