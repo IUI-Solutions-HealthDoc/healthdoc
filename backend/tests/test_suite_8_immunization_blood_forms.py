@@ -139,6 +139,7 @@ async def test_immunization_catalogue_and_patient_due_schedule(db):
     facility, staff, child, adult = await _setup_suite_8_fixture(db)
 
     # 1. Seed & fetch catalogue
+    await ensure_catalogue_seeded(db)
     catalogue = await get_catalogue(db)
     assert len(catalogue) >= 8
     codes = {v.code for v in catalogue}
