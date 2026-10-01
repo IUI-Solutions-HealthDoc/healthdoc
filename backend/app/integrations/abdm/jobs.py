@@ -116,8 +116,17 @@ async def enqueue(
 
 
 async def claim(
-    db: AsyncSession, *, now: datetime | None = None, ident: uuid.UUID | None = None
+    db: AsyncSession,
+    *,
+    now: datetime | None = None,
+    ident: uuid.UUID | None = None,
+    facility_id: uuid.UUID | None = None,
+    created_since: datetime | None = None,
 ) -> AbdmJob | None:
+    if created_since is not None and (
+        created_since.tzinfo is None or created_since.utcoffset() is None or facility_id is None
+    ):
+        raise ValueError("Session cutoff requires a facility and timezone-aware timestamp")
     now = now or datetime.now(UTC)
     ready = or_(
         (AbdmJob.status == "pending") & (AbdmJob.available_at <= now),
@@ -125,6 +134,10 @@ async def claim(
     )
     if ident is not None:
         ready = ready & (AbdmJob.id == ident)
+    if facility_id is not None:
+        ready = ready & (AbdmJob.facility_id == facility_id)
+    if created_since is not None:
+        ready = ready & (AbdmJob.created_at >= created_since)
     row = (
         await db.execute(
             select(AbdmJob)

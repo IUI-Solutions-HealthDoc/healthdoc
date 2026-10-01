@@ -14,6 +14,7 @@ agrees, and nothing here should be read as claiming that.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -326,7 +327,8 @@ async def test_a_transfer_arriving_after_the_key_expires_is_refused(hiu_db):
 async def test_a_bundle_encrypted_as_a_hip_would_opens_through_the_hiu_service(hiu_db):
     """The closest thing to a real transfer available without a sandbox: the
     HIP path encrypts, the HIU path decrypts, and the receipt records the
-    sha256 of what arrived without storing the clinical content."""
+    sha256 of what arrived without storing the clinical content. The HIP's
+    wire checksum is a different value, MD5 as ABDM specifies."""
     artefact = await _granted_artefact(hiu_db)
     row, wire = await service.begin_hi_request(
         hiu_db,
@@ -387,7 +389,9 @@ async def test_a_bundle_encrypted_as_a_hip_would_opens_through_the_hiu_service(h
     )
     assert b'"resourceType"' not in bytes(receipt.content_encrypted)
     assert receipt.status == "stored"
-    assert receipt.content_sha256 == digest
+    plaintext = json.dumps(bundle, separators=(",", ":"), sort_keys=True).encode()
+    assert receipt.content_sha256 == hashlib.sha256(plaintext).hexdigest()
+    assert digest == hashlib.md5(plaintext, usedforsecurity=False).hexdigest()
     # One valid entry is not enough to close a paginated transaction.  The
     # transfer route marks it received only after every declared page arrives.
     assert row.status == "partial"
