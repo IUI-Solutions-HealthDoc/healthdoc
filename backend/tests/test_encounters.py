@@ -10,6 +10,7 @@ from app.opd.models import Visit
 from app.patients.models import Patient
 from app.encounters import service
 from app.encounters.schemas import DiagnosisCreate, EncounterCreate, EncounterUpdate
+from tests.business_day import business_today
 
 
 @pytest.fixture
@@ -145,7 +146,7 @@ async def test_closing_an_encounter_completes_the_patients_queue_token(db, visit
     dept, room, _doctor = seed
     await roster_on_duty(dept.id, doctor.id)
     queue = await queue_service.create_queue(
-        db, dept.id, doctor.id, room.id, "Q", date.today(), dept.facility_id)
+        db, dept.id, doctor.id, room.id, "Q", business_today(), dept.facility_id)
     token = await queue_service.create_token(db, queue.id, v.id, "normal", queue.facility_id)
     assert token.status == "waiting"
 
@@ -172,7 +173,7 @@ async def test_editing_a_closed_note_does_not_re_advance_the_queue(db, visit, se
     dept, room, _doctor = seed
     await roster_on_duty(dept.id, doctor.id)
     queue = await queue_service.create_queue(
-        db, dept.id, doctor.id, room.id, "Q2", date.today(), dept.facility_id)
+        db, dept.id, doctor.id, room.id, "Q2", business_today(), dept.facility_id)
     first = await queue_service.create_token(db, queue.id, v.id, "normal", queue.facility_id)
 
     encounter = await service.create_encounter(

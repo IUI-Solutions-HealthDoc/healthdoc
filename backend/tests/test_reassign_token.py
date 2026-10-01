@@ -11,6 +11,7 @@ from app.departments.models import Department
 from app.queue import service
 from app.queue.models import Queue, QueueToken
 from app.users.models import Facility
+from tests.business_day import business_today
 
 pytestmark = pytest.mark.asyncio
 
@@ -27,7 +28,7 @@ async def _make_facility_and_department(db):
 async def _make_queue(db, facility_id, department_id, doctor_id=None):
     queue = Queue(
         id=uuid.uuid4(), facility_id=facility_id, department_id=department_id,
-        doctor_user_id=doctor_id or uuid.uuid4(), service_date=date.today(), is_open=True,
+        doctor_user_id=doctor_id or uuid.uuid4(), service_date=business_today(), is_open=True,
     )
     db.add(queue)
     await db.flush()
