@@ -22,6 +22,7 @@ from app.common.db import get_db
 from app.integrations.abdm import callback_replies
 from app.integrations.abdm.callback_auth import (
     GatewayCallback,
+    hip_ack_callback,
     hip_gateway_callback,
     hip_link_gateway_callback,
     hiu_gateway_callback,
@@ -72,6 +73,7 @@ _PLACEHOLDER = "change-me"
 DbSession = Annotated[AsyncSession, Depends(get_db)]
 HipCallback = Annotated[GatewayCallback, Depends(hip_gateway_callback)]
 HipLinkCallback = Annotated[GatewayCallback, Depends(hip_link_gateway_callback)]
+HipAckCallback = Annotated[GatewayCallback, Depends(hip_ack_callback)]
 HiuCallback = Annotated[GatewayCallback, Depends(hiu_gateway_callback)]
 ProfileCallback = Annotated[GatewayCallback, Depends(profile_gateway_callback)]
 
@@ -558,7 +560,7 @@ async def on_care_context(
 @router.post("/api/v3/links/context/on-notify", status_code=202)
 async def context_notify_ack(
     payload: GenericCallback,
-    callback: HipCallback,
+    callback: HipAckCallback,
 ) -> Response:
     return _accepted()
 
@@ -566,7 +568,7 @@ async def context_notify_ack(
 @router.post("/api/v3/patients/sms/on-notify", status_code=202)
 async def deep_link_sms_notify_ack(
     payload: GenericCallback,
-    callback: HipCallback,
+    callback: HipAckCallback,
 ) -> Response:
     """Receive the gateway acknowledgement for a deep-linking SMS request."""
     return _accepted()

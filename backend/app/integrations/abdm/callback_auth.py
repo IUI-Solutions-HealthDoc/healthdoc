@@ -236,6 +236,7 @@ async def _verify_gateway_headers(
     recipient_header: str | None,
     expected_recipient: str | None,
     require_cm_id: bool = True,
+    require_request_id: bool = True,
     replay_scope: str | None = None,
 ) -> GatewayCallback:
     """Validate ABDM's documented callback headers and reject replays.
@@ -251,12 +252,12 @@ async def _verify_gateway_headers(
     recipient = request.headers.get(recipient_header) if recipient_header else None
     cm_id = request.headers.get("X-CM-ID")
     if (
-        not request_id
+        (require_request_id and not request_id)
         or not raw_timestamp
         or (require_cm_id and not cm_id)
         or (recipient_header is not None and not recipient)
     ):
-        required_headers = ["REQUEST-ID", "TIMESTAMP"]
+        required_headers = ["REQUEST-ID", "TIMESTAMP"] if require_request_id else ["TIMESTAMP"]
         if require_cm_id:
             required_headers.append("X-CM-ID")
         if recipient_header:
@@ -275,7 +276,8 @@ async def _verify_gateway_headers(
             },
         )
     try:
-        uuid.UUID(request_id)
+        if request_id:
+            uuid.UUID(request_id)
     except ValueError as exc:
         raise HTTPException(
             400, {"code": "invalid_request_id", "message": "REQUEST-ID must be a UUID"}
@@ -306,6 +308,13 @@ async def _verify_gateway_headers(
             },
         )
 
+    if not request_id:
+        # Only acknowledgement-only callbacks reach here (require_request_id is
+        # False). With no id there is nothing to coalesce on; their handlers
+        # change no state, so a redelivery is harmless.
+        return GatewayCallback(
+            request_id="", timestamp=timestamp, recipient_id=recipient or cm_id or ""
+        )
     replay_scope = replay_scope or (recipient_header.lower() if recipient_header else "profile-share")
     replay_key = f"abdm:callback:{replay_scope}:{request.url.path}:{request_id}"
     try:
@@ -387,6 +396,25 @@ async def verify_hip_link_gateway_callback(request: Request) -> GatewayCallback:
     )
 
 
+async def verify_hip_ack_callback(request: Request) -> GatewayCallback:
+    """Acknowledgements of requests HealthDoc made, which change no state.
+
+    NHA acknowledged our care-context notification on 30 September 2026 with
+    X-HIP-ID and TIMESTAMP but no REQUEST-ID and no X-CM-ID (receipt 2ca67b4a),
+    and requiring them answered a genuine acknowledgement with 400. The
+    recipient must still be ours and the timestamp fresh; a REQUEST-ID or
+    X-CM-ID that is sent must still be valid. Not for any callback whose
+    handler records or changes anything.
+    """
+    return await _verify_gateway_headers(
+        request,
+        recipient_header="X-HIP-ID",
+        expected_recipient=get_settings().abdm_hip_id,
+        require_cm_id=False,
+        require_request_id=False,
+    )
+
+
 async def verify_profile_gateway_callback(request: Request) -> GatewayCallback:
     """Validate Scan-and-Share, whose two header sets disagree in practice.
 
@@ -445,6 +473,10 @@ async def hip_link_gateway_callback(request: Request) -> AsyncIterator[GatewayCa
     except Exception:
         await _release_replay(callback)
         raise
+
+
+async def hip_ack_callback(request: Request) -> AsyncIterator[GatewayCallback]:
+    yield await verify_hip_ack_callback(request)
 
 
 async def profile_gateway_callback(request: Request) -> AsyncIterator[GatewayCallback]:
