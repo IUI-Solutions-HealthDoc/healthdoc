@@ -150,7 +150,9 @@ class ConsentDetail(WireModel):
     patient: Party
     care_contexts: list[ConsentCareContext] = Field(default_factory=list, alias="careContexts")
     hip: Party
-    hiu: Party
+    # NHA's HIP consent notification omits it (30 September 2026, a PHR
+    # self-consent). The HIU consent handler still refuses one without it.
+    hiu: Party | None = None
     hi_types: list[str] = Field(default_factory=list, alias="hiTypes")
     permission: Permission
 

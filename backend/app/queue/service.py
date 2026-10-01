@@ -411,7 +411,7 @@ async def list_visits_without_tokens(
         .where(
             Visit.facility_id == caller_facility_id,
             Visit.visit_type.in_(VisitType.token_issuing()),
-            Visit.status.in_(["registered", "active"]),
+            Visit.status == "registered",
             QueueToken.id.is_(None),
         )
         .order_by(Visit.visit_date.desc())
