@@ -2,7 +2,9 @@
 import re
 import uuid
 
-from sqlalchemy import Boolean, ForeignKey, String, Text, UniqueConstraint, event, text
+from sqlalchemy import (
+    Boolean, CheckConstraint, ForeignKey, String, Text, UniqueConstraint, event, text,
+)
 from datetime import datetime
 import zoneinfo
 from sqlalchemy.dialects.postgresql import UUID
@@ -29,7 +31,18 @@ class Facility(Base, UUIDPk, Timestamps):
     district: Mapped[str | None] = mapped_column(Text)
     facility_type: Mapped[str | None] = mapped_column(String(50))
     hfr_facility_id: Mapped[str | None] = mapped_column(String(50))
+    #: government | private (0090). Selects ABDM's ABHA consent wording: NHA
+    #: tells private entities to remove "government". NULL is not a default;
+    #: ABHA creation refuses until it is recorded.
+    ownership: Mapped[str | None] = mapped_column(String(20))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "ownership IS NULL OR ownership IN ('government', 'private')",
+            name="ck_facilities_ownership",
+        ),
+    )
 
 
 class User(Base, UUIDPk, Timestamps):

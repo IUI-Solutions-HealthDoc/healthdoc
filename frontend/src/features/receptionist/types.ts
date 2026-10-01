@@ -135,6 +135,19 @@ export interface AbhaEnrolmentConsent {
   code: string;
   version: string;
   language: "en";
+  /** The desk's tick on each of NHA's published statements, by id. */
+  statements: Record<string, boolean>;
+  /** Digest of the declaration shown; the server refuses ticks on other text. */
+  declaration_sha256: string;
+}
+
+/** NHA's published ABHA consent as the server rendered it for this patient. */
+export interface AbhaDeclaration {
+  version: string;
+  ownership: "government" | "private";
+  intro: string;
+  statements: { id: string; text: string; ticked: boolean; required: boolean | null }[];
+  sha256: string;
 }
 
 /**
