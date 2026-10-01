@@ -708,12 +708,30 @@ async def notify_transaction(request_id: uuid.UUID) -> None:
             for p in pages
         ]
         if not statuses:
+            # Refused before any page was built (no authorised author, say).
+            # NHA kept refusing this notice when it named care context "", so
+            # report each care context the consent covered. With none to
+            # name, there is no valid notice to send.
+            artefact = (
+                await db.execute(
+                    select(AbdmHipConsentArtefact).where(
+                        AbdmHipConsentArtefact.consent_artefact_id == row.consent_artefact_id,
+                        AbdmHipConsentArtefact.facility_id == row.facility_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            references = hip_service.consented_care_contexts(
+                artefact.raw_artefact if artefact else None
+            )
+            if not references:
+                raise TransferError("Failed transfer has no care context to report against")
             statuses = [
                 {
-                    "careContextReference": "",
+                    "careContextReference": reference,
                     "hiStatus": "ERRORED",
                     "description": "Health information transfer failed",
                 }
+                for reference in references
             ]
         await _notify_gateway(
             row,

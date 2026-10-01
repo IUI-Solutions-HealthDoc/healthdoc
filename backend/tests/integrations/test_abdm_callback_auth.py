@@ -277,6 +277,20 @@ async def test_official_hip_callback_requires_the_documented_headers(gateway_set
     assert caught.value.detail["code"] == "missing_abdm_headers"
 
 
+#: Acknowledgement-only routes use the check that also tolerates a missing
+#: REQUEST-ID (see the tests at the end of this file).
+_ACK_ROUTES = {"/api/v3/links/context/on-notify", "/api/v3/patients/sms/on-notify"}
+
+
+def _route_check(family, path):
+    if path in _ACK_ROUTES:
+        return callback_auth.verify_hip_ack_callback, callback_auth.hip_ack_callback
+    return (
+        getattr(callback_auth, f"verify_{family}_gateway_callback"),
+        getattr(callback_auth, f"{family}_gateway_callback"),
+    )
+
+
 # Independently transcribed from the supplied M2/M3 v2.8 header tables.
 # Do not derive this expectation from the implementation's allowlist.
 DOCUMENTED_CM_OPTIONAL = [
@@ -306,21 +320,19 @@ def _event_request(family, path, **extra):
 async def test_documented_event_callback_accepts_no_cm_header(gateway_settings, family, path):
     from app.integrations.abdm.external_router import router
 
-    verify = getattr(callback_auth, f"verify_{family}_gateway_callback")
+    verify, dependency_call = _route_check(family, path)
     verified = await verify(_event_request(family, path))
     assert verified.recipient_id == f"SBXID_TEST_{family.upper()}"
     assert not verified.replayed
     # Hold the real route's dependency to the policy under test.
     route = next(route for route in router.routes if route.path == path)
-    assert getattr(callback_auth, f"{family}_gateway_callback") in {
-        dependency.call for dependency in route.dependant.dependencies
-    }
+    assert dependency_call in {dependency.call for dependency in route.dependant.dependencies}
 
 
 @pytest.mark.parametrize(("family", "path"), DOCUMENTED_CM_OPTIONAL)
 @pytest.mark.parametrize("cm", ["", "other-cm"])
 async def test_optional_cm_still_rejects_wrong_value(gateway_settings, family, path, cm):
-    verify = getattr(callback_auth, f"verify_{family}_gateway_callback")
+    verify, _ = _route_check(family, path)
     with pytest.raises(HTTPException) as caught:
         await verify(_event_request(family, path, **{"X-CM-ID": cm}))
     assert caught.value.status_code == 401
@@ -594,3 +606,62 @@ async def test_callback_age_and_future_skew_bounds(gateway_settings, offset, acc
         with pytest.raises(HTTPException) as caught:
             await callback_auth.verify_hip_gateway_callback(_request(**headers))
         assert caught.value.detail["code"] == "stale_callback"
+
+
+# --------------------------------------------- acknowledgements without REQUEST-ID
+# NHA acknowledged a care-context notification on 30 September 2026 with only
+# X-HIP-ID and TIMESTAMP (receipt 2ca67b4a). Requiring REQUEST-ID answered a
+# genuine acknowledgement with 400.
+
+
+def _nha_ack_headers():
+    return {"TIMESTAMP": datetime.now(UTC).isoformat(), "X-HIP-ID": "SBXID_TEST_HIP"}
+
+
+async def test_acknowledgement_without_request_id_is_accepted(gateway_settings):
+    verified = await callback_auth.verify_hip_ack_callback(_request(**_nha_ack_headers()))
+    assert verified.request_id == ""
+    assert verified.recipient_id == "SBXID_TEST_HIP"
+    assert verified.replayed is False
+    assert not gateway_settings.keys
+
+
+@pytest.mark.parametrize(
+    ("name", "value", "status", "code"),
+    [
+        ("X-HIP-ID", "", 400, "missing_abdm_headers"),
+        ("X-HIP-ID", "OTHER_HIP", 404, "unknown_service"),
+        ("TIMESTAMP", "", 400, "missing_abdm_headers"),
+        ("TIMESTAMP", "2026-09-11T00:00:00", 400, "stale_callback"),
+        ("REQUEST-ID", "invalid", 400, "invalid_request_id"),
+        ("X-CM-ID", "other-cm", 401, "invalid_cm_id"),
+    ],
+)
+async def test_acknowledgement_keeps_every_other_guard(gateway_settings, name, value, status, code):
+    headers = _nha_ack_headers()
+    headers[name] = value
+    with pytest.raises(HTTPException) as caught:
+        await callback_auth.verify_hip_ack_callback(_request(**headers))
+    assert caught.value.status_code == status
+    assert caught.value.detail["code"] == code
+
+
+async def test_acknowledgement_with_request_id_still_coalesces_replays(gateway_settings):
+    headers = {**_nha_ack_headers(), "REQUEST-ID": str(uuid.uuid4())}
+    first = await callback_auth.verify_hip_ack_callback(_request(**headers))
+    second = await callback_auth.verify_hip_ack_callback(_request(**headers))
+    assert (first.replayed, second.replayed) == (False, True)
+
+
+def test_only_acknowledgement_routes_accept_a_missing_request_id():
+    from app.integrations.abdm import external_router
+
+    relaxed = {
+        route.path
+        for route in external_router.router.routes
+        if any(
+            dep.call is callback_auth.hip_ack_callback
+            for dep in getattr(route, "dependant", None).dependencies
+        )
+    }
+    assert relaxed == {"/api/v3/links/context/on-notify", "/api/v3/patients/sms/on-notify"}

@@ -156,6 +156,22 @@ async def authorise_hi_request(
     )
 
 
+def consented_care_contexts(raw_artefact: dict | None) -> list[str]:
+    """The care-context references a stored consent artefact names, in order.
+
+    Stored artefacts are the gateway's notification (``notification.
+    consentDetail``); older rows hold the detail at the top level.
+    """
+    raw = raw_artefact or {}
+    detail = raw.get("notification", {}).get("consentDetail") or raw.get("consentDetail") or {}
+    references: list[str] = []
+    for item in detail.get("careContexts") or []:
+        reference = item.get("careContextReference")
+        if reference and str(reference) not in references:
+            references.append(str(reference))
+    return references
+
+
 async def record_consent_notification(
     db: AsyncSession,
     *,
@@ -251,13 +267,7 @@ async def list_care_contexts_for_transfer(
     # The artefact names the exact care contexts the patient authorised. A
     # valid consent for one consultation is not authority for every linked
     # consultation at this facility.
-    raw = authorisation.artefact.raw_artefact or {}
-    detail = raw.get("notification", {}).get("consentDetail") or raw.get("consentDetail") or {}
-    consented_references = {
-        str(item.get("careContextReference"))
-        for item in (detail.get("careContexts") or [])
-        if item.get("careContextReference")
-    }
+    consented_references = set(consented_care_contexts(authorisation.artefact.raw_artefact))
     # References are unique per patient, not per facility. Keep the verified
     # patient binding when intersecting references so a collision cannot share
     # a different patient's record.
