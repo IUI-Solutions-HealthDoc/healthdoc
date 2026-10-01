@@ -125,17 +125,21 @@ DEFAULT_NATIONAL_VACCINES = [
 
 
 async def ensure_catalogue_seeded(db: AsyncSession) -> None:
-    # Caller owns the transaction: a seed must not commit a clinical write's
-    # retry reservation early, nor swallow a failure and discard that reservation.
-    res = await db.execute(select(VaccineCatalogue).limit(1))
-    if res.scalars().first() is None:
-        for item in DEFAULT_NATIONAL_VACCINES:
+    """Insert any default vaccine whose code is missing.
+
+    Run by the seed script, never by a request. When the first read of an
+    empty catalogue seeded it, two simultaneous first reads both saw it empty
+    and the second insert failed on the unique code: a 500 on a GET.
+    Flushes only; the caller owns the transaction.
+    """
+    existing = set((await db.execute(select(VaccineCatalogue.code))).scalars().all())
+    for item in DEFAULT_NATIONAL_VACCINES:
+        if item["code"] not in existing:
             db.add(VaccineCatalogue(id=uuid.uuid4(), **item))
-        await db.flush()
+    await db.flush()
 
 
 async def get_catalogue(db: AsyncSession) -> list[VaccineCatalogue]:
-    await ensure_catalogue_seeded(db)
     res = await db.execute(
         select(VaccineCatalogue).where(VaccineCatalogue.is_active == True).order_by(VaccineCatalogue.min_age_days)
     )
@@ -143,7 +147,6 @@ async def get_catalogue(db: AsyncSession) -> list[VaccineCatalogue]:
 
 
 async def get_patient_schedule(db: AsyncSession, patient_id: uuid.UUID) -> PatientImmunizationScheduleOut:
-    await ensure_catalogue_seeded(db)
     pat_res = await db.execute(select(Patient).where(Patient.id == patient_id))
     patient = pat_res.scalar_one_or_none()
     if not patient:
@@ -210,7 +213,6 @@ async def record_administration(
 ) -> ImmunizationRecordOut:
     facility_id = await actor_facility(db, user_id)
     await require_patient_scope(db, payload.patient_id, facility_id)
-    await ensure_catalogue_seeded(db)
     vac_res = await db.execute(
         select(VaccineCatalogue).where(VaccineCatalogue.code.ilike(payload.vaccine_code.strip()))
     )
