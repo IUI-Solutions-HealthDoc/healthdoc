@@ -12,6 +12,7 @@ import { getPatient, getQueueToken } from "@/features/doctor/api";
 import { doctorPageSx } from "@/features/doctor/panelSx";
 import type { EncounterContext } from "@/features/doctor/types";
 import { api } from "@/lib/api";
+import { getMe } from "@/features/session/api";
 import { useAuth } from "@/providers/auth-provider";
 
 interface VisitRecord {
@@ -34,6 +35,7 @@ interface VisitRecord {
  */
 export default function Page() {
   const { t } = useLocale();
+  // Only a re-run trigger once sign-in settles; never the provider id (see below).
   const { user } = useAuth();
   const [context, setContext] = useState<EncounterContext | null>(null);
   const [message, setMessage] = useState<{ tone: "instruction" | "error"; text: string } | null>(null);
@@ -55,6 +57,12 @@ export default function Page() {
 
     void (async () => {
       try {
+        // The encounter's provider must be a HealthDoc staff id. The auth user's
+        // id is the Keycloak subject, which the backend rightly refuses as
+        // provider_not_in_facility — every token-free (emergency, teleconsult,
+        // IPD) consultation failed to save with 422 on 29 Sep 2026.
+        const me = await getMe();
+        if (cancelled) return;
         if (tokenId) {
           const token = await getQueueToken(tokenId);
           if (cancelled) return;
@@ -71,8 +79,8 @@ export default function Page() {
             uhid: token.uhid,
             age_years: token.age_years,
             sex: token.sex,
-            provider_user_id: token.provider_user_id || user?.id || "",
-            provider_name: token.provider_name || user?.name || "Assigned doctor",
+            provider_user_id: token.provider_user_id || me.id,
+            provider_name: token.provider_name || me.full_name || "Assigned doctor",
             department: token.department ?? "OPD",
             token_display: token.token_display,
           });
@@ -101,8 +109,8 @@ export default function Page() {
             uhid: patient.uhid || patient.thid || "No identifier",
             age_years: patient.age_years ?? 0,
             sex: patient.sex || "unknown",
-            provider_user_id: user?.id || "",
-            provider_name: user?.name || "Attending Doctor",
+            provider_user_id: me.id,
+            provider_name: me.full_name || "Attending Doctor",
             department: isEmergency ? "Emergency" : isIpd ? "Inpatient" : "OPD",
             token_display: isEmergency ? `EMERGENCY · ${visit.visit_number}` : visit.visit_number,
           });

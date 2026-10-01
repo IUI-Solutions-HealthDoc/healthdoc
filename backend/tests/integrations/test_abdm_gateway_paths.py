@@ -41,6 +41,9 @@ GATEWAY_PATH_FIELDS = sorted(
         "abdm_path_profile_abha_card",
         "abdm_path_login_request_otp", "abdm_path_login_verify",
         "abdm_path_login_verify_user",
+        # ABHA-address (PHR) login: also abhasbx.abdm.gov.in (M1 collection).
+        "abdm_path_phr_login_request_otp", "abdm_path_phr_login_verify",
+        "abdm_path_phr_profile", "abdm_path_phr_card",
     }
 )
 

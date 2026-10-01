@@ -43,6 +43,9 @@ public final class HealthDocEcdh {
                 System.out.println(encode(org.bouncycastle.util.BigIntegers.asUnsignedByteArray(
                     32, ((ECPrivateKey) pair.getPrivate()).getD())));
                 System.out.println(encode(((ECPublicKey) pair.getPublic()).getQ().getEncoded(false)));
+                // fidelius-cli's x509PublicKey: the same key as SubjectPublicKeyInfo DER.
+                // ABDM's PHR data-push receiver parses the HIP key only in this form.
+                System.out.println(encode(pair.getPublic().getEncoded()));
             } else if (fields.length == 3 && fields[0].equals("derive")) {
                 byte[] scalar = decode(fields[1]);
                 if (scalar.length != 32) throw new IllegalArgumentException();

@@ -16,6 +16,7 @@ from pydantic import ValidationError
 from app.integrations.abdm.contracts_v3 import (
     ConsentOnFetchCallback,
     HealthInformationPush,
+    HipConsentCallback,
     HipHealthInformationCallback,
     ProfileShareCallback,
 )
@@ -142,6 +143,41 @@ def test_consent_fetch_reads_the_grant_not_the_original_request():
     detail = callback.consent.consent_detail
     assert detail.hi_types == ["OPConsultation"]
     assert detail.care_contexts[0].care_context_reference == "V-1"
+
+
+def test_hip_consent_notification_parses_without_an_hiu():
+    """The shape NHA sent to the HIP on 30 September 2026 for a PHR consent:
+    no consentDetail.hiu. Requiring it answered a GRANTED consent with 422."""
+    callback = HipConsentCallback.model_validate(
+        {
+            "notification": {
+                "status": "GRANTED",
+                "consentId": "C-1",
+                "consentDetail": {
+                    "consentId": "C-1",
+                    "patient": {"id": "patient@sbx"},
+                    "careContexts": [
+                        {"patientReference": "P-1", "careContextReference": "wellness/1"}
+                    ],
+                    "purpose": {"code": "PATRQT"},
+                    "hip": {"id": "HIP-1"},
+                    "hiTypes": ["WellnessRecord"],
+                    "permission": {
+                        "accessMode": "VIEW",
+                        "dateRange": {
+                            "from": "2026-01-01T00:00:00.000Z",
+                            "to": "2026-09-30T00:00:00.000Z",
+                        },
+                        "dataEraseAt": "2026-10-30T00:00:00.000Z",
+                        "frequency": {"unit": "HOUR", "value": 1, "repeats": 0},
+                    },
+                },
+            }
+        }
+    )
+    detail = callback.notification.consent_detail
+    assert detail.hiu is None
+    assert detail.care_contexts[0].care_context_reference == "wellness/1"
 
 
 def test_data_push_has_bounded_pages_and_entries():

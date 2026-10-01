@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.common.enums import QueuePriority, Shift
 
@@ -117,6 +117,17 @@ class QueueOpeningOptionOut(BaseModel):
 class QueueOpeningOptionsOut(BaseModel):
     service_date: date
     items: list[QueueOpeningOptionOut]
+
+
+class BookableProviderOut(BaseModel):
+    staff_user_id: uuid.UUID
+    staff_name: str
+    department_id: uuid.UUID
+
+
+class BookableProvidersOut(BaseModel):
+    service_date: date
+    items: list[BookableProviderOut]
 
 
 class QueueTokenListItemOut(QueueTokenOut):
@@ -288,8 +299,31 @@ class StaleVisitsReportOut(BaseModel):
 
 
 class StaleVisitsReconcileRequest(BaseModel):
-    visit_ids: list[uuid.UUID] | None = None
-    reason: str = "Authorized end-of-day stale visit reconciliation (LWBS / no-show)"
+    """Either the reviewed `visit_ids` or `all: true`, never neither.
+
+    An omitted list used to mean "every stale visit", so a client bug that
+    dropped the field closed the whole backlog.
+    """
+
+    visit_ids: list[uuid.UUID] | None = Field(default=None, min_length=1, max_length=500)
+    all: bool = False
+    reason: str = Field(min_length=10, max_length=500)
+
+    @field_validator("reason")
+    @classmethod
+    def _reason_has_content(cls, value: str) -> str:
+        stripped = value.strip()
+        if len(stripped) < 10:
+            raise ValueError("reason must be at least 10 characters")
+        return stripped
+
+    @model_validator(mode="after")
+    def _explicit_scope(self) -> "StaleVisitsReconcileRequest":
+        if self.all and self.visit_ids is not None:
+            raise ValueError("send either visit_ids or all=true, not both")
+        if not self.all and self.visit_ids is None:
+            raise ValueError("send the reviewed visit_ids, or all=true to reconcile every stale visit")
+        return self
 
 
 class StaleVisitsReconcileResult(BaseModel):
