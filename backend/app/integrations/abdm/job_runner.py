@@ -43,6 +43,19 @@ class DeferredJob(RuntimeError):
     """Waiting for verified patient linkage, not an exhausted transport retry."""
 
 
+def _deep_link_applies(patient) -> bool:
+    """A live chart with a usable mobile and no ABHA address bound here."""
+    from app.integrations.abdm.hip.discovery import national_mobile
+
+    return (
+        patient is not None
+        and patient.deleted_at is None
+        and patient.merged_into_patient_id is None
+        and not patient.abha_address
+        and national_mobile(patient.mobile) is not None
+    )
+
+
 async def notify_context(job: jobs.AbdmJob) -> None:
     async with SessionLocal() as db:
         context = await db.get(AbdmCareContext, job.target_id)
@@ -69,6 +82,19 @@ async def notify_context(job: jobs.AbdmJob) -> None:
             link for link in links if context.reference in (link.care_context_references or [])
         ]
         if not links:
+            from app.patients.models import Patient
+
+            patient = await db.get(Patient, context.patient_id)
+            if _deep_link_applies(patient):
+                # HIP_INIT_NOTIFY_HIECM: the patient gave a mobile and no ABHA
+                # address, so ABDM texts them a deep link instead. One request
+                # id per record, so a retry is the same notification.
+                await gateway.notify_patient_sms(
+                    mobile=patient.mobile,
+                    hip_name=facility.name,
+                    request_id=str(uuid.uuid5(job.id, "sms-notify")),
+                )
+                return
             # A previous link for this patient does NOT implicitly link new
             # documents. G4 must obtain each context's own acknowledgement.
             raise DeferredJob("Document is awaiting confirmed linkage")

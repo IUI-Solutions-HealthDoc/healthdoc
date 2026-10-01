@@ -45,7 +45,7 @@ from app.integrations.abdm.contracts_v3 import (
     ProfileShareCallback,
     raw_dict,
 )
-from app.integrations.abdm.hip import link_otp
+from app.integrations.abdm.hip import discovery, link_otp
 from app.integrations.abdm.hip import service as hip_service
 from app.integrations.abdm.hip.documents import DocumentUnavailable, resolve_context_document
 from app.integrations.abdm.hip.models import (
@@ -257,11 +257,23 @@ async def discover(
     patient_groups: list[dict] = []
     matched_by: list[str] = []
     if patient is not None:
+        matched_by = ["ABHA_ADDRESS"]
+    else:
+        # No chart holds this address: the patient may have registered with
+        # name, birth year, gender and mobile only (the deep-link SMS case).
+        from app.common.patient_scope import facility_today
+
+        patient, matched_by = await discovery.match_by_demographics(
+            db,
+            facility_id=facility_id,
+            wire=payload.patient,
+            today=await facility_today(db, facility_id),
+        )
+    if patient is not None:
         patient_groups = _groups(
             patient,
             await _contexts(db, facility_id=facility_id, patient_id=patient.id),
         )
-        matched_by = ["ABHA_ADDRESS"]
     await callback_replies.schedule(
         db,
         facility_id=facility_id,
@@ -272,6 +284,9 @@ async def discover(
         subject_ids=[c["referenceNumber"] for g in patient_groups for c in g["careContexts"]],
         response_data={
             "abha_address": payload.patient.id,
+            # What the matched chart held when discovered: the same address,
+            # or None for a mobile-and-demographics match.
+            "chart_address": patient.abha_address if patient else None,
             "wire": {
                 "transaction_id": payload.transaction_id,
                 "patient_groups": patient_groups,
