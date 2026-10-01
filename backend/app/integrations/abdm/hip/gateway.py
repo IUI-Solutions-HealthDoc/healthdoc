@@ -364,6 +364,48 @@ async def notify_care_context(
     )
 
 
+def deep_link_phone(mobile: str | None) -> str:
+    """`+91-` and ten national digits, the form of the gateway's notify2 example.
+
+    The M2 Postman leaves phoneNo as a placeholder and the docs page shows no
+    body, so this is the one place to change if NHA's sandbox refuses it.
+    """
+    from app.integrations.abdm.hip.discovery import national_mobile
+
+    digits = national_mobile(mobile)
+    if digits is None:
+        raise ValueError("Not an Indian mobile number")
+    return f"+91-{digits}"
+
+
+async def notify_patient_sms(
+    *,
+    mobile: str,
+    hip_name: str,
+    request_id: str | None = None,
+) -> tuple[str, AbdmResponse]:
+    """HIP -> gateway. A new record exists for a patient who shared a mobile only.
+
+    ABDM texts the patient a deep link to a PHR app, which then discovers the
+    record here by demographics. Only the mobile number and this HIP are sent,
+    as the M2 case specifies; no record, name or identifier.
+    """
+    settings = get_settings()
+    rid = request_id or str(uuid.uuid4())
+    return await _post(
+        settings.abdm_path_hip_sms_notify,
+        {
+            "requestId": rid,
+            "timestamp": _now_iso(),
+            "notification": {
+                "phoneNo": deep_link_phone(mobile),
+                "hip": {"name": hip_name, "id": hip_id()},
+            },
+        },
+        request_id=rid,
+    )
+
+
 # =============================================================================
 # Patient-initiated linking — the gateway asks, we answer
 # =============================================================================

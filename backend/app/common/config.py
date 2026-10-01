@@ -91,6 +91,14 @@ class Settings(BaseSettings):
     #: Empty by default; never copy the local opt-in into deployment config.
     abdm_sandbox_local_author_context_ids: tuple[UUID, ...] = ()
 
+    #: Explicit development-only dev.* account UUIDs that may ask for consent
+    #: as NHA's published M3 sample requester. The sandbox does not check the
+    #: requester against HPR, and M3 cannot be exercised without one; real
+    #: deployments use each doctor's own registration. The requester module
+    #: additionally checks environment and the exact sandbox gateway/CM.
+    #: Empty by default; never copy the local opt-in into deployment config.
+    abdm_sandbox_test_requester_user_ids: tuple[UUID, ...] = ()
+
     #: ABDM's PUBLIC certificate, used to encrypt Aadhaar numbers, mobile
     #: numbers and OTPs before transmission (see abdm/identity/crypto.py).
     #: Public key material, not a secret — but it rotates, so it is
@@ -192,6 +200,9 @@ class Settings(BaseSettings):
     abdm_path_hip_link_add_contexts: str = "/api/hiecm/hip/v3/link/carecontext"
     #: HIP -> gateway. Notify the CM that a care context was added.
     abdm_path_hip_context_notify: str = "/api/hiecm/hip/v3/link/context/notify"
+    #: HIP -> gateway. Ask ABDM to text a deep link to a patient who gave a
+    #: mobile but no ABHA address (M2 HIP_INIT_NOTIFY_HIECM, "SMS Notify").
+    abdm_path_hip_sms_notify: str = "/api/hiecm/hip/v3/link/patient/links/sms/notify2"
     #: HIP -> gateway. Answer a discovery request the gateway sent us.
     abdm_path_hip_on_discover: str = (
         "/api/hiecm/user-initiated-linking/v3/patient/care-context/on-discover"
