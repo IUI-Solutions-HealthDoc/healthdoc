@@ -347,9 +347,11 @@ export function deletePatientPhoto(
 export function updatePatientDemographics(
   patientId: string,
   payload: Partial<PatientCreate> & { reason?: string },
+  idempotencyKey: string,
 ): Promise<Patient> {
   return api<Patient>(`/patients/${patientId}`, {
     method: "PATCH",
+    idempotencyKey,
     body: JSON.stringify(payload),
   });
 }
@@ -423,12 +425,14 @@ export function getScanShareTicket(reference: string): Promise<ScanShareTicketIt
 export function checkInScanShareTicket(
   ticketId: string,
   counter: string,
+  idempotencyKey: string,
 ): Promise<ScanShareCheckInResponse> {
   return api<ScanShareCheckInResponse>(
     `/abdm/scan-share/tickets/${encodeURIComponent(ticketId)}/check-in`,
     {
       method: "POST",
       // Server locks the ticket; identical retries preserve the original check-in.
+      idempotencyKey,
       body: JSON.stringify({ counter: counter.trim() }),
     },
   );

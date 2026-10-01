@@ -11,12 +11,13 @@ const sample = (id, name) => ({
   profile_data: { full_name: name, gender: "unknown" },
 });
 const props = { isOpen: true, onClose() {} };
+let keys = 0;
 const button = (tree, text) => nodes(tree).find((node) => node.type === "button" && content(node).includes(text));
 function harness(api) {
   return componentHarness((runtime) => compile(source("ScanShareDeskModal.tsx"), {
     ...runtime, "react-dom": { createPortal: (element) => element },
     "react-qr-code": { default: "QRCode" }, "@/components/ui/Modal": { Modal: "Modal" },
-    "@/lib/api": { formatDateTime: (value) => value },
+    "@/lib/api": { formatDateTime: (value) => value, newIdempotencyKey: () => `key-${++keys}` },
     "./StartVisit": { StartVisit: "StartVisit" }, "./api": api,
   }).ScanShareDeskModal);
 }
@@ -30,9 +31,10 @@ test("Scan-and-Share adapter accepts the real array and writes the exact counter
   });
   assert.deepEqual(await api.listScanShareTickets("all"), result);
   assert.match(calls[0][0], /status=all&limit=100$/);
-  await api.checkInScanShareTicket("immutable-ticket-id", " Desk A ");
+  await api.checkInScanShareTicket("immutable-ticket-id", " Desk A ", "check-in-key");
   assert.equal(calls[1][0], "/abdm/scan-share/tickets/immutable-ticket-id/check-in");
   assert.deepEqual(JSON.parse(calls[1][1].body), { counter: "Desk A" });
+  assert.equal(calls[1][1].idempotencyKey, "check-in-key");
   result = { items: [] };
   await assert.rejects(api.listScanShareTickets(), /Unexpected reception-ticket response/);
 });
@@ -60,11 +62,45 @@ test("real ticket fields render, check-in reads back the same ticket, and visit 
   const form = nodes(tree).find((n) => n.type === "form" && content(n).includes("Actual reception counter"));
   await form.props.onSubmit({ preventDefault() {} });
   tree = h.render(props);
-  assert.deepEqual(calls, [["ticket-A", "Real Desk"]]);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].slice(0, 2), ["ticket-A", "Real Desk"]);
+  assert.match(calls[0][2], /^key-\d+$/);
   const visit = nodes(tree).find((n) => n.type === "StartVisit");
   assert.deepEqual(visit.props.patient, { id: "patient-ticket-A", full_name: "Synthetic A", uhid: "TEST-ticket-A", thid: null });
   assert.match(content(tree), /Reception check-in saved/);
   assert.doesNotMatch(content(tree), /NABH Accredited|ABDM Integrated|Fill Registration Form/);
+});
+
+test("a retried check-in reuses its key; a changed counter gets a new one", async () => {
+  const ticket = sample("ticket-R", "Retry Patient"), calls = [];
+  let failures = 2;
+  const h = harness({
+    listScanShareTickets: async () => [ticket],
+    checkInScanShareTicket: async (...args) => {
+      calls.push(args);
+      if (failures > 0) { failures -= 1; throw new Error("Network failure"); }
+      return { ticket_id: ticket.id };
+    },
+    getScanShareTicket: async () => ({ ...ticket, status: "checked_in" }),
+  });
+  h.render(props); h.effects(); await flush();
+  let tree = h.render(props);
+  button(tree, "Retry Patient").props.onClick();
+  const submitWith = async (value) => {
+    tree = h.render(props);
+    nodes(tree).find((n) => n.type === "input" && n.props.maxLength === 50).props.onChange({ target: { value } });
+    tree = h.render(props);
+    await nodes(tree).find((n) => n.type === "form" && content(n).includes("Actual reception counter"))
+      .props.onSubmit({ preventDefault() {} });
+  };
+  await submitWith("Desk 1");
+  await submitWith("Desk 1");
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1][2], calls[0][2], "an unchanged retry must replay the same request");
+
+  await submitWith("Desk 2");
+  assert.equal(calls.length, 3);
+  assert.notEqual(calls[2][2], calls[0][2], "a different counter is a different request");
 });
 
 test("late lookup cannot replace a newer selected patient, and reopening discards old state", async () => {
