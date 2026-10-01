@@ -349,6 +349,8 @@ class WorkspaceOut(BaseModel):
     abha_address: str | None
     identity_verified: bool
     requester_ready: bool
+    #: The ask goes out as NHA's sample requester, not this doctor's licence.
+    sandbox_test_requester: bool = False
     requests: list[ConsentStatusOut]
     next_offset: int | None
 
@@ -496,8 +498,9 @@ async def patient_workspace(
     from app.users.models import User
 
     requester_ready = True
+    staff = await db.get(User, current_db_user.id)
     try:
-        requester.from_staff(await db.get(User, current_db_user.id), current_db_user.facility_id)
+        requester.from_staff(staff, current_db_user.facility_id)
     except requester.RequesterUnavailable:
         requester_ready = False
     return WorkspaceOut(
@@ -506,6 +509,7 @@ async def patient_workspace(
         abha_address=patient.abha_address,
         identity_verified=patient.abha_linked_at is not None and bool(patient.abha_address),
         requester_ready=requester_ready,
+        sandbox_test_requester=requester_ready and requester.uses_sandbox_test_requester(staff),
         requests=output,
         next_offset=offset + limit if len(rows) > limit else None,
     )
