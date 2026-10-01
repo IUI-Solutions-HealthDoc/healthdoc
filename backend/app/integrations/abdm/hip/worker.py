@@ -38,7 +38,7 @@ from app.integrations.abdm.hip.models import (
     AbdmHipHealthInformationRequest,
     AbdmHipTransferPage,
 )
-from app.integrations.abdm.jobs import enqueue, job_id
+from app.integrations.abdm.jobs import AbdmJob, enqueue, job_id
 from app.nursing.models import Vitals
 from app.opd.models import Diagnosis
 from app.orders.models import Order, Prescription, PrescriptionItem
@@ -699,6 +699,55 @@ async def transfer_transaction(transaction_id: str, *, retry_transport: bool = F
             await enqueue(db, kind="hip_notify", target_id=row.id, facility_id=row.facility_id)
             await db.commit()
             log.error("ABDM transfer failed (%s)", type(exc).__name__)
+
+
+async def abandon_transfer(request_id: uuid.UUID) -> bool:
+    """Close a transfer whose push job ran out of retries, and tell ABDM.
+
+    A dead hip_transfer job used to leave its request "transferring" with no
+    notice (1 October 2026, request fa9976b2): the HIU waited for data that
+    would never come. Mark it failed with the last push reason and queue the
+    FAILED notification. Delivered or already-failed requests are left alone.
+    """
+    async with SessionLocal() as db:
+        row = (
+            await db.execute(
+                select(AbdmHipHealthInformationRequest)
+                .where(AbdmHipHealthInformationRequest.id == request_id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if row is None or row.status != "transferring":
+            return False
+        reason = (row.failure_reason or "").removeprefix("Data push pending retry: ")
+        row.status = "failed"
+        row.failure_reason = f"Data push abandoned after retries: {reason or 'no detail'}"[:500]
+        row.completed_at = datetime.now(UTC)
+        await enqueue(db, kind="hip_notify", target_id=row.id, facility_id=row.facility_id)
+        await db.commit()
+        return True
+
+
+async def abandon_exhausted_transfers(facility_id: uuid.UUID) -> int:
+    """Reconcile transfers stranded by a dead push job before abandon_transfer existed."""
+    async with SessionLocal() as db:
+        stranded = (
+            (
+                await db.execute(
+                    select(AbdmHipHealthInformationRequest.id)
+                    .join(AbdmJob, AbdmJob.target_id == AbdmHipHealthInformationRequest.id)
+                    .where(
+                        AbdmHipHealthInformationRequest.facility_id == facility_id,
+                        AbdmHipHealthInformationRequest.status == "transferring",
+                        AbdmJob.kind == "hip_transfer",
+                        AbdmJob.status == "dead",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    return sum([await abandon_transfer(ident) for ident in stranded])
 
 
 async def notify_transaction(request_id: uuid.UUID) -> None:
