@@ -51,6 +51,12 @@ export function userFacingApiError(code, payload) {
     return "This request conflicts with the record's current state. Reload and try again.";
   }
   if (code === 429) return "Too many requests. Wait a moment and try again.";
-  if (code >= 500) return "The service is temporarily unavailable. Try again shortly.";
+  // Only the gateway statuses mean "not reachable right now". A 500 is a
+  // server fault; calling it an outage sends the desk into a retry loop
+  // instead of to the people who can fix it.
+  if (code === 502 || code === 503 || code === 504) {
+    return "The service is temporarily unavailable. Try again shortly.";
+  }
+  if (code >= 500) return "Something went wrong on the server. Report it to IT if it happens again.";
   return "The request could not be completed. Please try again.";
 }

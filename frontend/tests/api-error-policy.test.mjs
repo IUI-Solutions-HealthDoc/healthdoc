@@ -49,6 +49,17 @@ test("an ABDM rejection is not presented as a temporary outage or raw gateway te
   assert.equal(userFacingApiError(503), "The service is temporarily unavailable. Try again shortly.");
 });
 
+test("a server fault is not presented as a temporary outage", () => {
+  for (const status of [500, 501]) {
+    const message = userFacingApiError(status, "Traceback: private stack frame");
+    assert.equal(message, "Something went wrong on the server. Report it to IT if it happens again.");
+    assert.doesNotMatch(message, /temporarily|private|Traceback/);
+  }
+  for (const status of [502, 503, 504]) {
+    assert.equal(userFacingApiError(status), "The service is temporarily unavailable. Try again shortly.");
+  }
+});
+
 test("staff provisioning failures explain the remedy without hiding role denials", () => {
   for (const payload of [
     { code: "actor_not_provisioned", message: "PRIVATE-SUBJECT" },

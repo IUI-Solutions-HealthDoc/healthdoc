@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState, useSyncExternalStore } from "react";
 import { Printer, Scan, Check } from "lucide-react";
 
 import { PatientAvatar } from "@/components/ui";
@@ -18,6 +18,7 @@ import {
   isValidAbhaInput,
   isValidPatientName,
   isValidUhidInput,
+  localToday,
   normaliseIndianMobileInput,
 } from "./patientValidation";
 import { PatientCardModal, type PatientCardData } from "./PatientCardModal";
@@ -27,6 +28,9 @@ type Props = {
   onSelect?: (patient: PatientSearchResult) => void;
   selectLabel?: string;
 };
+
+const noSubscription = () => () => {};
+const noServerDate = () => undefined;
 
 const EMPTY: PatientSearchRequest = {
   full_name: "",
@@ -62,18 +66,29 @@ export function PatientSearch({ onSelect, selectLabel }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleQuickScan(exactIdentifier: string) {
-    const norm = exactIdentifier.trim().toUpperCase();
-    if (!norm) return;
-    setCriteria({ ...EMPTY, uhid: norm });
+  // The scan box is its own field: a scanned card must not overwrite, or be
+  // overwritten by, the UHID the desk is typing into the search form.
+  const [scanValue, setScanValue] = useState("");
+  // Paging repeats the query that produced the rows on screen, not whatever
+  // has been typed into the form since.
+  const lastQuery = useRef<PatientSearchRequest | null>(null);
+  const requestSeq = useRef(0);
+  const today = useSyncExternalStore(noSubscription, localToday, noServerDate);
+
+  async function runQuery(query: PatientSearchRequest, nextPage: number): Promise<boolean> {
+    const seq = ++requestSeq.current;
     setBusy(true);
     setError(null);
     try {
-      const response = await searchPatients({ uhid: norm }, 1, PAGE_SIZE);
+      const response = await searchPatients(query, nextPage, PAGE_SIZE);
+      if (seq !== requestSeq.current) return false;
+      lastQuery.current = query;
       setResults(response.items);
       setTotal(response.total);
-      setPage(1);
+      setPage(nextPage);
+      return true;
     } catch (reason) {
+      if (seq !== requestSeq.current) return false;
       setError(
         reason instanceof ApiError
           ? reason.isModuleDisabled
@@ -82,9 +97,16 @@ export function PatientSearch({ onSelect, selectLabel }: Props) {
           : t("patient.searchFailed"),
       );
       setResults(null);
+      return false;
     } finally {
-      setBusy(false);
+      if (seq === requestSeq.current) setBusy(false);
     }
+  }
+
+  async function handleQuickScan(exactIdentifier: string) {
+    const norm = exactIdentifier.trim().toUpperCase();
+    if (!norm) return;
+    if (await runQuery({ uhid: norm }, 1)) setScanValue("");
   }
 
   const hasCriterion = Boolean(
@@ -110,7 +132,7 @@ export function PatientSearch({ onSelect, selectLabel }: Props) {
     setCriteria((current) => ({ ...current, [field]: value }));
   }
 
-  async function search(nextPage: number) {
+  async function search() {
     if (!hasCriterion || formInvalid) {
       setError(
         nameNeedsDob
@@ -119,36 +141,21 @@ export function PatientSearch({ onSelect, selectLabel }: Props) {
       );
       return;
     }
+    const trimmed: PatientSearchRequest = Object.fromEntries(
+      Object.entries(criteria)
+        .map(([key, value]) => [key, typeof value === "string" ? value.trim() : value])
+        .filter(([, value]) => value !== "" && value !== undefined),
+    );
+    await runQuery(trimmed, 1);
+  }
 
-    setBusy(true);
-    setError(null);
-    try {
-      const trimmed = Object.fromEntries(
-        Object.entries(criteria)
-          .map(([key, value]) => [key, typeof value === "string" ? value.trim() : value])
-          .filter(([, value]) => value !== "" && value !== undefined),
-      );
-      const response = await searchPatients(trimmed, nextPage, PAGE_SIZE);
-      setResults(response.items);
-      setTotal(response.total);
-      setPage(nextPage);
-    } catch (reason) {
-      setError(
-        reason instanceof ApiError
-          ? reason.isModuleDisabled
-            ? t("patient.searchDisabled")
-            : reason.message
-          : t("patient.searchFailed"),
-      );
-      setResults(null);
-    } finally {
-      setBusy(false);
-    }
+  function turnPage(nextPage: number) {
+    if (lastQuery.current) void runQuery(lastQuery.current, nextPage);
   }
 
   function run(event: React.FormEvent) {
     event.preventDefault();
-    void search(1);
+    void search();
   }
 
   const matchLabel =
@@ -168,19 +175,19 @@ export function PatientSearch({ onSelect, selectLabel }: Props) {
             type="text"
             className="flex-1 rounded-md border border-border bg-card px-3 py-1.5 font-mono text-sm uppercase placeholder:normal-case placeholder:font-sans"
             placeholder={t("patient.scanHint")}
-            value={criteria.uhid ?? ""}
-            onChange={(e) => set("uhid", e.target.value)}
+            value={scanValue}
+            onChange={(e) => setScanValue(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
-                void handleQuickScan(criteria.uhid ?? "");
+                void handleQuickScan(scanValue);
               }
             }}
           />
           <button
             type="button"
-            onClick={() => void handleQuickScan(criteria.uhid ?? "")}
-            disabled={!criteria.uhid?.trim() || busy}
+            onClick={() => void handleQuickScan(scanValue)}
+            disabled={!scanValue.trim() || busy}
             className="rounded-md bg-primary px-3.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
           >
             {t("patient.scanAndFind")}
@@ -208,7 +215,7 @@ export function PatientSearch({ onSelect, selectLabel }: Props) {
               className={inputClass(nameNeedsDob)}
               aria-invalid={nameNeedsDob}
               value={criteria.dob ?? ""}
-              max={new Date().toISOString().slice(0, 10)}
+              max={today}
               onChange={(e) => set("dob", e.target.value)}
               required={Boolean(criteria.full_name?.trim())}
             />
@@ -265,10 +272,13 @@ export function PatientSearch({ onSelect, selectLabel }: Props) {
           <button
             type="button"
             onClick={() => {
+              requestSeq.current += 1;
+              lastQuery.current = null;
               setCriteria(EMPTY);
               setResults(null);
               setError(null);
               setPage(1);
+              setBusy(false);
             }}
             className="text-sm underline"
           >
@@ -460,7 +470,7 @@ export function PatientSearch({ onSelect, selectLabel }: Props) {
                     type="button"
                     className="rounded-md border border-border px-3 py-1 text-sm disabled:opacity-50"
                     disabled={busy || page <= 1}
-                    onClick={() => void search(page - 1)}
+                    onClick={() => turnPage(page - 1)}
                   >
                     {t("common.previous")}
                   </button>
@@ -474,7 +484,7 @@ export function PatientSearch({ onSelect, selectLabel }: Props) {
                     type="button"
                     className="rounded-md border border-border px-3 py-1 text-sm disabled:opacity-50"
                     disabled={busy || page >= Math.ceil(total / PAGE_SIZE)}
-                    onClick={() => void search(page + 1)}
+                    onClick={() => turnPage(page + 1)}
                   >
                     {t("common.next")}
                   </button>
