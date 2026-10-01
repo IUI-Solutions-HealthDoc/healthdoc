@@ -628,6 +628,8 @@ export const en = {
   "doctor.abdm.scopeNotice": "Only your own consent requests and their received records are shown. Purpose: care management.",
   "doctor.abdm.requesterIncomplete":
     "Your ABDM requester profile is incomplete. Ask the facility administrator to verify your name, registration number, identifier type and issuing registry URI in your staff profile. No request will be sent until this is complete.",
+  "doctor.abdm.sandboxTestRequester":
+    "ABDM sandbox test: requests from this account go out as NHA’s sample requester (ABDM SANDBOX TEST REQUESTER), not your registration. This only works against the NHA sandbox.",
   "doctor.abdm.requestConsent": "Request consent",
   "doctor.abdm.recordsFrom": "Records from",
   "doctor.abdm.recordsTo": "Records to",

@@ -91,6 +91,14 @@ class Settings(BaseSettings):
     #: Empty by default; never copy the local opt-in into deployment config.
     abdm_sandbox_local_author_context_ids: tuple[UUID, ...] = ()
 
+    #: Explicit development-only dev.* account UUIDs that may ask for consent
+    #: as NHA's published M3 sample requester. The sandbox does not check the
+    #: requester against HPR, and M3 cannot be exercised without one; real
+    #: deployments use each doctor's own registration. The requester module
+    #: additionally checks environment and the exact sandbox gateway/CM.
+    #: Empty by default; never copy the local opt-in into deployment config.
+    abdm_sandbox_test_requester_user_ids: tuple[UUID, ...] = ()
+
     #: ABDM's PUBLIC certificate, used to encrypt Aadhaar numbers, mobile
     #: numbers and OTPs before transmission (see abdm/identity/crypto.py).
     #: Public key material, not a secret — but it rotates, so it is
