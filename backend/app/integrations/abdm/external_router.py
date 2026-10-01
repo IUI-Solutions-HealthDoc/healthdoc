@@ -217,13 +217,75 @@ def _groups(patient: Patient, contexts: list[AbdmCareContext]) -> list[dict]:
     ]
 
 
+async def _bind_linked_identity(db: AsyncSession, link: AbdmCareContextLink) -> None:
+    """After a confirmed link, show the proven ABHA on a chart that had none."""
+    patient = await db.get(Patient, link.patient_id)
+    if (
+        patient is None
+        or patient.abha_address is not None
+        or not await discovery.link_began_from_match(db, link)
+    ):
+        return
+    bound = await discovery.bind_confirmed_identity(
+        db,
+        patient=patient,
+        abha_address=link.abha_address,
+        transaction_id=link.transaction_id,
+        now=link.confirmed_at,
+    )
+    if not bound:
+        return
+    from app.audit.actions import AuditAction
+    from app.audit.service import write_audit_log
+    from app.outbox.service import enqueue as enqueue_event
+
+    facility = await db.get(Facility, link.facility_id)
+    actor = await _abdm_service_user(db, facility)
+    patient.updated_by = actor.id
+    await write_audit_log(
+        db,
+        facility_id=link.facility_id,
+        action=AuditAction.UPDATE,
+        resource_type="patients",
+        resource_id=patient.id,
+        user_id=actor.id,
+        patient_id=patient.id,
+        new_value={
+            "abha_bound_via": "phr_discovery_link",
+            "link_id": str(link.id),
+            "abha_number_recorded": patient.abha_number is not None,
+        },
+    )
+    await enqueue_event(
+        db,
+        aggregate_type="patient",
+        aggregate_id=str(patient.id),
+        event_type="abha_linked",
+        payload={"abha_number": patient.abha_number},
+        sensitivity="important",
+    )
+
+
 async def _link_patient_contexts(
     db: AsyncSession, link: AbdmCareContextLink
 ) -> tuple[Patient, list[AbdmCareContext]]:
-    patient = await _patient_by_address(
-        db, facility_id=link.facility_id, abha_address=link.abha_address
-    )
-    if patient is None or patient.id != link.patient_id:
+    patient = await db.get(Patient, link.patient_id)
+    # The chart holds the link's address, or none yet when this very link
+    # began from a mobile-and-demographics discovery of it. A chart whose
+    # address was removed after an address-based link-init is not that case.
+    if (
+        patient is None
+        or patient.facility_id != link.facility_id
+        or patient.deleted_at is not None
+        or patient.merged_into_patient_id is not None
+        or (
+            patient.abha_address != link.abha_address
+            and not (
+                patient.abha_address is None
+                and await discovery.link_began_from_match(db, link)
+            )
+        )
+    ):
         raise HTTPException(404, {"code": "patient_not_found", "message": "Patient not found"})
     refs = set(link.care_context_references or [])
     rows = await _contexts(db, facility_id=link.facility_id, patient_id=patient.id, references=refs)
@@ -274,6 +336,18 @@ async def discover(
             patient,
             await _contexts(db, facility_id=facility_id, patient_id=patient.id),
         )
+        if matched_by != ["ABHA_ADDRESS"]:
+            # The link-init that follows cannot find this chart by address.
+            await discovery.record_match(
+                db,
+                facility_id=facility_id,
+                transaction_id=payload.transaction_id,
+                wire=payload.patient,
+                patient=patient,
+                references=[c["referenceNumber"] for g in patient_groups for c in g["careContexts"]],
+                matched_by=matched_by,
+                now=datetime.now(UTC),
+            )
     await callback_replies.schedule(
         db,
         facility_id=facility_id,
@@ -309,6 +383,21 @@ async def link_init(
     patient = await _patient_by_address(
         db, facility_id=facility_id, abha_address=payload.abha_address
     )
+    if patient is None:
+        # A chart found by mobile and demographics holds no address yet; only
+        # the exact discovery transaction that matched it may name it.
+        patient = await discovery.discovered_patient(
+            db,
+            facility_id=facility_id,
+            transaction_id=payload.transaction_id,
+            abha_address=payload.abha_address,
+            requested={
+                context.reference_number
+                for group in payload.patient
+                for context in group.care_contexts
+            },
+            now=datetime.now(UTC),
+        )
     if patient is None:
         raise HTTPException(404, {"code": "patient_not_found", "message": "Patient not found"})
     # Serializes the transaction, even if concurrent callbacks claim different
@@ -502,6 +591,7 @@ async def link_confirm(
     link.status = "confirmed"
     link.confirmed_at = datetime.now(UTC)
     await db.flush()
+    await _bind_linked_identity(db, link)
     # Commit proof and delivery intent together. A network failure must not
     # roll back the link after Redis has already reserved the successful OTP.
     await callback_replies.schedule(db, **reply_kwargs)
