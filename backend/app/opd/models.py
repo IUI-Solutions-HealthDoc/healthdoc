@@ -102,8 +102,12 @@ class Visit(Base, UUIDPk, Timestamps, Blame):
             name="visit_type",
         ),
         CheckConstraint(
-            "status IN ('registered', 'in_consultation', 'completed', "
-            "'lwbs', 'cancelled', 'closed')",
+            # Must match migration 0089's CHECK exactly (0007's values plus the
+            # two the state machine writes), for the same reason as above.
+            "status IN ('registered', 'payment_pending', 'waiting', 'in_service', "
+            "'waiting_for_investigation', 'report_ready', 'doctor_review_pending', "
+            "'pharmacy_pending', 'completed', 'cancelled', 'lwbs', "
+            "'in_consultation', 'closed')",
             name="status",
         ),
         Index("ix_visits_patient_id_visit_date", "patient_id", "visit_date"),

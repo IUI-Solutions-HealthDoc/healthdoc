@@ -24,18 +24,21 @@ Changes in this revision:
 """
 from __future__ import annotations
 
-from datetime import date, datetime
-from uuid import UUID
+from datetime import date, datetime, time
+from uuid import UUID, uuid4
 
 from zoneinfo import ZoneInfo
 
+from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.departments.models import Department
 from app.opd import visit_number
 from app.opd.models import Visit
 from app.opd.schemas import VisitCreate
 from app.integrations.abdm.fhir.service import build_encounter_close_bundles
+from app.patients.models import Patient
 
 ALLOWED_TRANSITIONS: dict[str, set[str]] = {
     "registered": {"in_consultation", "lwbs", "cancelled"},
@@ -47,6 +50,12 @@ ALLOWED_TRANSITIONS: dict[str, set[str]] = {
 }
 
 REASON_REQUIRED_FOR = {"lwbs", "cancelled"}
+
+#: A visit in one of these states is still the patient's current episode.
+OPEN_VISIT_STATUSES = ("registered", "in_consultation")
+
+#: Leaving without care ends the visit, so its queue token must not stay callable.
+TOKEN_ENDING_STATUSES = {"lwbs", "cancelled"}
 
 
 class InvalidVisitTransition(Exception):
@@ -99,21 +108,77 @@ async def create_visit(
     string -- see the module docstring for why this must not be two
     separate clock reads.
     """
-    business_date = _business_date(facility_timezone)
+    zone = ZoneInfo(facility_timezone)
+    now = datetime.now(zone)
+    business_date = now.date()
     # facility_id is the caller's, resolved from their token by the router --
     # never payload.facility_id. A receptionist at facility A must not be able
     # to open a visit (and its registration invoice) at facility B, which is
     # the same rule POST /patients already documents.
+    #
+    # The patient row lock serialises two desks registering the same patient,
+    # so the open-visit check below cannot pass for both of them.
+    patient = (
+        await db.execute(
+            select(Patient.id)
+            .where(Patient.id == payload.patient_id, Patient.facility_id == facility_id)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if patient is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "patient_not_found", "message": "Patient not found"},
+        )
+    if payload.department_id is not None:
+        department = (
+            await db.execute(
+                select(Department.id).where(
+                    Department.id == payload.department_id,
+                    Department.facility_id == facility_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if department is None:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "department_not_found", "message": "Department not found"},
+            )
+
+    existing = await find_open_visit_today(
+        db,
+        facility_id=facility_id,
+        patient_id=payload.patient_id,
+        visit_type=payload.visit_type,
+        department_id=payload.department_id,
+        day_start=datetime.combine(business_date, time.min, tzinfo=zone),
+    )
+    if existing is not None:
+        # A second registration would raise a second registration invoice.
+        # The desk is given the open visit to continue instead.
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "open_visit_exists",
+                "message": "This patient already has an open visit of this type today",
+                "visit_id": str(existing.id),
+                "visit_number": existing.visit_number,
+            },
+        )
+
     seq = await visit_number.next_visit_sequence(db, facility_id, business_date)
 
     visit = Visit(
+        id=uuid4(),
         visit_number=_format_visit_number(facility_code, business_date, seq),
         patient_id=payload.patient_id,
         facility_id=facility_id,
         department_id=payload.department_id,
         visit_type=payload.visit_type,
         status="registered",
-        visit_date=payload.visit_date,
+        # The server's clock, not the browser's: a desk PC with a wrong clock
+        # or a stale form must not backdate a visit and its invoice.
+        visit_date=now,
         created_by=created_by,
     )
     db.add(visit)
@@ -146,6 +211,42 @@ async def create_visit(
     return visit
 
 
+async def find_open_visit_today(
+    db: AsyncSession,
+    *,
+    facility_id: UUID,
+    patient_id: UUID,
+    visit_type: str,
+    department_id: UUID | None,
+    day_start: datetime,
+) -> Visit | None:
+    """The patient's open visit of this type and department since `day_start`.
+
+    Department is part of the match: seeing medicine and then orthopaedics on
+    the same morning is two visits, not a duplicate.
+    """
+    department_match = (
+        Visit.department_id.is_(None)
+        if department_id is None
+        else Visit.department_id == department_id
+    )
+    return (
+        await db.execute(
+            select(Visit)
+            .where(
+                Visit.facility_id == facility_id,
+                Visit.patient_id == patient_id,
+                Visit.visit_type == visit_type,
+                department_match,
+                Visit.status.in_(OPEN_VISIT_STATUSES),
+                Visit.visit_date >= day_start,
+            )
+            .order_by(Visit.visit_date.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+
 async def get_visit(db: AsyncSession, visit_id: UUID) -> Visit | None:
     result = await db.execute(select(Visit).where(Visit.id == visit_id))
     return result.scalar_one_or_none()
@@ -175,6 +276,11 @@ async def transition_visit_status(
     visit.status = target_status
     visit.updated_by = updated_by
     visit.row_version += 1
+
+    if target_status in TOKEN_ENDING_STATUSES:
+        from app.queue.service import cancel_live_tokens_for_visit
+
+        await cancel_live_tokens_for_visit(db, visit.id)
 
     if target_status == "closed":
         await build_encounter_close_bundles(db, visit)

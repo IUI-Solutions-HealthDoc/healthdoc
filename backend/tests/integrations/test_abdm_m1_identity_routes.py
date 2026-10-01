@@ -79,6 +79,10 @@ async def desk(db, monkeypatch):
         abdm_path_profile_abha_card = "/v3/profile/account/abha-card"
         abdm_path_login_request_otp = "/v3/profile/login/request/otp"
         abdm_path_login_verify = "/v3/profile/login/verify"
+        abdm_path_phr_login_request_otp = "/v3/phr/web/login/abha/request/otp"
+        abdm_path_phr_login_verify = "/v3/phr/web/login/abha/verify"
+        abdm_path_phr_profile = "/v3/phr/web/login/profile/abha-profile"
+        abdm_path_phr_card = "/v3/phr/web/login/profile/abha/phr-card"
 
     monkeypatch.setattr(crypto, "get_settings", lambda: _S())
     monkeypatch.setattr(service, "get_settings", lambda: _S())
@@ -107,7 +111,8 @@ async def desk(db, monkeypatch):
     app.dependency_overrides[get_current_db_user] = lambda: caller
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test",
                                  headers={"Idempotency-Key": str(uuid.uuid4())}) as client:
-        yield {"client": client, "gateway": gateway, "redis": redis, "patient": patient, "staff": staff}
+        yield {"client": client, "gateway": gateway, "redis": redis, "patient": patient, "staff": staff,
+               "other": _other}
 
 
 async def test_a_refused_otp_is_a_correctable_400_and_keeps_the_session(desk):
@@ -174,3 +179,73 @@ async def test_declined_enrolment_consent_is_400_and_does_not_call_abdm(desk):
     assert response.json()["detail"]["code"] == "enrolment_consent_refused"
     assert desk["gateway"].calls == []
     assert AADHAAR not in response.text
+
+
+# ------------------------------------------ ABHA-address (PHR) login through the desk
+_PHR_VERIFIED = {
+    "authResult": "success",
+    "users": [{"abhaAddress": "singh128@sbx", "fullName": "Deepak Kumar Singh",
+               "abhaNumber": "91-6167-8028-XXXX", "status": "ACTIVE", "kycStatus": "VERIFIED"}],
+    "tokens": {"token": "phr-x-token", "refreshToken": "phr-refresh"},
+}
+
+
+async def _address_login(desk):
+    desk["gateway"].responses = [{"txnId": "phr-txn"}, _PHR_VERIFIED]
+    requested = await desk["client"].post("/abdm/abha/login/request-otp", json={
+        "patient_id": str(desk["patient"].id), "abha_address": "singh128@sbx"})
+    assert requested.status_code == 200, requested.text
+    return await desk["client"].post("/abdm/abha/login/verify-otp", json={
+        "session_id": requested.json()["session_id"], "otp": "123456"})
+
+
+async def test_abha_address_login_binds_the_address_and_never_a_placeholder_number(desk, db):
+    from app.common.security import decrypt_pii
+
+    patient = desk["patient"]
+    patient.abha_number, patient.abha_address = None, None
+    await db.commit()
+
+    verified = await _address_login(desk)
+
+    assert verified.status_code == 200, verified.text
+    assert desk["gateway"].calls[0][0].endswith("/v3/phr/web/login/abha/request/otp")
+    assert desk["gateway"].calls[1][0].endswith("/v3/phr/web/login/abha/verify")
+    assert verified.json()["abha_address"] == "singh128@sbx"
+    assert verified.json()["abha_number"] == ""
+    assert "phr-x-token" not in verified.text
+    await db.refresh(patient)
+    assert patient.abha_number is None, "an empty or masked number must not be stored (the column is unique)"
+    assert patient.abha_address == "singh128@sbx"
+    assert patient.identity_status == "verified"
+    assert patient.abha_profile_token_kind == "phr"
+    assert decrypt_pii(patient.abha_profile_token_encrypted) == "phr-x-token"
+
+
+async def test_a_second_chart_cannot_take_a_linked_abha_address(desk, db):
+    desk["patient"].abha_number, desk["patient"].abha_address = None, None
+    desk["other"].abha_address = "singh128@sbx"
+    await db.commit()
+
+    verified = await _address_login(desk)
+
+    assert verified.status_code == 409, verified.text
+    assert verified.json()["detail"]["code"] == "duplicate_abha_address"
+
+
+async def test_phr_card_is_fetched_from_the_phr_endpoint_and_unlink_resets_the_kind(desk, db):
+    patient = desk["patient"]
+    patient.abha_number, patient.abha_address = None, None
+    await db.commit()
+    assert (await _address_login(desk)).status_code == 200
+
+    desk["gateway"].responses = [b"\x89card"]
+    card = await desk["client"].get(f"/abdm/abha/patients/{patient.id}/abha-card")
+    assert card.status_code == 200, card.text
+    assert desk["gateway"].calls[-1][0].endswith("/v3/phr/web/login/profile/abha/phr-card")
+
+    unlinked = await desk["client"].delete(f"/abdm/abha/patients/{patient.id}/abha")
+    assert unlinked.status_code == 200, unlinked.text
+    await db.refresh(patient)
+    assert patient.abha_address is None and patient.abha_profile_token_encrypted is None
+    assert patient.abha_profile_token_kind == "abha"

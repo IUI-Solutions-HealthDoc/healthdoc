@@ -39,6 +39,18 @@ from app.main import app
 FORBIDDEN = [
     ("/queue/worklist", {"admin", "auditor", "superadmin", "patient"}),
     ("/queue/hod-dashboard", {"admin", "auditor", "superadmin", "patient"}),
+    # Clinical record reads. Reception's routes are /receptionist and /consent;
+    # none of these screens is reachable from them, and a consultation note or
+    # an order list is not front-desk information.
+    ("/encounters", {"receptionist", "patient"}),
+    ("/terminology/search", {"receptionist", "patient"}),
+    ("/orders", {"receptionist", "patient"}),
+    ("/allergies", {"receptionist", "patient"}),
+    ("/forms/definitions", {"receptionist", "patient"}),
+    ("/order-sets", {"receptionist", "patient"}),
+    # Deciding which documents an ABHA address may see is the doctor's screen.
+    ("/abdm/hip/care-contexts", {"receptionist", "patient"}),
+    ("/abdm/hip/patients", {"receptionist", "patient"}),
 ]
 
 

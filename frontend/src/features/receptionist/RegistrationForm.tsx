@@ -262,11 +262,11 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
           </div>
         </div>
 
-        <AbhaIdentityPanel patient={registered} />
+        <AbhaIdentityPanel key={`abha-${registered.id}`} patient={registered} />
 
         {/* A UHID on its own does nothing for the patient standing at the desk.
             The visit is what starts billing; the token is what gets them seen. */}
-        <StartVisit patient={registered} />
+        <StartVisit key={`visit-${registered.id}`} patient={registered} />
 
         <div className="text-center">
           <button
