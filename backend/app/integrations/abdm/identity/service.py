@@ -442,6 +442,90 @@ async def enrol_by_aadhaar_otp(
     )
 
 
+# ------------------------------------------------- enrol by demographics
+
+
+def demographic_date(value) -> str:
+    """dd-mm-yyyy. NHA's M1 Postman leaves dateOfBirth as a placeholder; this is
+    the one place to change if the sandbox refuses the format."""
+    return value.strftime("%d-%m-%Y")
+
+
+async def enrol_by_demographics(
+    *,
+    aadhaar: str,
+    name: str,
+    date_of_birth,
+    gender: str,
+    mobile: str,
+    address: str,
+    pincode: str,
+    state_code: str,
+    district_code: str,
+    consent: EnrolmentConsent | None,
+) -> AbhaIssued:
+    """M1 CRT_ABHA_301-309: create or fetch an ABHA from Aadhaar demographics.
+
+    One call, no OTP: UIDAI checks the name, date of birth and gender against
+    the Aadhaar number, and ABHA returns the new or existing number with its
+    default address and a profile token (M1 Postman, "DemoAuth API"). The
+    mobile is not re-verified by ABHA; the desk takes it from the patient.
+    `aadhaar` is encrypted here and referenced nowhere afterwards.
+    """
+    granted = _require_enrolment_consent(consent)
+    benefit = get_settings().abdm_benefit_name
+    if not benefit or not benefit.strip():
+        raise AbdmIdentityError(
+            "abdm_demographic_not_enabled",
+            "Demographic ABHA creation needs NHA's HidIntegratedProgram role and benefit name",
+        )
+    response = await _call(
+        "POST",
+        get_settings().abdm_path_enrol_by_aadhaar,
+        {
+            "authData": {
+                "authMethods": ["demo_auth"],
+                "demo_auth": {
+                    "aadhaarNumber": encrypt_for_abdm(aadhaar),
+                    "districtCode": district_code,
+                    "stateCode": state_code,
+                    "dateOfBirth": demographic_date(date_of_birth),
+                    "gender": gender,
+                    "name": name,
+                    "mobile": mobile,
+                    "address": address,
+                    "pincode": pincode,
+                },
+            },
+            "consent": {"code": granted.code, "version": granted.version},
+        },
+        extra_headers={"Benefit-Name": benefit.strip()},
+    )
+    body = response.body
+    if not isinstance(body, dict):
+        raise AbdmIdentityError("abdm_bad_response", "gateway returned a non-object body")
+    abha_number = body.get("healthIdNumber") or body.get("ABHANumber")
+    if not isinstance(abha_number, str) or not abha_number.strip():
+        raise AbdmIdentityError(
+            "abdm_no_abha_returned", "demographic enrolment completed without an ABHA number"
+        )
+    address_value = body.get("healthId") or body.get("preferredAbhaAddress")
+    year, month, day = (body.get(k) for k in ("yearOfBirth", "monthOfBirth", "dayOfBirth"))
+    born = (
+        f"{int(day):02d}-{int(month):02d}-{year}"
+        if all(isinstance(part, str) and part.isdigit() for part in (year, month, day))
+        else None
+    )
+    return AbhaIssued(
+        abha_number=abha_number.strip(),
+        abha_address=address_value.strip() if isinstance(address_value, str) and address_value.strip() else None,
+        linking_token=_profile_token(body),
+        name=_name(body),
+        gender=body.get("gender"),
+        date_of_birth=born,
+    )
+
+
 # ---------------------------------------------------------- login by ABHA
 
 

@@ -134,6 +134,20 @@ class Settings(BaseSettings):
     abdm_path_phr_profile: str = "/v3/phr/web/login/profile/abha-profile"
     abdm_path_phr_card: str = "/v3/phr/web/login/profile/abha/phr-card"
 
+    #: Aadhaar demographic ABHA creation (M1 CRT_ABHA_301-309, mandatory for
+    #: government). Posted to abdm_path_enrol_by_aadhaar with authMethods
+    #: ["demo_auth"]. NHA must first grant the client id the
+    #: HidIntegratedProgram role and configure a benefit name for the
+    #: government programme (requested through the state ABDM nodal officer);
+    #: that name is sent as the Benefit-Name header. Unset means the route
+    #: refuses rather than calling ABDM without it.
+    abdm_benefit_name: str | None = None
+    #: JSON file of LGD state and district codes the desk chooses from, written
+    #: by scripts/import_lgd_districts.py from the official LGD directory export.
+    #: Demographic creation needs LGD codes and refuses until this is loaded;
+    #: codes are never typed in or guessed.
+    abdm_lgd_reference_path: str | None = None
+
     # ------------------------------------------------------------------
     # M2 (HIP) and M3 (HIU) gateway paths, relative to abdm_gateway_base_url.
     #

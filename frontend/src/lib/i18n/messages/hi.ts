@@ -272,6 +272,7 @@ export const hi = {
     "{name} की पहचान सत्यापित और लिंक करें। लिंकिंग क्रेडेंशियल सर्वर पर एन्क्रिप्टेड रहता है।",
   "receptionist.abha.useExisting": "मौजूदा ABHA उपयोग करें",
   "receptionist.abha.create": "ABHA बनाएँ",
+  "receptionist.abha.createDemographic": "आधार विवरण से ABHA बनाएँ",
   "receptionist.abha.methodAbhaMobile": "ABHA-लिंक मोबाइल पर OTP",
   "receptionist.abha.methodAadhaar": "आधार से OTP",
   "receptionist.abha.methodAddress": "ABHA पता",

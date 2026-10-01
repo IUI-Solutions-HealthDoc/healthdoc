@@ -11,8 +11,8 @@ a rural facility going offline must not break registration.
 
 import logging
 import uuid
-from datetime import UTC, datetime
-from typing import Annotated
+from datetime import UTC, date, datetime
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
@@ -34,7 +34,7 @@ from app.integrations.abdm.client import (
     AbdmUnavailable,
     get_abdm_client,
 )
-from app.integrations.abdm.identity import otp_session
+from app.integrations.abdm.identity import lgd, otp_session
 from app.integrations.abdm.identity import service as identity_service
 from app.integrations.abdm.identity.crypto import AbdmPublicKeyMissing
 from app.integrations.abdm.identity.enrolment_consent import (
@@ -436,6 +436,7 @@ _CLIENT_IDENTITY_CODES = {
     "abdm_account_selection_required",
     "abdm_no_address_suggestions",
     "abha_account_not_in_selection",
+    "abdm_demographic_not_enabled",
 }
 
 
@@ -598,6 +599,27 @@ async def _persist_verified_identity(
 
     patient_id = uuid.UUID(session.patient_id)
     patient = await _get_patient_or_404(db, patient_id, current_db_user.facility_id)
+    await _bind_issued_identity(db, current_db_user, patient, issued)
+    # Consume proof only after the identity and its event are durable. A failed
+    # database commit must not destroy the patient's successful OTP session.
+    await db.commit()
+    if consume_session:
+        try:
+            await otp_session.finish(session_id)
+        except Exception:
+            # Redis still expires this session; do not tell the desk a committed
+            # identity write failed. Never log the credential or transaction id.
+            log.error("ABHA identity committed; OTP session cleanup failed")
+    return patient.id
+
+
+async def _bind_issued_identity(
+    db: AsyncSession,
+    current_db_user: CurrentDbUser,
+    patient: Patient,
+    issued: identity_service.AbhaIssued,
+) -> None:
+    """Write an ABDM-verified ABHA onto this chart, refusing a clash. Flushes only."""
     # An ABHA-address login can verify the address without disclosing the full
     # number. Never store an empty or masked number: abha_number is unique, and
     # a placeholder would collide with the next address-only patient.
@@ -645,17 +667,6 @@ async def _persist_verified_identity(
         payload={"abha_number": normalised},
         sensitivity="important",
     )
-    # Consume proof only after the identity and its event are durable. A failed
-    # database commit must not destroy the patient's successful OTP session.
-    await db.commit()
-    if consume_session:
-        try:
-            await otp_session.finish(session_id)
-        except Exception:
-            # Redis still expires this session; do not tell the desk a committed
-            # identity write failed. Never log the credential or transaction id.
-            log.error("ABHA identity committed; OTP session cleanup failed")
-    return patient.id
 
 
 async def _bound_otp_session(
@@ -872,6 +883,163 @@ async def enrol_verify_otp(
         linked_patient_id=linked_patient_id,
         session_id=payload.session_id,
         next_step=issued.next_step,
+        has_nha_card=bool(issued.linking_token),
+    )
+
+
+class DemographicEnrolRequest(BaseModel):
+    """M1 CRT_ABHA_305: the beneficiary's details exactly as on the Aadhaar card."""
+
+    patient_id: uuid.UUID
+    #: Twelve digits (CRT_ABHA_304). Encrypted before transmission, never stored.
+    aadhaar: str = Field(min_length=12, max_length=12, pattern=r"^\d{12}$")
+    name: str = Field(min_length=1, max_length=200)
+    date_of_birth: date
+    gender: Literal["M", "F", "O"]
+    #: Not re-verified by ABHA; the desk takes it from the patient.
+    mobile: str = Field(pattern=r"^[6-9]\d{9}$")
+    address: str = Field(min_length=1, max_length=500)
+    pincode: str = Field(pattern=r"^[1-9]\d{5}$")
+    #: LGD codes chosen from GET /lgd/states and /lgd/districts.
+    state_code: str = Field(pattern=r"^\d{1,4}$")
+    district_code: str = Field(pattern=r"^\d{1,4}$")
+    consent: EnrolmentConsentIn
+
+
+def _lgd_unavailable(exc: Exception) -> HTTPException:
+    return HTTPException(409, {"code": "lgd_reference_unavailable", "message": str(exc)})
+
+
+@router.get("/lgd/states", dependencies=[Depends(require_roles("receptionist", "doctor"))])
+async def lgd_states() -> dict:
+    """LGD states the desk may choose for demographic ABHA creation."""
+    try:
+        return {"states": lgd.states()}
+    except lgd.LgdUnavailable as exc:
+        raise _lgd_unavailable(exc) from None
+
+
+@router.get("/lgd/districts", dependencies=[Depends(require_roles("receptionist", "doctor"))])
+async def lgd_districts(state_code: Annotated[str, Query(pattern=r"^\d{1,4}$")]) -> dict:
+    try:
+        return {"districts": lgd.districts(state_code)}
+    except lgd.LgdUnavailable as exc:
+        raise _lgd_unavailable(exc) from None
+    except lgd.LgdUnknown:
+        raise HTTPException(404, {"code": "lgd_state_unknown", "message": "Unknown LGD state"}) from None
+
+
+@router.post(
+    "/enrol/demographic",
+    response_model=AbhaIssuedOut,
+    dependencies=[Depends(require_roles("receptionist", "doctor"))],
+)
+async def enrol_by_demographics(
+    payload: DemographicEnrolRequest,
+    current_db_user: CurrentDbUser,
+    db: DbSession,
+) -> AbhaIssuedOut:
+    """Create (or fetch) an ABHA from Aadhaar demographics and bind it here.
+
+    M1 CRT_ABHA_301-309, mandatory for government. One ABDM call: UIDAI checks
+    the details against the Aadhaar number and ABHA returns the new or existing
+    number with its default address (Case 1 and Case 3 of CRT_ABHA_305).
+    """
+    patient = await _get_patient_or_404(db, payload.patient_id, current_db_user.facility_id)
+    shown = await _declaration_for(db, current_db_user, patient)
+    if payload.consent.declaration_sha256 != shown["sha256"]:
+        raise HTTPException(
+            409,
+            {
+                "code": "enrolment_declaration_changed",
+                "message": "The consent text changed after it was shown; show it again",
+            },
+        )
+    try:
+        statements = accept_declaration(shown, payload.consent.statements)
+    except DeclarationRefused as exc:
+        raise _declaration_refused(exc) from None
+    try:
+        lgd.require(payload.state_code, payload.district_code)
+    except lgd.LgdUnavailable as exc:
+        raise _lgd_unavailable(exc) from None
+    except lgd.LgdUnknown as exc:
+        raise HTTPException(400, {"code": "lgd_code_unknown", "message": str(exc)}) from None
+    try:
+        issued = await identity_service.enrol_by_demographics(
+            aadhaar=payload.aadhaar,
+            name=payload.name.strip(),
+            date_of_birth=payload.date_of_birth,
+            gender=payload.gender,
+            mobile=payload.mobile,
+            address=payload.address.strip(),
+            pincode=payload.pincode,
+            state_code=payload.state_code,
+            district_code=payload.district_code,
+            consent=EnrolmentConsent(
+                granted=payload.consent.granted,
+                code=payload.consent.code,
+                version=payload.consent.version,
+                language=payload.consent.language,
+            ),
+        )
+    except AbdmNotConfigured:
+        raise _unavailable("ABDM credentials are not configured on this server") from None
+    except AbdmPublicKeyMissing:
+        raise _unavailable("ABDM public certificate is not configured on this server") from None
+    except AbdmUnavailable:
+        raise _unavailable("ABDM did not respond") from None
+    except AbdmRejected as exc:
+        # Status only: the body can echo what was just sent.
+        log.warning("ABDM declined a demographic enrolment (%s)", exc.status_code)
+        if exc.status_code in {401, 403}:
+            raise HTTPException(
+                502,
+                {
+                    "code": "abdm_demographic_not_permitted",
+                    "message": "ABDM refused demographic creation for this client",
+                },
+            ) from exc
+        # CRT_ABHA_305: details that do not match Aadhaar create nothing.
+        raise HTTPException(
+            400,
+            {
+                "code": "abha_demographics_rejected",
+                "message": "ABDM did not accept these details for this Aadhaar number. "
+                "Check name, date of birth and gender against the Aadhaar card.",
+            },
+        ) from exc
+    except identity_service.AbdmIdentityError as exc:
+        raise _identity_error(exc) from exc
+
+    await write_audit_log(
+        db,
+        facility_id=current_db_user.facility_id,
+        action=AuditAction.CREATE,
+        resource_type="abha_enrolment_consent",
+        user_id=current_db_user.id,
+        patient_id=patient.id,
+        new_value={
+            "code": payload.consent.code,
+            "version": payload.consent.version,
+            "language": payload.consent.language,
+            "granted": True,
+            "method": "aadhaar_demographic",
+            "declaration_version": shown["version"],
+            "declaration_sha256": shown["sha256"],
+            "ownership": shown["ownership"],
+            "statements": statements,
+        },
+    )
+    await _bind_issued_identity(db, current_db_user, patient, issued)
+    await db.commit()
+    return AbhaIssuedOut(
+        abha_number=issued.abha_number,
+        abha_address=issued.abha_address,
+        name=issued.name,
+        gender=issued.gender,
+        date_of_birth=issued.date_of_birth,
+        linked_patient_id=patient.id,
         has_nha_card=bool(issued.linking_token),
     )
 
