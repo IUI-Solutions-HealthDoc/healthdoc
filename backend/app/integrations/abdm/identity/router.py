@@ -9,13 +9,14 @@ Follows the same graceful-degradation pattern as integrations/icd11/client.py:
 a rural facility going offline must not break registration.
 """
 
+import base64
 import logging
 import uuid
 from datetime import UTC, date, datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit.actions import AuditAction
 from app.audit.service import write_audit_log
 from app.auth.deps import CurrentDbUser, require_roles
+from app.common import captcha
 from app.common.config import get_settings
 from app.common.db import get_db
 from app.common.enums import AbhaProfileTokenKind, IdentityStatus
@@ -354,6 +356,10 @@ class AbhaLoginOtpRequest(BaseModel):
     abha_address: str | None = Field(default=None, min_length=3, max_length=120)
     mobile: str | None = Field(default=None, pattern=r"^\d{10}$")
     patient_id: uuid.UUID
+    #: Required with `mobile` (M1 VRFY_ABHA_301 "Captcha preferred"): the
+    #: challenge from GET /captcha and the characters the desk read from it.
+    captcha_id: str | None = Field(default=None, max_length=64)
+    captcha_answer: str | None = Field(default=None, max_length=16)
 
     @model_validator(mode="after")
     def _exactly_one_identifier(self) -> "AbhaLoginOtpRequest":
@@ -1049,6 +1055,16 @@ async def enrol_by_demographics(
     )
 
 
+@router.get("/captcha", dependencies=[Depends(require_roles("receptionist", "doctor"))])
+async def new_captcha() -> JSONResponse:
+    """A fresh challenge for the mobile ABHA lookup. Never cached."""
+    captcha_id, png = await captcha.issue()
+    return JSONResponse(
+        {"captcha_id": captcha_id, "image": "data:image/png;base64," + base64.b64encode(png).decode()},
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @router.get(
     "/enrol/consent",
     dependencies=[Depends(require_roles("receptionist", "doctor"))],
@@ -1457,6 +1473,19 @@ async def login_request_otp(
     """Send an OTP for an ABHA the patient says they hold — to its linked
     mobile (ABHA number) or through Aadhaar (Aadhaar number)."""
     await _get_patient_or_404(db, payload.patient_id, current_db_user.facility_id)
+    # A mobile number finds every ABHA linked to it, so this lookup carries a
+    # second check before any OTP is sent (VRFY_ABHA_301). Resends reuse the
+    # session this request opened and need no new challenge.
+    if payload.mobile is not None and not await captcha.check(
+        payload.captcha_id, payload.captcha_answer
+    ):
+        raise HTTPException(
+            400,
+            {
+                "code": "captcha_invalid",
+                "message": "The characters did not match the image. Enter the characters from the new image.",
+            },
+        )
     try:
         result = await identity_service.request_login_otp(
             abha_number=_normalise_abha(payload.abha_number) if payload.abha_number else None,

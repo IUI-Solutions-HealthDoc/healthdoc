@@ -60,14 +60,22 @@ function loginIdentifierBody(identifier: AbhaLoginIdentifier): Record<string, st
   return { abha_number: digitsOnly(identifier.abha_number) };
 }
 
+/** M1 VRFY_ABHA_301: a self-hosted image challenge for the mobile lookup. */
+export interface AbhaCaptcha { captcha_id: string; image: string }
+
+export function getAbhaCaptcha(): Promise<AbhaCaptcha> {
+  return api<AbhaCaptcha>("/abdm/abha/captcha");
+}
+
 export function requestAbhaLoginOtp(
   patientId: string,
   identifier: AbhaLoginIdentifier,
   idempotencyKey: string,
+  captcha?: { captcha_id: string; captcha_answer: string },
 ): Promise<AbhaOtpRequested> {
   return api<AbhaOtpRequested>("/abdm/abha/login/request-otp", {
     method: "POST",
-    body: JSON.stringify({ patient_id: patientId, ...loginIdentifierBody(identifier) }),
+    body: JSON.stringify({ patient_id: patientId, ...loginIdentifierBody(identifier), ...(captcha ?? {}) }),
     idempotencyKey,
   });
 }

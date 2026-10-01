@@ -427,3 +427,27 @@ test("switching the consent to Hindi reloads it, shows the translation notice an
   assert.equal(sent.language, "hi");
   assert.equal(sent.declaration_sha256, HINDI.sha256);
 });
+
+test("the mobile lookup sends the image check with the OTP request and spends it", async () => {
+  let issued = 0;
+  const d = desk({
+    getAbhaCaptcha: async () => ({ captcha_id: `c${++issued}`, image: "data:image/png;base64,AA==" }),
+    requestAbhaLoginOtp: async () => { throw new TestApiError(400, "The characters did not match the image. Enter the characters from the new image.", { code: "captcha_invalid" }); },
+  });
+  let tree = d.render();
+  button(tree, "Communication mobile").props.onClick();
+  d.render(); await flush(); tree = d.render();
+  assert.ok(find(tree, (n) => n.type === "img" && n.props.alt.includes("characters")), "an image check is shown");
+  input(tree).props.onChange({ target: { value: "9876543210" } }); tree = d.render();
+  assert.equal(button(tree, "Send OTP").props.disabled, true, "no OTP before the characters are typed");
+  find(tree, (n) => n.type === "input" && n.props.name === "captcha_answer").props.onChange({ target: { value: "ab3cd" } });
+  tree = d.render();
+  await button(tree, "Send OTP").props.onClick(); await flush();
+  const sent = d.calls.find((c) => c.name === "requestAbhaLoginOtp").args;
+  assert.deepEqual(sent[1], { mobile: "9876543210" });
+  assert.deepEqual(sent[3], { captcha_id: "c1", captcha_answer: "AB3CD" });
+  d.render(); await flush(); tree = d.render();
+  assert.match(alertText(tree), /did not match the image/);
+  assert.equal(issued, 2, "a refused challenge is replaced, never retried");
+  assert.equal(find(tree, (n) => n.type === "input" && n.props.name === "captcha_answer").props.value, "");
+});
