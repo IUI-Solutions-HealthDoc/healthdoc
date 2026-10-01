@@ -18,7 +18,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from app.auth.deps import require_roles
+from app.auth.deps import CurrentDbUser, require_roles
 from app.common.config import get_settings
 from app.integrations.abdm.client import (
     AbdmAuthError,
@@ -26,7 +26,7 @@ from app.integrations.abdm.client import (
     AbdmRejected,
     AbdmUnavailable,
 )
-from app.integrations.abdm.hfr import client
+from app.integrations.abdm.hfr import client, hpr_login
 
 log = logging.getLogger("healthdoc.abdm")
 router = APIRouter(
@@ -256,3 +256,87 @@ async def link_bridge(payload: BridgeLink) -> dict:
         "bridge_id": bridge_id,
         "services": services,
     }
+
+
+# ----------------------------------------------------------------- facility manager's HPR login
+
+
+class HprOtpStart(BaseModel):
+    hpr_id: str = Field(min_length=3, max_length=60)
+    method: Literal["AADHAAR_OTP", "MOBILE_OTP"]
+
+
+class HprOtpConfirm(BaseModel):
+    session_id: str = Field(min_length=8, max_length=64)
+    otp: str = Field(pattern=r"^\d{6}$")
+
+
+class HprPassword(BaseModel):
+    hpr_id: str = Field(min_length=3, max_length=60)
+    password: str = Field(min_length=1, max_length=128, repr=False)
+
+
+def _hpr_session_out(session: hpr_login.HprSession | None) -> dict:
+    if session is None:
+        return {"logged_in": False}
+    return {
+        "logged_in": True,
+        "hpr_id": session.hpr_id,
+        "hpr_id_number": session.hpr_id_number,
+        "expires_at": session.expires_at,
+    }
+
+
+def _hpr_refused(exc: hpr_login.HprLoginError) -> HTTPException:
+    status = 404 if exc.code == "hpr_login_session_not_found" else 400
+    return HTTPException(status, {"code": exc.code, "message": exc.message})
+
+
+@router.get("/hpr-login")
+async def hpr_login_state(current_db_user: CurrentDbUser) -> dict:
+    held = await hpr_login.current(current_db_user.facility_id, current_db_user.id)
+    return _hpr_session_out(held[0] if held else None)
+
+
+@router.post("/hpr-login/otp")
+async def hpr_login_otp(payload: HprOtpStart, current_db_user: CurrentDbUser) -> dict:
+    """Send an OTP for the facility manager's HPR login. Typed by them on this screen."""
+    try:
+        session_id, hint = await _hfr(hpr_login.start_otp(
+            facility_id=current_db_user.facility_id, user_id=current_db_user.id,
+            hpr_id=payload.hpr_id.strip(), method=payload.method,
+        ))
+    except hpr_login.HprLoginError as exc:
+        raise _hpr_refused(exc) from None
+    return {"session_id": session_id, "masked_mobile": hint}
+
+
+@router.post("/hpr-login/verify")
+async def hpr_login_verify(payload: HprOtpConfirm, current_db_user: CurrentDbUser) -> dict:
+    try:
+        session = await _hfr(hpr_login.confirm_otp(
+            facility_id=current_db_user.facility_id, user_id=current_db_user.id,
+            session_id=payload.session_id, otp=payload.otp,
+        ))
+    except hpr_login.HprLoginError as exc:
+        raise _hpr_refused(exc) from None
+    return _hpr_session_out(session)
+
+
+@router.post("/hpr-login/password")
+async def hpr_login_password(payload: HprPassword, current_db_user: CurrentDbUser) -> dict:
+    """The password goes to HPR and nowhere else: not stored, logged or echoed."""
+    try:
+        session = await _hfr(hpr_login.password_login(
+            facility_id=current_db_user.facility_id, user_id=current_db_user.id,
+            hpr_id=payload.hpr_id.strip(), password=payload.password,
+        ))
+    except hpr_login.HprLoginError as exc:
+        raise _hpr_refused(exc) from None
+    return _hpr_session_out(session)
+
+
+@router.delete("/hpr-login")
+async def hpr_logout(current_db_user: CurrentDbUser) -> dict:
+    await hpr_login.logout(current_db_user.facility_id, current_db_user.id)
+    return {"logged_in": False}

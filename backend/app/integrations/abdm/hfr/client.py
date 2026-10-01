@@ -13,9 +13,14 @@ from app.common.config import get_settings
 from app.integrations.abdm.client import AbdmResponse, get_abdm_client
 
 
-async def call(method: str, path: str, *, json: dict | None = None) -> Any:
+async def call(
+    method: str, path: str, *, json: dict | None = None, headers: dict[str, str] | None = None
+) -> Any:
+    """`headers` add to, or replace, the gateway's own (an HPR login token, say)."""
     url = f"{get_settings().abdm_hfr_base_url.rstrip('/')}{path}"
-    response: AbdmResponse = await get_abdm_client().request(method, url, json=json)
+    response: AbdmResponse = await get_abdm_client().request(
+        method, url, json=json, extra_headers=headers
+    )
     return response.body
 
 

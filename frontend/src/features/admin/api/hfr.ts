@@ -55,3 +55,30 @@ export function linkHfrBridge(facilityId: string, services: HfrBridgeService[], 
     idempotencyKey,
   });
 }
+
+/** The facility manager's HPR login; HealthDoc keeps the token, never the browser. */
+export type HprSession =
+  | { logged_in: false }
+  | { logged_in: true; hpr_id: string; hpr_id_number: string | null; expires_at: number };
+
+export function hprLoginState(): Promise<HprSession> {
+  return api<HprSession>("/abdm/hfr/hpr-login");
+}
+export function startHprOtp(hprId: string, method: "AADHAAR_OTP" | "MOBILE_OTP") {
+  return api<{ session_id: string; masked_mobile: string | null }>("/abdm/hfr/hpr-login/otp", {
+    method: "POST", body: JSON.stringify({ hpr_id: hprId, method }), idempotencyKey: null,
+  });
+}
+export function verifyHprOtp(sessionId: string, otp: string): Promise<HprSession> {
+  return api<HprSession>("/abdm/hfr/hpr-login/verify", {
+    method: "POST", body: JSON.stringify({ session_id: sessionId, otp }), idempotencyKey: null,
+  });
+}
+export function hprPasswordLogin(hprId: string, password: string): Promise<HprSession> {
+  return api<HprSession>("/abdm/hfr/hpr-login/password", {
+    method: "POST", body: JSON.stringify({ hpr_id: hprId, password }), idempotencyKey: null,
+  });
+}
+export function hprLogout(): Promise<HprSession> {
+  return api<HprSession>("/abdm/hfr/hpr-login", { method: "DELETE" });
+}

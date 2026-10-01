@@ -28,7 +28,7 @@ class _Hfr:
         self.calls = []
         self.answers = {}
 
-    async def call(self, method, path, *, json=None):
+    async def call(self, method, path, *, json=None, headers=None):
         self.calls.append((method, path, json))
         answer = self.answers.get(path.split("?")[0])
         if isinstance(answer, Exception):
