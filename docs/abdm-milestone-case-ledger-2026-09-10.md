@@ -15,6 +15,33 @@ from this published ledger. M1 enrolment/profile credentials must not be assumed
 interchangeable with a HIP link token; successful identity binding is not
 clinical-sharing consent or M2/M3 completion.
 
+**30 September – 1 October: M2 HIP-initiated linking (demographic auth) and data transfer, live round trip.**
+The participant's chart (identifier withheld) was linked to one finalized care context, the allowlisted
+synthetic WellnessRecord, and the participant then pulled it in the ABHA PHR app, which displays it under
+HealthDoc Facility (participant-confirmed, 1 October). All times UTC; no tokens, OTPs or clinical content recorded.
+
+| Step | Correlation | Time | Result |
+|---|---|---|---|
+| `generate-token` (name, gender, year of birth) | REQUEST-ID `c7dc17db-48b5-51be-bbef-67caaf0460e7` | 30 Sep 17:37:18 | 202 |
+| `on-generate-token` callback | receipt `e6ebed75` | 30 Sep 17:53:22 | link token received (callback ~16 min after request) |
+| `link/carecontext` | REQUEST-ID `c9f734c6-a494-508a-ab18-176a22791b00` | 30 Sep 17:53:22 | 202 |
+| `link/on_carecontext` | receipt `1eae59b3` | 30 Sep 17:53:23 | result received; refused locally for a zone-less TIMESTAMP (fixed in #611); link confirmed from the stored receipt by an audited operator reconciliation |
+| PHR | — | 30 Sep | "New Record Added" notifications; record visible under HealthDoc Facility |
+| `consent/request/hip/notify` (GRANTED) | REQUEST-ID `127b4f01-a4ea-49d9-b90d-29f94cf2a4e6`, artefact `74674494-f72b-4c8b-bcce-322f8f15f033` | 1 Oct 11:05:14 | 202, acknowledged |
+| `hip/health-information/request` | REQUEST-ID `9076431b-5047-4a7c-985c-897c6a64d699`, transaction `428d7c38-76b2-4418-a936-8c26ea7a9aaf` | 1 Oct 11:05:18 | 202, acknowledged |
+| encrypted push to the PHR `dataPushUrl` | same transaction | 1 Oct 11:05:18–22 | delivered, 1 entry |
+| `health-information/notify` (TRANSFERRED, DELIVERED) | — | 1 Oct 11:05:22 | accepted |
+
+Earlier attempts in the same run found six defects, each fixed with regression tests (#609–#613 merged to staging, #614 in review): link display
+characters and length (#609, #610: NHA `ABDM-9999` "Invalid display"), zone-less callback TIMESTAMP and a consent
+notice without `consentDetail.hiu` (#611), acknowledgements without REQUEST-ID and an empty care context in failure
+notices (#612), the HIP push key encoding, checksum and status values (#613: the PHR requires the HIP key as X.509
+SubjectPublicKeyInfo and an MD5 checksum), and a transfer stranded after its push retries ran out (#614). NHA
+delivered several callbacks about 16 minutes after creating them; a PHR fetch whose consent notice arrived late
+failed and needed retrying (raised with NHA support).
+
+This is live sandbox evidence for the rows marked below, not NHA assessment or M2 certification.
+
 **21 September, ~11:54 UTC Create ABHA (new Aadhaar):** enrol request-otp **200**.
 First verify-otp **400** (REQUEST-ID `e1839499-a83f-465e-9401-95accb233907`, no
 `ABDM-NNNN`) without the communication-mobile override. Second verify-otp **200**
@@ -205,7 +232,7 @@ Source: [M2_BUILDING_HIP_WITH_APIS_UPDATED_22_Aug_871c2f7fcd.xlsx](../ABDM%20DOC
 
 | Row | Case ID | Function / scenario | Source applicability label | Live result | Evidence |
 |---|---|---|---|---|---|
-| 12 | Health_RECORD_CREATION_101 | Creation of Health Records | Mandatory | NOT RUN | — |
+| 12 | Health_RECORD_CREATION_101 | Creation of Health Records | Mandatory | PARTIAL | A finalized OP consultation was created through the consultation workflow (29 Sep). The record shared live was the allowlisted synthetic WellnessRecord, because the treating clinician has no registration number for transfer. |
 | 15 | HIP_INTI_LINK_201 | Link record via mobile OTP | Optional | NOT RUN | — |
 | 16 | HIP_INTI_LINK_202 | Receive OTP | Optional | NOT RUN | — |
 | 17 | HIP_INTI_LINK_203 | OTP validation | Optional | NOT RUN | — |
@@ -226,12 +253,12 @@ Source: [M2_BUILDING_HIP_WITH_APIS_UPDATED_22_Aug_871c2f7fcd.xlsx](../ABDM%20DOC
 | 35 | HIP_INIT_GRANT_CONSENT_ | HIP must save consent (s)granted for a ABHA address in their system | Mandatory if the intergrator is implementing HIP initated linking using Direct Auth | NOT RUN | — |
 | 37 | HIP_INIT_REVOKE_CONSENT | HIP must delete consents for a ABHA address in their system when it is revoked | Mandatory if the intergrator is implementing HIP initated linking using Direct Auth | NOT RUN | — |
 | 39 | HIP_INIT_EXPIRE_CONSENT | HIP must delete consents for a ABHA address in their system when it is expired | Mandatory if the intergrator is implementing HIP initated linking using Direct Auth | NOT RUN | — |
-| 41 | HIP_INTI_LINK_501 | Link record via Demographic Auth | Mandatory for the Government Integartors / Private Integrators | NOT RUN | — |
-| 42 | HIP_INTI_LINK_502 | Sharing demographic details | Mandatory for the Government Integartors / Private Integrators | NOT RUN | — |
-| 43 | HIP_INTI_LINK_503 | Validate the demographic details | Mandatory for the Government Integartors / Private Integrators | NOT RUN | — |
-| 44 | HIP_INTI_LINK_504 | Creation of Linking Token | Mandatory for the Government Integartors / Private Integrators | NOT RUN | — |
-| 45 | HIP_INTI_LINK_505 | Linking of Health Records | Mandatory for the Government Integartors / Private Integrators | NOT RUN | — |
-| 46 | HIP_INTI_LINK_506 | Pull Records | Mandatory for the Government Integartors / Private Integrators | NOT RUN | — |
+| 41 | HIP_INTI_LINK_501 | Link record via Demographic Auth | Mandatory for the Government Integartors / Private Integrators | PASS (live, 30 Sep) | See the 30 Sep – 1 Oct entry above: token request `c7dc17db…`, link `c9f734c6…`, record visible in the PHR app. |
+| 42 | HIP_INTI_LINK_502 | Sharing demographic details | Mandatory for the Government Integartors / Private Integrators | PASS (live, 30 Sep) | `generate-token` carried name, gender and year of birth (REQUEST-ID `c7dc17db…`), 202. |
+| 43 | HIP_INTI_LINK_503 | Validate the demographic details | Mandatory for the Government Integartors / Private Integrators | PASS (live, 30 Sep) | NHA validated the demographics and issued a link token (callback receipt `e6ebed75`). |
+| 44 | HIP_INTI_LINK_504 | Creation of Linking Token | Mandatory for the Government Integartors / Private Integrators | PASS (live, 30 Sep) | `on-generate-token` delivered the link token for request `c7dc17db…`. |
+| 45 | HIP_INTI_LINK_505 | Linking of Health Records | Mandatory for the Government Integartors / Private Integrators | PASS (live, 30 Sep) | `link/carecontext` `c9f734c6…` 202; `link/on_carecontext` received; the PHR app shows the record under HealthDoc Facility. |
+| 46 | HIP_INTI_LINK_506 | Pull Records | Mandatory for the Government Integartors / Private Integrators | PASS (live, 1 Oct) | PHR fetch → consent `74674494…` → request `9076431b…` → encrypted push delivered (transaction `428d7c38…`); participant confirmed the record renders. |
 | 48 | USER_INIT_LINK_601 | Login into PHR App | Not specified on this row; see source section | NOT RUN | — |
 | 49 | USER_INIT_LINK_602 | Search for Facility/ HIP | Mandatory | NOT RUN | — |
 | 50 | USER_INIT_LINK_603 | Share User Profile Details with Facility/ HIP | Mandatory | NOT RUN | — |
@@ -240,7 +267,7 @@ Source: [M2_BUILDING_HIP_WITH_APIS_UPDATED_22_Aug_871c2f7fcd.xlsx](../ABDM%20DOC
 | 53 | USER_INIT_LINK_606 | Validate request | Mandatory | NOT RUN | — |
 | 54 | USER_INIT_LINK_607 | Pull Records | Mandatory | NOT RUN | — |
 | 56 | HIP_INIT_NOTIFY_HIECM | sending notification to the patient on their mobile with deep link | Mandatory | NOT RUN | — |
-| 58 | HIP_INIT_SHARE_CARECONTEXT | HIP must share health records associated with care context on request | Mandatory | NOT RUN | — |
+| 58 | HIP_INIT_SHARE_CARECONTEXT | HIP must share health records associated with care context on request | Mandatory | PASS (live, 1 Oct) | Shared the linked care context on the PHR's request: delivered and reported TRANSFERRED/DELIVERED. Refusal and expiry cases not yet run. |
 
 ## M3
 
