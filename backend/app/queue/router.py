@@ -20,6 +20,8 @@ from app.common.idempotency import check_idempotency, hash_request_body, record_
 from app.common.redis import publish_event, queue_channel, subscribe
 from app.queue import reconciliation, service
 from app.queue.schemas import (
+    BookableProviderOut,
+    BookableProvidersOut,
     CompleteAdvanceOut,
     DepartmentWorkloadOut,
     DoctorWorklistItemOut,
@@ -250,6 +252,25 @@ async def list_queue_opening_options(
     return QueueOpeningOptionsOut(
         service_date=business_date,
         items=[QueueOpeningOptionOut(**row) for row in rows],
+    ).model_dump(mode="json")
+
+
+@router.get(
+    "/bookable-providers",
+    dependencies=[Depends(require_roles("receptionist", "admin"))],
+)
+async def list_bookable_providers(
+    current_db_user: CurrentDbUser,
+    service_date: date = Query(...),
+    department_id: uuid.UUID | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    rows = await service.list_bookable_providers(
+        db, current_db_user.facility_id, service_date, department_id
+    )
+    return BookableProvidersOut(
+        service_date=service_date,
+        items=[BookableProviderOut(**row) for row in rows],
     ).model_dump(mode="json")
 
 

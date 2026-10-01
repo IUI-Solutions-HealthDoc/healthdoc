@@ -7,6 +7,7 @@ import type {
   AppointmentService,
   AppointmentServiceCreate,
   AppointmentUpdate,
+  BookableProviders,
 } from "./types";
 
 // Every write takes the caller's key so a retry of the same action replays the
@@ -49,6 +50,16 @@ export async function listAppointments(filters: {
   const url = qs ? `/appointments?${qs}` : "/appointments";
   const res = await api<Appointment[]>(url);
   return Array.isArray(res) ? res : [];
+}
+
+/** Staff rostered and available on the booking date, optionally in one department. */
+export async function listBookableProviders(
+  serviceDate: string,
+  departmentId?: string,
+): Promise<BookableProviders> {
+  const params = new URLSearchParams({ service_date: serviceDate });
+  if (departmentId) params.set("department_id", departmentId);
+  return await api<BookableProviders>(`/queue/bookable-providers?${params.toString()}`);
 }
 
 export async function createAppointment(
