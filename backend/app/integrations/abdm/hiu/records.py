@@ -35,6 +35,8 @@ PROFILES = {
     "PrescriptionRecord": "Prescription",
     "DiagnosticReportRecord": "DiagnosticReport",
     "DischargeSummaryRecord": "DischargeSummary",
+    "ImmunizationRecord": "ImmunizationRecord",
+    "HealthDocumentRecord": "HealthDocumentRecord",
     "WellnessRecord": "WellnessRecord",
 }
 ABHA_SYSTEMS = {"https://healthid.abdm.gov.in", "https://healthid.ndhm.gov.in"}

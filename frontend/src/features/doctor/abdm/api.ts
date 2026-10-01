@@ -1,6 +1,10 @@
 import { api } from "@/lib/api";
 
-export const HI_TYPES = ["OPConsultation", "Prescription", "DiagnosticReport", "DischargeSummary", "WellnessRecord"] as const;
+// Every type ABDM's M3 cases may ask for, not only the five HealthDoc builds.
+export const HI_TYPES = [
+  "OPConsultation", "Prescription", "DiagnosticReport", "DischargeSummary",
+  "ImmunizationRecord", "HealthDocumentRecord", "WellnessRecord",
+] as const;
 export type HiType = (typeof HI_TYPES)[number];
 export interface ExternalRecord {
   id: string; hi_type: string | null; source_hip_id: string | null;
