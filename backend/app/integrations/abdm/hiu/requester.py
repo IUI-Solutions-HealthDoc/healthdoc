@@ -3,12 +3,26 @@
 M3 v2.8 requires consent.requester.name and identifier.{type,value,system}.
 The issuer cannot be guessed from a registration number: staff administration
 must record it explicitly. This validates completeness, not registry membership.
+
+One exception: an explicitly allowlisted dev.* account on the NHA sandbox asks
+as NHA's own published sample requester, labelled as a test.
 """
 
 from collections.abc import Mapping
 from urllib.parse import urlsplit
 
+from app.common.config import get_settings
 from app.users.models import User
+
+#: NHA's own sample requester identifier from its Milestone 3 Postman
+#: collection (16 Feb 2026). Taken from the Postman rather than the docs page
+#: (REGNO / MH1001 / https://www.mciindia.org) because its registry URI is not
+#: a real host, so it cannot claim anyone's actual licence. The name says what
+#: it is instead of borrowing the sample's doctor name.
+SANDBOX_TEST_REQUESTER = {
+    "name": "ABDM SANDBOX TEST REQUESTER",
+    "identifier": {"type": "REGNO1", "value": "MH1001", "system": "https://www.mciindia.9985"},
+}
 
 
 class RequesterUnavailable(ValueError):
@@ -54,9 +68,25 @@ def validate_requester(value: object) -> dict:
     }
 
 
+def uses_sandbox_test_requester(user: User) -> bool:
+    """True only for an allowlisted dev.* account against the NHA sandbox."""
+    settings = get_settings()
+    return (
+        settings.environment == "dev"
+        and settings.abdm_gateway_base_url == "https://dev.abdm.gov.in"
+        and settings.abdm_x_cm_id == "sbx"
+        and user.id in settings.abdm_sandbox_test_requester_user_ids
+        and user.username.startswith("dev.")
+    )
+
+
 def from_staff(user: User | None, facility_id) -> dict:
     if user is None or not user.is_active or user.facility_id != facility_id:
         raise RequesterUnavailable("ABDM requester is unavailable")
+    # The allowlist wins over whatever the dev account's profile holds, so a
+    # snapshot taken at request time and re-derived by the worker always agree.
+    if uses_sandbox_test_requester(user):
+        return validate_requester(SANDBOX_TEST_REQUESTER)
     return validate_requester(
         {
             "name": user.full_name,

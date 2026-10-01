@@ -248,6 +248,11 @@ function PatientWorkspace({ patientId }: { patientId: string }) {
                 {t("doctor.abdm.requesterIncomplete")}
               </p>
             )}
+            {workspace.requester_ready && workspace.sandbox_test_requester && (
+              <p role="note" className="text-sm font-medium text-warning">
+                {t("doctor.abdm.sandboxTestRequester")}
+              </p>
+            )}
             <form
               className="space-y-4"
               onSubmit={(event) => {
