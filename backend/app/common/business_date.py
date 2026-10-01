@@ -15,9 +15,20 @@ import uuid
 from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 
 from app.users.models import Facility
+
+
+def latest_date_anywhere() -> date:
+    """The furthest-ahead calendar date on Earth (UTC+14).
+
+    For request validators, which run before any facility is known. Comparing
+    against the server's UTC date instead rejects a genuine Indian "today"
+    between midnight and 05:30 IST. This bound only catches the obviously
+    impossible; the facility-exact check belongs where the facility is known.
+    """
+    return (datetime.now(UTC) + timedelta(hours=14)).date()
 
 
 async def get_business_date(db: AsyncSession, facility_id: uuid.UUID) -> date:

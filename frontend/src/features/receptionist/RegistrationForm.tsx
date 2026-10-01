@@ -133,7 +133,7 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
       // If photo was selected, upload it to the patient record
       if (photoFile) {
         try {
-          const photoRes = await uploadPatientPhoto(patient.id, photoFile);
+          const photoRes = await uploadPatientPhoto(patient.id, photoFile, newIdempotencyKey());
           patient.photo_file_id = photoRes.photo_file_id;
         } catch {
           // Photo failure should not fail patient creation, but let desk know

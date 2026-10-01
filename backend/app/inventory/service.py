@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import date
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException
@@ -8,6 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.service import write_audit_log
+from app.common.patient_scope import facility_today
 from app.inventory.schemas import (
     PurchaseOrderCreate,
     PurchaseOrderItemOut,
@@ -99,7 +99,7 @@ async def create_purchase_order(
             raise HTTPException(status_code=404, detail=f"Active item {item.item_id} not found")
 
     purchase_order_id = uuid4()
-    po_number = f"PO-{date.today():%Y%m%d}-{uuid4().hex[:10].upper()}"
+    po_number = f"PO-{await facility_today(db, facility_id):%Y%m%d}-{uuid4().hex[:10].upper()}"
     await db.execute(
         text("""
             INSERT INTO purchase_orders

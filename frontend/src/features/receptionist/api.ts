@@ -312,11 +312,13 @@ export function listVisitsWithoutTokens(limit = 50): Promise<VisitWithoutToken[]
 export async function uploadPatientPhoto(
   patientId: string,
   file: File,
+  idempotencyKey: string,
 ): Promise<{ photo_file_id: string; status: string }> {
   const formData = new FormData();
   formData.append("upload", file);
   return api<{ photo_file_id: string; status: string }>(`/patients/${patientId}/photo`, {
     method: "POST",
+    idempotencyKey,
     body: formData,
   });
 }
@@ -331,9 +333,13 @@ export function getPatientPhoto(
 }
 
 /** Remove patient photograph. */
-export function deletePatientPhoto(patientId: string): Promise<{ status: string }> {
+export function deletePatientPhoto(
+  patientId: string,
+  idempotencyKey: string,
+): Promise<{ status: string }> {
   return api<{ status: string }>(`/patients/${patientId}/photo`, {
     method: "DELETE",
+    idempotencyKey,
   });
 }
 

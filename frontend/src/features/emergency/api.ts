@@ -34,12 +34,17 @@ export interface PromotionLog {
   unmerge_reason: string | null;
 }
 
+/**
+ * The caller owns the key: resending the same unchanged form must reuse it, or
+ * a lost response becomes a second THID for one unidentified arrival.
+ */
 export function registerEmergencyPatient(
   payload: EmergencyPatientInput,
+  idempotencyKey: string,
 ): Promise<EmergencyPatient> {
   return api<EmergencyPatient>("/emergency/patients", {
     method: "POST",
-    idempotencyKey: newIdempotencyKey(),
+    idempotencyKey,
     body: JSON.stringify(payload),
   });
 }
