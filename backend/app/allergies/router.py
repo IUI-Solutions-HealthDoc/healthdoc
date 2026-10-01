@@ -151,7 +151,7 @@ async def check_patient_allergy(
 @router.get(
     "/patients/{patient_id}",
     response_model=list[AllergyOut],
-    dependencies=[Depends(require_roles("doctor", "nurse", "pharmacist", "receptionist", "admin"))],
+    dependencies=[Depends(require_roles("doctor", "nurse", "pharmacist", "admin"))],
 )
 async def list_patient_allergies(
     patient_id: UUID,

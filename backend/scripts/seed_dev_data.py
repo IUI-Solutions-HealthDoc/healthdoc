@@ -18,6 +18,8 @@ from sqlalchemy import text
 from sqlalchemy.sql.elements import TextClause
 
 from app.common.db import SessionLocal
+from app.forms.service import ensure_defaults_seeded as ensure_default_forms
+from app.users import models as _users_models  # noqa: F401 — FK target for the ORM flush
 
 FACILITY_ID = uuid.UUID("00000000-0000-0000-0000-000000000101")
 
@@ -425,6 +427,10 @@ async def seed(users: list[tuple[str, str]]) -> None:
                 ),
                 {"facility_id": FACILITY_ID},
             )
+
+            # Default form definitions and order sets. These used to be
+            # inserted by the first GET of /forms/definitions or /order-sets.
+            await ensure_default_forms(session, tariff_author)
 
         # ------------------------------------------------------------------
         # A small medicine catalogue.

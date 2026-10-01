@@ -18,6 +18,11 @@ router = APIRouter(prefix="/files", tags=["files"])
 
 _FILE_ROLES = ("receptionist", "nurse", "doctor", "lab_tech", "radiology_tech", "pharmacist", "admin")
 
+#: owner_module becomes part of the MinIO object key, so a free-text value
+#: would let a client choose the storage path. Only modules that actually
+#: attach files through this route are accepted.
+_OWNER_MODULES = frozenset({"patients", "orders", "consent"})
+
 
 def _extract_ip(request: Request) -> str | None:
     forwarded_for = request.headers.get("x-forwarded-for")
@@ -57,6 +62,32 @@ async def upload_file(
     sensitivity: str = Form(default="normal"),
     db: AsyncSession = Depends(get_db),
 ) -> FileOut:
+    if owner_module not in _OWNER_MODULES:
+        raise HTTPException(
+            422,
+            {
+                "code": "invalid_owner_module",
+                "message": f"owner_module must be one of: {', '.join(sorted(_OWNER_MODULES))}",
+            },
+        )
+    if sensitivity not in service.UPLOAD_SENSITIVITIES:
+        raise HTTPException(
+            422,
+            {
+                "code": "invalid_sensitivity",
+                "message": f"sensitivity must be one of: {', '.join(sorted(service.UPLOAD_SENSITIVITIES))}",
+            },
+        )
+    # Refused rather than stored: an uploader who could not read the file back
+    # would be creating a record nobody at their desk can review or correct.
+    if not service.may_read_sensitivity(sensitivity, user.roles):
+        raise HTTPException(
+            403,
+            {
+                "code": "sensitivity_not_permitted",
+                "message": "Your role cannot upload files at this sensitivity",
+            },
+        )
     record = await service.upload_file(
         db,
         upload=upload,
@@ -78,7 +109,9 @@ async def upload_file(
 async def get_file(
     file_id: uuid.UUID, request: Request, user: CurrentDbUser, db: AsyncSession = Depends(get_db)
 ) -> FileOut:
-    record = await service.get_file_record(db, file_id, facility_id=user.facility_id)
+    record = await service.get_file_record(
+        db, file_id, facility_id=user.facility_id, reader_roles=user.roles
+    )
     await service.record_view_access(db, file_id, user_id=user.id, ip_address=_extract_ip(request))
     return FileOut.model_validate(record)
 
@@ -92,7 +125,12 @@ async def get_file_download_url(
     file_id: uuid.UUID, request: Request, user: CurrentDbUser, db: AsyncSession = Depends(get_db)
 ) -> FileDownloadUrlOut:
     url = await service.get_download_url(
-        db, file_id, facility_id=user.facility_id, user_id=user.id, ip_address=_extract_ip(request)
+        db,
+        file_id,
+        facility_id=user.facility_id,
+        user_id=user.id,
+        ip_address=_extract_ip(request),
+        reader_roles=user.roles,
     )
     return FileDownloadUrlOut(url=url, expires_in_seconds=service.PRESIGNED_URL_EXPIRY_SECONDS)
 
