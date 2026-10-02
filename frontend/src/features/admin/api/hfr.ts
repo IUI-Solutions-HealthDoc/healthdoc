@@ -82,3 +82,78 @@ export function hprPasswordLogin(hprId: string, password: string): Promise<HprSe
 export function hprLogout(): Promise<HprSession> {
   return api<HprSession>("/abdm/hfr/hpr-login", { method: "DELETE" });
 }
+
+// ------------------------------------------------------------- registration
+// HFR-010 to 117. Every list comes from HFR; the manager must be signed in to HPR.
+
+export async function hfrFacilityTypes(ownershipCode: string, systemOfMedicineCode: string): Promise<HfrOption[]> {
+  const query = `ownership_code=${encodeURIComponent(ownershipCode)}&system_of_medicine_code=${encodeURIComponent(systemOfMedicineCode)}`;
+  return (await api<{ data: HfrOption[] }>(`/abdm/hfr/facility-types?${query}`)).data;
+}
+export async function hfrFacilitySubtypes(facilityTypeCode: string): Promise<HfrOption[]> {
+  return (await api<{ data: HfrOption[] }>(`/abdm/hfr/facility-subtypes?facility_type_code=${encodeURIComponent(facilityTypeCode)}`)).data;
+}
+export async function hfrOwnerSubtypes(ownershipCode: string, subtypeCode: string): Promise<HfrOption[]> {
+  const query = `ownership_code=${encodeURIComponent(ownershipCode)}&owner_subtype_code=${encodeURIComponent(subtypeCode)}`;
+  return (await api<{ data: HfrOption[] }>(`/abdm/hfr/owner-subtypes?${query}`)).data;
+}
+export async function hfrSpecialities(systemOfMedicineCode: string): Promise<HfrOption[]> {
+  return (await api<{ data: HfrOption[] }>(`/abdm/hfr/specialities?system_of_medicine_code=${encodeURIComponent(systemOfMedicineCode)}`)).data;
+}
+
+export interface HfrUpload { name: string; content: string }
+export interface HfrTiming { days: string[]; hours: string }
+export interface HfrBasicInformation {
+  tracking_id: string;
+  name: string;
+  address: {
+    state_code: string; district_code: string; sub_district_code: string; region: string;
+    address_line1: string; address_line2: string; pincode: string; latitude: string; longitude: string;
+  };
+  contact: { email: string; mobile: string; website: string; landline: string; std_code: string };
+  ownership_code: string;
+  ownership_subtype_code: string;
+  ownership_subtype_code2: string;
+  systems_of_medicine: string[];
+  types_of_service: string[];
+  facility_type_code: string;
+  facility_subtype_code: string;
+  speciality_type: string;
+  operational_status: string;
+  timings: HfrTiming[];
+  board_photo: HfrUpload | null;
+  building_photo: HfrUpload | null;
+  address_proofs: { type: string; attachment: HfrUpload }[];
+}
+export interface HfrServiceCount { service: string; count: number }
+export interface HfrAdditionalInformation {
+  tracking_id: string;
+  nhrr_id: string; nin: string; abpmjay_id: string; rohini_id: string;
+  echs_id: string; cghs_id: string; cea_registration: string; state_insurance_scheme_id: string;
+  general: { dialysis: string; pharmacy: string; blood_bank: string; cath_lab: string; diagnostic_lab: string; imaging: string };
+  imaging_services: HfrServiceCount[];
+}
+export interface HfrDetailedInformation {
+  tracking_id: string;
+  specialities: { system_of_medicine: string; available: "Y" | "N"; codes: string[] }[];
+  infrastructure: Record<string, number>;
+  imaging_services: HfrServiceCount[];
+  diagnostic_services: string[];
+}
+export interface HfrStepSaved { tracking_id: string; status: string | null; message: string | null }
+
+// One call per step, so the contract check can match each to its route.
+export function saveHfrBasic(body: HfrBasicInformation, idempotencyKey: string): Promise<HfrStepSaved> {
+  return api<HfrStepSaved>("/abdm/hfr/registration/basic", { method: "POST", body: JSON.stringify(body), idempotencyKey });
+}
+export function saveHfrAdditional(body: HfrAdditionalInformation, idempotencyKey: string): Promise<HfrStepSaved> {
+  return api<HfrStepSaved>("/abdm/hfr/registration/additional", { method: "POST", body: JSON.stringify(body), idempotencyKey });
+}
+export function saveHfrDetailed(body: HfrDetailedInformation, idempotencyKey: string): Promise<HfrStepSaved> {
+  return api<HfrStepSaved>("/abdm/hfr/registration/detailed", { method: "POST", body: JSON.stringify(body), idempotencyKey });
+}
+export function submitHfrFacility(trackingId: string, idempotencyKey: string) {
+  return api<{ facility_id: string; status: string | null; message: string | null }>("/abdm/hfr/registration/submit", {
+    method: "POST", body: JSON.stringify({ tracking_id: trackingId }), idempotencyKey,
+  });
+}

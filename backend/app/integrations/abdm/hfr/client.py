@@ -81,3 +81,30 @@ async def link_bridge(facility_id: str, facility_name: str, services: list[dict]
         "/v1/bridges/MutipleHRPAddUpdateServices",
         json={"facilityId": facility_id, "facilityName": facility_name, "HRP": services},
     )
+
+
+# ---------------------------------------------------------------- registration
+# The two steps that bind the facility to its manager carry x-hprid-auth: the
+# signed-in manager's HPR ID number, as NHA's M4 example sends it.
+
+
+async def save_basic_information(body: dict, hpr_id_number: str) -> Any:
+    return await call(
+        "POST", "/v1.5/facility/basic-information", json=body,
+        headers={"x-hprid-auth": hpr_id_number},
+    )
+
+
+async def save_additional_information(body: dict) -> Any:
+    return await call("POST", "/v1.5/facility/additional-information", json=body)
+
+
+async def save_detailed_information(body: dict) -> Any:
+    return await call("POST", "/v1.5/facility/detailed-information", json=body)
+
+
+async def submit_facility(body: dict, hpr_id_number: str) -> Any:
+    return await call(
+        "POST", "/v1.5/facility/submit-facility", json=body,
+        headers={"x-hprid-auth": hpr_id_number},
+    )

@@ -1,9 +1,9 @@
 """Health Facility Registry for the facility administrator (ABDM M4, HFR).
 
 Covers the HFR workbook's search cases (HFR-001 to 009), the master data and
-LGD lists every HFR form draws from, and bridge linkage (HFR-118 to 123).
-Registration and update need the facility manager's HPR login and come
-separately. Field rules quoted below are the workbook's.
+LGD lists every HFR form draws from, registration under the facility manager's
+HPR login (HFR-010 to 063, submit HFR-116/117) and bridge linkage (HFR-118 to
+123). Field rules quoted below are the workbook's.
 
 HFR answers synchronously; a refusal is passed back as a 502 naming HFR, with
 the status only, never HFR's body, which can echo what was sent.
@@ -17,16 +17,27 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator, model_validator
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit.actions import AuditAction
+from app.audit.service import write_audit_log
 from app.auth.deps import CurrentDbUser, require_roles
 from app.common.config import get_settings
+from app.common.db import get_db
 from app.integrations.abdm.client import (
     AbdmAuthError,
     AbdmNotConfigured,
     AbdmRejected,
     AbdmUnavailable,
 )
-from app.integrations.abdm.hfr import client, hpr_login
+from app.integrations.abdm.hfr import client, hpr_login, registration
+from app.integrations.abdm.hfr.registration import (
+    AdditionalInformation,
+    BasicInformation,
+    DetailedInformation,
+    HfrStepRefused,
+    SubmitFacility,
+)
 
 log = logging.getLogger("healthdoc.abdm")
 router = APIRouter(
@@ -340,3 +351,112 @@ async def hpr_login_password(payload: HprPassword, current_db_user: CurrentDbUse
 async def hpr_logout(current_db_user: CurrentDbUser) -> dict:
     await hpr_login.logout(current_db_user.facility_id, current_db_user.id)
     return {"logged_in": False}
+
+
+# ---------------------------------------------------------------- registration
+
+DbSession = Annotated[AsyncSession, Depends(get_db)]
+
+
+async def _manager(current_db_user) -> hpr_login.HprSession:
+    """The signed-in facility manager; registration happens under their HPR ID."""
+    held = await hpr_login.current(current_db_user.facility_id, current_db_user.id)
+    if held is None or not held[0].hpr_id_number:
+        raise HTTPException(
+            409, {"code": "hpr_login_required", "message": "Sign in to HPR as the facility manager first"}
+        )
+    return held[0]
+
+
+async def _step(call) -> object:
+    """Run one registration call. HFR's own field messages are about the
+    facility the admin typed, so a refusal passes them back to be corrected."""
+    try:
+        return await call
+    except AbdmRejected as exc:
+        log.warning("HFR declined a registration step (%s)", exc.status_code)
+        detail = exc.detail if isinstance(exc.detail, dict) else {}
+        messages = registration._messages(detail) or [f"HFR refused this step (HTTP {exc.status_code})"]
+        raise HTTPException(400, {"code": "hfr_registration_refused", "messages": messages}) from exc
+    except (AbdmNotConfigured, AbdmUnavailable, AbdmAuthError):
+        return await _hfr(call)
+
+
+def _refused(exc: HfrStepRefused) -> HTTPException:
+    return HTTPException(400, {"code": "hfr_registration_refused", "messages": exc.messages})
+
+
+async def _audit(db, current_db_user, step: str, values: dict) -> None:
+    await write_audit_log(
+        db,
+        facility_id=current_db_user.facility_id,
+        action=AuditAction.CREATE if step == "submit" else AuditAction.UPDATE,
+        resource_type="hfr_registration",
+        user_id=current_db_user.id,
+        new_value={"step": step, **values},
+    )
+
+
+@router.post("/registration/basic")
+async def register_basic(
+    payload: BasicInformation, current_db_user: CurrentDbUser, db: DbSession
+) -> dict:
+    """HFR-010 to 038. Returns the tracking id the later steps continue."""
+    manager = await _manager(current_db_user)
+    body = await _step(client.save_basic_information(
+        registration.basic_payload(payload), manager.hpr_id_number))
+    try:
+        tracking, status, message = registration.tracking_from(body)
+    except HfrStepRefused as exc:
+        raise _refused(exc) from None
+    await _audit(db, current_db_user, "basic", {
+        "tracking_id": tracking, "facility_name": payload.name, "hpr_id": manager.hpr_id})
+    await db.commit()
+    return {"tracking_id": tracking, "status": status, "message": message}
+
+
+@router.post("/registration/additional")
+async def register_additional(
+    payload: AdditionalInformation, current_db_user: CurrentDbUser, db: DbSession
+) -> dict:
+    await _manager(current_db_user)
+    body = await _step(client.save_additional_information(registration.additional_payload(payload)))
+    try:
+        tracking, status, message = registration.tracking_from(body)
+    except HfrStepRefused as exc:
+        raise _refused(exc) from None
+    await _audit(db, current_db_user, "additional", {"tracking_id": tracking})
+    await db.commit()
+    return {"tracking_id": tracking, "status": status, "message": message}
+
+
+@router.post("/registration/detailed")
+async def register_detailed(
+    payload: DetailedInformation, current_db_user: CurrentDbUser, db: DbSession
+) -> dict:
+    await _manager(current_db_user)
+    body = await _step(client.save_detailed_information(registration.detailed_payload(payload)))
+    try:
+        tracking, status, message = registration.tracking_from(body)
+    except HfrStepRefused as exc:
+        raise _refused(exc) from None
+    await _audit(db, current_db_user, "detailed", {"tracking_id": tracking})
+    await db.commit()
+    return {"tracking_id": tracking, "status": status, "message": message}
+
+
+@router.post("/registration/submit")
+async def register_submit(
+    payload: SubmitFacility, current_db_user: CurrentDbUser, db: DbSession
+) -> dict:
+    """HFR-116/117: submit the saved details; HFR returns the new facility id."""
+    manager = await _manager(current_db_user)
+    body = await _step(client.submit_facility(registration.submit_payload(payload), manager.hpr_id_number))
+    try:
+        facility_id, status, message = registration.facility_from(body)
+    except HfrStepRefused as exc:
+        raise _refused(exc) from None
+    await _audit(db, current_db_user, "submit", {
+        "tracking_id": payload.tracking_id, "hfr_facility_id": facility_id, "hpr_id": manager.hpr_id})
+    await db.commit()
+    return {"facility_id": facility_id, "status": status, "message": message}
