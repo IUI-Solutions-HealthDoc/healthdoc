@@ -142,6 +142,11 @@ class Settings(BaseSettings):
     abdm_path_phr_profile: str = "/v3/phr/web/login/profile/abha-profile"
     abdm_path_phr_card: str = "/v3/phr/web/login/profile/abha/phr-card"
 
+    #: Health Facility Registry (M4, HFR). NHA moved the sandbox HFR API to
+    #: apihspsbx (v4); the facilitysbx host in the 2024 test-case workbook now
+    #: refuses connections. Same gateway session token as every other call.
+    abdm_hfr_base_url: str = "https://apihspsbx.abdm.gov.in/v4/int"
+
     # ------------------------------------------------------------------
     # M2 (HIP) and M3 (HIU) gateway paths, relative to abdm_gateway_base_url.
     #
