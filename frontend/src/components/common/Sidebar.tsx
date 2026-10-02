@@ -113,6 +113,7 @@ const NAV_ITEMS: readonly NavItem[] = [
   { href: "/admin/permissions", labelKey: "sidebar.permissions", icon: Shield, area: "admin", roles: [ROLES.ADMIN] },
   { href: "/admin/departments", labelKey: "sidebar.departmentsRooms", icon: Building2, area: "admin", roles: [ROLES.ADMIN] },
   { href: "/admin/abdm-sync", labelKey: "sidebar.abdmIdentityLinks", icon: Shield, area: "admin", roles: [ROLES.ADMIN] },
+  { href: "/admin/hfr", labelKey: "sidebar.hfr", icon: Building2, area: "admin", roles: [ROLES.ADMIN] },
   { href: "/admin/data-protection", labelKey: "sidebar.dataProtection", icon: Shield, area: "admin", roles: [ROLES.ADMIN, ROLES.AUDITOR] },
   { href: "/admin/maintenance", labelKey: "sidebar.equipmentMaintenance", icon: Building2, area: "admin", roles: [ROLES.ADMIN, ROLES.LAB_TECH, ROLES.RADIOLOGY_TECH] },
   { href: "/admin/integration", labelKey: "sidebar.integrationDlq", icon: Radio, area: "admin", roles: [ROLES.ADMIN] },
