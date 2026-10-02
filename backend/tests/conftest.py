@@ -87,6 +87,18 @@ def _ensure_stub_tables_exist() -> None:
             extend_existing=True,
         )
         
+@compiles(UUID, "sqlite")
+def _compile_uuid_sqlite(type_, compiler, **kw):
+    """Text affinity for UUID columns.
+
+    A column declared "UUID" gets SQLite's NUMERIC affinity, so a random id
+    whose hex reads as a number (digits and one "e", like 123...890e1) is
+    stored as REAL and cannot be read back as a UUID. That failed a CI run on
+    #635 in an unrelated test; CHAR(32) keeps every id as the text it was.
+    """
+    return "CHAR(32)"
+
+
 @compiles(JSONB, "sqlite")
 def _compile_jsonb_sqlite(type_, compiler, **kw):
     return "JSON"
