@@ -130,11 +130,14 @@ export interface AbhaIdentityLinked {
   accounts?: { abha_number: string; name?: string | null }[];
 }
 
+/** English is NHA's published text; Hindi is HealthDoc's labelled translation. */
+export type ConsentLanguage = "en" | "hi";
+
 export interface AbhaEnrolmentConsent {
   granted: boolean;
   code: string;
   version: string;
-  language: "en";
+  language: ConsentLanguage;
   /** The desk's tick on each of NHA's published statements, by id. */
   statements: Record<string, boolean>;
   /** Digest of the declaration shown; the server refuses ticks on other text. */
@@ -145,6 +148,9 @@ export interface AbhaEnrolmentConsent {
 export interface AbhaDeclaration {
   version: string;
   ownership: "government" | "private";
+  language: ConsentLanguage;
+  /** Set for a translation: says it is HealthDoc's, not NHA's, wording. */
+  notice: string | null;
   intro: string;
   statements: { id: string; text: string; ticked: boolean; required: boolean | null }[];
   sha256: string;

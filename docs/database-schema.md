@@ -209,6 +209,8 @@ do not merge out of order.**
 | 0088 | abdm_frozen_delivery_jobs | abdm_jobs | Widens the status CHECK with `frozen` for historical jobs held during a service-ID cutover; the delivery worker and operator retry must not dispatch them. |
 | 0089 | uuid_pk_defaults_visit_status | ALTER appointment_services: id; ALTER appointments: id; ALTER clinical_dispositions: id; ALTER admission_checklist_tasks: id; ALTER emergency_triages: id; ALTER emergency_triage_logs: id; ALTER lab_analytes: id; ALTER visits: status | Restores the `uuid_generate_v4()` id default 0074–0076 omitted (every insert failed on PostgreSQL) and widens the visit status CHECK with `in_consultation` and `closed`, which the OPD state machine writes. |
 | 0090 | facility_ownership | ALTER facilities: ownership | Government or private, CHECK-constrained, NULL until recorded; selects NHA's published ABHA consent wording (CRT_ABHA_102). |
+| 0091 | abdm_discovery_matches | abdm_discovery_matches | A PHR discovery matched by mobile and demographics (USER_INIT_LINK_603): transaction, asking ABHA address, chart and care contexts, kept until the link-init quotes them or they expire. |
+| 0092 | abdm_care_context_immunization | ALTER abdm_care_contexts: hi_type CHECK adds ImmunizationRecord | One NRCeS ImmunizationRecord per recorded vaccine dose, a context with no visit. Downgrade refuses while any immunization context exists rather than withdrawing a possibly linked record. |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -2089,6 +2091,21 @@ expires_at timestamptz NOT NULL
 checked_in_at timestamptz NULL                    -- 0082: original successful check-in; no invented legacy backfill
 ```
 
+**abdm_discovery_matches** (0091) — a demographic discovery a link-init may quote
+```
+facility_id UUID NOT NULL → facilities
+patient_id UUID NOT NULL → patients              -- the chart matched; it held no ABHA address
+transaction_id varchar(120) NOT NULL             -- UNIQUE (facility_id, transaction_id)
+abha_address varchar(120) NOT NULL               -- the PHR user's address that asked
+abha_number varchar(17) NULL                     -- ABHA number the CM verified, if sent; bound only after a confirmed link
+care_context_references jsonb NOT NULL           -- what discovery answered; a link-init may select only from these
+matched_by jsonb NOT NULL                        -- ["MOBILE"] or ["MOBILE","MR"]
+expires_at timestamptz NOT NULL                  -- 30 minutes after discovery
+```
+The chart is found by this row only while it still holds no ABHA address, or
+holds the asking one. A confirmed, OTP-verified link then records the address
+(and verified number) on the chart unless another chart already holds them.
+
 **abdm_callback_replies** (0067) — committed reply intent, not a clinical inbox
 ```
 facility_id UUID NOT NULL → facilities
@@ -2134,12 +2151,12 @@ checksum, context identity and page count. A crash after remote acceptance but
 before local acknowledgement can replay a page: the receiver must deduplicate
 transaction/page/entry. The payload is excluded from the append-only audit log.
 
-**abdm_care_contexts** (0055, 0062) — one finalized document that can be offered to an ABHA
+**abdm_care_contexts** (0055, 0062, 0092) — one finalized document that can be offered to an ABHA
 ```
-patient_id UUID NOT NULL → patients · visit_id UUID → visits
+patient_id UUID NOT NULL → patients · visit_id UUID → visits (NULL for an immunization)
 reference varchar(100) NOT NULL                   -- quoted back by ABDM forever; never recomputed
 display varchar(200) NOT NULL
-hi_type varchar(50) NOT NULL                      -- OPConsultation|Prescription|DiagnosticReport|DischargeSummary|WellnessRecord (narrowed in 0059)
+hi_type varchar(50) NOT NULL                      -- OPConsultation|Prescription|DiagnosticReport|DischargeSummary|WellnessRecord|ImmunizationRecord (narrowed in 0059, ImmunizationRecord back in 0092)
 document_at timestamptz                          -- finalized source time; NULL legacy rows cannot be shared
 facility_id UUID NOT NULL → facilities
 UNIQUE (patient_id, reference)                    -- two facilities may both hold a context for one person

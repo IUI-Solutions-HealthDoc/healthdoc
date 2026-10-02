@@ -51,7 +51,7 @@ from app.integrations.abdm.hip.models import (
     AbdmCareContextLink,
     AbdmHipHealthInformationRequest,
 )
-from app.integrations.abdm.hip.publisher import publish_document
+from app.integrations.abdm.hip.publisher import publish_source
 from app.opd.models import Visit
 from app.patients.models import Patient
 from app.users.models import Facility
@@ -147,7 +147,8 @@ class CareContextIn(BaseModel):
         min_length=1,
         max_length=100,
         description="Finalized source: encounter/UUID, prescription/UUID, lab-result/UUID, "
-        "radiology-report/UUID, discharge/UUID or wellness/UUID. Visit-wide references are not shareable.",
+        "radiology-report/UUID, discharge/UUID, wellness/UUID or immunization/UUID (no visit). "
+        "Visit-wide references are not shareable.",
     )
     display: str = Field(min_length=1, max_length=200)
     hi_type: str
@@ -242,11 +243,11 @@ async def create_care_context(
         )
     except DocumentUnavailable as exc:
         raise HTTPException(422, {"code": "document_unavailable", "message": str(exc)}) from exc
-    context = await publish_document(
+    context = await publish_source(
         db,
-        kind=source.kind,
-        source_id=source.source_id,
-        visit=source.visit,
+        source,
+        patient_id=payload.patient_id,
+        facility_id=current_db_user.facility_id,
         actor_id=current_db_user.id,
         display=payload.display,
     )

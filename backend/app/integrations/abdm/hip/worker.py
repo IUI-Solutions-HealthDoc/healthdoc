@@ -27,6 +27,7 @@ from app.admissions.models import Admission, Discharge
 from app.allergies.models import Allergy
 from app.common.config import get_settings
 from app.common.db import SessionLocal
+from app.immunization.models import ImmunizationRecord, VaccineCatalogue
 from app.integrations.abdm.client import safe_rejection_message
 from app.integrations.abdm.fhir.builder import build_clinical_bundle
 from app.integrations.abdm.hip import gateway as hip_gateway
@@ -161,6 +162,50 @@ async def _clinical_facts(
         practitioner_facts["sandbox_account_id"] = str(practitioner.id)
     if not facility.hfr_facility_id:
         raise TransferError("Facility has no HFR identifier")
+    patient_facts = {
+        "id": patient.id,
+        "name": patient.full_name,
+        "identifier": patient.uhid or patient.thid,
+        "abha_number": patient.abha_number,
+        "gender": patient.sex,
+        "birth_date": patient.dob,
+        "mobile": patient.mobile,
+    }
+    organization_facts = {
+        "id": facility.id,
+        "name": facility.name,
+        "hfr_id": facility.hfr_facility_id,
+    }
+    if source.kind == "immunization":
+        record = await db.get(ImmunizationRecord, source.source_id, populate_existing=True)
+        vaccine = await db.get(VaccineCatalogue, record.vaccine_id) if record else None
+        if record is None or vaccine is None:
+            raise TransferError("Immunization record is unavailable")
+        return {
+            "patient": patient_facts,
+            "practitioner": practitioner_facts,
+            "organization": organization_facts,
+            "encounter": None,
+            "authored_at": source.authored_at,
+            "care_context_reference": context.reference,
+            "document_label": context.display,
+            "immunizations": [
+                {
+                    "id": record.id,
+                    "vaccine": vaccine.name,
+                    "target_disease": vaccine.target_disease,
+                    "occurred_at": record.administered_at,
+                    "dose_number": record.dose_number,
+                    "lot_number": record.batch_number,
+                    "expiration_date": record.expiry_date,
+                    "manufacturer": record.manufacturer,
+                    "site": record.site,
+                    "route": record.route,
+                    "adverse_reaction": record.adverse_reaction,
+                    "notes": record.notes,
+                }
+            ],
+        }
 
     # Only the selected consultation/wellness record owns encounter-wide facts.
     # A prescription or report must not absorb its siblings from the same visit.
@@ -362,21 +407,9 @@ async def _clinical_facts(
     encounter_class = "IMP" if discharge_row else "AMB"
 
     common = {
-        "patient": {
-            "id": patient.id,
-            "name": patient.full_name,
-            "identifier": patient.uhid or patient.thid,
-            "abha_number": patient.abha_number,
-            "gender": patient.sex,
-            "birth_date": patient.dob,
-            "mobile": patient.mobile,
-        },
+        "patient": patient_facts,
         "practitioner": practitioner_facts,
-        "organization": {
-            "id": facility.id,
-            "name": facility.name,
-            "hfr_id": facility.hfr_facility_id,
-        },
+        "organization": organization_facts,
         "encounter": {
             "id": primary.id if primary else visit.id,
             "status": encounter_status,

@@ -11,6 +11,7 @@ from app.departments.models import Department
 from app.queue import service
 from app.queue.models import Queue
 from app.users.models import Facility, User
+from tests.business_day import business_today
 
 pytestmark = pytest.mark.asyncio
 
@@ -45,7 +46,7 @@ async def test_create_roster_entry_succeeds_for_admin(db):
         department_id=department_id,
         room_id=None,
         shift="morning",
-        roster_date=date.today(),
+        roster_date=business_today(),
         caller_facility_id=facility_id,
         caller_roles=["admin"],
         caller_department_id=None,
@@ -65,7 +66,7 @@ async def test_create_roster_entry_rejects_non_hod_non_admin(db):
             department_id=department_id,
             room_id=None,
             shift="morning",
-            roster_date=date.today(),
+            roster_date=business_today(),
             caller_facility_id=facility_id,
             caller_roles=["doctor"],
             caller_department_id=None,
@@ -85,7 +86,7 @@ async def test_create_roster_entry_rejects_hod_wrong_department(db):
             department_id=department_id,
             room_id=None,
             shift="morning",
-            roster_date=date.today(),
+            roster_date=business_today(),
             caller_facility_id=facility_id,
             caller_roles=["hod"],
             caller_department_id=other_department_id,
@@ -105,7 +106,7 @@ async def test_create_roster_entry_rejects_staff_from_other_facility(db):
             department_id=department_id,
             room_id=None,
             shift="morning",
-            roster_date=date.today(),
+            roster_date=business_today(),
             caller_facility_id=facility_id,
             caller_roles=["admin"],
             caller_department_id=None,
@@ -123,7 +124,7 @@ async def test_create_roster_entry_nonexistent_staff_is_not_found_not_duplicate(
             department_id=department_id,
             room_id=None,
             shift="morning",
-            roster_date=date.today(),
+            roster_date=business_today(),
             caller_facility_id=facility_id,
             caller_roles=["admin"],
             caller_department_id=None,
@@ -146,7 +147,7 @@ async def test_create_roster_entry_rejects_staff_from_other_department(db):
 
     with pytest.raises(Exception) as exc_info:
         await service.create_roster_entry(
-            db, staff_id, department_id, None, "morning", date.today(),
+            db, staff_id, department_id, None, "morning", business_today(),
             facility_id, ["hod"], department_id,
         )
     assert "Staff member not found" in str(exc_info.value)
@@ -186,7 +187,7 @@ async def test_availability_change_by_admin_produces_notification(db):
     staff_id = await _make_staff(db, facility_id, department_id)
 
     entry = await service.create_roster_entry(
-        db, staff_id, department_id, None, "morning", date.today(),
+        db, staff_id, department_id, None, "morning", business_today(),
         facility_id, ["admin"], None,
     )
 
@@ -205,7 +206,7 @@ async def test_availability_change_by_hod_produces_no_notification(db):
     staff_id = await _make_staff(db, facility_id, department_id)
 
     entry = await service.create_roster_entry(
-        db, staff_id, department_id, None, "morning", date.today(),
+        db, staff_id, department_id, None, "morning", business_today(),
         facility_id, ["hod"], department_id,
     )
 
@@ -224,7 +225,7 @@ async def test_pause_queue_by_hod_produces_notification(db):
 
     queue = Queue(
         id=uuid.uuid4(), facility_id=facility_id, department_id=department_id,
-        doctor_user_id=doctor_id, service_date=date.today(), is_open=True,
+        doctor_user_id=doctor_id, service_date=business_today(), is_open=True,
     )
     db.add(queue)
     await db.flush()
@@ -243,7 +244,7 @@ async def test_pause_queue_rejects_doctor(db):
     doctor_id = uuid.uuid4()
     queue = Queue(
         id=uuid.uuid4(), facility_id=facility_id, department_id=department_id,
-        doctor_user_id=doctor_id, service_date=date.today(), is_open=True,
+        doctor_user_id=doctor_id, service_date=business_today(), is_open=True,
     )
     db.add(queue)
     await db.flush()
@@ -260,7 +261,7 @@ async def test_resume_queue_sets_is_open_true(db):
     doctor_id = uuid.uuid4()
     queue = Queue(
         id=uuid.uuid4(), facility_id=facility_id, department_id=department_id,
-        doctor_user_id=doctor_id, service_date=date.today(), is_open=False,
+        doctor_user_id=doctor_id, service_date=business_today(), is_open=False,
     )
     db.add(queue)
     await db.flush()

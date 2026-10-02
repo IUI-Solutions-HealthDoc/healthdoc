@@ -21,7 +21,7 @@ from app.integrations.abdm.hip.documents import (
     resolve_document,
 )
 from app.integrations.abdm.hip.models import AbdmCareContext
-from app.integrations.abdm.hip.publisher import publish_document
+from app.integrations.abdm.hip.publisher import publish_source
 from app.nursing.models import Vitals
 from app.patients.models import Patient
 from app.users.models import Facility, User
@@ -180,14 +180,14 @@ async def register_historical_documents(
     # The operator UUID is attribution; the CLI cannot attest a Keycloak role.
     with actor_context(AuditActor(manifest.operator_id, None, None, None)):
         async with db.begin_nested():
-            for result, source in zip(results, sources, strict=True):
+            for item, result, source in zip(manifest.documents, results, sources, strict=True):
                 if result.status == "existing":
                     continue  # Never reset an existing notification job or adopted date.
-                context = await publish_document(
+                context = await publish_source(
                     db,
-                    kind=source.kind,
-                    source_id=source.source_id,
-                    visit=source.visit,
+                    source,
+                    patient_id=item.patient_id,
+                    facility_id=manifest.facility_id,
                     actor_id=manifest.operator_id,
                 )
                 result.status, result.context_id = "created", context.id

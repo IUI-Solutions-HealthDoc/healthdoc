@@ -6,6 +6,7 @@ import type {
   PatientSearchRequest,
   PatientSearchResponse,
   AbhaDeclaration,
+  ConsentLanguage,
   AbhaEnrolmentConsent,
   AbhaIdentityLinked,
   AbhaLoginIdentifier,
@@ -113,9 +114,12 @@ export function verifyAbhaLoginOtp(
   });
 }
 
-export async function getAbhaEnrolmentDeclaration(patientId: string): Promise<AbhaDeclaration> {
+export async function getAbhaEnrolmentDeclaration(
+  patientId: string,
+  language: ConsentLanguage = "en",
+): Promise<AbhaDeclaration> {
   const result = await api<{ declaration: AbhaDeclaration }>(
-    `/abdm/abha/enrol/consent?patient_id=${encodeURIComponent(patientId)}`,
+    `/abdm/abha/enrol/consent?patient_id=${encodeURIComponent(patientId)}&language=${language}`,
   );
   return result.declaration;
 }
@@ -175,6 +179,43 @@ export function verifyEnrolmentMobileOtp(
   return api<AbhaIdentityLinked>("/abdm/abha/enrol/mobile/verify-otp", {
     method: "POST",
     body: JSON.stringify({ session_id: sessionId, otp }),
+    idempotencyKey,
+  });
+}
+
+export interface LgdOption { code: string; name: string }
+
+export async function listLgdStates(): Promise<LgdOption[]> {
+  return (await api<{ states: LgdOption[] }>("/abdm/abha/lgd/states")).states;
+}
+
+export async function listLgdDistricts(stateCode: string): Promise<LgdOption[]> {
+  const path = `/abdm/abha/lgd/districts?state_code=${encodeURIComponent(stateCode)}`;
+  return (await api<{ districts: LgdOption[] }>(path)).districts;
+}
+
+/** M1 CRT_ABHA_301-309: details exactly as on the Aadhaar card. */
+export interface DemographicEnrolment {
+  patient_id: string;
+  aadhaar: string;
+  name: string;
+  date_of_birth: string;
+  gender: "M" | "F" | "O";
+  mobile: string;
+  address: string;
+  pincode: string;
+  state_code: string;
+  district_code: string;
+  consent: AbhaEnrolmentConsent;
+}
+
+export function enrolAbhaByDemographics(
+  body: DemographicEnrolment,
+  idempotencyKey: string,
+): Promise<AbhaIdentityLinked> {
+  return api<AbhaIdentityLinked>("/abdm/abha/enrol/demographic", {
+    method: "POST",
+    body: JSON.stringify({ ...body, aadhaar: digitsOnly(body.aadhaar) }),
     idempotencyKey,
   });
 }

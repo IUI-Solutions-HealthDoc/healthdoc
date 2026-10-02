@@ -247,6 +247,11 @@ async def record_administration(
     db.add(rec)
     await db.flush()
     await db.refresh(rec)
+    from app.integrations.abdm.hip.publisher import publish_immunization
+
+    # Offered to the patient's ABHA in the same transaction as the dose, like
+    # a closed consultation; nothing is sent until the patient links it.
+    await publish_immunization(db, rec, facility_id=facility_id, actor_id=user_id)
     return ImmunizationRecordOut.model_validate(rec)
 
 
