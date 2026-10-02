@@ -58,10 +58,11 @@ def test_builder_validator_and_check_name_the_same_hi_types():
 
 
 def test_the_removed_types_are_gone_from_every_vocabulary():
-    """ImmunizationRecord/HealthDocumentRecord/Invoice were removed because the
-    builder cannot populate them. Re-adding one to a single place must fail the
-    test above; this pins the specific regression."""
-    removed = {"ImmunizationRecord", "HealthDocumentRecord", "Invoice"}
+    """HealthDocumentRecord/Invoice were removed because the builder cannot
+    populate them. Re-adding one to a single place must fail the test above;
+    this pins the specific regression. ImmunizationRecord came back in 0092
+    with a builder, in all three places at once."""
+    removed = {"HealthDocumentRecord", "Invoice"}
     assert removed.isdisjoint(HI_TYPES)
     assert removed.isdisjoint(set(RECORD_TYPES))
     assert removed.isdisjoint(_care_context_check_types())

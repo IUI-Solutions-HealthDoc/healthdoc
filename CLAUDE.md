@@ -466,14 +466,17 @@ queried in this review. The dated local consent renewed through 14 September
 | **M2 — HIP linking/sharing** | Official v3 callbacks/outbound calls, finalized-document contexts, grouped linking, durable jobs, FHIR export and encrypted transfer exist. An earlier token callback succeeded but its link failed/expired. A later request's controlled same-ID retry returned 202; no confirmed link is evidenced. | Resolve the missing genuine callback/link confirmation, then real PHR discovery/link visibility, approved consent, record sharing/notifications and required negative cases. HTTP 202 and synthetic receiver probes are not completed linkage. The alternative MEDIATE user-initiated route needs an approved SMS/HTTPS OTP relay, which the owner has not provisioned. |
 | **M3 — HIU consent/exchange** | Consent request/artefact/data APIs, requester snapshots/admin fields, durable transfer handling, encrypted received storage and protected document/PDF viewer exist. Local crypto interoperability and sample bundle validation are recorded. | Genuine or NHA-approved clinician requester details, actual PHR approval/denial, authorized counterparty data, encrypted receive/decrypt/validate/display/receipt, revocation/expiry and evidence. No complete live HIU consent/data exchange is recorded. A synthetic local viewer test is not M3. |
 
-**Supported content is five HI types**, with both lab and imaging represented
+**Supported content is six HI types**, with both lab and imaging represented
 under DiagnosticReport: Prescription, DiagnosticReport, OPConsultation,
-DischargeSummary and WellnessRecord (`hip/gateway.py::HI_TYPES`). Historical
+DischargeSummary, WellnessRecord and ImmunizationRecord
+(`hip/gateway.py::HI_TYPES`). ImmunizationRecord (2 October, migration 0092)
+is one recorded vaccine dose, a care context with no visit; vaccine, site and
+route travel as text because the catalogue holds no SNOMED concepts. Historical
 samples validated against NRCeS 6.5.0 with HL7 validator 6.9.12; that does not
 validate every future clinical document or settle current assigned case scope.
 The supplied FAQ/workbook conflict on required types remains: confirm with NHA.
-ImmunizationRecord, HealthDocumentRecord and InvoiceRecord must have legitimate
-source workflows and mappings if in scope; do not generate dummy content.
+HealthDocumentRecord and InvoiceRecord must have legitimate source workflows and
+mappings if in scope; do not generate dummy content.
 
 **Callback diagnostics are built and merged, not a cure proven against NHA.**
 Migration 0073 adds durable encrypted/redacted receipts; nginx persists bounded
