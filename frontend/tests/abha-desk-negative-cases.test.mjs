@@ -36,7 +36,19 @@ function panelParts(runtime, api) {
     "./api": api,
     "./patientValidation": compile(source("patientValidation.ts"), {}),
   });
-  return { "./AbhaConsentDeclaration": consent, "./DemographicAbhaEnrolment": demographic };
+  const licence = compile(source("DrivingLicenceAbhaEnrolment.tsx"), {
+    ...runtime,
+    "@/lib/api": { ApiError: TestApiError, newIdempotencyKey: () => "synthetic-key" },
+    "./AbhaConsentDeclaration": consent,
+    "./api": api,
+    "./licencePhoto": { prepareLicencePhoto: async () => "c3ludGhldGlj" },
+    "./patientValidation": compile(source("patientValidation.ts"), {}),
+  });
+  return {
+    "./AbhaConsentDeclaration": consent,
+    "./DemographicAbhaEnrolment": demographic,
+    "./DrivingLicenceAbhaEnrolment": licence,
+  };
 }
 
 function desk(apiStubs) {

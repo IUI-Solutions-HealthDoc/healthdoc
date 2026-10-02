@@ -61,6 +61,7 @@ function harness(kind) {
     dependencies["./AbhaConsentDeclaration"] = compile("../src/features/receptionist/AbhaConsentDeclaration.tsx", dependencies);
     // Not exercised here: the demographic route has no OTP session to switch away from.
     dependencies["./DemographicAbhaEnrolment"] = { DemographicAbhaEnrolment: () => null };
+    dependencies["./DrivingLicenceAbhaEnrolment"] = { DrivingLicenceAbhaEnrolment: () => null };
     component = compile("../src/features/receptionist/AbhaIdentityPanel.tsx", dependencies).AbhaIdentityPanel;
   } else if (kind === "access") {
     for (const name of ["Alert", "Box", "CircularProgress", "Stack", "Typography"]) dependencies[`@mui/material/${name}`] = name;

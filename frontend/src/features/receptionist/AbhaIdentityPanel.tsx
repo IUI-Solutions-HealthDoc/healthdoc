@@ -22,6 +22,7 @@ import {
 } from "./api";
 import { AbhaConsentDeclaration, declarationAccepted, defaultTicks } from "./AbhaConsentDeclaration";
 import { DemographicAbhaEnrolment } from "./DemographicAbhaEnrolment";
+import { DrivingLicenceAbhaEnrolment } from "./DrivingLicenceAbhaEnrolment";
 import { digitsOnly, isValidAbhaInput, normaliseIndianMobileInput } from "./patientValidation";
 import type { AbhaDeclaration, AbhaIdentityLinked, AbhaLoginIdentifier, ConsentLanguage } from "./types";
 
@@ -35,8 +36,9 @@ const ENROLMENT_CONSENT = {
 };
 
 
-/** "demographic": M1 CRT_ABHA_301-309, Aadhaar demographics without an OTP. */
-type Flow = "existing" | "new" | "demographic";
+/** "demographic": M1 CRT_ABHA_301-309, Aadhaar demographics without an OTP.
+ *  "licence": M1 CRT_ABHA_401-411, a driving licence; yields an enrolment number. */
+type Flow = "existing" | "new" | "demographic" | "licence";
 /** How an existing ABHA is proven: OTP to its linked mobile, or through Aadhaar. */
 type Method = "abha-number" | "aadhaar" | "abha-address" | "mobile";
 
@@ -293,8 +295,8 @@ function PatientAbhaIdentity({ patient }: Props) {
 
   async function resendOtp() {
     const current = requestedIdentifier.current;
-    // The demographic flow has no OTP session, so it never reaches a resend.
-    if (!sessionId || !current || !canResend || flow === "demographic") return;
+    // The demographic and licence flows own their sessions, so never reach this resend.
+    if (!sessionId || !current || !canResend || flow === "demographic" || flow === "licence") return;
     const generation = beginRequest();
     if (generation === null) return;
     setBusy(true);
@@ -538,11 +540,13 @@ function PatientAbhaIdentity({ patient }: Props) {
         <button type="button" onClick={() => changeFlow("existing")} aria-pressed={flow === "existing"} className={`rounded-md border px-3 py-2 text-sm ${flow === "existing" ? "border-primary bg-primary/10" : "border-border"}`}>{t("receptionist.abha.useExisting")}</button>
         <button type="button" onClick={() => changeFlow("new")} aria-pressed={flow === "new"} className={`rounded-md border px-3 py-2 text-sm ${flow === "new" ? "border-primary bg-primary/10" : "border-border"}`}>{t("receptionist.abha.create")}</button>
         <button type="button" onClick={() => changeFlow("demographic")} aria-pressed={flow === "demographic"} className={`rounded-md border px-3 py-2 text-sm ${flow === "demographic" ? "border-primary bg-primary/10" : "border-border"}`}>{t("receptionist.abha.createDemographic")}</button>
+        <button type="button" onClick={() => changeFlow("licence")} aria-pressed={flow === "licence"} className={`rounded-md border px-3 py-2 text-sm ${flow === "licence" ? "border-primary bg-primary/10" : "border-border"}`}>{t("receptionist.abha.createLicence")}</button>
       </div>
 
       {flow === "demographic" ? (
         <DemographicAbhaEnrolment patient={patient} onLinked={setLinked} />
       ) : null}
+      {flow === "licence" ? <DrivingLicenceAbhaEnrolment patient={patient} /> : null}
 
       {flow === "existing" && !sessionId ? (
         <div className="flex flex-wrap gap-2" role="group" aria-label="Verification method">
@@ -553,7 +557,7 @@ function PatientAbhaIdentity({ patient }: Props) {
         </div>
       ) : null}
 
-      {flow === "demographic" ? null : accounts.length > 0 ? (
+      {flow === "demographic" || flow === "licence" ? null : accounts.length > 0 ? (
         <fieldset className="space-y-3">
           <legend className="text-sm text-muted-foreground">ABDM returned more than one account. Choose the one that belongs to this patient.</legend>
           {accounts.map((account) => (

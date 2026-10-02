@@ -75,6 +75,12 @@ _HINDI = {
     ),
 }
 OWNERSHIPS = frozenset({"government", "private"})
+#: How the ABHA is created. NHA's second statement is the switch: unticked for
+#: Aadhaar, ticked for a document other than Aadhaar (driving licence).
+METHODS = frozenset({"aadhaar", "document"})
+#: For a document, these two statements trade places: the Aadhaar statement
+#: must stay unticked (no Aadhaar is shared) and the document one is required.
+_DOCUMENT_FLIPS = {"aadhaar_sharing": (False, False), "other_document": (True, True)}
 
 
 @dataclass(frozen=True)
@@ -162,7 +168,12 @@ class DeclarationRefused(ValueError):
 
 
 def declaration(
-    *, ownership: str | None, health_worker: str, beneficiary: str, language: str = "en"
+    *,
+    ownership: str | None,
+    health_worker: str,
+    beneficiary: str,
+    language: str = "en",
+    method: str = "aadhaar",
 ) -> dict:
     """The exact declaration this desk shows for this patient, staff member and facility.
 
@@ -185,6 +196,8 @@ def declaration(
             "enrolment_consent_language_unavailable",
             "No translation of this consent is available in that language",
         )
+    if method not in METHODS:
+        raise DeclarationRefused("enrolment_method_unknown", "Unknown ABHA creation method")
     government = ownership == "government"
 
     def text(statement: _Statement) -> str:
@@ -193,20 +206,25 @@ def declaration(
         return _HINDI[statement.id].replace("{gov}", "सरकारी " if government else "")
 
     intro = DECLARATION_INTRO if language == "en" else _HINDI["intro"]
+    flips = _DOCUMENT_FLIPS if method == "document" else {}
     statements = [
         {
             "id": s.id,
             "text": text(s).format(health_worker=worker, beneficiary=patient),
-            "ticked": s.ticked,
-            "required": s.required,
+            "ticked": flips.get(s.id, (s.ticked, s.required))[0],
+            "required": flips.get(s.id, (s.ticked, s.required))[1],
         }
         for s in _statements(government)
     ]
-    shown = json.dumps([language, intro, statements], ensure_ascii=False, sort_keys=True)
+    # The method changes which ticks are required, so it is part of what the
+    # desk was shown; an Aadhaar digest cannot authorise a document enrolment.
+    shown_parts = [language, intro, statements] + ([method] if method != "aadhaar" else [])
+    shown = json.dumps(shown_parts, ensure_ascii=False, sort_keys=True)
     return {
         "version": DECLARATION_VERSION,
         "ownership": ownership,
         "language": language,
+        "method": method,
         "intro": intro,
         "notice": HINDI_NOTICE if language == "hi" else None,
         "statements": statements,
@@ -225,6 +243,11 @@ def accept_declaration(shown: dict, choices: Mapping[str, bool]) -> dict[str, bo
         )
     for statement in shown["statements"]:
         if statement["required"] is False and choices[statement["id"]]:
+            if statement["id"] == "aadhaar_sharing":
+                raise DeclarationRefused(
+                    "enrolment_aadhaar_selected",
+                    "The patient chose Aadhaar; a driving-licence enrolment shares no Aadhaar",
+                )
             raise DeclarationRefused(
                 "enrolment_other_document_selected",
                 "The patient chose a document other than Aadhaar; Aadhaar OTP is not sent",

@@ -145,10 +145,14 @@ export interface AbhaEnrolmentConsent {
 }
 
 /** NHA's published ABHA consent as the server rendered it for this patient. */
+/** How the ABHA is created; a document flips NHA's first two statements. */
+export type ConsentMethod = "aadhaar" | "document";
+
 export interface AbhaDeclaration {
   version: string;
   ownership: "government" | "private";
   language: ConsentLanguage;
+  method: ConsentMethod;
   /** Set for a translation: says it is HealthDoc's, not NHA's, wording. */
   notice: string | null;
   intro: string;
@@ -352,3 +356,16 @@ export interface StaleVisitsReconcileResult {
   skipped_details: Array<{ visit_id?: string; reason?: string }>;
 }
 
+
+/**
+ * M1 CRT_ABHA_405-408: a driving-licence enrolment. The number is provisional
+ * until a participating facility verifies the licence; it is never linked to
+ * the chart as an ABHA.
+ */
+export interface DrivingLicenceEnrolmentResult {
+  enrolment_number: string;
+  enrolment_state: string | null;
+  abha_address: string | null;
+  is_new: boolean | null;
+  linked: false;
+}

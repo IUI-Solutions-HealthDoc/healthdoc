@@ -73,6 +73,8 @@ class OtpPurpose(str, Enum):
     VERIFY_MOBILE = "verify_mobile"
     #: Authenticate an EXISTING ABHA the patient already holds.
     LOGIN_BY_ABHA = "login_by_abha"
+    #: Enrol with a driving licence after a mobile OTP (dl-flow).
+    ENROL_BY_DOCUMENT = "enrol_by_document"
 
 
 class OtpSessionNotFound(Exception):

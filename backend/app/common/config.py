@@ -130,6 +130,9 @@ class Settings(BaseSettings):
     abdm_path_enrol_auth_by_abdm: str = "/v3/enrollment/auth/byAbdm"
     abdm_path_enrol_suggestion: str = "/v3/enrollment/enrol/suggestion"
     abdm_path_enrol_abha_address: str = "/v3/enrollment/enrol/abha-address"
+    #: Driving-licence enrolment (M1 CRT_ABHA_401-411); returns a provisional
+    #: enrolment number, not an ABHA number.
+    abdm_path_enrol_by_document: str = "/v3/enrollment/enrol/byDocument"
     abdm_path_profile_account: str = "/v3/profile/account"
     abdm_path_profile_abha_card: str = "/v3/profile/account/abha-card"
     abdm_path_login_request_otp: str = "/v3/profile/login/request/otp"
