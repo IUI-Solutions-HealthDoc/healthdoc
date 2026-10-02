@@ -149,3 +149,58 @@ async def test_optional_statements_may_be_declined_and_every_tick_is_audited(des
         "share_for_care": True, "anonymised_use": False, "health_worker": True, "beneficiary": True,
     }
     assert AADHAAR not in str(row.new_value)
+
+
+def test_hindi_is_the_same_seven_statements_with_the_same_rules():
+    english, hindi = _shown(), ec.declaration(
+        ownership="government", health_worker="Nurse Shweta", beneficiary="Aarav Sharma", language="hi")
+    assert hindi["language"] == "hi" and hindi["notice"] and english["notice"] is None
+    assert [(s["id"], s["ticked"], s["required"]) for s in hindi["statements"]] == [
+        (s["id"], s["ticked"], s["required"]) for s in english["statements"]]
+    texts = [s["text"] for s in hindi["statements"]]
+    assert hindi["intro"].startswith("मैं एतद्द्वारा")
+    assert "Nurse Shweta" in texts[5] and "Aarav Sharma" in texts[6]
+    assert "सरकारी" in texts[2] and "सरकारी" in texts[4]
+    assert hindi["sha256"] != english["sha256"], "the digest pins the language shown"
+
+
+def test_hindi_for_a_private_facility_drops_only_the_word_government():
+    government = [s["text"] for s in ec.declaration(
+        ownership="government", health_worker="W", beneficiary="B", language="hi")["statements"]]
+    private = [s["text"] for s in ec.declaration(
+        ownership="private", health_worker="W", beneficiary="B", language="hi")["statements"]]
+    assert all("सरकारी" not in text for text in private)
+    assert private == [text.replace("सरकारी ", "") for text in government]
+
+
+def test_a_language_without_a_translation_is_refused():
+    with pytest.raises(ec.DeclarationRefused) as refused:
+        ec.declaration(ownership="government", health_worker="W", beneficiary="B", language="ta")
+    assert refused.value.code == "enrolment_consent_language_unavailable"
+
+
+async def test_the_desk_can_show_and_record_the_hindi_consent(desk):  # noqa: F811
+    shown = await desk["client"].get(
+        "/abdm/abha/enrol/consent", params={"patient_id": str(desk["patient"].id), "language": "hi"})
+    assert shown.status_code == 200, shown.text
+    declaration = shown.json()["declaration"]
+    assert declaration["language"] == "hi" and "HealthDoc" in declaration["notice"]
+    desk["gateway"].responses = [{"txnId": "abdm-txn-1"}]
+    statements = {row["id"]: row["ticked"] for row in declaration["statements"]}
+    statements.update({"health_worker": True, "beneficiary": True})
+    consent = {"granted": True, "code": "abha-enrollment", "version": "1.4", "language": "hi",
+               "statements": statements, "declaration_sha256": declaration["sha256"]}
+    response = await _request(desk, consent)
+    assert response.status_code == 200, response.text
+    row = (await desk["db"].execute(
+        select(AuditLog).where(AuditLog.resource_type == "abha_enrolment_consent"))).scalar_one()
+    assert row.new_value["language"] == "hi"
+    assert row.new_value["declaration_sha256"] == declaration["sha256"]
+
+
+async def test_english_ticks_against_the_hindi_text_are_not_recorded(desk):  # noqa: F811
+    consent = await consent_for(desk)  # English digest
+    consent["language"] = "hi"
+    response = await _request(desk, consent)
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "enrolment_declaration_changed"
