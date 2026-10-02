@@ -2,16 +2,20 @@
 
 Usage:
     python -m scripts.import_lgd_districts <lgd-districts.csv> <out.json>
+    python -m scripts.import_lgd_districts --from-hfr <out.json>
 
-Download the CSV from the Local Government Directory (lgdirectory.gov.in,
-Download Directory > District). Its column titles have changed over time, so
-each column is found by any of the known titles below; an export with none of
-them stops here with the titles it does have, rather than guessing a column.
-Point ABDM_LGD_REFERENCE_PATH at the written file.
+Either download the CSV from the Local Government Directory (lgdirectory.gov.in,
+Download Directory > District), or read the same LGD codes from ABDM's Health
+Facility Registry with this server's ABDM credentials (--from-hfr). The CSV's
+column titles have changed over time, so each column is found by any of the
+known titles below; an export with none of them stops here with the titles it
+does have, rather than guessing a column. Point ABDM_LGD_REFERENCE_PATH at the
+written file.
 """
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import json
 import sys
@@ -70,11 +74,56 @@ def convert(source: Path) -> dict:
     return reference
 
 
+def _rows(body: object, what: str) -> list[dict]:
+    if not isinstance(body, list) or not all(isinstance(row, dict) for row in body):
+        raise SystemExit(f"HFR returned no {what} list")
+    return body
+
+
+def _named(rows: list[dict], what: str) -> dict[str, str]:
+    named: dict[str, str] = {}
+    for row in rows:
+        code, name = str(row.get("code") or "").strip(), str(row.get("name") or "").strip()
+        if not code or not name:
+            raise SystemExit(f"HFR returned a {what} without a code or name")
+        if named.setdefault(code, name) != name:
+            raise SystemExit(f"HFR returned {what} {code} with two names")
+    return named
+
+
+async def from_hfr() -> dict:
+    """The same LGD codes, read from HFR (GET /v1.5/facility/lgd/states).
+
+    HFR's state rows may carry their districts; a state that comes without
+    them is asked for its own list. A state with no districts at all stops the
+    import, because the desk could never choose one there.
+    """
+    from app.integrations.abdm.hfr import client as hfr
+
+    states: dict[str, dict] = {}
+    for row in _rows(await hfr.lgd_states(), "state"):
+        code, name = next(iter(_named([row], "state").items()))
+        districts = row.get("districts") or _rows(await hfr.lgd_districts(code), "district")
+        named = _named(_rows(districts, "district"), "district")
+        if not named:
+            raise SystemExit(f"HFR returned no districts for state {code} ({name})")
+        if code in states:
+            raise SystemExit(f"HFR returned state {code} twice")
+        states[code] = {"name": name, "districts": named}
+    reference = {
+        "source": "ABDM HFR /v1.5/facility/lgd",
+        "imported_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "states": states,
+    }
+    validate_reference(reference)
+    return reference
+
+
 def main(argv: list[str]) -> int:
     if len(argv) != 3:
         print(__doc__)
         return 2
-    reference = convert(Path(argv[1]))
+    reference = asyncio.run(from_hfr()) if argv[1] == "--from-hfr" else convert(Path(argv[1]))
     Path(argv[2]).write_text(json.dumps(reference, ensure_ascii=False, indent=1), encoding="utf-8")
     districts = sum(len(state["districts"]) for state in reference["states"].values())
     print(f"Wrote {len(reference['states'])} states and {districts} districts to {argv[2]}")
