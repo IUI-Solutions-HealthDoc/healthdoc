@@ -24,7 +24,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import select, tuple_
+from sqlalchemy import and_, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.integrations.abdm import hi_crypto
@@ -282,11 +282,21 @@ async def list_care_contexts_for_transfer(
 
     stmt = (
         select(AbdmCareContext)
-        .join(Visit, Visit.id == AbdmCareContext.visit_id)
+        .outerjoin(Visit, Visit.id == AbdmCareContext.visit_id)
         .where(
             AbdmCareContext.facility_id == facility_id,
-            Visit.facility_id == facility_id,
-            Visit.patient_id == AbdmCareContext.patient_id,
+            # A vaccine dose is recorded outside any visit. Every other
+            # document must still sit in this patient's visit at this facility.
+            or_(
+                and_(
+                    AbdmCareContext.visit_id.is_(None),
+                    AbdmCareContext.hi_type == "ImmunizationRecord",
+                ),
+                and_(
+                    Visit.facility_id == facility_id,
+                    Visit.patient_id == AbdmCareContext.patient_id,
+                ),
+            ),
             tuple_(AbdmCareContext.patient_id, AbdmCareContext.reference).in_(permitted_contexts),
             AbdmCareContext.hi_type.in_(authorisation.hi_types),
             AbdmCareContext.document_at.is_not(None),

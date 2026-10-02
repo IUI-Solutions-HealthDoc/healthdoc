@@ -56,7 +56,8 @@ log = logging.getLogger("healthdoc.abdm")
 #: empty-shell failure mode. ImmunizationRecord, HealthDocumentRecord and
 #: Invoice were removed for exactly that reason; re-add one only once
 #: fhir/builder.py can populate it, and the drift test will hold the three sets
-#: together.
+#: together. ImmunizationRecord came back (migration 0092) with a builder for
+#: one recorded vaccine dose.
 HI_TYPES: frozenset[str] = frozenset(
     {
         "OPConsultation",
@@ -64,6 +65,7 @@ HI_TYPES: frozenset[str] = frozenset(
         "DiagnosticReport",
         "DischargeSummary",
         "WellnessRecord",
+        "ImmunizationRecord",
     }
 )
 

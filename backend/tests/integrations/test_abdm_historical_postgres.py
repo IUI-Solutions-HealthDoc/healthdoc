@@ -160,7 +160,7 @@ async def scoped_count(db, model, facility_id):
 async def test_concurrent_historical_apply_creates_each_context_once(pg_historical, monkeypatch):
     sessions, manifest = pg_historical
     first_inside, release_first, second_started = asyncio.Event(), asyncio.Event(), asyncio.Event()
-    publish = historical.publish_document
+    publish = historical.publish_source
     contender_pid = None
     calls = 0
 
@@ -172,7 +172,7 @@ async def test_concurrent_historical_apply_creates_each_context_once(pg_historic
             await asyncio.wait_for(release_first.wait(), timeout=15)
         return await publish(*args, **kwargs)
 
-    monkeypatch.setattr(historical, "publish_document", hold_first)
+    monkeypatch.setattr(historical, "publish_source", hold_first)
 
     async def apply(*, contender=False):
         nonlocal contender_pid
@@ -235,7 +235,7 @@ async def test_postgres_partial_failure_rolls_back_context_job_and_audit(
     pg_historical, monkeypatch
 ):
     sessions, manifest = pg_historical
-    publish = historical.publish_document
+    publish = historical.publish_source
     calls = 0
 
     async def fail_second(*args, **kwargs):
@@ -245,7 +245,7 @@ async def test_postgres_partial_failure_rolls_back_context_job_and_audit(
             raise RuntimeError("Synthetic late failure")
         return await publish(*args, **kwargs)
 
-    monkeypatch.setattr(historical, "publish_document", fail_second)
+    monkeypatch.setattr(historical, "publish_source", fail_second)
     async with sessions() as db:
         with pytest.raises(RuntimeError, match="Synthetic"):
             await historical.register_historical_documents(db, manifest, apply=True)

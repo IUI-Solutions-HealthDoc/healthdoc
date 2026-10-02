@@ -224,7 +224,7 @@ async def test_later_write_failure_rolls_back_batch_even_if_caller_commits(
             reference=f"prescription/{documents[2][1].id}",
         )
     )
-    publish = historical.publish_document
+    publish = historical.publish_source
     calls = 0
 
     async def fail_second(*args, **kwargs):
@@ -234,7 +234,7 @@ async def test_later_write_failure_rolls_back_batch_even_if_caller_commits(
             raise RuntimeError("Simulated source/write failure")
         return await publish(*args, **kwargs)
 
-    monkeypatch.setattr(historical, "publish_document", fail_second)
+    monkeypatch.setattr(historical, "publish_source", fail_second)
     original_actor = AuditActor(uuid.uuid4(), "test-existing-actor", None, None)
     with actor_context(original_actor):
         with pytest.raises(RuntimeError, match="Simulated"):

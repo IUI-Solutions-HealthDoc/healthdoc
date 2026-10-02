@@ -12,10 +12,10 @@ from app.integrations.abdm.fhir.builder import (
 )
 
 
-def test_all_five_record_types_valid():
+def test_all_six_record_types_valid():
     bundles = build_all("patient-123", "HPR-9999")
     assert set(bundles) == set(RECORD_TYPES)
-    assert len(RECORD_TYPES) == 5
+    assert len(RECORD_TYPES) == 6
     for rt, b in bundles.items():
         assert validate_min(b) == [], (rt, validate_min(b))
 
@@ -148,9 +148,23 @@ def test_sandbox_identifier_cannot_impersonate_a_different_account():
         build_clinical_bundle("WellnessRecord", **facts)
 
 
+def _dose(**changes):
+    return {
+        "id": "dose-1",
+        "vaccine": "Test vaccine",
+        "occurred_at": datetime(2026, 1, 2, tzinfo=UTC),
+        "dose_number": 1,
+        **changes,
+    }
+
+
 @pytest.mark.parametrize("record_type", RECORD_TYPES)
 def test_document_label_survives_export_without_changing_the_profile_type(record_type):
-    facts = {**_facts(), "care_plan": "Synthetic test content"}
+    facts = (
+        {**_facts(), "encounter": None, "immunizations": [_dose()]}
+        if record_type == "ImmunizationRecord"
+        else {**_facts(), "care_plan": "Synthetic test content"}
+    )
     original = build_clinical_bundle(record_type, **facts)["entry"][0]["resource"]
     label = "ABDM SANDBOX TEST — SYNTHETIC <not clinical advice> & test only"
     composition = build_clinical_bundle(record_type, **facts, document_label=label)["entry"][0][
@@ -271,3 +285,73 @@ def test_a_text_only_diagnosis_does_not_emit_an_empty_coding_array():
         if entry["resource"]["resourceType"] == "Condition"
     )
     assert condition["code"] == {"text": "Viral fever"}
+
+
+def test_an_immunization_record_needs_no_encounter_and_holds_one_coded_section():
+    bundle = build_clinical_bundle(
+        "ImmunizationRecord", **{**_facts(), "encounter": None}, immunizations=[_dose()]
+    )
+    assert validate_min(bundle) == []
+    kinds = [entry["resource"]["resourceType"] for entry in bundle["entry"]]
+    assert "Encounter" not in kinds and kinds.count("Immunization") == 1
+    composition = bundle["entry"][0]["resource"]
+    assert composition["meta"]["profile"] == [
+        "https://nrces.in/ndhm/fhir/r4/StructureDefinition/ImmunizationRecord"
+    ]
+    assert "encounter" not in composition
+    coding = {"system": "http://snomed.info/sct", "code": "41000179103",
+              "display": "Immunization record"}
+    assert composition["type"]["coding"] == [coding]
+    assert [section["code"]["coding"] for section in composition["section"]] == [[coding]]
+
+
+def test_vaccine_site_and_route_travel_as_text_not_as_guessed_codes():
+    bundle = build_clinical_bundle(
+        "ImmunizationRecord", **{**_facts(), "encounter": None},
+        immunizations=[_dose(site="left_upper_arm", route="intradermal")],
+    )
+    immunization = bundle["entry"][-1]["resource"]
+    assert immunization["vaccineCode"] == {"text": "Test vaccine"}
+    assert immunization["site"] == {"text": "left upper arm"}
+    assert immunization["route"] == {"text": "intradermal"}
+    assert "note" not in immunization and "lotNumber" not in immunization
+
+
+@pytest.mark.parametrize("missing", ["vaccine", "occurred_at", "dose_number"])
+def test_an_immunization_without_its_required_facts_is_refused(missing):
+    with pytest.raises(ValueError, match=missing):
+        build_clinical_bundle(
+            "ImmunizationRecord", **{**_facts(), "encounter": None},
+            immunizations=[_dose(**{missing: None})],
+        )
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [{"care_plan": "Plan"}, {"diagnoses": [{"text": "Fever"}]},
+     {"observations": [{"name": "Pulse rate", "value": 72, "unit": "/min"}]}],
+)
+def test_an_immunization_record_carries_nothing_but_immunizations(extra):
+    with pytest.raises(ValueError, match="immunizations only"):
+        build_clinical_bundle(
+            "ImmunizationRecord", **{**_facts(), "encounter": None},
+            immunizations=[_dose()], **extra,
+        )
+
+
+@pytest.mark.parametrize("record_type", [t for t in RECORD_TYPES if t != "ImmunizationRecord"])
+def test_every_other_document_still_requires_an_encounter_and_refuses_doses(record_type):
+    with pytest.raises(ValueError, match="requires an encounter"):
+        build_clinical_bundle(
+            record_type, **{**_facts(), "encounter": None}, care_plan="Synthetic test content"
+        )
+    with pytest.raises(ValueError, match="cannot carry immunizations"):
+        build_clinical_bundle(record_type, **_facts(), immunizations=[_dose()])
+
+
+def test_the_minimum_check_still_demands_an_encounter_outside_immunization_records():
+    bundle = build_clinical_bundle("WellnessRecord", **_facts(), care_plan="Synthetic")
+    bundle["entry"] = [
+        entry for entry in bundle["entry"] if entry["resource"]["resourceType"] != "Encounter"
+    ]
+    assert validate_min(bundle) == ["bundle must contain a Encounter"]
