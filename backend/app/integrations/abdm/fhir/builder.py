@@ -34,6 +34,7 @@ RECORD_TYPES = (
     "Prescription",
     "DischargeSummary",
     "WellnessRecord",
+    "ImmunizationRecord",
 )
 
 _DOCUMENTS: dict[str, tuple[str, str | None, str]] = {
@@ -44,7 +45,13 @@ _DOCUMENTS: dict[str, tuple[str, str | None, str]] = {
     # WellnessRecord fixes Composition.type.text to this label; unlike the
     # other four document profiles it does not fix a SNOMED document code.
     "WellnessRecord": ("WellnessRecord", None, "Wellness Record"),
+    "ImmunizationRecord": ("ImmunizationRecord", "41000179103", "Immunization record"),
 }
+
+#: Every other document is written within a consultation, admission or order.
+#: A vaccine dose is recorded on its own, and only this profile leaves
+#: Composition.encounter optional.
+_ENCOUNTER_OPTIONAL = frozenset({"ImmunizationRecord"})
 
 _SECTION_CODES = {
     "chief_complaints": ("422843007", "Chief complaint section"),
@@ -55,6 +62,8 @@ _SECTION_CODES = {
     "prescription": ("440545006", "Prescription record"),
     "diagnostic_reports": ("721981007", "Diagnostic studies report"),
     "care_plan": ("734163000", "Care plan"),
+    # ImmunizationRecord fixes its single section's code to the document code.
+    "immunizations": ("41000179103", "Immunization record"),
 }
 
 
@@ -532,6 +541,62 @@ def _diagnostic_report(
     return report, observations, attachments
 
 
+def _immunization(
+    item: Mapping[str, Any],
+    patient: Mapping[str, Any],
+    practitioner: Mapping[str, Any],
+    authored_at: datetime,
+    index: int,
+) -> dict[str, Any]:
+    for required in ("vaccine", "occurred_at", "dose_number"):
+        if not item.get(required):
+            raise ValueError(f"FHIR immunization requires {required}")
+    vaccine = str(item["vaccine"])
+    dose = int(item["dose_number"])
+    if dose < 1:
+        raise ValueError("FHIR immunization dose number must be positive")
+    protocol: dict[str, Any] = {"doseNumberPositiveInt": dose}
+    if item.get("target_disease"):
+        protocol["targetDisease"] = [{"text": str(item["target_disease"])}]
+    resource: dict[str, Any] = {
+        "resourceType": "Immunization",
+        "id": _rid("immunization", item.get("id") or f"{patient['id']}:{index}:{vaccine}"),
+        "meta": _meta("Immunization", authored_at),
+        "text": _narrative(f"Immunization: {vaccine}, dose {dose}"),
+        "status": "completed",
+        # The catalogue holds HealthDoc's own codes (BCG, PENTAVALENT-1), not
+        # SNOMED vaccine products. The NRCeS binding is only preferred, so the
+        # vaccine travels as its catalogue name rather than a guessed concept.
+        "vaccineCode": {"text": vaccine},
+        "patient": _reference(patient),
+        "occurrenceDateTime": _iso(item["occurred_at"]),
+        "performer": [{"actor": _reference(practitioner)}],
+        "protocolApplied": [protocol],
+    }
+    if item.get("lot_number"):
+        resource["lotNumber"] = str(item["lot_number"])
+    if item.get("expiration_date"):
+        resource["expirationDate"] = _iso(item["expiration_date"])
+    if item.get("manufacturer"):
+        # Recorded as a name only; there is no Organization to point at.
+        resource["manufacturer"] = {"display": str(item["manufacturer"])}
+    # Site and route are stored as words (left_upper_arm, intramuscular). The
+    # profile fixes route.coding to SNOMED, so neither is sent as a coding.
+    for field in ("site", "route"):
+        if item.get(field):
+            resource[field] = {"text": str(item[field]).replace("_", " ")}
+    notes = []
+    if item.get("adverse_reaction"):
+        # reaction.detail must reference an Observation that was never
+        # recorded; the nurse's words are kept as an annotation instead.
+        notes.append({"text": f"Adverse reaction: {item['adverse_reaction']}"})
+    if item.get("notes"):
+        notes.append({"text": str(item["notes"])})
+    if notes:
+        resource["note"] = notes
+    return resource
+
+
 def _section(
     key: str,
     resources: Sequence[Mapping[str, Any]],
@@ -560,7 +625,7 @@ def build_clinical_bundle(
     patient: Mapping[str, Any],
     practitioner: Mapping[str, Any],
     organization: Mapping[str, Any],
-    encounter: Mapping[str, Any],
+    encounter: Mapping[str, Any] | None,
     authored_at: datetime,
     care_context_reference: str,
     document_label: str | None = None,
@@ -571,10 +636,23 @@ def build_clinical_bundle(
     medications: Sequence[Mapping[str, Any]] = (),
     diagnostic_reports: Sequence[Mapping[str, Any]] = (),
     care_plan: str | None = None,
+    immunizations: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Build one transfer-ready FHIR document from explicit clinical facts."""
     if record_type not in _DOCUMENTS:
         raise ValueError(f"Unknown ABDM record type: {record_type!r}")
+    if encounter is None and record_type not in _ENCOUNTER_OPTIONAL:
+        raise ValueError(f"{record_type} requires an encounter")
+    immunization_record = record_type == "ImmunizationRecord"
+    other_content = (
+        chief_complaints, diagnoses, allergies, observations, medications, diagnostic_reports
+    )
+    # The ImmunizationRecord section is closed to anything but immunizations,
+    # and immunizations belong to no other document type.
+    if immunization_record and (any(other_content) or care_plan):
+        raise ValueError("ImmunizationRecord carries immunizations only")
+    if immunizations and not immunization_record:
+        raise ValueError(f"{record_type} cannot carry immunizations")
     profile, document_code, document_title = _DOCUMENTS[record_type]
     # Preserve the registered document label (including explicit test warnings)
     # without changing the profile's fixed/coded Composition.type vocabulary.
@@ -582,7 +660,13 @@ def build_clinical_bundle(
     patient_resource = _patient(patient, authored_at)
     practitioner_resource = _practitioner(practitioner, authored_at)
     organization_resource = _organization(organization, authored_at)
-    encounter_resource = _encounter(encounter, patient_resource, authored_at)
+    encounter_resource = (
+        _encounter(encounter, patient_resource, authored_at) if encounter is not None else None
+    )
+    immunization_resources = [
+        _immunization(item, patient_resource, practitioner_resource, authored_at, pos)
+        for pos, item in enumerate(immunizations)
+    ]
 
     complaints = [
         _condition(item, patient_resource, pos) for pos, item in enumerate(chief_complaints)
@@ -635,6 +719,7 @@ def build_clinical_bundle(
         ("allergies", allergy_resources),
         ("medications", medication_resources),
         ("diagnostic_reports", report_resources),
+        ("immunizations", immunization_resources),
     )
     for key, resources in candidates:
         if resources:
@@ -673,19 +758,21 @@ def build_clinical_bundle(
         "status": "final",
         "type": composition_type,
         "subject": _reference(patient_resource, str(patient["name"])),
-        "encounter": _reference(encounter_resource),
         "date": _iso(authored_at),
         "author": [_reference(practitioner_resource, str(practitioner["name"]))],
         "title": composition_title,
         "custodian": _reference(organization_resource, str(organization["name"])),
         "section": sections,
     }
+    if encounter_resource is not None:
+        composition["encounter"] = _reference(encounter_resource)
     resources = [
         composition,
         practitioner_resource,
         organization_resource,
         patient_resource,
-        encounter_resource,
+        *([encounter_resource] if encounter_resource is not None else []),
+        *immunization_resources,
         *complaints,
         *conditions,
         *observation_resources,
@@ -739,6 +826,19 @@ def build_bundle(
 ) -> dict[str, Any]:
     """Compatibility helper for shape tests; production uses the fact mapper."""
     now = datetime.now(UTC)
+    content: dict[str, Any] = (
+        {
+            "encounter": None,
+            "immunizations": [
+                {"vaccine": "FHIR bundle shape test", "occurred_at": now, "dose_number": 1}
+            ],
+        }
+        if record_type == "ImmunizationRecord"
+        else {
+            "encounter": {"id": care_context_id or "shape-test", "status": "closed"},
+            "care_plan": "FHIR bundle shape test",
+        }
+    )
     return build_clinical_bundle(
         record_type,
         patient={
@@ -757,10 +857,9 @@ def build_bundle(
             "name": "HealthDoc",
             "hfr_id": "test-only",
         },
-        encounter={"id": care_context_id or "shape-test", "status": "closed"},
         authored_at=now,
         care_context_reference=care_context_id or "shape-test",
-        care_plan="FHIR bundle shape test",
+        **content,
     )
 
 
@@ -791,7 +890,13 @@ def validate_min(bundle: Mapping[str, Any]) -> list[str]:
         errors.append("first entry must be a Composition")
     if not first.get("section"):
         errors.append("Composition must contain clinical sections")
-    for required in ("Patient", "Practitioner", "Organization", "Encounter"):
+    required_types = ["Patient", "Practitioner", "Organization"]
+    profile_names = {
+        str(url).rsplit("/", 1)[-1] for url in (first.get("meta") or {}).get("profile") or []
+    }
+    if profile_names.isdisjoint(_ENCOUNTER_OPTIONAL):
+        required_types.append("Encounter")
+    for required in required_types:
         if not any(entry.get("resource", {}).get("resourceType") == required for entry in entries):
             errors.append(f"bundle must contain a {required}")
     return errors

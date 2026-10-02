@@ -11,10 +11,12 @@ from datetime import UTC, datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admissions.models import Admission, Discharge
+from app.immunization.models import ImmunizationRecord
 from app.integrations.abdm.hip.models import AbdmCareContext
 from app.opd.models import Encounter, Visit
 from app.orders.models import Order, Prescription
 from app.pathology.models import LabOrderItem, LabResult
+from app.patients.models import Patient
 from app.radiology.models import RadiologyOrderItem, RadiologyReport
 
 SOURCE_TYPES = {
@@ -24,6 +26,7 @@ SOURCE_TYPES = {
     "radiology-report": "DiagnosticReport",
     "discharge": "DischargeSummary",
     "wellness": "WellnessRecord",
+    "immunization": "ImmunizationRecord",
 }
 
 
@@ -35,7 +38,8 @@ class DocumentUnavailable(ValueError):
 class DocumentSource:
     kind: str
     source_id: uuid.UUID
-    visit: Visit
+    #: None only for an immunization, which is recorded outside any visit.
+    visit: Visit | None
     encounter: Encounter | None
     authored_at: datetime
     author_id: uuid.UUID
@@ -67,6 +71,10 @@ async def resolve_document(
         raise DocumentUnavailable("A canonical finalized-document reference is required") from exc
     if SOURCE_TYPES.get(kind) != hi_type or reference != f"{kind}/{source_id}":
         raise DocumentUnavailable("Document reference and health-information type do not match")
+    if kind == "immunization":
+        return await _immunization_source(
+            db, source_id, patient_id=patient_id, facility_id=facility_id, visit_id=visit_id
+        )
 
     encounter = None
     visit = None
@@ -140,6 +148,33 @@ async def resolve_document(
         encounter,
         _utc(authored_at),
         author_id,
+    )
+
+
+async def _immunization_source(
+    db: AsyncSession,
+    source_id: uuid.UUID,
+    *,
+    patient_id: uuid.UUID,
+    facility_id: uuid.UUID,
+    visit_id: uuid.UUID | None,
+) -> DocumentSource:
+    record = await _fresh(db, ImmunizationRecord, source_id)
+    patient = await _fresh(db, Patient, patient_id) if record is not None else None
+    # The record carries no facility of its own; the chart it was written on
+    # does. A dose belongs to no visit, so a visit-scoped request cannot name it.
+    if (
+        record is None
+        or patient is None
+        or record.patient_id != patient_id
+        or patient.facility_id != facility_id
+        or visit_id is not None
+    ):
+        raise DocumentUnavailable("No finalized document for this patient and facility")
+    # A dose is never edited after it is saved, so the record is final from
+    # then; the time it was given is its content, not its authorship.
+    return DocumentSource(
+        "immunization", source_id, None, None, _utc(record.created_at), record.administered_by
     )
 
 
