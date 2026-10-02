@@ -151,7 +151,8 @@ class Settings(BaseSettings):
     #: refuses rather than calling ABDM without it.
     abdm_benefit_name: str | None = None
     #: JSON file of LGD state and district codes the desk chooses from, written
-    #: by scripts/import_lgd_districts.py from the official LGD directory export.
+    #: by scripts/import_lgd_districts.py from HFR (--from-hfr) or the official
+    #: LGD directory export.
     #: Demographic creation needs LGD codes and refuses until this is loaded;
     #: codes are never typed in or guessed.
     abdm_lgd_reference_path: str | None = None

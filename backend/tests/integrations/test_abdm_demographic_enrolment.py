@@ -149,6 +149,55 @@ def test_importer_refuses_an_export_it_cannot_read_rather_than_guess(tmp_path):
         import_lgd_districts.convert(clash)
 
 
+def _hfr(monkeypatch, states, districts=None):
+    from app.integrations.abdm.hfr import client as hfr
+
+    asked = []
+
+    async def lgd_states():
+        return states
+
+    async def lgd_districts(code):
+        asked.append(code)
+        return (districts or {}).get(code, [])
+
+    monkeypatch.setattr(hfr, "lgd_states", lgd_states)
+    monkeypatch.setattr(hfr, "lgd_districts", lgd_districts)
+    return asked
+
+
+async def test_importer_reads_the_same_lgd_codes_from_hfr(monkeypatch):
+    asked = _hfr(
+        monkeypatch,
+        [
+            {"code": "27", "name": "MAHARASHTRA", "districts": [
+                {"code": "494", "name": "SATARA"}, {"code": "490", "name": "PUNE"}]},
+            {"code": "7", "name": "DELHI"},
+        ],
+        {"7": [{"code": "77", "name": "NEW DELHI"}]},
+    )
+    reference = await import_lgd_districts.from_hfr()
+    assert reference["states"] == REFERENCE["states"]
+    assert asked == ["7"], "a state that came with its districts is not asked again"
+    assert reference["source"] == "ABDM HFR /v1.5/facility/lgd"
+
+
+@pytest.mark.parametrize(
+    ("states", "message"),
+    [
+        ({"error": "unauthorised"}, "no state list"),
+        ([{"code": "27", "name": "MAHARASHTRA"}], "no districts for state 27"),
+        ([{"code": "27", "name": ""}], "without a code or name"),
+        ([{"code": "27", "name": "A", "districts": [{"code": "1", "name": "X"}, {"code": "1", "name": "Y"}]}],
+         "two names"),
+    ],
+)
+async def test_an_hfr_answer_it_cannot_trust_stops_the_import(monkeypatch, states, message):
+    _hfr(monkeypatch, states)
+    with pytest.raises(SystemExit, match=message):
+        await import_lgd_districts.from_hfr()
+
+
 # ------------------------------------------------------------------ route
 
 
