@@ -321,6 +321,7 @@ export const en = {
     "Verify and link the identity for {name}. The linking credential stays encrypted on the server.",
   "receptionist.abha.useExisting": "Use existing ABHA",
   "receptionist.abha.create": "Create ABHA",
+  "receptionist.abha.createDemographic": "Create with Aadhaar demographics",
   "receptionist.abha.methodAbhaMobile": "OTP to ABHA-linked mobile",
   "receptionist.abha.methodAadhaar": "OTP through Aadhaar",
   "receptionist.abha.methodAddress": "ABHA address",

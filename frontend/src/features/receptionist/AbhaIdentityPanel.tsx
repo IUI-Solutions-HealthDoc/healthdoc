@@ -18,6 +18,8 @@ import {
   verifyAbhaLoginOtp,
   verifyEnrolmentMobileOtp,
 } from "./api";
+import { AbhaConsentDeclaration, declarationAccepted, defaultTicks } from "./AbhaConsentDeclaration";
+import { DemographicAbhaEnrolment } from "./DemographicAbhaEnrolment";
 import { digitsOnly, isValidAbhaInput, normaliseIndianMobileInput } from "./patientValidation";
 import type { AbhaDeclaration, AbhaIdentityLinked, AbhaLoginIdentifier } from "./types";
 
@@ -31,15 +33,9 @@ const ENROLMENT_CONSENT = {
   language: "en" as const,
 };
 
-/** Required statements ticked and "a document other than Aadhaar" not. */
-function declarationAccepted(declaration: AbhaDeclaration | null, ticks: Record<string, boolean>): boolean {
-  return declaration !== null && declaration.statements.every((statement) =>
-    statement.required === true ? ticks[statement.id] === true
-      : statement.required === false ? ticks[statement.id] !== true
-        : true);
-}
 
-type Flow = "existing" | "new";
+/** "demographic": M1 CRT_ABHA_301-309, Aadhaar demographics without an OTP. */
+type Flow = "existing" | "new" | "demographic";
 /** How an existing ABHA is proven: OTP to its linked mobile, or through Aadhaar. */
 type Method = "abha-number" | "aadhaar" | "abha-address" | "mobile";
 
@@ -48,7 +44,12 @@ type Method = "abha-number" | "aadhaar" | "abha-address" | "mobile";
 const RESEND_COOLDOWN_SECONDS = 30;
 
 interface Props {
-  patient: { id: string; full_name: string; abha_number?: string | null };
+  /** The optional fields prefill demographic ABHA creation; the desk confirms them. */
+  patient: {
+    id: string; full_name: string; abha_number?: string | null;
+    sex?: string | null; dob?: string | null; mobile?: string | null;
+    address_line?: string | null; pincode?: string | null;
+  };
 }
 
 function refusalCode(reason: unknown): string | null {
@@ -120,7 +121,7 @@ function PatientAbhaIdentity({ patient }: Props) {
         setDeclaration(shown);
         // NHA's published form shows statements 1, 3, 4 and 5 ticked; the
         // patient may untick the optional ones, and both confirmations start empty.
-        setTicks(Object.fromEntries(shown.statements.map((statement) => [statement.id, statement.ticked])));
+        setTicks(defaultTicks(shown));
       },
       (reason: unknown) => {
         if (!disposed) {
@@ -253,7 +254,8 @@ function PatientAbhaIdentity({ patient }: Props) {
 
   async function resendOtp() {
     const current = requestedIdentifier.current;
-    if (!sessionId || !current || !canResend) return;
+    // The demographic flow has no OTP session, so it never reaches a resend.
+    if (!sessionId || !current || !canResend || flow === "demographic") return;
     const generation = beginRequest();
     if (generation === null) return;
     setBusy(true);
@@ -496,7 +498,12 @@ function PatientAbhaIdentity({ patient }: Props) {
       <div className="flex flex-wrap gap-2" role="group" aria-label="ABHA identity flow">
         <button type="button" onClick={() => changeFlow("existing")} aria-pressed={flow === "existing"} className={`rounded-md border px-3 py-2 text-sm ${flow === "existing" ? "border-primary bg-primary/10" : "border-border"}`}>{t("receptionist.abha.useExisting")}</button>
         <button type="button" onClick={() => changeFlow("new")} aria-pressed={flow === "new"} className={`rounded-md border px-3 py-2 text-sm ${flow === "new" ? "border-primary bg-primary/10" : "border-border"}`}>{t("receptionist.abha.create")}</button>
+        <button type="button" onClick={() => changeFlow("demographic")} aria-pressed={flow === "demographic"} className={`rounded-md border px-3 py-2 text-sm ${flow === "demographic" ? "border-primary bg-primary/10" : "border-border"}`}>{t("receptionist.abha.createDemographic")}</button>
       </div>
+
+      {flow === "demographic" ? (
+        <DemographicAbhaEnrolment patient={patient} onLinked={setLinked} />
+      ) : null}
 
       {flow === "existing" && !sessionId ? (
         <div className="flex flex-wrap gap-2" role="group" aria-label="Verification method">
@@ -507,7 +514,7 @@ function PatientAbhaIdentity({ patient }: Props) {
         </div>
       ) : null}
 
-      {accounts.length > 0 ? (
+      {flow === "demographic" ? null : accounts.length > 0 ? (
         <fieldset className="space-y-3">
           <legend className="text-sm text-muted-foreground">ABDM returned more than one account. Choose the one that belongs to this patient.</legend>
           {accounts.map((account) => (
@@ -541,33 +548,12 @@ function PatientAbhaIdentity({ patient }: Props) {
             />
           </label>
           {flow === "new" ? (
-            <fieldset className="space-y-2 rounded-md border border-border p-3 text-sm">
-              <legend className="px-1 font-medium">ABHA consent</legend>
-              {declarationError ? (
-                <p role="alert" className="text-danger">{declarationError}</p>
-              ) : !declaration ? (
-                <p role="status" className="text-muted-foreground">Loading the ABHA consent…</p>
-              ) : (
-                <>
-                  <p>{declaration.intro}</p>
-                  {declaration.statements.map((statement) => (
-                    <label key={statement.id} className={`flex items-start gap-2 ${statement.id === "health_worker" || statement.id === "beneficiary" ? "pl-6" : ""}`}>
-                      <input
-                        type="checkbox"
-                        name={statement.id}
-                        checked={ticks[statement.id] === true}
-                        onChange={(event) => setTicks((current) => ({ ...current, [statement.id]: event.target.checked }))}
-                      />
-                      <span>{statement.text}</span>
-                    </label>
-                  ))}
-                  {ticks.other_document ? (
-                    <p role="alert" className="text-warning">The patient chose a document other than Aadhaar. No Aadhaar OTP is sent while this is ticked.</p>
-                  ) : null}
-                  <p className="text-xs text-muted-foreground">NHA advises showing this consent to the patient on a screen facing them.</p>
-                </>
-              )}
-            </fieldset>
+            <AbhaConsentDeclaration
+              declaration={declaration}
+              error={declarationError}
+              ticks={ticks}
+              onTick={(id, checked) => setTicks((current) => ({ ...current, [id]: checked }))}
+            />
           ) : null}
           <button type="button" disabled={busy || !identifierValid || (flow === "new" && !declarationAccepted(declaration, ticks))} onClick={() => void requestOtp()} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{busy ? t("receptionist.abha.requestingOtp") : t("receptionist.abha.sendOtp")}</button>
         </div>
