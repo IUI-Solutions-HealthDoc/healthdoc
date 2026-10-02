@@ -181,7 +181,8 @@ test("switching patient discards the remembered identifier and open session", as
 
 /** NHA's published statements, as the server renders them (texts shortened). */
 const DECLARATION = {
-  version: "nha-consent-language-1", ownership: "government", intro: "I hereby declare that:", sha256: "a".repeat(64),
+  version: "nha-consent-language-1", ownership: "government", language: "en", notice: null,
+  intro: "I hereby declare that:", sha256: "a".repeat(64),
   statements: [
     { id: "aadhaar_sharing", text: "I am voluntarily sharing my Aadhaar Number", ticked: true, required: true },
     { id: "other_document", text: "using document other than Aadhaar.", ticked: false, required: false },
@@ -210,7 +211,7 @@ test("the desk shows NHA's published consent and sends only once both confirmati
     requestAbhaEnrolmentOtp: async () => ({ session_id: "s1", masked_mobile: null, resends_remaining: 3 }),
   });
   let tree = await openNewAbha(d);
-  assert.deepEqual(d.calls[0], { name: "getAbhaEnrolmentDeclaration", args: ["patient-A"] });
+  assert.deepEqual(d.calls[0], { name: "getAbhaEnrolmentDeclaration", args: ["patient-A", "en"] });
   assert.match(content(tree), /I hereby declare that:/);
   for (const statement of DECLARATION.statements) assert.ok(content(tree).includes(statement.text));
   const ticked = (id) => find(tree, (n) => n.type === "input" && n.props.name === id).props.checked;
@@ -401,4 +402,28 @@ test("an LGD list that cannot be loaded is a refusal, not an empty list", async 
   d.render(); await flush(); tree = d.render();
   assert.match(alertText(tree), /LGD state and district list is not loaded/);
   assert.equal(button(tree, "Create ABHA from these details").props.disabled, true);
+});
+
+
+test("switching the consent to Hindi reloads it, shows the translation notice and sends hi", async () => {
+  const HINDI = { ...DECLARATION, language: "hi", sha256: "b".repeat(64),
+    notice: "हिन्दी अनुवाद HealthDoc द्वारा; NHA का प्रकाशित पाठ अंग्रेज़ी में है।", intro: "मैं एतद्द्वारा घोषणा करता/करती हूँ कि:" };
+  const d = desk({
+    getAbhaEnrolmentDeclaration: async (_patient, language) => (language === "hi" ? HINDI : DECLARATION),
+    requestAbhaEnrolmentOtp: async () => ({ session_id: "s1", masked_mobile: null, resends_remaining: 3 }),
+  });
+  let tree = await openNewAbha(d);
+  tick(tree, "health_worker"); tree = d.render();
+  button(tree, "हिन्दी").props.onClick();
+  d.render(); await flush(); tree = d.render();
+  assert.deepEqual(d.calls.filter((c) => c.name === "getAbhaEnrolmentDeclaration").map((c) => c.args[1]), ["en", "hi"]);
+  assert.match(content(tree), /HealthDoc द्वारा/);
+  assert.equal(find(tree, (n) => n.type === "input" && n.props.name === "health_worker").props.checked, false,
+    "ticks start again for the new text");
+  tick(tree, "health_worker"); tree = d.render();
+  tick(tree, "beneficiary"); tree = d.render();
+  await button(tree, "Send OTP").props.onClick(); await flush();
+  const sent = d.calls.find((c) => c.name === "requestAbhaEnrolmentOtp").args[2];
+  assert.equal(sent.language, "hi");
+  assert.equal(sent.declaration_sha256, HINDI.sha256);
 });
