@@ -26,6 +26,19 @@ const button = (tree, text) => find(tree, (n) => n.type === "button" && content(
 const input = (tree) => find(tree, (n) => n.type === "input");
 const alertText = (tree) => nodes(tree).filter((n) => n.props?.role === "alert").map(content).join(" ");
 
+/** The panel's own child modules, compiled for real against the same stubs. */
+function panelParts(runtime, api) {
+  const consent = compile(source("AbhaConsentDeclaration.tsx"), runtime);
+  const demographic = compile(source("DemographicAbhaEnrolment.tsx"), {
+    ...runtime,
+    "@/lib/api": { ApiError: TestApiError, newIdempotencyKey: () => "synthetic-key" },
+    "./AbhaConsentDeclaration": consent,
+    "./api": api,
+    "./patientValidation": compile(source("patientValidation.ts"), {}),
+  });
+  return { "./AbhaConsentDeclaration": consent, "./DemographicAbhaEnrolment": demographic };
+}
+
 function desk(apiStubs) {
   const calls = [];
   const record = (name, impl) => async (...args) => { calls.push({ name, args }); return impl(...args); };
@@ -35,6 +48,7 @@ function desk(apiStubs) {
     "@/lib/api": { ApiError: TestApiError, newIdempotencyKey: () => "synthetic-key" },
     "./api": api,
     "./patientValidation": compile(source("patientValidation.ts"), {}),
+    ...panelParts(runtime, api),
   }).AbhaIdentityPanel);
   const props = { patient: { id: "patient-A", full_name: "Synthetic Patient", abha_number: null } };
   const render = () => { const tree = h.render(props); h.effects(); return tree; };
@@ -157,6 +171,7 @@ test("switching patient discards the remembered identifier and open session", as
   const h = componentHarness((runtime) => compile(source("AbhaIdentityPanel.tsx"), {
     ...runtime, "@/lib/api": { ApiError: TestApiError, newIdempotencyKey: () => "k" },
     "./api": {}, "./patientValidation": compile(source("patientValidation.ts"), {}),
+    ...panelParts(runtime, {}),
   }).AbhaIdentityPanel);
   const other = h.render({ patient: { id: "patient-B", full_name: "Other Patient", abha_number: null } }); h.effects();
   assert.equal(button(other, "Resend OTP"), undefined);
@@ -290,4 +305,100 @@ test("creating an ABHA requires consent and does not preselect one of several ad
   assert.match(content(tree), /beta@sbx/);
   assert.match(content(tree), /National Health Authority/);
   assert.equal(d.calls.find((c) => c.name === "submitEnrolmentAbhaAddress").args[2], "beta@sbx");
+});
+
+/** M1 CRT_ABHA_301-309: Aadhaar demographic ABHA creation at the desk. */
+function demographicDesk(apiStubs, patient) {
+  const calls = [];
+  const record = (name, impl) => async (...args) => { calls.push({ name, args }); return impl(...args); };
+  const api = Object.fromEntries(Object.entries(apiStubs).map(([name, impl]) => [name, record(name, impl)]));
+  const h = componentHarness((runtime) => compile(source("AbhaIdentityPanel.tsx"), {
+    ...runtime,
+    "@/lib/api": { ApiError: TestApiError, newIdempotencyKey: () => "synthetic-key" },
+    "./api": api,
+    "./patientValidation": compile(source("patientValidation.ts"), {}),
+    ...panelParts(runtime, api),
+  }).AbhaIdentityPanel);
+  const render = () => { const tree = h.render({ patient }); h.effects(); return tree; };
+  return { calls, render };
+}
+
+const field = (tree, name) => find(tree, (n) => (n.type === "input" || n.type === "select") && n.props.name === name);
+const CHART = {
+  id: "patient-A", full_name: "Aarav Sharma", abha_number: null, sex: "male", dob: "1990-05-17",
+  mobile: "+919876543210", address_line: "12 Synthetic Lane", pincode: "415001",
+};
+
+test("demographic creation prefills from the chart, takes LGD codes from the list and binds the result", async () => {
+  const d = demographicDesk({
+    getAbhaEnrolmentDeclaration: async () => DECLARATION,
+    listLgdStates: async () => [{ code: "27", name: "MAHARASHTRA" }],
+    listLgdDistricts: async (state) => (state === "27" ? [{ code: "494", name: "SATARA" }] : []),
+    enrolAbhaByDemographics: async () => ({
+      abha_number: "91-5006-4247-3341", abha_address: "91500642473341@sbx", name: "Aarav Sharma",
+      gender: "M", date_of_birth: "17-05-1990", linked_patient_id: "patient-A", linked: true, has_nha_card: true,
+    }),
+  }, CHART);
+  let tree = d.render();
+  button(tree, "Create with Aadhaar demographics").props.onClick();
+  d.render(); await flush(); tree = d.render();
+  assert.equal(field(tree, "name").props.value, "Aarav Sharma");
+  assert.equal(field(tree, "date_of_birth").props.value, "1990-05-17");
+  assert.equal(field(tree, "gender").props.value, "M");
+  assert.equal(field(tree, "mobile").props.value, "9876543210", "stored E.164 becomes ten national digits");
+  assert.equal(button(tree, "Create ABHA from these details").props.disabled, true);
+
+  field(tree, "aadhaar").props.onChange({ target: { value: "9999 8888 7777" } }); tree = d.render();
+  field(tree, "state_code").props.onChange({ target: { value: "27" } });
+  d.render(); await flush(); tree = d.render();
+  assert.deepEqual(d.calls.find((c) => c.name === "listLgdDistricts").args, ["27"]);
+  field(tree, "district_code").props.onChange({ target: { value: "494" } }); tree = d.render();
+  assert.equal(button(tree, "Create ABHA from these details").props.disabled, true, "the consent confirmations are still empty");
+  tick(tree, "health_worker"); tree = d.render();
+  tick(tree, "beneficiary"); tree = d.render();
+  assert.equal(button(tree, "Create ABHA from these details").props.disabled, false);
+
+  await button(tree, "Create ABHA from these details").props.onClick(); await flush();
+  const [body, key] = d.calls.find((c) => c.name === "enrolAbhaByDemographics").args;
+  assert.equal(key, "synthetic-key");
+  assert.deepEqual({ ...body, consent: undefined }, {
+    aadhaar: "9999 8888 7777", name: "Aarav Sharma", date_of_birth: "1990-05-17", gender: "M",
+    mobile: "9876543210", address: "12 Synthetic Lane", pincode: "415001", state_code: "27",
+    district_code: "494", patient_id: "patient-A", consent: undefined,
+  });
+  assert.equal(body.consent.declaration_sha256, DECLARATION.sha256);
+  assert.equal(body.consent.statements.beneficiary, true);
+  tree = d.render();
+  assert.match(content(tree), /ABHA verified and linked/);
+  assert.match(content(tree), /91-5006-4247-3341/);
+  assert.doesNotMatch(content(tree), /999988887777|9999 8888 7777/);
+});
+
+test("changing the state clears the chosen district", async () => {
+  const d = demographicDesk({
+    getAbhaEnrolmentDeclaration: async () => DECLARATION,
+    listLgdStates: async () => [{ code: "27", name: "MAHARASHTRA" }, { code: "7", name: "DELHI" }],
+    listLgdDistricts: async (state) => (state === "27" ? [{ code: "494", name: "SATARA" }] : [{ code: "77", name: "NEW DELHI" }]),
+  }, CHART);
+  let tree = d.render();
+  button(tree, "Create with Aadhaar demographics").props.onClick();
+  d.render(); await flush(); tree = d.render();
+  field(tree, "state_code").props.onChange({ target: { value: "27" } });
+  d.render(); await flush(); tree = d.render();
+  field(tree, "district_code").props.onChange({ target: { value: "494" } }); tree = d.render();
+  field(tree, "state_code").props.onChange({ target: { value: "7" } }); tree = d.render();
+  assert.equal(field(tree, "district_code").props.value, "", "a district of the previous state is not kept");
+});
+
+test("an LGD list that cannot be loaded is a refusal, not an empty list", async () => {
+  const d = demographicDesk({
+    getAbhaEnrolmentDeclaration: async () => DECLARATION,
+    listLgdStates: async () => { throw new TestApiError(409, "The LGD state and district list is not loaded on this server", { code: "lgd_reference_unavailable" }); },
+    enrolAbhaByDemographics: async () => { throw new Error("must not be sent"); },
+  }, CHART);
+  let tree = d.render();
+  button(tree, "Create with Aadhaar demographics").props.onClick();
+  d.render(); await flush(); tree = d.render();
+  assert.match(alertText(tree), /LGD state and district list is not loaded/);
+  assert.equal(button(tree, "Create ABHA from these details").props.disabled, true);
 });
