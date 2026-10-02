@@ -155,6 +155,10 @@ class Settings(BaseSettings):
     #: Demographic creation needs LGD codes and refuses until this is loaded;
     #: codes are never typed in or guessed.
     abdm_lgd_reference_path: str | None = None
+    #: Health Facility Registry (M4, HFR). NHA moved the sandbox HFR API to
+    #: apihspsbx (v4); the facilitysbx host in the 2024 test-case workbook now
+    #: refuses connections. Same gateway session token as every other call.
+    abdm_hfr_base_url: str = "https://apihspsbx.abdm.gov.in/v4/int"
 
     # ------------------------------------------------------------------
     # M2 (HIP) and M3 (HIU) gateway paths, relative to abdm_gateway_base_url.
