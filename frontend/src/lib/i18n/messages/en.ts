@@ -322,6 +322,7 @@ export const en = {
   "receptionist.abha.useExisting": "Use existing ABHA",
   "receptionist.abha.create": "Create ABHA",
   "receptionist.abha.createDemographic": "Create with Aadhaar demographics",
+  "receptionist.abha.createLicence": "Create with driving licence",
   "receptionist.abha.methodAbhaMobile": "OTP to ABHA-linked mobile",
   "receptionist.abha.methodAadhaar": "OTP through Aadhaar",
   "receptionist.abha.methodAddress": "ABHA address",

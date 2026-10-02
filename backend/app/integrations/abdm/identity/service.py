@@ -526,6 +526,207 @@ async def enrol_by_demographics(
     )
 
 
+# --------------------------------------------- enrol by driving licence
+
+STAGE_DOCUMENT_OTP = "document_otp"
+STAGE_DOCUMENT_DETAILS = "document_details"
+#: NHA's M1 Postman "ABHA Enrolment via DL": both OTP legs carry dl-flow.
+_DOCUMENT_SCOPE = ["abha-enrol", "mobile-verify", "dl-flow"]
+
+
+@dataclass(frozen=True)
+class DocumentEnrolment:
+    """What a driving-licence enrolment returns: an enrolment number, not an ABHA.
+
+    NHA issues the ABHA number only after a participating facility verifies the
+    licence against the person (sandbox docs, "Using Driving License"), so this
+    is never written to a chart as a verified identity.
+    """
+
+    enrolment_number: str
+    enrolment_state: str | None
+    abha_address: str | None
+    is_new: bool | None
+
+
+async def _document_session(session_id: str, facility_id: str) -> OtpSession:
+    return await otp_session.load(
+        session_id, facility_id=facility_id, purpose=OtpPurpose.ENROL_BY_DOCUMENT
+    )
+
+
+async def _send_document_otp(mobile: str) -> tuple[str, str | None]:
+    body = (
+        await _post(
+            get_settings().abdm_path_enrol_request_otp,
+            {
+                "scope": _DOCUMENT_SCOPE,
+                "loginHint": "mobile",
+                "loginId": encrypt_for_abdm(mobile),
+                "otpSystem": "abdm",
+            },
+        )
+    ).body
+    return _txn_id(body), (body.get("message") if isinstance(body, dict) else None)
+
+
+async def request_document_mobile_otp(
+    *,
+    mobile: str,
+    facility_id: str,
+    started_by: str,
+    patient_id: str,
+    consent: EnrolmentConsent | None,
+) -> OtpRequested:
+    """CRT_ABHA_403/404: OTP the communication mobile for a licence enrolment.
+
+    Consent must already be granted; the mobile is encrypted here and stored
+    nowhere. The session remembers the grant so the enrolment leg quotes it.
+    """
+    granted = _require_enrolment_consent(consent)
+    txn_id, message = await _send_document_otp(mobile)
+    session = await otp_session.start(
+        abdm_txn_id=txn_id,
+        purpose=OtpPurpose.ENROL_BY_DOCUMENT,
+        facility_id=facility_id,
+        started_by=started_by,
+        patient_id=patient_id,
+        login_hint="mobile",
+        consent_code=granted.code,
+        consent_version=granted.version,
+        consent_language=granted.language,
+        consent_granted_at=datetime.now(UTC).isoformat(),
+        stage=STAGE_DOCUMENT_OTP,
+    )
+    return OtpRequested(
+        session_id=session.session_id,
+        masked_mobile=message,
+        resends_remaining=otp_session.MAX_RESENDS,
+    )
+
+
+async def resend_document_mobile_otp(
+    *, session_id: str, mobile: str, facility_id: str, started_by: str
+) -> OtpRequested:
+    """A fresh OTP for the same desk attempt, inside the resend limits."""
+    session = await _document_session(session_id, facility_id)
+    if session.started_by != str(started_by):
+        raise otp_session.OtpSessionMismatch
+    _require_stage(session, STAGE_DOCUMENT_OTP)
+    session.resend_allowed()
+    txn_id, message = await _send_document_otp(mobile)
+    resends = session.resends + 1
+    await otp_session.save(otp_session.with_updates(
+        session, abdm_txn_id=txn_id, resends=resends, created_at=datetime.now(UTC).isoformat()
+    ))
+    return OtpRequested(
+        session_id=session.session_id,
+        masked_mobile=message,
+        resends_remaining=otp_session.MAX_RESENDS - resends,
+    )
+
+
+async def verify_document_mobile_otp(*, session_id: str, otp: str, facility_id: str) -> None:
+    """Verify the mobile OTP; the session then waits for the licence details."""
+    session = await _document_session(session_id, facility_id)
+    _require_stage(session, STAGE_DOCUMENT_OTP)
+    body = (
+        await _post(
+            get_settings().abdm_path_enrol_auth_by_abdm,
+            {
+                "scope": _DOCUMENT_SCOPE,
+                "authData": {
+                    "authMethods": ["otp"],
+                    "otp": {
+                        "timeStamp": _abdm_timestamp(),
+                        "txnId": session.abdm_txn_id,
+                        "otpValue": encrypt_for_abdm(otp),
+                    },
+                },
+            },
+        )
+    ).body
+    if not isinstance(body, dict):
+        raise AbdmIdentityError("abdm_bad_response", "gateway returned a non-object body")
+    if body.get("authResult") not in (None, "success"):
+        raise AbdmIdentityError("abdm_auth_failed", "ABDM did not verify this OTP")
+    next_txn = body.get("txnId")
+    await otp_session.save(otp_session.with_updates(
+        session,
+        abdm_txn_id=next_txn if isinstance(next_txn, str) and next_txn else session.abdm_txn_id,
+        stage=STAGE_DOCUMENT_DETAILS,
+    ))
+
+
+async def enrol_by_driving_licence(
+    *,
+    session_id: str,
+    facility_id: str,
+    licence_number: str,
+    first_name: str,
+    middle_name: str,
+    last_name: str,
+    date_of_birth,
+    gender: str,
+    front_photo: str,
+    back_photo: str,
+    address: str,
+    state: str,
+    district: str,
+    pincode: str,
+) -> DocumentEnrolment:
+    """CRT_ABHA_405/406: submit the licence and its photos for an enrolment number.
+
+    The photos are base64 and travel to ABDM only; nothing here keeps them.
+    State and district go as names: NHA's Postman leaves them as placeholders
+    and the swagger's examples are names ("Delhi", "Pune").
+    """
+    session = await _document_session(session_id, facility_id)
+    _require_stage(session, STAGE_DOCUMENT_DETAILS)
+    body = (
+        await _post(
+            get_settings().abdm_path_enrol_by_document,
+            {
+                "txnId": session.abdm_txn_id,
+                "documentType": "DRIVING_LICENCE",
+                "documentId": licence_number,
+                "firstName": first_name,
+                "middleName": middle_name,
+                "lastName": last_name,
+                "dob": demographic_date(date_of_birth),
+                "gender": gender,
+                "frontSidePhoto": front_photo,
+                "backSidePhoto": back_photo,
+                "address": address,
+                "state": state,
+                "district": district,
+                "pinCode": pincode,
+                "consent": _consent_from_session(session),
+            },
+        )
+    ).body
+    profile = body.get("enrolProfile") if isinstance(body, dict) else None
+    number = profile.get("enrolmentNumber") if isinstance(profile, dict) else None
+    if not isinstance(number, str) or not number.strip():
+        raise AbdmIdentityError(
+            "abdm_no_enrolment_returned", "ABDM returned no enrolment number for this licence"
+        )
+    addresses = [
+        value.strip()
+        for value in (profile.get("phrAddress") or [])
+        if isinstance(value, str) and value.strip()
+    ]
+    await otp_session.finish(session_id)
+    is_new = body.get("isNew")
+    state_value = profile.get("enrolmentState")
+    return DocumentEnrolment(
+        enrolment_number=number.strip(),
+        enrolment_state=state_value if isinstance(state_value, str) else None,
+        abha_address=addresses[0] if addresses else None,
+        is_new=is_new if isinstance(is_new, bool) else None,
+    )
+
+
 # ---------------------------------------------------------- login by ABHA
 
 

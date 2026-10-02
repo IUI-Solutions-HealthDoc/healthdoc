@@ -7,6 +7,8 @@ import type {
   PatientSearchResponse,
   AbhaDeclaration,
   ConsentLanguage,
+  ConsentMethod,
+  DrivingLicenceEnrolmentResult,
   AbhaEnrolmentConsent,
   AbhaIdentityLinked,
   AbhaLoginIdentifier,
@@ -60,14 +62,22 @@ function loginIdentifierBody(identifier: AbhaLoginIdentifier): Record<string, st
   return { abha_number: digitsOnly(identifier.abha_number) };
 }
 
+/** M1 VRFY_ABHA_301: a self-hosted image challenge for the mobile lookup. */
+export interface AbhaCaptcha { captcha_id: string; image: string }
+
+export function getAbhaCaptcha(): Promise<AbhaCaptcha> {
+  return api<AbhaCaptcha>("/abdm/abha/captcha");
+}
+
 export function requestAbhaLoginOtp(
   patientId: string,
   identifier: AbhaLoginIdentifier,
   idempotencyKey: string,
+  captcha?: { captcha_id: string; captcha_answer: string },
 ): Promise<AbhaOtpRequested> {
   return api<AbhaOtpRequested>("/abdm/abha/login/request-otp", {
     method: "POST",
-    body: JSON.stringify({ patient_id: patientId, ...loginIdentifierBody(identifier) }),
+    body: JSON.stringify({ patient_id: patientId, ...loginIdentifierBody(identifier), ...(captcha ?? {}) }),
     idempotencyKey,
   });
 }
@@ -117,9 +127,10 @@ export function verifyAbhaLoginOtp(
 export async function getAbhaEnrolmentDeclaration(
   patientId: string,
   language: ConsentLanguage = "en",
+  method: ConsentMethod = "aadhaar",
 ): Promise<AbhaDeclaration> {
   const result = await api<{ declaration: AbhaDeclaration }>(
-    `/abdm/abha/enrol/consent?patient_id=${encodeURIComponent(patientId)}&language=${language}`,
+    `/abdm/abha/enrol/consent?patient_id=${encodeURIComponent(patientId)}&language=${language}&method=${method}`,
   );
   return result.declaration;
 }
@@ -216,6 +227,76 @@ export function enrolAbhaByDemographics(
   return api<AbhaIdentityLinked>("/abdm/abha/enrol/demographic", {
     method: "POST",
     body: JSON.stringify({ ...body, aadhaar: digitsOnly(body.aadhaar) }),
+    idempotencyKey,
+  });
+}
+
+export function requestLicenceEnrolmentOtp(
+  patientId: string,
+  mobile: string,
+  consent: AbhaEnrolmentConsent,
+  idempotencyKey: string,
+): Promise<AbhaOtpRequested> {
+  return api<AbhaOtpRequested>("/abdm/abha/enrol/driving-licence/request-otp", {
+    method: "POST",
+    body: JSON.stringify({ patient_id: patientId, mobile, consent }),
+    idempotencyKey,
+  });
+}
+
+export function resendLicenceEnrolmentOtp(
+  patientId: string,
+  sessionId: string,
+  mobile: string,
+  idempotencyKey: string,
+): Promise<AbhaOtpRequested> {
+  return api<AbhaOtpRequested>("/abdm/abha/enrol/driving-licence/resend-otp", {
+    method: "POST",
+    body: JSON.stringify({ patient_id: patientId, session_id: sessionId, mobile }),
+    idempotencyKey,
+  });
+}
+
+export function verifyLicenceEnrolmentOtp(
+  patientId: string,
+  sessionId: string,
+  otp: string,
+  idempotencyKey: string,
+): Promise<void> {
+  return api<void>("/abdm/abha/enrol/driving-licence/verify-otp", {
+    method: "POST",
+    body: JSON.stringify({ patient_id: patientId, session_id: sessionId, otp }),
+    idempotencyKey,
+  });
+}
+
+/** M1 CRT_ABHA_405/406: the licence as printed and both sides photographed. */
+export interface DrivingLicenceEnrolment {
+  session_id: string;
+  patient_id: string;
+  licence_number: string;
+  first_name: string;
+  middle_name: string;
+  last_name: string;
+  date_of_birth: string;
+  gender: "M" | "F" | "O";
+  address: string;
+  pincode: string;
+  state_code: string;
+  district_code: string;
+  front_photo: string;
+  back_photo: string;
+  /** CRT_ABHA_407: the operator checked the licence against the person. */
+  operator_verified: true;
+}
+
+export function enrolByDrivingLicence(
+  body: DrivingLicenceEnrolment,
+  idempotencyKey: string,
+): Promise<DrivingLicenceEnrolmentResult> {
+  return api<DrivingLicenceEnrolmentResult>("/abdm/abha/enrol/driving-licence", {
+    method: "POST",
+    body: JSON.stringify(body),
     idempotencyKey,
   });
 }
