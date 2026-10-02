@@ -255,6 +255,8 @@ const ROLE_DASHBOARDS = [
         expectCalls: true,
         requiredRequests: [{ method: "GET", path: "/api/v1/abdm/operations/jobs" }],
       },
+      // HFR lists load only when name search is opened; nothing calls HFR on arrival.
+      { path: "/admin/hfr", expectCalls: false },
       { path: "/audit-viewer", expectCalls: true },
       {
         path: "/admin/data-protection",
