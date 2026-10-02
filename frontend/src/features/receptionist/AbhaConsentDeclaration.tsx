@@ -2,7 +2,7 @@
 
 import type { AbhaDeclaration, ConsentLanguage } from "./types";
 
-/** Required statements ticked and "a document other than Aadhaar" not. */
+/** Required statements ticked; the statement the method excludes left unticked. */
 export function declarationAccepted(declaration: AbhaDeclaration | null, ticks: Record<string, boolean>): boolean {
   return declaration !== null && declaration.statements.every((statement) =>
     statement.required === true ? ticks[statement.id] === true
@@ -53,8 +53,11 @@ export function AbhaConsentDeclaration({ declaration, error, ticks, onTick, lang
               <span>{statement.text}</span>
             </label>
           ))}
-          {ticks.other_document ? (
+          {ticks.other_document && declaration.method !== "document" ? (
             <p role="alert" className="text-warning">The patient chose a document other than Aadhaar. No Aadhaar request is sent while this is ticked.</p>
+          ) : null}
+          {ticks.aadhaar_sharing && declaration.method === "document" ? (
+            <p role="alert" className="text-warning">The patient chose Aadhaar. A driving-licence enrolment shares no Aadhaar; untick it or use an Aadhaar flow.</p>
           ) : null}
           <p className="text-xs text-muted-foreground">NHA advises showing this consent to the patient on a screen facing them.</p>
         </>

@@ -9,13 +9,14 @@ Follows the same graceful-degradation pattern as integrations/icd11/client.py:
 a rural facility going offline must not break registration.
 """
 
+import base64
 import logging
 import uuid
 from datetime import UTC, date, datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit.actions import AuditAction
 from app.audit.service import write_audit_log
 from app.auth.deps import CurrentDbUser, require_roles
+from app.common import captcha
 from app.common.config import get_settings
 from app.common.db import get_db
 from app.common.enums import AbhaProfileTokenKind, IdentityStatus
@@ -354,6 +356,10 @@ class AbhaLoginOtpRequest(BaseModel):
     abha_address: str | None = Field(default=None, min_length=3, max_length=120)
     mobile: str | None = Field(default=None, pattern=r"^\d{10}$")
     patient_id: uuid.UUID
+    #: Required with `mobile` (M1 VRFY_ABHA_301 "Captcha preferred"): the
+    #: challenge from GET /captcha and the characters the desk read from it.
+    captcha_id: str | None = Field(default=None, max_length=64)
+    captcha_answer: str | None = Field(default=None, max_length=16)
 
     @model_validator(mode="after")
     def _exactly_one_identifier(self) -> "AbhaLoginOtpRequest":
@@ -443,7 +449,11 @@ _CLIENT_IDENTITY_CODES = {
 
 
 async def _declaration_for(
-    db: AsyncSession, actor: CurrentDbUser, patient: Patient, language: str = "en"
+    db: AsyncSession,
+    actor: CurrentDbUser,
+    patient: Patient,
+    language: str = "en",
+    method: str = "aadhaar",
 ) -> dict:
     """NHA's ABHA consent as this desk must show it for this patient."""
     facility = await db.get(Facility, actor.facility_id)
@@ -454,6 +464,7 @@ async def _declaration_for(
             health_worker=staff.full_name if staff else "",
             beneficiary=patient.full_name or "",
             language=language.strip().lower(),
+            method=method,
         )
     except DeclarationRefused as exc:
         raise _declaration_refused(exc) from None
@@ -1049,6 +1060,363 @@ async def enrol_by_demographics(
     )
 
 
+@router.get("/captcha", dependencies=[Depends(require_roles("receptionist", "doctor"))])
+async def new_captcha() -> JSONResponse:
+    """A fresh challenge for the mobile ABHA lookup. Never cached."""
+    captcha_id, png = await captcha.issue()
+    return JSONResponse(
+        {"captcha_id": captcha_id, "image": "data:image/png;base64," + base64.b64encode(png).decode()},
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+# ------------------------------------------------ driving-licence enrolment
+#
+# M1 CRT_ABHA_401-411. Mobile OTP with the dl-flow scope, then the licence
+# details and both photos. ABDM answers with an enrolment number in PROVISIONAL
+# state: NHA issues the ABHA only after a participating facility verifies the
+# licence against the person, so nothing here is bound to the chart. Once the
+# ABHA exists, the desk verifies it like any other existing ABHA.
+
+#: Two megabytes per side, decoded. The desk shrinks camera photos first.
+_PHOTO_MAX_BYTES = 2 * 1024 * 1024
+_PHOTO_MAX_CHARS = 64 + (_PHOTO_MAX_BYTES * 4) // 3 + 4
+_PHOTO_SIGNATURES = (b"\xff\xd8\xff", b"\x89PNG\r\n\x1a\n")
+
+
+def _licence_photo(value: str) -> str:
+    """Plain base64 of a JPEG or PNG within the size limit; never stored."""
+    encoded = value.split(",", 1)[1] if value.startswith("data:") else value
+    try:
+        decoded = base64.b64decode(encoded, validate=True)
+    except ValueError as exc:
+        raise ValueError("the licence photo must be base64") from exc
+    if not decoded.startswith(_PHOTO_SIGNATURES):
+        raise ValueError("the licence photo must be a JPEG or PNG image")
+    if len(decoded) > _PHOTO_MAX_BYTES:
+        raise ValueError("the licence photo must be at most 2 MB")
+    return encoded
+
+
+class DrivingLicenceOtpRequest(BaseModel):
+    patient_id: uuid.UUID
+    #: The communication mobile (CRT_ABHA_403). Encrypted, never stored.
+    mobile: str = Field(pattern=r"^[6-9]\d{9}$")
+    consent: EnrolmentConsentIn
+
+
+class DrivingLicenceOtpResend(BaseModel):
+    session_id: str
+    patient_id: uuid.UUID
+    mobile: str = Field(pattern=r"^[6-9]\d{9}$")
+
+
+class DrivingLicenceOtpVerify(BaseModel):
+    session_id: str
+    patient_id: uuid.UUID
+    otp: str = Field(pattern=r"^\d{6}$")
+
+
+class DrivingLicenceEnrolRequest(BaseModel):
+    """CRT_ABHA_405/406: the licence as printed, and both sides photographed."""
+
+    session_id: str
+    patient_id: uuid.UUID
+    #: NHA's driving-licence pattern: letters/digits with at most one - or space.
+    licence_number: str = Field(
+        min_length=5, max_length=20, pattern=r"^[A-Za-z0-9]+[- ]?[A-Za-z0-9]+$"
+    )
+    first_name: str = Field(min_length=1, max_length=100)
+    middle_name: str = Field(default="", max_length=100)
+    last_name: str = Field(default="", max_length=100)
+    date_of_birth: date
+    gender: Literal["M", "F", "O"]
+    address: str = Field(min_length=1, max_length=500)
+    pincode: str = Field(pattern=r"^[1-9]\d{5}$")
+    state_code: str = Field(pattern=r"^\d{1,4}$")
+    district_code: str = Field(pattern=r"^\d{1,4}$")
+    front_photo: str = Field(max_length=_PHOTO_MAX_CHARS)
+    back_photo: str = Field(max_length=_PHOTO_MAX_CHARS)
+    #: CRT_ABHA_407: the operator compared the licence, its photo and these
+    #: details with the person at the desk. A rejected licence is never sent.
+    operator_verified: Literal[True]
+
+    @field_validator("front_photo", "back_photo")
+    @classmethod
+    def _photo(cls, value: str) -> str:
+        return _licence_photo(value)
+
+
+class DrivingLicenceEnrolmentOut(BaseModel):
+    enrolment_number: str
+    enrolment_state: str | None = None
+    abha_address: str | None = None
+    is_new: bool | None = None
+    #: Always false: a provisional enrolment is not written to the chart.
+    linked: bool = False
+
+
+def _licence_flow_refusal(exc: Exception) -> HTTPException:
+    """The refusals every driving-licence leg shares."""
+    if isinstance(exc, OtpSessionNotFound | OtpSessionMismatch):
+        return HTTPException(
+            404,
+            {"code": "otp_session_not_found", "message": "This OTP session has expired or does not exist"},
+        )
+    if isinstance(exc, otp_session.OtpResendTooSoon):
+        return HTTPException(
+            429,
+            {
+                "code": "otp_resend_too_soon",
+                "message": f"Wait {exc.retry_after_seconds} seconds before requesting another OTP",
+                "retry_after_seconds": exc.retry_after_seconds,
+            },
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        )
+    if isinstance(exc, otp_session.OtpResendExhausted):
+        return HTTPException(
+            429,
+            {
+                "code": "otp_resend_exhausted",
+                "message": "No more OTP resends for this attempt. Start the enrolment again.",
+            },
+        )
+    if isinstance(exc, AbdmNotConfigured):
+        return _unavailable("ABDM credentials are not configured on this server")
+    if isinstance(exc, AbdmPublicKeyMissing):
+        return _unavailable("ABDM public certificate is not configured on this server")
+    if isinstance(exc, AbdmUnavailable):
+        return _unavailable("ABDM did not respond")
+    if isinstance(exc, identity_service.AbdmIdentityError):
+        return _identity_error(exc)
+    raise exc
+
+
+_LICENCE_FLOW_ERRORS = (
+    OtpSessionNotFound,
+    OtpSessionMismatch,
+    otp_session.OtpResendTooSoon,
+    otp_session.OtpResendExhausted,
+    AbdmNotConfigured,
+    AbdmPublicKeyMissing,
+    AbdmUnavailable,
+    identity_service.AbdmIdentityError,
+)
+
+
+async def _licence_session(
+    db: AsyncSession, actor: CurrentDbUser, session_id: str, patient_id: uuid.UUID
+) -> otp_session.OtpSession:
+    session = await _bound_otp_session(db, actor, session_id, OtpPurpose.ENROL_BY_DOCUMENT)
+    if session.patient_id != str(patient_id):
+        raise HTTPException(
+            404,
+            {"code": "otp_session_not_found", "message": "This OTP session has expired or does not exist"},
+        )
+    return session
+
+
+@router.post(
+    "/enrol/driving-licence/request-otp",
+    response_model=OtpRequestedOut,
+    dependencies=[Depends(require_roles("receptionist", "doctor"))],
+)
+async def enrol_licence_request_otp(
+    payload: DrivingLicenceOtpRequest,
+    current_db_user: CurrentDbUser,
+    db: DbSession,
+) -> OtpRequestedOut:
+    """CRT_ABHA_402-404: consent for a non-Aadhaar ABHA, then the mobile OTP."""
+    patient = await _get_patient_or_404(db, payload.patient_id, current_db_user.facility_id)
+    shown = await _declaration_for(
+        db, current_db_user, patient, payload.consent.language, "document"
+    )
+    if payload.consent.declaration_sha256 != shown["sha256"]:
+        raise HTTPException(
+            409,
+            {
+                "code": "enrolment_declaration_changed",
+                "message": "The consent text changed after it was shown; show it again",
+            },
+        )
+    try:
+        statements = accept_declaration(shown, payload.consent.statements)
+    except DeclarationRefused as exc:
+        raise _declaration_refused(exc) from None
+    try:
+        result = await identity_service.request_document_mobile_otp(
+            mobile=payload.mobile,
+            facility_id=str(current_db_user.facility_id),
+            started_by=str(current_db_user.id),
+            patient_id=str(patient.id),
+            consent=EnrolmentConsent(
+                granted=payload.consent.granted,
+                code=payload.consent.code,
+                version=payload.consent.version,
+                language=payload.consent.language,
+            ),
+        )
+    except _LICENCE_FLOW_ERRORS as exc:
+        raise _licence_flow_refusal(exc) from None
+    except AbdmRejected as exc:
+        # Status only: the body can echo the mobile just sent.
+        log.warning("ABDM declined a driving-licence OTP request (%s)", exc.status_code)
+        raise HTTPException(502, {"code": "abdm_rejected", "message": "ABDM declined the request"}) from exc
+    await write_audit_log(
+        db,
+        facility_id=current_db_user.facility_id,
+        action=AuditAction.CREATE,
+        resource_type="abha_enrolment_consent",
+        user_id=current_db_user.id,
+        patient_id=patient.id,
+        new_value={
+            "code": payload.consent.code,
+            "version": payload.consent.version,
+            "language": payload.consent.language,
+            "granted": True,
+            "method": "driving_licence",
+            "declaration_version": shown["version"],
+            "declaration_sha256": shown["sha256"],
+            "ownership": shown["ownership"],
+            "statements": statements,
+        },
+    )
+    return OtpRequestedOut(
+        session_id=result.session_id,
+        masked_mobile=result.masked_mobile,
+        resends_remaining=result.resends_remaining,
+    )
+
+
+@router.post(
+    "/enrol/driving-licence/resend-otp",
+    response_model=OtpRequestedOut,
+    dependencies=[Depends(require_roles("receptionist", "doctor"))],
+)
+async def enrol_licence_resend_otp(
+    payload: DrivingLicenceOtpResend,
+    current_db_user: CurrentDbUser,
+    db: DbSession,
+) -> OtpRequestedOut:
+    await _licence_session(db, current_db_user, payload.session_id, payload.patient_id)
+    try:
+        result = await identity_service.resend_document_mobile_otp(
+            session_id=payload.session_id,
+            mobile=payload.mobile,
+            facility_id=str(current_db_user.facility_id),
+            started_by=str(current_db_user.id),
+        )
+    except _LICENCE_FLOW_ERRORS as exc:
+        raise _licence_flow_refusal(exc) from None
+    except AbdmRejected as exc:
+        log.warning("ABDM declined a driving-licence OTP resend (%s)", exc.status_code)
+        raise HTTPException(502, {"code": "abdm_rejected", "message": "ABDM declined the request"}) from exc
+    return OtpRequestedOut(
+        session_id=result.session_id,
+        masked_mobile=result.masked_mobile,
+        resends_remaining=result.resends_remaining,
+    )
+
+
+@router.post(
+    "/enrol/driving-licence/verify-otp",
+    status_code=204,
+    dependencies=[Depends(require_roles("receptionist", "doctor"))],
+)
+async def enrol_licence_verify_otp(
+    payload: DrivingLicenceOtpVerify,
+    current_db_user: CurrentDbUser,
+    db: DbSession,
+) -> Response:
+    """CRT_ABHA_404: a wrong OTP is an error the desk can correct and retry."""
+    await _licence_session(db, current_db_user, payload.session_id, payload.patient_id)
+    try:
+        await identity_service.verify_document_mobile_otp(
+            session_id=payload.session_id,
+            otp=payload.otp,
+            facility_id=str(current_db_user.facility_id),
+        )
+    except _LICENCE_FLOW_ERRORS as exc:
+        raise _licence_flow_refusal(exc) from None
+    except AbdmRejected as exc:
+        raise _otp_rejected(exc, "driving-licence mobile") from exc
+    return Response(status_code=204)
+
+
+@router.post(
+    "/enrol/driving-licence",
+    response_model=DrivingLicenceEnrolmentOut,
+    dependencies=[Depends(require_roles("receptionist", "doctor"))],
+)
+async def enrol_by_driving_licence(
+    payload: DrivingLicenceEnrolRequest,
+    current_db_user: CurrentDbUser,
+    db: DbSession,
+) -> DrivingLicenceEnrolmentOut:
+    """CRT_ABHA_405-408: submit the checked licence; show the enrolment number."""
+    await _licence_session(db, current_db_user, payload.session_id, payload.patient_id)
+    try:
+        state, district = lgd.require(payload.state_code, payload.district_code)
+    except lgd.LgdUnavailable as exc:
+        raise _lgd_unavailable(exc) from None
+    except lgd.LgdUnknown as exc:
+        raise HTTPException(400, {"code": "lgd_code_unknown", "message": str(exc)}) from None
+    try:
+        enrolled = await identity_service.enrol_by_driving_licence(
+            session_id=payload.session_id,
+            facility_id=str(current_db_user.facility_id),
+            licence_number=payload.licence_number.strip(),
+            first_name=payload.first_name.strip(),
+            middle_name=payload.middle_name.strip(),
+            last_name=payload.last_name.strip(),
+            date_of_birth=payload.date_of_birth,
+            gender=payload.gender,
+            front_photo=payload.front_photo,
+            back_photo=payload.back_photo,
+            address=payload.address.strip(),
+            state=state,
+            district=district,
+            pincode=payload.pincode,
+        )
+    except _LICENCE_FLOW_ERRORS as exc:
+        raise _licence_flow_refusal(exc) from None
+    except AbdmRejected as exc:
+        log.warning("ABDM declined a driving-licence enrolment (%s)", exc.status_code)
+        if exc.status_code == 422:
+            # ABDM-1203: the details do not match the licence (Sarathi).
+            raise HTTPException(
+                400,
+                {
+                    "code": "abha_licence_rejected",
+                    "message": "ABDM did not match these details to the driving licence. "
+                    "Check the number, name, date of birth and gender as printed on it.",
+                },
+            ) from exc
+        raise HTTPException(502, {"code": "abdm_rejected", "message": "ABDM declined the request"}) from exc
+    await write_audit_log(
+        db,
+        facility_id=current_db_user.facility_id,
+        action=AuditAction.CREATE,
+        resource_type="abha_document_enrolment",
+        user_id=current_db_user.id,
+        patient_id=payload.patient_id,
+        new_value={
+            "document_type": "DRIVING_LICENCE",
+            "enrolment_number": enrolled.enrolment_number,
+            "enrolment_state": enrolled.enrolment_state,
+            "is_new": enrolled.is_new,
+            "operator_verified": True,
+        },
+    )
+    await db.commit()
+    return DrivingLicenceEnrolmentOut(
+        enrolment_number=enrolled.enrolment_number,
+        enrolment_state=enrolled.enrolment_state,
+        abha_address=enrolled.abha_address,
+        is_new=enrolled.is_new,
+    )
+
+
 @router.get(
     "/enrol/consent",
     dependencies=[Depends(require_roles("receptionist", "doctor"))],
@@ -1058,6 +1426,7 @@ async def enrol_consent_copy(
     current_db_user: CurrentDbUser,
     db: DbSession,
     language: Annotated[str, Query(pattern=r"^(en|hi)$")] = "en",
+    method: Annotated[str, Query(pattern=r"^(aadhaar|document)$")] = "aadhaar",
 ) -> dict:
     """NHA's published ABHA consent for this patient, as the desk must show it.
 
@@ -1065,7 +1434,9 @@ async def enrol_consent_copy(
     scoped like any patient read: another facility's patient is a 404.
     """
     patient = await _get_patient_or_404(db, patient_id, current_db_user.facility_id)
-    return consent_metadata(await _declaration_for(db, current_db_user, patient, language))
+    return consent_metadata(
+        await _declaration_for(db, current_db_user, patient, language, method)
+    )
 
 
 async def _enrolment_continuation_session(
@@ -1457,6 +1828,19 @@ async def login_request_otp(
     """Send an OTP for an ABHA the patient says they hold — to its linked
     mobile (ABHA number) or through Aadhaar (Aadhaar number)."""
     await _get_patient_or_404(db, payload.patient_id, current_db_user.facility_id)
+    # A mobile number finds every ABHA linked to it, so this lookup carries a
+    # second check before any OTP is sent (VRFY_ABHA_301). Resends reuse the
+    # session this request opened and need no new challenge.
+    if payload.mobile is not None and not await captcha.check(
+        payload.captcha_id, payload.captcha_answer
+    ):
+        raise HTTPException(
+            400,
+            {
+                "code": "captcha_invalid",
+                "message": "The characters did not match the image. Enter the characters from the new image.",
+            },
+        )
     try:
         result = await identity_service.request_login_otp(
             abha_number=_normalise_abha(payload.abha_number) if payload.abha_number else None,

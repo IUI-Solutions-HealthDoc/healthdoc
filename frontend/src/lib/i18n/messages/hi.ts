@@ -274,6 +274,7 @@ export const hi = {
   "receptionist.abha.useExisting": "मौजूदा ABHA उपयोग करें",
   "receptionist.abha.create": "ABHA बनाएँ",
   "receptionist.abha.createDemographic": "आधार विवरण से ABHA बनाएँ",
+  "receptionist.abha.createLicence": "ड्राइविंग लाइसेंस से ABHA बनाएँ",
   "receptionist.abha.methodAbhaMobile": "ABHA-लिंक मोबाइल पर OTP",
   "receptionist.abha.methodAadhaar": "आधार से OTP",
   "receptionist.abha.methodAddress": "ABHA पता",
