@@ -12,9 +12,9 @@ import {
   type LgdOption,
 } from "./api";
 import { digitsOnly } from "./patientValidation";
-import type { AbhaDeclaration, AbhaIdentityLinked } from "./types";
+import type { AbhaDeclaration, AbhaIdentityLinked, ConsentLanguage } from "./types";
 
-const ENROLMENT_CONSENT = { granted: true, code: "abha-enrollment", version: "1.4", language: "en" as const };
+const ENROLMENT_CONSENT = { granted: true, code: "abha-enrollment", version: "1.4" };
 const GENDERS: Partial<Record<string, "M" | "F" | "O">> = { male: "M", female: "F", other: "O" };
 
 interface Patient {
@@ -71,13 +71,19 @@ export function DemographicAbhaEnrolment({ patient, onLinked }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const key = useRef<string | null>(null);
+  const [consentLanguage, setConsentLanguage] = useState<ConsentLanguage>("en");
 
   useEffect(() => {
     let disposed = false;
-    getAbhaEnrolmentDeclaration(patient.id).then(
+    getAbhaEnrolmentDeclaration(patient.id, consentLanguage).then(
       (shown) => { if (!disposed) { setDeclaration(shown); setTicks(defaultTicks(shown)); } },
       (reason: unknown) => { if (!disposed) setDeclarationError(failure(reason, "The ABHA consent could not be loaded.")); },
     );
+    return () => { disposed = true; };
+  }, [patient.id, consentLanguage]);
+
+  useEffect(() => {
+    let disposed = false;
     listLgdStates().then(
       (rows) => { if (!disposed) setStates(rows); },
       (reason: unknown) => { if (!disposed) setLgdError(failure(reason, "The LGD state list could not be loaded.")); },
@@ -121,7 +127,7 @@ export function DemographicAbhaEnrolment({ patient, onLinked }: {
         ...form,
         gender: form.gender,
         patient_id: patient.id,
-        consent: { ...ENROLMENT_CONSENT, statements: ticks, declaration_sha256: declaration.sha256 },
+        consent: { ...ENROLMENT_CONSENT, language: declaration.language, statements: ticks, declaration_sha256: declaration.sha256 },
       }, key.current);
       setForm((current) => ({ ...current, aadhaar: "" })); // never left on screen
       onLinked(linked);
@@ -174,6 +180,15 @@ export function DemographicAbhaEnrolment({ patient, onLinked }: {
         error={declarationError}
         ticks={ticks}
         onTick={(id, checked) => { key.current = null; setTicks((current) => ({ ...current, [id]: checked })); }}
+        language={consentLanguage}
+        onLanguage={(next) => {
+          if (next === consentLanguage) return;
+          key.current = null;
+          setConsentLanguage(next);
+          setDeclaration(null);
+          setDeclarationError(null);
+          setTicks({});
+        }}
       />
       {error ? <p role="alert" className="text-sm text-danger">{error}</p> : null}
       <button type="button" disabled={busy || !ready} onClick={() => void submit()} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
