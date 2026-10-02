@@ -2,9 +2,10 @@
 
 ABDM's demographic ABHA API takes the beneficiary's state and district as LGD
 codes ("The correct state and district (LGD codes) of the beneficiary are
-passed"). No ABDM lookup for them is documented, so the operator loads the
-official LGD district list with scripts/import_lgd_districts.py, and the desk
-chooses from it. A code that is not in that list is refused, never passed on.
+passed"). The ABHA API documents no lookup for them, but ABDM's facility
+registry (HFR) serves the same LGD codes. The operator loads the list from HFR
+or from the official LGD export with scripts/import_lgd_districts.py, and the
+desk chooses from it. A code that is not in that list is refused, never passed on.
 """
 
 from __future__ import annotations
