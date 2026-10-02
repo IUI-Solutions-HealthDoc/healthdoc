@@ -2,17 +2,17 @@
 
 HFR ties a facility to the health professional who registers it, so
 `basic-information` and `submit-facility` carry that person's HPR login.
-NHA's M4 Postman logs in three ways, all on the same v4 host:
+NHA's M4 Postman logs in these two ways on the v4 host:
 
   Aadhaar OTP   POST /api/v1/auth/init {authMethod: AADHAAR_OTP, hprId}
                 POST /api/v1/auth/confirmWithAadhaarOtp {otp, txnId}
-  Mobile OTP    POST /api/v1/auth/init {authMethod: MOBILE_OTP, hprId}
-                POST /api/v1/auth/confirmWithMobileOTP {otp, txnId}
   Password      POST /api/v1/auth/authPassword {hprId, password}
 
-The Postman shows the mobile confirm only through a different mobile-number
-flow; `confirmWithMobileOTP` mirrors the Aadhaar one and is unverified until a
-live login. Each success returns an HPR token.
+Each success returns an HPR token. The Aadhaar OTP login passed live on
+2 October 2026. A mobile OTP is not offered: init + confirmWithMobileOTP, the
+shape first guessed from the Aadhaar pair, answered 503 live, and NHA's own
+mobile login is a separate v2 flow (/api/v2/auth/loginViaMobileSendOTP with an
+encrypted OTP) that this module does not implement.
 
 The token is the professional's credential. It is stored encrypted in Redis,
 for the signed-in admin of this facility only, never sent to the browser,
@@ -36,8 +36,7 @@ from app.integrations.abdm.hfr import client
 
 #: An HPR ID ("name@hpr.abdm") or HPR ID number (71-1234-5678-9012).
 HPR_ID = re.compile(r"^(?:[a-z0-9][a-z0-9._]{2,48}@hpr\.abdm|\d{2}-\d{4}-\d{4}-\d{4})$")
-OTP_METHODS = {"AADHAAR_OTP": "/api/v1/auth/confirmWithAadhaarOtp",
-               "MOBILE_OTP": "/api/v1/auth/confirmWithMobileOTP"}
+OTP_METHODS = {"AADHAAR_OTP": "/api/v1/auth/confirmWithAadhaarOtp"}
 PENDING_TTL = 600
 MAX_TOKEN_TTL = 1800
 
@@ -109,7 +108,7 @@ async def start_otp(
     *, facility_id: uuid.UUID, user_id: uuid.UUID, hpr_id: str, method: str
 ) -> tuple[str, str | None]:
     if method not in OTP_METHODS:
-        raise HprLoginError("hpr_method_invalid", "Choose Aadhaar OTP or mobile OTP")
+        raise HprLoginError("hpr_method_invalid", "Choose Aadhaar OTP")
     if not HPR_ID.match(hpr_id):
         raise HprLoginError("hpr_id_invalid", "Enter an HPR ID (name@hpr.abdm) or HPR ID number")
     body = await client.call(

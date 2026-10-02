@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { ApiError } from "@/lib/api";
 import { hprLoginState, hprLogout, hprPasswordLogin, startHprOtp, verifyHprOtp, type HprSession } from "./api/hfr";
 
-type Method = "AADHAAR_OTP" | "MOBILE_OTP" | "PASSWORD";
+type Method = "AADHAAR_OTP" | "PASSWORD";
 const input = "w-full rounded-md border border-border px-3 py-2 text-sm";
 const HPR_ID = /^(?:[a-z0-9][a-z0-9._]{2,48}@hpr\.abdm|\d{2}-\d{4}-\d{4}-\d{4})$/;
 
@@ -77,7 +77,7 @@ export function HprLoginPanel({ onChange }: { onChange?: (session: HprSession) =
           <label className="block space-y-1 text-sm"><span className="text-muted-foreground">HPR ID</span>
             <input name="hpr_id" value={hprId} onChange={(e) => setHprId(e.target.value.trim().toLowerCase())} placeholder="name@hpr.abdm" autoComplete="off" className={input} /></label>
           <div className="flex flex-wrap gap-4 text-sm" role="radiogroup" aria-label="HPR login method">
-            {([["AADHAAR_OTP", "OTP on Aadhaar mobile"], ["MOBILE_OTP", "OTP on HPR mobile"], ["PASSWORD", "HPR password"]] as const).map(([value, label]) => (
+            {([["AADHAAR_OTP", "OTP on Aadhaar mobile"], ["PASSWORD", "HPR password"]] as const).map(([value, label]) => (
               <label key={value} className="flex items-center gap-2">
                 <input type="radio" name="hpr_method" value={value} checked={method === value} onChange={() => setMethod(value)} />{label}
               </label>

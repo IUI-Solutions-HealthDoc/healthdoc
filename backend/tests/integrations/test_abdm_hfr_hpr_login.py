@@ -109,15 +109,25 @@ async def test_an_hpr_id_must_look_like_one(hpr, hpr_id):
     assert fake.calls == []
 
 
+async def test_mobile_otp_is_not_offered(hpr):
+    """init + confirmWithMobileOTP answered 503 live on 2 October; NHA's mobile
+    login is a separate v2 flow this module does not implement."""
+    fake, _, http, _ = hpr
+    response = await http.post(
+        "/abdm/hfr/hpr-login/otp", json={"hpr_id": "kumar682000@hpr.abdm", "method": "MOBILE_OTP"})
+    assert response.status_code == 422
+    assert fake.calls == []
+
+
 async def test_a_login_session_belongs_to_the_admin_who_started_it(hpr):
     fake, redis, http, app = hpr
     fake.answers["/api/v1/auth/init"] = {"transactionId": "txn-1"}
-    started = await http.post("/abdm/hfr/hpr-login/otp", json={"hpr_id": "kumar682000@hpr.abdm", "method": "MOBILE_OTP"})
+    started = await http.post("/abdm/hfr/hpr-login/otp", json={"hpr_id": "kumar682000@hpr.abdm", "method": "AADHAAR_OTP"})
     other = DbUser(id=uuid.uuid4(), keycloak_sub="other", username="other", facility_id=FACILITY, roles=["admin"])
     app.dependency_overrides[get_current_db_user] = lambda: other
     response = await http.post("/abdm/hfr/hpr-login/verify", json={"session_id": started.json()["session_id"], "otp": "123456"})
     assert response.status_code == 404
-    assert all(path != "/api/v1/auth/confirmWithMobileOTP" for _, path, _, _ in fake.calls)
+    assert all(path != "/api/v1/auth/confirmWithAadhaarOtp" for _, path, _, _ in fake.calls)
 
 
 async def test_a_refused_otp_returns_no_token_and_keeps_nothing(hpr):

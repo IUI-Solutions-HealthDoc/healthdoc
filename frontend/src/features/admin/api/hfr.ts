@@ -64,7 +64,7 @@ export type HprSession =
 export function hprLoginState(): Promise<HprSession> {
   return api<HprSession>("/abdm/hfr/hpr-login");
 }
-export function startHprOtp(hprId: string, method: "AADHAAR_OTP" | "MOBILE_OTP") {
+export function startHprOtp(hprId: string, method: "AADHAAR_OTP") {
   return api<{ session_id: string; masked_mobile: string | null }>("/abdm/hfr/hpr-login/otp", {
     method: "POST", body: JSON.stringify({ hpr_id: hprId, method }), idempotencyKey: null,
   });

@@ -263,7 +263,7 @@ async def link_bridge(payload: BridgeLink) -> dict:
 
 class HprOtpStart(BaseModel):
     hpr_id: str = Field(min_length=3, max_length=60)
-    method: Literal["AADHAAR_OTP", "MOBILE_OTP"]
+    method: Literal["AADHAAR_OTP"] = "AADHAAR_OTP"
 
 
 class HprOtpConfirm(BaseModel):
