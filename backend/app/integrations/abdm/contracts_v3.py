@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
 
 class WireModel(BaseModel):
@@ -31,6 +31,15 @@ class Identifier(WireModel):
     value: str | None = None
 
 
+def _as_text(value: object) -> object:
+    """NHA sends date parts as numbers where its Postman shows strings."""
+    return str(value) if isinstance(value, int) and not isinstance(value, bool) else value
+
+
+def _null_as_empty(value: object) -> object:
+    return [] if value is None else value
+
+
 class DiscoveryPatient(WireModel):
     id: str
     name: str | None = None
@@ -41,6 +50,13 @@ class DiscoveryPatient(WireModel):
     )
     unverified_identifiers: list[Identifier] = Field(
         default_factory=list, alias="unverifiedIdentifiers"
+    )
+
+    # The PHR's live discover (3 Oct 2026, phrsbx) sent "yearOfBirth": 2000 and
+    # "unverifiedIdentifiers": null; refusing either 422'd the whole discovery.
+    _year = field_validator("year_of_birth", mode="before")(_as_text)
+    _lists = field_validator("verified_identifiers", "unverified_identifiers", mode="before")(
+        _null_as_empty
     )
 
 
@@ -105,6 +121,11 @@ class SharedPatientProfile(WireModel):
     month_of_birth: str | None = Field(default=None, alias="monthOfBirth")
     phone_number: str | None = Field(default=None, alias="phoneNumber")
     identifiers: list[Identifier] = Field(default_factory=list)
+
+    _dates = field_validator("year_of_birth", "day_of_birth", "month_of_birth", mode="before")(
+        _as_text
+    )
+    _lists = field_validator("identifiers", mode="before")(_null_as_empty)
 
 
 class ProfileShareMetadata(WireModel):
