@@ -155,7 +155,7 @@ async def test_the_licence_enrolment_follows_nhas_dl_flow_and_binds_nothing(lice
     assert body == {
         "txnId": "txn-verified", "documentType": "DRIVING_LICENCE",
         "documentId": "MH12 20110012345", "firstName": "Aarav", "middleName": "",
-        "lastName": "Sharma", "dob": "17-05-1990", "gender": "M",
+        "lastName": "Sharma", "dob": "1990-05-17", "gender": "M",
         "frontSidePhoto": JPEG, "backSidePhoto": PNG, "address": "12 Synthetic Lane",
         "state": "MAHARASHTRA", "district": "SATARA", "pinCode": "415001",
         "consent": {"code": "abha-enrollment", "version": "1.4"},
@@ -248,3 +248,16 @@ async def test_a_resend_uses_a_fresh_transaction_inside_the_limits(licence, monk
     assert again.json()["resends_remaining"] == otp_session.MAX_RESENDS - 1
     stored = json.loads(licence["redis"].store[f"abdm:otp:{session_id}"])
     assert stored["abdm_txn_id"] == "txn-2"
+
+
+def _jpeg(size: int) -> str:
+    return base64.b64encode(b"\xff\xd8\xff" + b"\0" * (size - 3)).decode()
+
+
+def test_a_licence_photo_abdm_would_refuse_is_refused_before_sending():
+    """ABDM, 3 Oct 2026: "Please upload a document of size less than 150KB"."""
+    from app.integrations.abdm.identity.router import _licence_photo
+
+    assert _licence_photo(_jpeg(149_999))
+    with pytest.raises(ValueError, match="under 150 KB"):
+        _licence_photo(_jpeg(150_000))

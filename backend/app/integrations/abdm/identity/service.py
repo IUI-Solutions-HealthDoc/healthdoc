@@ -47,7 +47,13 @@ from datetime import UTC, datetime
 
 from app.common.config import get_settings
 from app.common.enums import AbhaProfileTokenKind
-from app.integrations.abdm.client import AbdmRejected, AbdmResponse, get_abdm_client
+from app.integrations.abdm.client import (
+    AbdmRejected,
+    AbdmResponse,
+    _body_shape,
+    get_abdm_client,
+    safe_rejection_message,
+)
 
 from . import otp_session
 from .crypto import encrypt_for_abdm
@@ -173,14 +179,42 @@ async def _call(
             parse_json=parse_json,
         )
     except AbdmRejected as exc:
-        # Error bodies can echo the identifier or OTP. Retain only contracted
-        # field names and error-code syntax, never values or free-form messages.
+        # Error bodies can echo the identifier or OTP. Retain contracted field
+        # names, error-code syntax, the body's shape and ABDM's own message with
+        # identifiers scrubbed: a licence refusal (3 Oct 2026) carried no ABDM
+        # code at all, so without the message the reason was lost.
         codes, fields = _rejection_metadata(exc.detail)
         log.warning(
-            "ABDM identity rejected (status=%s request=%s codes=%s fields=%s)",
+            "ABDM identity rejected (status=%s request=%s codes=%s fields=%s shape=%s reason=%s)",
             exc.status_code, exc.request_id, codes, fields,
+            _body_shape(exc.detail), _refusal_reason(exc.detail),
         )
         raise
+
+
+#: Licence-document fields whose ABDM refusal text describes the check, not the
+#: person ("Invalid DOB", "...size less than 150KB"). Names, numbers and other
+#: identifiers stay out: ABHA error text can echo them.
+_LOGGED_FIELD_REFUSALS = frozenset(
+    {"Dob", "FrontSidePhoto", "BackSidePhoto", "Gender", "PinCode", "State", "District"}
+)
+
+
+def _refusal_reason(detail: object) -> str | None:
+    """ABDM's words for a rejected licence field, numbers scrubbed.
+
+    A validation refusal keys each message by the field it rejects
+    ({"Dob": "...", "FrontSidePhoto": "...", "timestamp": ...}; live, 3 Oct
+    2026). ABDM's general free-text message is never logged; its code is.
+    """
+    if not isinstance(detail, dict):
+        return None
+    per_field = [
+        f"{key}: {safe_rejection_message({'message': value})}"
+        for key, value in sorted(detail.items())
+        if key in _LOGGED_FIELD_REFUSALS and isinstance(value, str) and value.strip()
+    ]
+    return "; ".join(per_field)[:400] or None
 
 
 async def _post(path: str, payload: dict) -> AbdmResponse:
@@ -693,7 +727,9 @@ async def enrol_by_driving_licence(
                 "firstName": first_name,
                 "middleName": middle_name,
                 "lastName": last_name,
-                "dob": demographic_date(date_of_birth),
+                # yyyy-mm-dd: ABDM answered "Invalid DOB" to dd-mm-yyyy here
+                # (live, 3 Oct 2026); NHA's M1 document shows 1996-07-15.
+                "dob": date_of_birth.isoformat(),
                 "gender": gender,
                 "frontSidePhoto": front_photo,
                 "backSidePhoto": back_photo,
@@ -708,6 +744,8 @@ async def enrol_by_driving_licence(
     profile = body.get("enrolProfile") if isinstance(body, dict) else None
     number = profile.get("enrolmentNumber") if isinstance(profile, dict) else None
     if not isinstance(number, str) or not number.strip():
+        # Field names only: the reply carries the person's identity.
+        log.warning("ABDM licence enrolment reply had no enrolment number (shape=%s)", _body_shape(body))
         raise AbdmIdentityError(
             "abdm_no_enrolment_returned", "ABDM returned no enrolment number for this licence"
         )
