@@ -115,3 +115,30 @@ test("tariff route remains limited to billing and admin, not receptionist or pla
     assert.equal(routes.canRoleAccessPath(role, "/billing/tariffs"), ["billing", "admin"].includes(role), role);
   }
 });
+
+test("each request first refreshes a token about to expire, and still goes if refresh fails", async (t) => {
+  // Live, 3 Oct 2026: a desk back from a long form sent an expired token and was signed out mid-enrolment.
+  const order = [];
+  t.mock.method(globalThis, "fetch", async (_url, init) => {
+    order.push(`fetch:${init.headers.Authorization ?? "none"}`);
+    return new Response(JSON.stringify({ success: true, data: { ok: true } }), { status: 200 });
+  });
+  const client = load("../src/lib/api.ts", {
+    "./api-error-policy.mjs": { userFacingApiError: () => "Failure" },
+    "./session-policy.mjs": {}, "./auth": {},
+  });
+  client.setAccessToken("old");
+  client.setTokenRefresher(async () => { order.push("refresh"); client.setAccessToken("new"); });
+  assert.deepEqual(await client.api("/patients/x"), { ok: true });
+  assert.deepEqual(order, ["refresh", "fetch:Bearer new"]);
+
+  order.length = 0;
+  client.setTokenRefresher(async () => { order.push("refresh"); throw new Error("offline"); });
+  await client.api("/patients/x");
+  assert.deepEqual(order, ["refresh", "fetch:Bearer new"]);
+
+  order.length = 0;
+  client.setTokenRefresher(null);
+  await client.api("/patients/x");
+  assert.deepEqual(order, ["fetch:Bearer new"]);
+});
