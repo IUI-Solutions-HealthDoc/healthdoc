@@ -27,6 +27,8 @@ export function userFacingApiError(code, payload) {
     actor_not_provisioned: "Sign-in succeeded, but this account is not linked to a HealthDoc staff profile. Ask your facility administrator to check account provisioning.",
     user_deactivated: "Your HealthDoc staff account is deactivated. Contact your facility administrator.",
     abdm_rejected: "ABDM declined this request. Check the details before retrying; contact support if it continues.",
+    // ABDM-1203: the licence record (Sarathi) did not match what was entered.
+    abha_licence_rejected: "ABDM did not match these details to the driving licence record. Enter the licence number, name, date of birth and gender exactly as printed on the licence.",
     duplicate_abha: "This ABHA number is already linked to another patient. Open that record instead of linking it here.",
     abha_link_unavailable: "This ABHA number cannot be linked at this facility. Contact your facility administrator.",
     consent_manager_decision_forbidden: "Only an admin or doctor can record a consent manager's decision.",
