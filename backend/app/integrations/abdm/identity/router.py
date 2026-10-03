@@ -35,6 +35,7 @@ from app.integrations.abdm.client import (
     AbdmRejected,
     AbdmUnavailable,
     get_abdm_client,
+    safe_failure_summary,
 )
 from app.integrations.abdm.identity import lgd, otp_session
 from app.integrations.abdm.identity import service as identity_service
@@ -1160,6 +1161,13 @@ class DrivingLicenceEnrolmentOut(BaseModel):
 
 def _licence_flow_refusal(exc: Exception) -> HTTPException:
     """The refusals every driving-licence leg shares."""
+    # Every outcome other than success is logged: a 502 and a 503 on the live
+    # enrolment (3 Oct 2026) left no trace of which refusal they were.
+    detail = exc.code if isinstance(exc, identity_service.AbdmIdentityError) else None
+    log.warning(
+        "Driving-licence leg refused (%s%s)",
+        safe_failure_summary(exc), f":{detail}" if detail else "",
+    )
     if isinstance(exc, OtpSessionNotFound | OtpSessionMismatch):
         return HTTPException(
             404,
