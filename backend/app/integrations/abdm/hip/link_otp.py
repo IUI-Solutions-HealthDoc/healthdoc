@@ -28,6 +28,7 @@ import httpx
 from app.common.config import get_settings
 from app.common.redis import get_redis
 from app.common.security import _get_hmac_key
+from app.integrations.abdm.hip.discovery import national_mobile
 
 OTP_TTL_SECONDS = 10 * 60
 MAX_ATTEMPTS = 5
@@ -114,6 +115,19 @@ def masked_mobile(mobile: str) -> str:
     if len(digits) < 10 or len(digits) > 15:
         raise LinkOtpUnavailable("The patient has no usable mobile number for linking")
     return f"******{digits[-4:]}"
+
+
+def communication_hint(mobile: str) -> str:
+    """The on-init communicationHint: the ten national digits the OTP went to.
+
+    NHA's v3 gateway refused the masked "******4541" with ABDM-9999 "Invalid
+    communication hint" (live, 3 Oct 2026) and accepted the national number,
+    which is also what NHA's reference HIP sends.
+    """
+    number = national_mobile(mobile)
+    if number is None:
+        raise LinkOtpUnavailable("The patient has no usable mobile number for linking")
+    return number
 
 
 def _msg91_mobile(mobile: str) -> str:

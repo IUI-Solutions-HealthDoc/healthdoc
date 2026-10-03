@@ -143,3 +143,15 @@ async def test_missing_or_invalid_mobile_is_refused_before_storage(redis, mobile
     with pytest.raises(link_otp.LinkOtpUnavailable):
         await link_otp.issue(link_ref_number="LINK-1", mobile=mobile)
     assert redis.values == {}
+
+
+@pytest.mark.parametrize("mobile", ["+91 98765 43210", "919876543210", "09876543210", "9876543210"])
+def test_the_communication_hint_is_the_ten_digit_number_nha_accepts(mobile):
+    # NHA refused "******3210" with ABDM-9999 "Invalid communication hint".
+    assert link_otp.communication_hint(mobile) == "9876543210"
+
+
+@pytest.mark.parametrize("mobile", ["", "12345", "+1 415 555 0100", "1234567890"])
+def test_no_hint_is_invented_for_a_number_that_cannot_receive_the_otp(mobile):
+    with pytest.raises(link_otp.LinkOtpUnavailable):
+        link_otp.communication_hint(mobile)

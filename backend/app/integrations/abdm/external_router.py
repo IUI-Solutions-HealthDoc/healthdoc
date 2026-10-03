@@ -503,7 +503,7 @@ async def link_init(
                 "message": "The patient has no mobile number for mediated linking",
             },
         )
-    communication_hint = link_otp.masked_mobile(patient.mobile)
+    communication_hint = link_otp.communication_hint(patient.mobile)
     expiry = (link.expires_at or datetime.now(UTC) + timedelta(minutes=10)).astimezone(UTC)
     await callback_replies.schedule(
         db,

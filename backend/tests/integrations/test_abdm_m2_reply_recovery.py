@@ -1,5 +1,6 @@
 """M2 reply outage/commit boundaries use synthetic records and mocked transport."""
 
+import json
 import uuid
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
@@ -8,7 +9,7 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy import select
 
-from app.common.security import decrypt_pii
+from app.common.security import decrypt_pii, encrypt_pii
 from app.integrations.abdm import callback_replies, external_router, job_runner, jobs
 from app.integrations.abdm.contracts_v3 import DiscoverCallback, ProfileShareCallback
 from app.integrations.abdm.hip import gateway, link_otp
@@ -289,3 +290,19 @@ def test_shared_address_ignores_anything_that_is_not_an_object():
     assert external_router._shared_address("67 Block Se, Pune") is None
     assert external_router._shared_address(["67 Block Se"]) is None
     assert external_router._shared_address({"line": "x" * 500})["line"] == "x" * 200
+
+
+async def test_a_snapshot_frozen_with_a_masked_hint_is_sent_with_the_number_nha_accepts(
+    db, mediated_case, transports
+):
+    """3 Oct 2026: NHA refused on-init "******3210" with ABDM-9999 "Invalid
+    communication hint"; a reply already queued must not keep repeating it."""
+    await start(db, mediated_case, "hip_link_init")
+    reply = (await db.execute(select(jobs.AbdmCallbackReply))).scalar_one()
+    aad = callback_replies.response_aad(reply.id, reply.facility_id, reply.kind)
+    data = json.loads(decrypt_pii(reply.response_encrypted, associated_data=aad))
+    data["wire"]["communication_hint"] = "******3210"
+    reply.response_encrypted = encrypt_pii(json.dumps(data), associated_data=aad)
+    await db.commit()
+    await job_runner.run_once((await db.execute(select(jobs.AbdmJob))).scalar_one().id)
+    assert transports["respond_to_link_init"].call_args.kwargs["communication_hint"] == "9876543210"

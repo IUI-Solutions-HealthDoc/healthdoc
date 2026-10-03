@@ -54,7 +54,9 @@ async def dispatch(db, reply, job):
             mobile=patient.mobile,
             expires_at=aware(link.expires_at),
         )
-        await gateway.respond_to_link_init(**common, **data["wire"])
+        # Snapshots frozen before 3 Oct 2026 carry a masked hint NHA refuses.
+        wire = {**data["wire"], "communication_hint": link_otp.communication_hint(patient.mobile)}
+        await gateway.respond_to_link_init(**common, **wire)
         return
     patient = await db.get(Patient, reply.target_id) if reply.target_id else None
     # A demographic discovery matched a chart holding no ABHA address. It may
