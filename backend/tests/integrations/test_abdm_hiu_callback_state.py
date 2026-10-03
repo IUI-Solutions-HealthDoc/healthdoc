@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import select
 
 from app.integrations.abdm import callback_replies, jobs
 from app.integrations.abdm import external_router as routes
@@ -343,3 +344,97 @@ async def test_artefact_service_refuses_rebinding_and_regrant(hiu_db, callback_c
             expires_at=request.requested_expiry,
             raw={},
         )
+
+
+async def _undecided(hiu_db, callback_case):
+    request, artefact, _, callback = callback_case
+    await hiu_db.delete(artefact)
+    request.status, request.consent_request_id = "requested", None
+    await hiu_db.flush()
+    return request, callback
+
+
+async def test_on_init_asks_for_the_status_a_decision_may_already_have(hiu_db, callback_case):
+    """Live, 3 Oct 2026: GRANTED arrived 30 s after the request and on-init 16
+    min later, so the grant could not be matched and was refused."""
+    request, callback = await _undecided(hiu_db, callback_case)
+    remote = str(uuid.uuid4())
+    await routes.consent_on_init(
+        ConsentOnInitCallback.model_validate(
+            {"consentRequest": {"id": remote}, "response": {"requestId": request.gateway_request_id}}
+        ),
+        callback,
+        hiu_db,
+    )
+    assert request.consent_request_id == remote
+    job = await hiu_db.get(AbdmJob, jobs.job_id("hiu_consent", request.id))
+    assert (job.status, job.attempts) == ("pending", 0)
+
+
+async def test_the_consent_job_polls_status_once_the_id_is_known(hiu_db, callback_case, monkeypatch):
+    from types import SimpleNamespace
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    request, _ = await _undecided(hiu_db, callback_case)
+    request.consent_request_id = remote = str(uuid.uuid4())
+    await hiu_db.commit()
+    monkeypatch.setattr(worker, "SessionLocal", async_sessionmaker(hiu_db.bind, expire_on_commit=False))
+    monkeypatch.setattr(worker, "get_settings", lambda: SimpleNamespace(abdm_hfr_facility_id="TEST-HFR"))
+    status, consent = AsyncMock(), AsyncMock()
+    monkeypatch.setattr(worker.gateway, "check_consent_request_status", status)
+    monkeypatch.setattr(worker.gateway, "request_consent", consent)
+    await worker.dispatch(
+        AbdmJob(id=uuid.uuid4(), kind="hiu_consent", target_id=request.id, facility_id=FACILITY)
+    )
+    consent.assert_not_awaited()
+    assert status.await_args.kwargs["consent_request_id"] == remote
+
+
+async def test_a_status_grant_is_matched_by_id_and_its_artefact_fetched(hiu_db, callback_case):
+    request, callback = await _undecided(hiu_db, callback_case)
+    request.consent_request_id = remote = str(uuid.uuid4())
+    await hiu_db.flush()
+    granted = str(uuid.uuid4())
+    await routes.consent_on_status(
+        ConsentOnStatusCallback.model_validate(
+            {
+                # The poll's own REQUEST-ID, not the original request's.
+                "response": {"requestId": str(uuid.uuid4())},
+                "consentRequest": {
+                    "id": remote,
+                    "status": "GRANTED",
+                    "consentArtefacts": [{"id": granted}],
+                },
+            }
+        ),
+        callback,
+        hiu_db,
+    )
+    assert request.status == "granted"
+    artefact = (
+        await hiu_db.execute(
+            select(service.AbdmHiuConsentArtefact).where(
+                service.AbdmHiuConsentArtefact.consent_artefact_id == granted
+            )
+        )
+    ).scalar_one()
+    assert artefact.status == "granted" and artefact.consent_request_id == request.id
+    fetch = await hiu_db.get(AbdmJob, jobs.job_id("hiu_fetch", artefact.id))
+    assert fetch is not None and fetch.status == "pending"
+
+
+async def test_a_status_for_an_unknown_consent_is_still_refused(hiu_db, callback_case):
+    _, callback = await _undecided(hiu_db, callback_case)
+    with pytest.raises(HTTPException) as refused:
+        await routes.consent_on_status(
+            ConsentOnStatusCallback.model_validate(
+                {
+                    "response": {"requestId": str(uuid.uuid4())},
+                    "consentRequest": {"id": str(uuid.uuid4()), "status": "GRANTED"},
+                }
+            ),
+            callback,
+            hiu_db,
+        )
+    assert refused.value.status_code == 404

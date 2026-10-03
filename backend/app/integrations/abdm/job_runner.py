@@ -151,7 +151,12 @@ async def _dispatch(job: jobs.AbdmJob) -> None:
             if row is None or row.facility_id != job.facility_id:
                 raise worker.TransferError("Transfer unavailable")
             transaction_id = row.transaction_id
-        await worker.transfer_transaction(transaction_id, retry_transport=True)
+        try:
+            await worker.transfer_transaction(transaction_id, retry_transport=True)
+        except worker.HiuTransactionUnknown as exc:
+            # Spend no attempt: the HIU is waiting for NHA's on-request, and the
+            # HIU key's expiry ends the wait as a definite failure.
+            raise DeferredJob("HIU does not know this transaction yet") from exc
     else:
         raise ValueError("Unsupported ABDM job kind")
 
