@@ -735,6 +735,8 @@ async def enrol_by_driving_licence(
     profile = body.get("enrolProfile") if isinstance(body, dict) else None
     number = profile.get("enrolmentNumber") if isinstance(profile, dict) else None
     if not isinstance(number, str) or not number.strip():
+        # Field names only: the reply carries the person's identity.
+        log.warning("ABDM licence enrolment reply had no enrolment number (shape=%s)", _body_shape(body))
         raise AbdmIdentityError(
             "abdm_no_enrolment_returned", "ABDM returned no enrolment number for this licence"
         )
