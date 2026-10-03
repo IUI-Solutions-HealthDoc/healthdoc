@@ -347,3 +347,21 @@ async def test_authorisation_is_rechecked_between_pages(db, transfer_case, chang
     row = (await db.execute(select(AbdmHipHealthInformationRequest))).scalar_one()
     assert row.status == "failed"
     assert row.bundles_sent == "1"
+
+
+async def test_an_hiu_that_does_not_know_the_transaction_yet_is_waited_for(monkeypatch):
+    """Live, 3 Oct 2026: our push reached our own HIU before NHA's on-request
+    told it the transaction, and every page attempt got 404."""
+    import httpx
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        worker.httpx,
+        "AsyncClient",
+        lambda **kw: real_client(
+            transport=httpx.MockTransport(lambda request: httpx.Response(404, json={})), **kw
+        ),
+    )
+    monkeypatch.setattr(worker.asyncio, "sleep", AsyncMock())
+    with pytest.raises(worker.HiuTransactionUnknown):
+        await worker._post_page("https://hiu.example/transfer", {"entries": []})

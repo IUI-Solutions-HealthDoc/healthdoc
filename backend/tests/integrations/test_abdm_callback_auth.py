@@ -300,6 +300,8 @@ DOCUMENTED_CM_OPTIONAL = [
     ("hip", "/api/v3/hip/link/care-context/confirm"),
     ("hip", "/api/v3/consent/request/hip/notify"),
     ("hip", "/api/v3/hip/health-information/request"),
+    # Live sandbox, 3 Oct 2026 (receipt f3a72f0a): on-init came without X-CM-ID.
+    ("hiu", "/api/v3/hiu/consent/request/on-init"),
     ("hiu", "/api/v3/hiu/consent/request/notify"),
     ("hiu", "/api/v3/hiu/consent/request/on-status"),
     ("hiu", "/api/v3/hiu/consent/on-fetch"),
@@ -358,10 +360,8 @@ async def test_event_callback_still_requires_exact_recipient_and_freshness(
     assert not gateway_settings.keys
 
 
-@pytest.mark.parametrize(
-    "path", ["/api/v3/hiu/consent/request/on-init", "/api/v3/hiu/unknown-callback"]
-)
-async def test_hiu_init_and_unknown_routes_still_require_cm(gateway_settings, path):
+@pytest.mark.parametrize("path", ["/api/v3/hiu/unknown-callback"])
+async def test_unknown_hiu_routes_still_require_cm(gateway_settings, path):
     with pytest.raises(HTTPException) as caught:
         await callback_auth.verify_hiu_gateway_callback(_event_request("hiu", path))
     assert caught.value.detail["code"] == "missing_abdm_headers"

@@ -85,6 +85,10 @@ _HIP_CALLBACKS_WITHOUT_CM_ID = frozenset(
 )
 _HIU_CALLBACKS_WITHOUT_CM_ID = frozenset(
     {
+        # The published collection sends X-CM-ID on consent on-init; the live
+        # sandbox did not (3 Oct 2026, receipt f3a72f0a), and refusing it lost
+        # the consent request's id.
+        "/api/v3/hiu/consent/request/on-init",
         "/api/v3/hiu/consent/request/notify",
         "/api/v3/hiu/consent/request/on-status",
         "/api/v3/hiu/consent/on-fetch",
