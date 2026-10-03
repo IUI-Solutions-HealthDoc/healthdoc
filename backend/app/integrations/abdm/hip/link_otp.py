@@ -7,8 +7,9 @@ who can reach it claim a patient's care contexts.
 
 Redis retains only keyed proof fingerprints, attempt/replay metadata and a
 delivery guard under the original ten-minute deadline. The clear code exists
-long enough to be sent to the configured SMS relay and is never logged,
-returned by an API, or written to Postgres.
+long enough to be sent (the configured SMS relay, or MSG91 with the
+deployment's DLT template) and is never logged, returned by an API, or written
+to Postgres.
 """
 
 from __future__ import annotations
@@ -16,6 +17,8 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
+import re
 import secrets
 from datetime import UTC, datetime
 from math import ceil
@@ -29,6 +32,7 @@ from app.common.security import _get_hmac_key
 OTP_TTL_SECONDS = 10 * 60
 MAX_ATTEMPTS = 5
 _KEY_PREFIX = "abdm:link-otp"
+log = logging.getLogger("healthdoc.abdm")
 
 
 class LinkOtpUnavailable(RuntimeError):
@@ -112,9 +116,67 @@ def masked_mobile(mobile: str) -> str:
     return f"******{digits[-4:]}"
 
 
-async def _deliver(*, mobile: str, otp: str) -> None:
-    """Send through the deployment's HTTPS SMS relay contract."""
+def _msg91_mobile(mobile: str) -> str:
+    """MSG91 wants the country code and no plus: 91 and ten digits."""
+    digits = "".join(character for character in mobile if character.isdigit())
+    if len(digits) == 10 and digits[0] in "6789":
+        return f"91{digits}"
+    if len(digits) == 12 and digits.startswith("91") and digits[2] in "6789":
+        return digits
+    raise LinkOtpUnavailable("MSG91 sends only to Indian mobile numbers")
+
+
+async def _send_msg91(*, mobile: str, otp: str) -> None:
+    """MSG91 with the deployment's DLT template, whose variables are OTP and min."""
     settings = get_settings()
+    key, template = settings.msg91_auth_key, settings.msg91_otp_template_id
+    if not key or not template:
+        raise LinkOtpUnavailable("MSG91_AUTH_KEY and MSG91_OTP_TEMPLATE_ID are not configured")
+    to, minutes = _msg91_mobile(mobile), str(OTP_TTL_SECONDS // 60)
+    base = settings.msg91_base_url.rstrip("/")
+    if settings.msg91_api == "otp":
+        # OTP API: ##OTP## is filled from the otp parameter, other variables from the body.
+        request = {
+            "url": f"{base}/api/v5/otp",
+            "params": {"template_id": template, "mobile": to, "otp": otp, "otp_expiry": minutes},
+            "json": {"min": minutes},
+        }
+    else:
+        # Flow API: each recipient carries the template's variables by name.
+        request = {
+            "url": f"{base}/api/v5/flow",
+            "json": {
+                "template_id": template,
+                "short_url": "0",
+                "recipients": [{"mobiles": to, "OTP": otp, "min": minutes}],
+            },
+        }
+    try:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
+            response = await client.post(
+                headers={"authkey": key, "accept": "application/json", "content-type": "application/json"},
+                **request,
+            )
+    except httpx.HTTPError as exc:
+        raise LinkOtpUnavailable("MSG91 did not answer") from exc
+    try:
+        body = response.json()
+    except ValueError:
+        body = {}
+    if response.status_code >= 400 or not isinstance(body, dict) or body.get("type") != "success":
+        message = str(body.get("message") if isinstance(body, dict) else "")
+        # MSG91's reason ("Invalid authkey", "Template not found"), never a number it echoed.
+        log.warning("MSG91 refused the linking OTP (HTTP %s): %s",
+                    response.status_code, re.sub(r"\d{4,}", "…", message)[:120])
+        raise LinkOtpUnavailable("MSG91 did not accept the OTP")
+
+
+async def _deliver(*, mobile: str, otp: str) -> None:
+    """Send through MSG91 or the deployment's HTTPS SMS relay contract."""
+    settings = get_settings()
+    if settings.abdm_link_otp_sender == "msg91":
+        await _send_msg91(mobile=mobile, otp=otp)
+        return
     url = settings.abdm_link_otp_delivery_url
     if not url:
         raise LinkOtpUnavailable("ABDM_LINK_OTP_DELIVERY_URL is not configured")

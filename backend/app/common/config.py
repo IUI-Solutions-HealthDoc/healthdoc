@@ -1,6 +1,7 @@
 """Central settings — every module reads config from here, never os.environ directly."""
 
 from functools import lru_cache
+from typing import Literal
 from uuid import UUID
 
 from pydantic import Field
@@ -298,6 +299,14 @@ class Settings(BaseSettings):
     #: fails closed; accepting an unverified confirmation is never a fallback.
     abdm_link_otp_delivery_url: str | None = None
     abdm_link_otp_delivery_token: str | None = Field(default=None, repr=False)
+    #: Who sends that OTP: the relay above, or MSG91 directly with the
+    #: deployment's DLT-registered template (##OTP## and ##min##).
+    abdm_link_otp_sender: Literal["relay", "msg91"] = "relay"
+    msg91_auth_key: str | None = Field(default=None, repr=False)
+    msg91_otp_template_id: str | None = None
+    #: The MSG91 API the template was created under: Flow (SMS templates) or OTP.
+    msg91_api: Literal["flow", "otp"] = "flow"
+    msg91_base_url: str = "https://control.msg91.com"
 
     aadhaar_hmac_key: str = "change-me-in-env"
     aadhaar_encryption_key: str = "change-me-in-env"
