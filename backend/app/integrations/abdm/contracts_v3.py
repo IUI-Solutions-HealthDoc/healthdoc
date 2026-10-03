@@ -70,12 +70,13 @@ class DiscoverCallback(WireModel):
 
 class CareContext(WireModel):
     reference_number: str = Field(alias="referenceNumber")
-    display: str
+    # The PHR's live link-init (3 Oct 2026) names contexts by reference only.
+    display: str | None = None
 
 
 class PatientCareContexts(WireModel):
     reference_number: str = Field(alias="referenceNumber")
-    display: str
+    display: str | None = None
     care_contexts: list[CareContext] = Field(default_factory=list, alias="careContexts")
     hi_type: str = Field(alias="hiType")
     count: int | None = None
