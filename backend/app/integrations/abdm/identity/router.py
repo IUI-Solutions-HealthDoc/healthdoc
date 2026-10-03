@@ -35,6 +35,7 @@ from app.integrations.abdm.client import (
     AbdmRejected,
     AbdmUnavailable,
     get_abdm_client,
+    safe_failure_summary,
 )
 from app.integrations.abdm.identity import lgd, otp_session
 from app.integrations.abdm.identity import service as identity_service
@@ -1078,8 +1079,10 @@ async def new_captcha() -> JSONResponse:
 # licence against the person, so nothing here is bound to the chart. Once the
 # ABHA exists, the desk verifies it like any other existing ABHA.
 
-#: Two megabytes per side, decoded. The desk shrinks camera photos first.
-_PHOTO_MAX_BYTES = 2 * 1024 * 1024
+#: ABDM refuses a licence photo of 150 KB or more (live, 3 Oct 2026: "Please
+#: upload a document of size less than 150KB"). The desk shrinks camera photos
+#: under 140 KB first; this refuses anything ABDM would, before it is sent.
+_PHOTO_MAX_BYTES = 150_000
 _PHOTO_MAX_CHARS = 64 + (_PHOTO_MAX_BYTES * 4) // 3 + 4
 _PHOTO_SIGNATURES = (b"\xff\xd8\xff", b"\x89PNG\r\n\x1a\n")
 
@@ -1093,8 +1096,8 @@ def _licence_photo(value: str) -> str:
         raise ValueError("the licence photo must be base64") from exc
     if not decoded.startswith(_PHOTO_SIGNATURES):
         raise ValueError("the licence photo must be a JPEG or PNG image")
-    if len(decoded) > _PHOTO_MAX_BYTES:
-        raise ValueError("the licence photo must be at most 2 MB")
+    if len(decoded) >= _PHOTO_MAX_BYTES:
+        raise ValueError("the licence photo must be under 150 KB, ABDM's limit")
     return encoded
 
 
@@ -1158,6 +1161,13 @@ class DrivingLicenceEnrolmentOut(BaseModel):
 
 def _licence_flow_refusal(exc: Exception) -> HTTPException:
     """The refusals every driving-licence leg shares."""
+    # Every outcome other than success is logged: a 502 and a 503 on the live
+    # enrolment (3 Oct 2026) left no trace of which refusal they were.
+    detail = exc.code if isinstance(exc, identity_service.AbdmIdentityError) else None
+    log.warning(
+        "Driving-licence leg refused (%s%s)",
+        safe_failure_summary(exc), f":{detail}" if detail else "",
+    )
     if isinstance(exc, OtpSessionNotFound | OtpSessionMismatch):
         return HTTPException(
             404,
