@@ -1094,6 +1094,14 @@ async def consent_on_init(
             raise HTTPException(409, {"code": "consent_correlation_conflict"})
         if row.status not in {"failed", "denied", "expired", "revoked"}:
             row.consent_request_id = payload.consent_request.id
+        if row.status == "requested":
+            # NHA's decision can arrive before this id does (live, 3 Oct 2026:
+            # GRANTED 30 s after the request, on-init 16 min later), and a
+            # decision for an unknown id cannot be matched. Ask for the status
+            # now that the id is known; a later decision still arrives normally.
+            await jobs.rearm(
+                db, kind="hiu_consent", target_id=row.id, facility_id=row.facility_id
+            )
     return _accepted()
 
 
@@ -1106,6 +1114,19 @@ async def consent_on_status(
     if callback.replayed:
         return _accepted()
     row = await _consent_request_by_gateway_id(db, payload.response.request_id)
+    if row is None and payload.consent_request and payload.consent_request.id:
+        # A status poll carries its own REQUEST-ID, so the answer is matched by
+        # NHA's consent-request id, exactly; never by patient or time.
+        row = (
+            await db.execute(
+                select(AbdmConsentRequest)
+                .where(
+                    AbdmConsentRequest.consent_request_id == payload.consent_request.id,
+                    AbdmConsentRequest.facility_id == await _facility_id(db),
+                )
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
     if row is None:
         raise HTTPException(
             404, {"code": "consent_request_not_found", "message": "Consent request not found"}
@@ -1115,8 +1136,30 @@ async def consent_on_status(
         if payload.consent_request.id not in {None, row.consent_request_id}:
             raise HTTPException(409, {"code": "consent_correlation_conflict"})
         status = payload.consent_request.status.lower()
-        if _advance_consent_status(row, status):
+        applicable = _advance_consent_status(row, status)
+        if applicable:
             await hiu_service.end_consent_request(db, row)
+        if applicable and status == "granted":
+            # The grant this status reports may never have reached us as a
+            # notification; record its artefacts and fetch them, as the
+            # acknowledged notification would have.
+            for reference in payload.consent_request.consent_artefacts:
+                artefact = await _record_hiu_artefact(
+                    db,
+                    facility_id=row.facility_id,
+                    consent_request=row,
+                    artefact_id=reference.id,
+                    status="granted",
+                    hi_types=[],
+                    date_range_from=None,
+                    date_range_to=None,
+                    expires_at=None,
+                    raw=raw_dict(payload),
+                )
+                if artefact.status == "granted":
+                    await jobs.enqueue(
+                        db, kind="hiu_fetch", target_id=artefact.id, facility_id=row.facility_id
+                    )
     return _accepted()
 
 

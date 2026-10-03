@@ -1,5 +1,6 @@
 """Retry HIU receipt notification without rolling back or re-decrypting data."""
 
+import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import select
@@ -58,7 +59,13 @@ async def dispatch(job: AbdmJob) -> None:
             row = await db.get(AbdmConsentRequest, job.target_id)
             if row is None or row.facility_id != job.facility_id:
                 raise ValueError("Consent request unavailable")
-            if row.status != "requested" or row.consent_request_id:
+            if row.status != "requested":
+                return
+            if row.consent_request_id:
+                # Re-armed by on-init: the decision may have come before the id.
+                await gateway.check_consent_request_status(
+                    consent_request_id=row.consent_request_id, request_id=str(uuid.uuid4())
+                )
                 return
             from app.patients.models import Patient
 
