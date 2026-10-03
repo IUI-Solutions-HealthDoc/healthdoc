@@ -161,8 +161,9 @@ async def test_confirmation_acknowledges_exact_selected_documents(db, mediated_c
     assert link.status == "confirmed" and link.confirmed_at is not None
     gateway.respond_to_link_confirm_groups.assert_not_awaited()
     await db.commit()
-    ack = (await db.execute(select(jobs.AbdmJob))).scalar_one()
-    assert ack.kind == "callback_ack"
+    ack = (
+        await db.execute(select(jobs.AbdmJob).where(jobs.AbdmJob.kind == "callback_ack"))
+    ).scalar_one()
     await job_runner.run_once(ack.id)
     groups = gateway.respond_to_link_confirm_groups.call_args.kwargs[
         "patient_groups"
@@ -171,6 +172,50 @@ async def test_confirmation_acknowledges_exact_selected_documents(db, mediated_c
     assert [row["referenceNumber"] for group in groups for row in group["careContexts"]] == [
         contexts[0].reference
     ]
+
+
+async def test_a_confirmed_link_announces_each_linked_record_to_the_phr(db, mediated_case):
+    """phrsbx, 3 Oct 2026: a record published before the chart held an ABHA
+    address was announced by deep-link SMS, and the PHR never fetched it after
+    the patient linked it. The confirmed link must send the care-context
+    notification again, and only for the records it links."""
+    patient, contexts, link = mediated_case
+    await jobs.enqueue(
+        db, kind="context_notify", target_id=contexts[0].id, facility_id=link.facility_id
+    )
+    earlier = (await db.execute(select(jobs.AbdmJob))).scalar_one()
+    earlier.status, earlier.attempts = "done", 1
+    await db.commit()
+
+    await external_router.link_confirm(confirmation(link), callback(), db)
+    await db.commit()
+
+    notifications = (
+        await db.execute(
+            select(jobs.AbdmJob)
+            .where(jobs.AbdmJob.kind == "context_notify")
+            .execution_options(populate_existing=True)
+        )
+    ).scalars().all()
+    assert [(job.target_id, job.status, job.attempts) for job in notifications] == [
+        (contexts[0].id, "pending", 0)
+    ]
+
+
+async def test_an_operator_frozen_notification_stays_frozen_after_linking(db, mediated_case):
+    patient, contexts, link = mediated_case
+    await jobs.enqueue(
+        db, kind="context_notify", target_id=contexts[0].id, facility_id=link.facility_id
+    )
+    frozen = (await db.execute(select(jobs.AbdmJob))).scalar_one()
+    frozen.status = "frozen"
+    await db.commit()
+
+    await external_router.link_confirm(confirmation(link), callback(), db)
+    await db.commit()
+
+    await db.refresh(frozen)
+    assert frozen.status == "frozen"
 
 
 async def test_ack_outage_retries_committed_proof_without_reconsuming_otp(db, mediated_case):
@@ -184,7 +229,9 @@ async def test_ack_outage_retries_committed_proof_without_reconsuming_otp(db, me
     assert reply.kind == "hip_link_confirm"
     assert len(reply.payload_sha256) == 64
     assert reply.subject_ids == link.care_context_references
-    ack_job = (await db.execute(select(jobs.AbdmJob))).scalar_one()
+    ack_job = (
+        await db.execute(select(jobs.AbdmJob).where(jobs.AbdmJob.kind == "callback_ack"))
+    ).scalar_one()
     await job_runner.run_once(ack_job.id)
     await db.refresh(ack_job)
     await db.refresh(link)
@@ -203,7 +250,8 @@ async def test_ack_outage_retries_committed_proof_without_reconsuming_otp(db, me
     await db.refresh(ack_job)
     assert ack_job.status == "done"
     assert ack.call_args.kwargs == first_wire
-    assert (await db.execute(select(jobs.AbdmJob.kind))).scalars().all() == ["callback_ack"]
+    kinds = (await db.execute(select(jobs.AbdmJob.kind))).scalars().all()
+    assert sorted(kinds) == ["callback_ack", "context_notify"]
 
 
 @pytest.mark.parametrize("change", ["otp", "callback_id", "documents"])
@@ -250,7 +298,9 @@ async def test_ack_dispatch_rechecks_binding_before_network(db, mediated_case):
     patient, _, link = mediated_case
     await external_router.link_confirm(confirmation(link), callback(), db)
     await db.commit()
-    ack_job = (await db.execute(select(jobs.AbdmJob))).scalar_one()
+    ack_job = (
+        await db.execute(select(jobs.AbdmJob).where(jobs.AbdmJob.kind == "callback_ack"))
+    ).scalar_one()
     patient.abha_address = "changed-before-dispatch@sbx"
     await db.commit()
     await job_runner.run_once(ack_job.id)
