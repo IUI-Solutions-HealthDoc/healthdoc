@@ -266,6 +266,23 @@ async def _bind_linked_identity(db: AsyncSession, link: AbdmCareContextLink) -> 
     )
 
 
+async def _linked_references(
+    db: AsyncSession, *, facility_id: uuid.UUID, patient_id: uuid.UUID, abha_address: str
+) -> set[str]:
+    """Care-context references this ABHA address already holds a confirmed link to."""
+    rows = (
+        await db.execute(
+            select(AbdmCareContextLink.care_context_references).where(
+                AbdmCareContextLink.facility_id == facility_id,
+                AbdmCareContextLink.patient_id == patient_id,
+                AbdmCareContextLink.abha_address == abha_address,
+                AbdmCareContextLink.status == "confirmed",
+            )
+        )
+    ).scalars()
+    return {str(reference) for references in rows for reference in (references or [])}
+
+
 async def _link_patient_contexts(
     db: AsyncSession, link: AbdmCareContextLink
 ) -> tuple[Patient, list[AbdmCareContext]]:
@@ -332,9 +349,19 @@ async def discover(
             today=await facility_today(db, facility_id),
         )
     if patient is not None:
+        # A record this address has already linked is not offered again. The
+        # first live PHR discovery (3 Oct 2026) listed one, and the PHR's link
+        # attempt then timed out without NHA ever calling link-init here.
+        linked = await _linked_references(
+            db, facility_id=facility_id, patient_id=patient.id, abha_address=payload.patient.id
+        )
         patient_groups = _groups(
             patient,
-            await _contexts(db, facility_id=facility_id, patient_id=patient.id),
+            [
+                context
+                for context in await _contexts(db, facility_id=facility_id, patient_id=patient.id)
+                if context.reference not in linked
+            ],
         )
         if matched_by != ["ABHA_ADDRESS"]:
             # The link-init that follows cannot find this chart by address.
