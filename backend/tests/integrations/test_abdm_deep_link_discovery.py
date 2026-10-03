@@ -164,6 +164,19 @@ async def test_a_mobile_only_patient_is_discovered_by_mobile_and_demographics(
     assert found == {context.reference for context in contexts}
 
 
+async def test_the_phrs_live_discover_shape_is_accepted(db, mobile_only, monkeypatch):
+    """phrsbx, 3 Oct 2026: yearOfBirth as a number and unverifiedIdentifiers null.
+    Both were refused with 422, so the patient's discovery found nothing."""
+    patient, contexts, _ = mobile_only
+    payload = _discover(yearOfBirth=1990, unverifiedIdentifiers=None)
+    assert payload.patient.year_of_birth == "1990"
+    assert payload.patient.unverified_identifiers == []
+    target, wire = await _reply(db, monkeypatch, payload)
+    assert target == patient.id, "the chart is found exactly as with the documented shape"
+    found = {c["referenceNumber"] for g in wire["patient_groups"] for c in g["careContexts"]}
+    assert found == {context.reference for context in contexts}
+
+
 @pytest.mark.parametrize(
     "name", ["RAVI KUMAR SHARMA", "Ravi Kumar", "Ravi  Kumar  Sharmaa", "ravi kumar sharma"]
 )

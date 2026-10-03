@@ -130,6 +130,25 @@ async def test_anything_but_that_discovery_cannot_name_the_chart(db, discovered,
         AbdmCareContextLink.abha_address == address))).first() is None
 
 
+async def test_the_phrs_live_link_init_names_contexts_by_reference_only(db, discovered):
+    """phrsbx, 3 Oct 2026: link-init carried no patient or care-context display,
+    and requiring one 422'd the link after a successful discovery."""
+    patient, contexts, transaction_id = discovered
+    payload = LinkInitCallback.model_validate({
+        "transactionId": transaction_id,
+        "abhaAddress": ADDRESS,
+        "patient": [{
+            "referenceNumber": patient.uhid or str(patient.id),
+            "careContexts": [{"referenceNumber": contexts[0].reference}],
+            "hiType": contexts[0].hi_type,
+            "count": 1,
+        }],
+    })
+    await external_router.link_init(payload, callback(), db)
+    link = await _link(db, transaction_id)
+    assert link.care_context_references == [contexts[0].reference]
+
+
 async def _confirm(db, link):
     payload = LinkConfirmCallback.model_validate(
         {"confirmation": {"linkRefNumber": link.link_ref_number, "token": "123456"}})
@@ -193,3 +212,36 @@ async def test_an_address_link_whose_chart_was_unlinked_meanwhile_is_not_rebound
     assert refused.value.status_code == 404
     await db.refresh(patient)
     assert patient.abha_address is None
+
+
+async def test_records_the_address_already_linked_are_not_offered_again(
+    db, link_case, monkeypatch  # noqa: F811
+):
+    """phrsbx, 3 Oct 2026: discovery listed a record the address had already
+    linked beside a new one, and the PHR's link then timed out at NHA."""
+    from app.integrations.abdm import callback_replies
+    from app.integrations.abdm.contracts_v3 import DiscoverCallback
+
+    patient, contexts = link_case
+    db.add(AbdmCareContextLink(
+        id=uuid.uuid4(), facility_id=patient.facility_id, patient_id=patient.id,
+        abha_address=patient.abha_address, status="confirmed",
+        care_context_references=[contexts[0].reference],
+    ))
+    db.add(AbdmCareContextLink(
+        id=uuid.uuid4(), facility_id=patient.facility_id, patient_id=patient.id,
+        abha_address=patient.abha_address, status="failed",
+        care_context_references=[contexts[1].reference],
+    ))
+    await db.flush()
+    schedule = AsyncMock()
+    monkeypatch.setattr(callback_replies, "schedule", schedule)
+    payload = DiscoverCallback.model_validate({"transactionId": str(uuid.uuid4()), "patient": {
+        "id": patient.abha_address, "name": patient.full_name, "gender": "M", "yearOfBirth": 1990,
+        "verifiedIdentifiers": [], "unverifiedIdentifiers": None,
+    }})
+    await external_router.discover(payload, callback(), db)
+    wire = schedule.await_args.kwargs["response_data"]["wire"]
+    offered = {c["referenceNumber"] for g in wire["patient_groups"] for c in g["careContexts"]}
+    assert offered == {contexts[1].reference}, "a failed link is no link; a confirmed one is"
+    assert schedule.await_args.kwargs["subject_ids"] == [contexts[1].reference]
