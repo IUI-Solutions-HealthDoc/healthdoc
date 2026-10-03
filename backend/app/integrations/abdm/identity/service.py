@@ -192,20 +192,29 @@ async def _call(
         raise
 
 
+#: Licence-document fields whose ABDM refusal text describes the check, not the
+#: person ("Invalid DOB", "...size less than 150KB"). Names, numbers and other
+#: identifiers stay out: ABHA error text can echo them.
+_LOGGED_FIELD_REFUSALS = frozenset(
+    {"Dob", "FrontSidePhoto", "BackSidePhoto", "Gender", "PinCode", "State", "District"}
+)
+
+
 def _refusal_reason(detail: object) -> str | None:
-    """ABDM's words, scrubbed. A validation refusal keys each message by the
-    field it rejects ({"Dob": "...", "FrontSidePhoto": "..."}) instead of
-    using "message", so both shapes are read."""
-    general = safe_rejection_message(detail)
-    if general or not isinstance(detail, dict):
-        return general
+    """ABDM's words for a rejected licence field, numbers scrubbed.
+
+    A validation refusal keys each message by the field it rejects
+    ({"Dob": "...", "FrontSidePhoto": "...", "timestamp": ...}; live, 3 Oct
+    2026). ABDM's general free-text message is never logged; its code is.
+    """
+    if not isinstance(detail, dict):
+        return None
     per_field = [
         f"{key}: {safe_rejection_message({'message': value})}"
         for key, value in sorted(detail.items())
-        if key != "timestamp" and re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,39}", key)
-        and isinstance(value, str) and value.strip()
+        if key in _LOGGED_FIELD_REFUSALS and isinstance(value, str) and value.strip()
     ]
-    return "; ".join(per_field[:8])[:400] or None
+    return "; ".join(per_field)[:400] or None
 
 
 async def _post(path: str, payload: dict) -> AbdmResponse:
