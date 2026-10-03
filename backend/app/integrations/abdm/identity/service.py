@@ -187,9 +187,25 @@ async def _call(
         log.warning(
             "ABDM identity rejected (status=%s request=%s codes=%s fields=%s shape=%s reason=%s)",
             exc.status_code, exc.request_id, codes, fields,
-            _body_shape(exc.detail), safe_rejection_message(exc.detail),
+            _body_shape(exc.detail), _refusal_reason(exc.detail),
         )
         raise
+
+
+def _refusal_reason(detail: object) -> str | None:
+    """ABDM's words, scrubbed. A validation refusal keys each message by the
+    field it rejects ({"Dob": "...", "FrontSidePhoto": "..."}) instead of
+    using "message", so both shapes are read."""
+    general = safe_rejection_message(detail)
+    if general or not isinstance(detail, dict):
+        return general
+    per_field = [
+        f"{key}: {safe_rejection_message({'message': value})}"
+        for key, value in sorted(detail.items())
+        if key != "timestamp" and re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,39}", key)
+        and isinstance(value, str) and value.strip()
+    ]
+    return "; ".join(per_field[:8])[:400] or None
 
 
 async def _post(path: str, payload: dict) -> AbdmResponse:

@@ -27,6 +27,7 @@ class _Refusing:
     [
         {"message": "Invalid DL number UP1420190012345 for mobile 9876543210", "timestamp": "x"},
         {"error": {"message": "Invalid DL number 'UP1420190012345'", "code": "900"}},
+        {"Dob": "Invalid DL number UP1420190012345 or dob", "timestamp": "2026-10-03 15:40:01"},
     ],
 )
 async def test_the_reason_is_logged_without_the_licence_or_mobile(monkeypatch, caplog, detail):
