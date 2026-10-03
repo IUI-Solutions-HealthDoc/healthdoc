@@ -62,6 +62,15 @@ class TransientTransferError(TransferError):
     """A transport outage; retry the frozen page, not a newly built document."""
 
 
+class HiuTransactionUnknown(TransientTransferError):
+    """The HIU answered 404: it does not know this transaction yet.
+
+    NHA delivers the HIU's on-request, which carries the transaction id, on
+    its own schedule; our push reached the HIU first (live, 3 Oct 2026). This
+    is waiting, not failing, and lasts at most until the HIU's key expires.
+    """
+
+
 def _aware(value: datetime | None) -> datetime | None:
     if value is None:
         return None
@@ -502,18 +511,23 @@ def _hiu_key_material(row: AbdmHipHealthInformationRequest) -> tuple[str, str, s
 
 async def _post_page(url: str, payload: dict[str, Any]) -> None:
     last_error: Exception | None = None
+    last_status: int | None = None
     async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
         for attempt in range(_MAX_ATTEMPTS):
             try:
                 response = await client.post(url, json=payload)
                 if 200 <= response.status_code < 300:
                     return
+                last_status = response.status_code
                 last_error = TransferError(_push_refusal(response))
             except httpx.HTTPError as exc:
+                last_status = None
                 last_error = exc
             if attempt + 1 < _MAX_ATTEMPTS:
                 await asyncio.sleep(0.25 * (2**attempt))
     reason = str(last_error) if isinstance(last_error, TransferError) else type(last_error).__name__
+    if last_status == 404:
+        raise HiuTransactionUnknown(f"HIU data push failed ({reason})") from last_error
     raise TransientTransferError(f"HIU data push failed ({reason})") from last_error
 
 

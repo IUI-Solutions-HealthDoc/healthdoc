@@ -279,3 +279,24 @@ async def test_restart_after_first_page_skips_delivered_page_and_preserves_snaps
     db.expire_all()
     request = await db.get(AbdmHipHealthInformationRequest, request_id)
     assert request.status == "delivered" and request.bundles_sent == "3"
+
+
+async def test_a_push_the_hiu_cannot_match_yet_waits_without_spending_attempts(
+    db, transfer_case
+):
+    payload, callback, _, pushes = transfer_case
+    await external_router.hip_health_information_request(payload, BackgroundTasks(), callback, db)
+    await job_runner.run_once()  # Acknowledge, then schedule transfer.
+    pushes.side_effect = worker.HiuTransactionUnknown("HIU data push failed (HTTP 404)")
+    job = (
+        await db.execute(select(jobs.AbdmJob).where(jobs.AbdmJob.kind == "hip_transfer"))
+    ).scalar_one()
+    job.attempts = 4  # A counted failure now would be the fifth: dead.
+    ident = job.id
+    await db.commit()
+    assert await job_runner.run_once(ident)
+    db.expire_all()
+    job = await db.get(jobs.AbdmJob, ident)
+    assert (job.status, job.attempts) == ("pending", 4)
+    row = (await db.execute(select(AbdmHipHealthInformationRequest))).scalar_one()
+    assert row.status != "failed"
