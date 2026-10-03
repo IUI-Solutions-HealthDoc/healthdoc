@@ -438,3 +438,43 @@ async def test_a_status_for_an_unknown_consent_is_still_refused(hiu_db, callback
             hiu_db,
         )
     assert refused.value.status_code == 404
+
+
+@pytest.mark.parametrize("session_status", ["REQUESTED", "ACKNOWLEDGED"])
+async def test_the_consent_managers_requested_keeps_the_transfer_open(
+    hiu_db, callback_case, session_status
+):
+    """Live, 3 Oct 2026: on-request said REQUESTED, which was read as failure."""
+    request, artefact, transfer, callback = callback_case
+    transfer.status, transfer.transaction_id = "requested", None
+    await hiu_db.flush()
+    await routes.hiu_health_information_on_request(
+        HiuHealthInformationOnRequestCallback.model_validate(
+            {
+                "response": {"requestId": transfer.gateway_request_id},
+                "hiRequest": {"transactionId": str(uuid.uuid4()), "sessionStatus": session_status},
+            }
+        ),
+        callback,
+        hiu_db,
+    )
+    assert transfer.status == "acknowledged"
+    assert transfer.private_key_encrypted is not None
+
+
+async def test_an_unknown_session_status_fails_and_says_which(hiu_db, callback_case):
+    request, artefact, transfer, callback = callback_case
+    transfer.status, transfer.transaction_id = "requested", None
+    await hiu_db.flush()
+    await routes.hiu_health_information_on_request(
+        HiuHealthInformationOnRequestCallback.model_validate(
+            {
+                "response": {"requestId": transfer.gateway_request_id},
+                "hiRequest": {"transactionId": str(uuid.uuid4()), "sessionStatus": "ERRORED"},
+            }
+        ),
+        callback,
+        hiu_db,
+    )
+    assert transfer.status == "failed"
+    assert transfer.failure_reason == "ABDM session status ERRORED"
