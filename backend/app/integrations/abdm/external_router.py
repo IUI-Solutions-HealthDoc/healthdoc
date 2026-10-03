@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.config import get_settings
 from app.common.db import get_db
-from app.integrations.abdm import callback_replies
+from app.integrations.abdm import callback_replies, jobs
 from app.integrations.abdm.callback_auth import (
     GatewayCallback,
     hip_ack_callback,
@@ -619,6 +619,18 @@ async def link_confirm(
     link.confirmed_at = datetime.now(UTC)
     await db.flush()
     await _bind_linked_identity(db, link)
+    # A record published before this chart had an ABHA address was announced by
+    # deep-link SMS, or deferred. The PHR fetches a newly linked record only
+    # after this notification (live, 3 Oct 2026), so send it for each one now.
+    for context in await _contexts(
+        db,
+        facility_id=link.facility_id,
+        patient_id=link.patient_id,
+        references=set(link.care_context_references or []),
+    ):
+        await jobs.rearm(
+            db, kind="context_notify", target_id=context.id, facility_id=link.facility_id
+        )
     # Commit proof and delivery intent together. A network failure must not
     # roll back the link after Redis has already reserved the successful OTP.
     await callback_replies.schedule(db, **reply_kwargs)
