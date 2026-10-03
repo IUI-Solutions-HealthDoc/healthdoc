@@ -718,7 +718,9 @@ async def enrol_by_driving_licence(
                 "firstName": first_name,
                 "middleName": middle_name,
                 "lastName": last_name,
-                "dob": demographic_date(date_of_birth),
+                # yyyy-mm-dd: ABDM answered "Invalid DOB" to dd-mm-yyyy here
+                # (live, 3 Oct 2026); NHA's M1 document shows 1996-07-15.
+                "dob": date_of_birth.isoformat(),
                 "gender": gender,
                 "frontSidePhoto": front_photo,
                 "backSidePhoto": back_photo,
