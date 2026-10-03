@@ -1347,7 +1347,19 @@ async def hiu_health_information_on_request(
     else:
         row.transaction_id = payload.hi_request.transaction_id
         status = payload.hi_request.session_status.upper()
-        row.status = "acknowledged" if status == "ACKNOWLEDGED" else "failed"
+        # The consent manager answers the HIU with REQUESTED; ACKNOWLEDGED is
+        # the HIP's word. Reading REQUESTED as failure (live, 3 Oct 2026)
+        # discarded the key and refused the records that followed.
+        if status in {"REQUESTED", "ACKNOWLEDGED"}:
+            row.status = "acknowledged"
+        else:
+            row.status = "failed"
+            # A status name, not patient data; kept so a new value is visible.
+            row.failure_reason = (
+                f"ABDM session status {status}"
+                if re.fullmatch(r"[A-Z_]{1,30}", status)
+                else "ABDM session status not recognised"
+            )
     if row.status == "failed":
         hiu_service._clear_key(row)
     return _accepted()
