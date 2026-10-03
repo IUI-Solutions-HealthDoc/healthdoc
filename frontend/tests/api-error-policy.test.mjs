@@ -49,6 +49,15 @@ test("an ABDM rejection is not presented as a temporary outage or raw gateway te
   assert.equal(userFacingApiError(503), "The service is temporarily unavailable. Try again shortly.");
 });
 
+test("a licence that does not match its record says so, not 'highlighted fields'", () => {
+  // Live, 3 Oct 2026: ABDM-1203 "The details provided by you do not match
+  // against your documents details" reached the desk as the generic 400 copy.
+  const message = userFacingApiError(400, { code: "abha_licence_rejected", message: "server text" });
+  assert.match(message, /did not match these details to the driving licence record/);
+  assert.match(message, /exactly as printed/);
+  assert.doesNotMatch(message, /highlighted fields|server text/);
+});
+
 test("a server fault is not presented as a temporary outage", () => {
   for (const status of [500, 501]) {
     const message = userFacingApiError(status, "Traceback: private stack frame");
