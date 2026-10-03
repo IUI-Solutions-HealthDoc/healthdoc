@@ -47,7 +47,13 @@ from datetime import UTC, datetime
 
 from app.common.config import get_settings
 from app.common.enums import AbhaProfileTokenKind
-from app.integrations.abdm.client import AbdmRejected, AbdmResponse, get_abdm_client
+from app.integrations.abdm.client import (
+    AbdmRejected,
+    AbdmResponse,
+    _body_shape,
+    get_abdm_client,
+    safe_rejection_message,
+)
 
 from . import otp_session
 from .crypto import encrypt_for_abdm
@@ -173,12 +179,15 @@ async def _call(
             parse_json=parse_json,
         )
     except AbdmRejected as exc:
-        # Error bodies can echo the identifier or OTP. Retain only contracted
-        # field names and error-code syntax, never values or free-form messages.
+        # Error bodies can echo the identifier or OTP. Retain contracted field
+        # names, error-code syntax, the body's shape and ABDM's own message with
+        # identifiers scrubbed: a licence refusal (3 Oct 2026) carried no ABDM
+        # code at all, so without the message the reason was lost.
         codes, fields = _rejection_metadata(exc.detail)
         log.warning(
-            "ABDM identity rejected (status=%s request=%s codes=%s fields=%s)",
+            "ABDM identity rejected (status=%s request=%s codes=%s fields=%s shape=%s reason=%s)",
             exc.status_code, exc.request_id, codes, fields,
+            _body_shape(exc.detail), safe_rejection_message(exc.detail),
         )
         raise
 
