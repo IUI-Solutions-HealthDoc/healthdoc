@@ -187,3 +187,11 @@ test("when HPR cannot verify in HealthDoc, NHA's page takes over on the same car
   assert.match(content(tree), /already has an HPID/);
   assert.equal(d.signedIn(), 1);
 });
+
+test("NHA's page can be chosen from the start, without an OTP", async () => {
+  const d = panel();
+  let tree = d.render();
+  await button(tree, "Verify on NHA's page instead").props.onClick(); tree = await settle(d);
+  assert.equal(find(tree, (n) => n.type === "a").props.href, "https://healthidbeta.abdm.gov.in/x");
+  assert.equal(d.calls.some((c) => c.name === "sendHpidAadhaarOtp"), false);
+});

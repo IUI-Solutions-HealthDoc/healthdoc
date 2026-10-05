@@ -88,7 +88,12 @@ export function HpidCreation({ onSignedIn }: { onSignedIn?: () => void }) {
       {stage.kind === "idle" ? (
         <>
           <p className="text-sm text-muted-foreground">For a doctor, nurse or pharmacist. A professional who already has an HPID is signed in with it instead, ready for their HPR registration.</p>
-          <button type="button" className={primary} onClick={() => setStage({ kind: "aadhaar" })}>Start with Aadhaar</button>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className={primary} onClick={() => setStage({ kind: "aadhaar" })}>Start with Aadhaar</button>
+            {/* NHA's own page does the same verification; HPR's in-app verify
+                fails in the sandbox (5 Oct 2026). */}
+            <button type="button" className={secondary} disabled={busy} onClick={() => void openNhaPage()}>Verify on NHA&apos;s page instead</button>
+          </div>
         </>
       ) : null}
 
