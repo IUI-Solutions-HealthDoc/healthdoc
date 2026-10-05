@@ -1,6 +1,7 @@
 """Healthcare Professionals Registry for the facility administrator (ABDM M4, HPR).
 
-HPR's master data and HPID creation (HPR-002 to 011). Master lists come back
+HPR's master data, HPID creation (HPR-002 to 011, Aadhaar on NHA's page) and
+registration of the signed-in professional (HPR-018 to 079). Master lists come back
 as {code, label}; HPR's own field names differ per list. HPR's state and
 district ids are its own, not LGD codes (district/27 is Punjab, 5 Oct live),
 so every HPR form takes them from these lists only.
@@ -15,7 +16,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.auth.deps import CurrentDbUser, require_roles
-from app.integrations.abdm.hfr import client, hpid
+from app.integrations.abdm.client import (
+    AbdmAuthError,
+    AbdmNotConfigured,
+    AbdmRejected,
+    AbdmUnavailable,
+)
+from app.integrations.abdm.hfr import client, hpid, hpr_login, hpr_registration
 from app.integrations.abdm.hfr.router import _hfr
 
 router = APIRouter(
@@ -106,7 +113,7 @@ async def councils(kind: Literal["medical", "nurse"] = "medical") -> dict:
 @router.get("/master/courses")
 async def courses(
     system_of_medicine: Annotated[str, Query(min_length=1, max_length=120)],
-    hpr_type: Literal["doctor", "nurse"] = "doctor",
+    hpr_type: Literal["doctor", "nurse", "pharmacist"] = "doctor",
     all_courses: bool = False,
 ) -> dict:
     """HPR-062. HPR returns only basic degrees for an empty qualification
@@ -132,12 +139,30 @@ async def universities(college_code: Annotated[str, Query(pattern=_ID)]) -> dict
     return {"data": _options(await _hfr(client.call("GET", f"/apis/v1/masters/universites/{college_code}")), "name")}
 
 
-# ----------------------------------------------------------------- HPID creation (HPR-002 to 011)
+# ----------------------------------------------------------------- HPID creation, in HealthDoc (HPR-002 to 011)
+
 
 
 def _refused(exc: hpid.HpidError) -> HTTPException:
     status = 404 if exc.code == "hpid_session_not_found" else 400
     return HTTPException(status, {"code": exc.code, "message": exc.message})
+
+
+async def _step(call):
+    """One HPID step. HPR's own reason for a refusal ("Aadhaar Number/Virtual
+    ID is invalid", a wrong OTP) is the desk's to act on, so it is passed back;
+    other failures are mapped as every HPR failure is."""
+    try:
+        return await call
+    except AbdmRejected as exc:
+        detail = exc.detail if isinstance(exc.detail, dict) else {}
+        messages = [str(d.get("message")) for d in detail.get("details") or [] if isinstance(d, dict) and d.get("message")]
+        raise HTTPException(400, {"code": "hpr_refused", "message": "; ".join(messages)
+                                  or f"HPR refused this (HTTP {exc.status_code})"}) from None
+    except hpid.HpidError as exc:
+        raise _refused(exc) from None
+    except (AbdmNotConfigured, AbdmUnavailable, AbdmAuthError) as exc:
+        await _hfr(_raise(exc))
 
 
 class HpidSession(BaseModel):
@@ -159,34 +184,38 @@ class HpidCreate(HpidSession):
     password: str = Field(min_length=8, max_length=64, repr=False)
     category_code: int = Field(ge=1, le=999)
     subcategory_code: int = Field(ge=1, le=999)
-    state_code: str = Field(pattern=_ID)
-    district_code: str = Field(pattern=_ID)
+    #: HPR's lookup ids, as its lists return them; the server sends their ISO codes.
+    state_id: str = Field(pattern=_ID)
+    district_id: str = Field(pattern=_ID)
+    role: Literal["PROFESSIONAL", "FACILITY_MANAGER", "BOTH"] = "PROFESSIONAL"
 
 
-@router.post("/hpid/start")
-async def hpid_start(current_db_user: CurrentDbUser) -> dict:
-    """Opens NHA's Aadhaar page; the professional authenticates there, so
-    HealthDoc never sees their Aadhaar number or its OTP."""
-    try:
-        session_id, url = await _hfr(hpid.start(facility_id=current_db_user.facility_id, user_id=current_db_user.id))
-    except hpid.HpidError as exc:
-        raise _refused(exc) from None
+class HpidLinkStart(BaseModel):
+    #: After Cancel: a new NHA page, not the one still waiting.
+    fresh: bool = False
+
+
+@router.post("/hpid/link")
+async def hpid_link(current_db_user: CurrentDbUser, payload: HpidLinkStart | None = None) -> dict:
+    """HPR-002 to 007 on NHA's own page; HealthDoc never sees the Aadhaar number.
+    The admin's attempt still waiting on that page comes back unless fresh."""
+    session_id, url = await _step(hpid.start_link(
+        facility_id=current_db_user.facility_id, user_id=current_db_user.id, fresh=bool(payload and payload.fresh)))
     return {"session_id": session_id, "url": url}
 
 
-@router.post("/hpid/check")
-async def hpid_check(payload: HpidSession, current_db_user: CurrentDbUser) -> dict:
-    try:
-        return await _hfr(hpid.check(
-            facility_id=current_db_user.facility_id, user_id=current_db_user.id, session_id=payload.session_id))
-    except hpid.HpidError as exc:
-        raise _refused(exc) from None
+@router.post("/hpid/link/check")
+async def hpid_link_check(payload: HpidSession, current_db_user: CurrentDbUser) -> dict:
+    """{"authenticated": false} until the professional finishes on NHA's page;
+    then their KYC, and an existing HPID's login or HPR ID suggestions."""
+    return await _step(hpid.check_link(
+        facility_id=current_db_user.facility_id, user_id=current_db_user.id, session_id=payload.session_id))
 
 
 @router.post("/hpid/mobile")
 async def hpid_mobile(payload: HpidMobile, current_db_user: CurrentDbUser) -> dict:
     try:
-        return await _hfr(hpid.verify_mobile(
+        return await _step(hpid.verify_mobile(
             facility_id=current_db_user.facility_id, user_id=current_db_user.id,
             session_id=payload.session_id, mobile=payload.mobile))
     except hpid.HpidError as exc:
@@ -196,7 +225,7 @@ async def hpid_mobile(payload: HpidMobile, current_db_user: CurrentDbUser) -> di
 @router.post("/hpid/mobile/verify")
 async def hpid_mobile_verify(payload: HpidOtp, current_db_user: CurrentDbUser) -> dict:
     try:
-        return await _hfr(hpid.confirm_mobile(
+        return await _step(hpid.confirm_mobile(
             facility_id=current_db_user.facility_id, user_id=current_db_user.id,
             session_id=payload.session_id, otp=payload.otp))
     except hpid.HpidError as exc:
@@ -206,15 +235,163 @@ async def hpid_mobile_verify(payload: HpidOtp, current_db_user: CurrentDbUser) -
 @router.post("/hpid/create")
 async def hpid_create(payload: HpidCreate, current_db_user: CurrentDbUser) -> dict:
     """Creates the HPID and signs the professional in to HPR with it."""
+    iso = await _resolve_iso(states={payload.state_id}, districts={payload.district_id: payload.state_id})
     try:
-        session, number = await _hfr(hpid.create(
+        session, number = await _step(hpid.create(
             facility_id=current_db_user.facility_id, user_id=current_db_user.id,
             session_id=payload.session_id, hpr_id=payload.hpr_id.strip().lower(), email=payload.email.strip(),
             password=payload.password, category_code=payload.category_code,
-            subcategory_code=payload.subcategory_code, state_code=payload.state_code,
-            district_code=payload.district_code,
+            subcategory_code=payload.subcategory_code, state_code=iso[f"state:{payload.state_id}"],
+            district_code=iso[f"district:{payload.district_id}"], role=payload.role,
         ))
     except hpid.HpidError as exc:
         raise _refused(exc) from None
     return {"hpr_id": session.hpr_id, "hpr_id_number": number, "logged_in": True,
             "expires_at": session.expires_at}
+
+
+# ----------------------------------------------------------------- HPR's ISO codes
+
+
+async def _resolve_iso(
+    *, states: set[str] = frozenset(), districts: dict[str, str] | None = None,
+    sub_districts: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """HPR's lists are looked up by id, but its payloads take each place's
+    isoCode (the LGD code; NHA's register document). Resolved here from HPR's
+    own masters, so the browser never supplies a code HPR stores."""
+    iso: dict[str, str] = {}
+    if states:
+        rows = _list(await _hfr(client.call("GET", "/apis/v1/masters/states")))
+        by_id = {str(row.get("id")): str(row.get("isoCode") or "") for row in rows}
+        for state in states:
+            if not by_id.get(state):
+                raise HTTPException(422, {"code": "hpr_place_unknown", "message": "HPR does not list this state"})
+            iso[f"state:{state}"] = by_id[state]
+    for district, state in (districts or {}).items():
+        rows = _list(await _hfr(client.call("GET", f"/apis/v1/masters/district/{state}")))
+        code = next((str(r.get("isoCode") or "") for r in rows if str(r.get("id")) == district), "")
+        if not code:
+            raise HTTPException(422, {"code": "hpr_place_unknown", "message": "HPR does not list this district"})
+        iso[f"district:{district}"] = code
+    for sub, district in (sub_districts or {}).items():
+        rows = _list(await _hfr(client.call("GET", f"/apis/v1/masters/sub-districts/{district}")))
+        code = next((str(r.get("isoCode") or "") for r in rows if str(r.get("id")) == sub), "")
+        if not code:
+            raise HTTPException(422, {"code": "hpr_place_unknown", "message": "HPR does not list this sub-district"})
+        iso[f"subdistrict:{sub}"] = code
+    return iso
+
+
+# ----------------------------------------------------------------- registration in HPR (HPR-018 to 079)
+
+
+async def _signed_in(current_db_user) -> tuple[hpr_login.HprSession, str]:
+    held = await hpr_login.current(current_db_user.facility_id, current_db_user.id)
+    if held is None:
+        raise HTTPException(409, {"code": "hpr_login_required", "message": "Sign in to HPR as the professional first"})
+    return held
+
+
+async def _kyc(current_db_user) -> dict:
+    kyc = await hpr_login.kyc(current_db_user.facility_id, current_db_user.id)
+    if not kyc:
+        # A password or OTP login hands over only a token; HPR's KYC comes
+        # with Aadhaar verification (HPID creation, or an existing HPID found).
+        raise HTTPException(409, {"code": "hpr_kyc_required",
+                                  "message": "Verify the professional's Aadhaar under “Create an HPID” to load their details"})
+    return kyc
+
+
+@router.get("/profile")
+async def hpr_profile(current_db_user: CurrentDbUser) -> dict:
+    """HPR-019 to 037: the signed-in professional's Aadhaar details, shown
+    read-only on the registration form."""
+    session, _ = await _signed_in(current_db_user)
+    return hpid.public(await _kyc(current_db_user)) | {
+        "hpr_id": session.hpr_id, "hpr_id_number": session.hpr_id_number}
+
+
+@router.get("/professional")
+async def hpr_professional(current_db_user: CurrentDbUser) -> dict:
+    """HPR-078: what HPR holds for the signed-in professional (its public,
+    masked view; NHA's Fetch Professional Details document)."""
+    session, _ = await _signed_in(current_db_user)
+    if not session.hpr_id_number:
+        raise HTTPException(409, {"code": "hpr_login_required", "message": "This HPR login carries no HPR ID number"})
+    body = await _hfr(client.call("POST", "/apis/v1/doctors/fetch-professional-info", json={"practitioner": {
+        "id": session.hpr_id_number, "name": "", "contactNumber": "", "state": "", "registrationNumber": ""}}))
+    rows = body.get("practitioners") if isinstance(body, dict) else None
+    # HPR nests the list one level deeper than a flat list (5 Oct live; NHA's document agrees).
+    while isinstance(rows, list) and rows and isinstance(rows[0], list):
+        rows = rows[0]
+    return {"practitioner": rows[0] if isinstance(rows, list) and rows and isinstance(rows[0], dict) else None}
+
+
+async def _raise(exc: Exception):
+    raise exc
+
+
+async def _submit(path: str, payload: hpr_registration.Professional, current_db_user) -> dict:
+    session, token = await _signed_in(current_db_user)
+    kyc = await _kyc(current_db_user)
+    comm = payload.communication_address
+    quals = payload.registration.qualifications
+    iso = await _resolve_iso(
+        states={q.state for q in quals} | ({comm.state} if comm else set()),
+        districts={comm.district: comm.state} if comm else None,
+        sub_districts={comm.sub_district: comm.district} if comm and comm.sub_district else None,
+    )
+    try:
+        practitioner = hpr_registration.practitioner(payload, kyc, iso)
+    except hpr_registration.HprKycMissing as exc:
+        raise HTTPException(409, {"code": "hpr_kyc_required", "message": str(exc)}) from None
+    body = {"practitioner": practitioner, "hprToken": token}
+    try:
+        answer = await client.call("POST", path, json=body)
+    except AbdmRejected as exc:
+        detail = exc.detail if isinstance(exc.detail, dict) else {}
+        messages = [str(d.get("message")) for d in detail.get("details") or [] if isinstance(d, dict) and d.get("message")]
+        raise HTTPException(400, {"code": "hpr_registration_refused",
+                                  "messages": messages or [f"HPR refused this (HTTP {exc.status_code})"]}) from None
+    except (AbdmNotConfigured, AbdmUnavailable, AbdmAuthError) as exc:
+        # Mapped as every HPR failure is, without sending the registration again.
+        await _hfr(_raise(exc))
+    try:
+        result = hpr_registration.outcome(answer)
+    except ValueError as exc:
+        raise HTTPException(400, {"code": "hpr_registration_refused",
+                                  "messages": [hpr_registration.safe_text(str(exc))]}) from None
+    return result | {"hpr_id_number": session.hpr_id_number}
+
+
+@router.post("/professional")
+async def register_professional(payload: hpr_registration.Professional, current_db_user: CurrentDbUser) -> dict:
+    """HPR-018 to 077: register the signed-in professional in HPR."""
+    return await _submit("/apis/v1/doctors/register-professional-new", payload, current_db_user)
+
+
+@router.post("/professional/update")
+async def update_professional(payload: hpr_registration.Professional, current_db_user: CurrentDbUser) -> dict:
+    """HPR-079: the same form, sent as an update."""
+    return await _submit("/apis/v1/doctors/update-professional-new", payload, current_db_user)
+
+
+@router.get("/master/registration-options")
+async def registration_options() -> dict:
+    """NHA's fixed lists for registration (register document and Master Data
+    workbook), which HPR serves no master call for."""
+    pairs = lambda mapping: [{"code": str(code), "label": label} for code, label in mapping.items()]  # noqa: E731
+    return {
+        "salutations": pairs(hpr_registration.SALUTATIONS),
+        "categories": [{"code": "1", "label": "Doctor"}, {"code": "2", "label": "Nurse"}, {"code": "6", "label": "Pharmacist"}],
+        "doctor_systems": pairs(hpr_registration.DOCTOR_SYSTEMS),
+        "nurse_types": pairs(hpr_registration.NURSE_TYPES),
+        "pharmacist_type": {"code": str(hpr_registration.PHARMACIST_TYPE), "label": "Pharmacist"},
+        "work_status": [{"code": "PRIVATE", "label": "Private only"}, {"code": "GOVERNMENT", "label": "Government only"},
+                        {"code": "BOTH", "label": "Both"}],
+        "government_types": [{"code": "CENTRAL", "label": "Central government"}, {"code": "STATE", "label": "State government"}],
+        "purposes": list(hpr_registration.PURPOSES),
+        "not_working_reasons": list(hpr_registration.NOT_WORKING_REASONS),
+        "months": list(hpr_registration.MONTHS),
+    }

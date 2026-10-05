@@ -379,8 +379,11 @@ function RegistrationSteps({ signedIn, initial }: { signedIn: boolean; initial?:
   const saveBasic = () => run("basic", async (key) => {
     const saved = await saveHfrBasic(basic, key);
     setBasic((current) => ({ ...current, tracking_id: saved.tracking_id }));
-    setNotice(`Saved in HFR. Tracking ID ${saved.tracking_id}.`);
-    setStep("additional");
+    // NHA's HFR document: a facility that is not Functional skips the
+    // additional and detailed information and is submitted directly.
+    const functional = basic.operational_status === "F";
+    setNotice(`Saved in HFR. Tracking ID ${saved.tracking_id}.${functional ? "" : " Not functional, so it goes straight to submission."}`);
+    setStep(functional ? "additional" : "submit");
   });
   const saveAdditional = () => run("additional", async (key) => {
     const imaging = Object.entries(additional.imaging).filter(([, count]) => Number(count) > 0)
