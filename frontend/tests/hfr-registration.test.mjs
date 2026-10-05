@@ -276,3 +276,18 @@ test("a facility HealthDoc holds no forms for opens empty under its tracking id"
   assert.match(content(tree), /Tracking ID\s*98060/);
   assert.equal(field(tree, "facility_name").props.value, "");
 });
+
+test("a facility that is not functional goes straight to submission (NHA's HFR document)", async () => {
+  const d = registration();
+  MASTERS["FAC-STATUS"].push({ code: "CL", value: "Closed" });
+  try {
+    let tree = await fillBasic(d);
+    type(tree, "operational_status", "CL"); tree = d.render();
+    await button(tree, "Save basic information").props.onClick(); await flush();
+    tree = await settle(d);
+    assert.ok(button(tree, "Submit to HFR"), "the submit step is shown");
+    assert.equal(button(tree, "Save additional information"), undefined);
+  } finally {
+    MASTERS["FAC-STATUS"].pop();
+  }
+});

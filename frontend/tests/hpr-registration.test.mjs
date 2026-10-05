@@ -14,7 +14,7 @@ const field = (tree, name) => find(tree, (n) => (n.type === "input" || n.type ==
 const PROFILE = { hpr_id: "asha.verma@hpr.abdm", hpr_id_number: "71-0000-0000-0002", name: "Asha Kumari Verma",
   first_name: "Asha", middle_name: "Kumari", last_name: "Verma", gender: "F", birth_date: "1990-04-07",
   address: "1 Synthetic Lane, Pune", state_name: "Maharashtra", district_name: "Pune", pincode: "411001",
-  email: "asha@example.org", photo: "", category_id: 1, subcategory_id: 1, kyc_verified: true, mobile_hint: "3210" };
+  email: "asha@example.org", photo: "", mobile_hint: "3210" };
 const PDF = { file_type: "pdf", content: "JVBERi0=" };
 
 function form(overrides = {}) {
@@ -23,11 +23,15 @@ function form(overrides = {}) {
     hprProfile: async () => PROFILE,
     hprProfessional: async () => ({ practitioner: null }),
     hprRegistrationOptions: async () => ({
-      salutations: [{ code: "1", label: "Dr." }, { code: "2", label: "Mr." }],
-      work_status: [{ code: "GOVERNMENT", label: "Government" }, { code: "PRIVATE", label: "Private" }, { code: "BOTH", label: "Both" }],
-      not_working_reasons: ["Retired", "Other"], months: ["January", "February"] }),
-    hprCategories: async () => [{ code: "1", label: "Doctor", subcategories: [{ code: "1", label: "Modern Medicine" }] }],
-    hprSystems: async () => [{ code: "1", label: "Modern Medicine", hpr_type: "doctor" }],
+      salutations: [{ code: "1", label: "Dr." }, { code: "2", label: "Mr." }, { code: "3", label: "Ms." }, { code: "0", label: "Do not specify" }],
+      categories: [{ code: "1", label: "Doctor" }, { code: "2", label: "Nurse" }, { code: "6", label: "Pharmacist" }],
+      doctor_systems: [{ code: "1", label: "Modern Medicine" }, { code: "2", label: "Dentistry" }],
+      nurse_types: [{ code: "8", label: "RANM" }], pharmacist_type: { code: "13", label: "Pharmacist" },
+      work_status: [{ code: "PRIVATE", label: "Private only" }, { code: "GOVERNMENT", label: "Government only" }, { code: "BOTH", label: "Both" }],
+      government_types: [{ code: "CENTRAL", label: "Central government" }, { code: "STATE", label: "State government" }],
+      purposes: ["Administrative", "Practice", "Teaching", "Research"],
+      not_working_reasons: ["Retired", "Voluntary Opt-Out", "Suspended"], months: ["January", "February"] }),
+    hprSystems: async () => [{ code: "1", label: "Modern Medicine", hpr_type: "doctor" }, { code: "2", label: "Dentistry", hpr_type: "doctor" }],
     hprCouncils: async () => [{ code: "23", label: "Maharashtra Medical Council", state_id: "20", system_of_medicine_id: 1 },
       { code: "99", label: "Dental Council", state_id: "20", system_of_medicine_id: 2 }],
     hprCountries: async () => [{ code: "356", label: "India" }],
@@ -69,7 +73,8 @@ async function opened(d) {
 async function fill(d) {
   let tree = await opened(d);
   type(tree, "salutation", "1"); tree = d.render();
-  type(tree, "system", "1"); tree = await settle(d);
+  type(tree, "category", "1"); tree = d.render();
+  type(tree, "subcategory", "1"); tree = await settle(d);
   tick(tree, "language:1"); tree = d.render();
   type(tree, "father_name", "Ramesh Verma"); tree = d.render();
   type(tree, "council", "23"); tree = d.render();
@@ -83,6 +88,7 @@ async function fill(d) {
   type(tree, "q0_year", "2014"); tree = d.render();
   tree = await attach(d, tree, "q0_certificate");
   type(tree, "working", "yes"); tree = d.render();
+  type(tree, "work_purpose", "Practice"); tree = d.render();
   type(tree, "work_status", "PRIVATE"); tree = d.render();
   type(tree, "facility_id", "in2710005985"); tree = d.render();
   return tree;
@@ -105,7 +111,8 @@ test("Aadhaar's details are shown and no field edits them", async () => {
   for (const name of ["first_name", "last_name", "gender", "birth_date", "kyc_address"]) {
     assert.equal(field(tree, name), undefined, `${name} is not an input`);
   }
-  assert.equal(field(tree, "category").props.value, "1", "the category comes from the HPR profile");
+  assert.deepEqual(nodes(field(tree, "salutation")).filter((n) => n.type === "option").map((n) => content(n).trim()),
+    ["Choose", "Dr.", "Mr.", "Ms.", "Do not specify"], "NHA's salutations only");
 });
 
 test("the filled form registers with HPR's codes and the KYC stays server-side", async () => {
@@ -125,18 +132,36 @@ test("the filled form registers with HPR's codes and the KYC stays server-side",
   assert.deepEqual(body.registration.certificate, PDF);
   assert.deepEqual(body.registration.qualifications[0], { degree: 4060, country: "356", state: "20", college: 1022,
     university: 6372, year: 2014, month: null, certificate: PDF, name_differs: false, name_change_proof: null });
-  assert.deepEqual(body.work, { working: true, reason_not_working: "", status: "PRIVATE", proof: null,
-    facility_id: "IN2710005985", department: "", designation: "" });
+  assert.deepEqual(body.work, { working: true, reason_not_working: "", purpose: "Practice", status: "PRIVATE",
+    government_type: null, ministry: "", proof: null, facility_id: "IN2710005985", department: "", designation: "" });
   assert.match(content(tree), /Submitted in HPR, reference REF1/);
 });
 
-test("government work needs its proof before submitting (HPR-075)", async () => {
+test("government work needs central or state, a ministry for central, and proof (HPR-074/075)", async () => {
   const d = form();
   let tree = await fill(d);
   type(tree, "work_status", "GOVERNMENT"); tree = d.render();
   assert.equal(button(tree, "Submit to HPR").props.disabled, true);
   tree = await attach(d, tree, "work_proof");
+  assert.equal(button(tree, "Submit to HPR").props.disabled, true, "central or state still to choose");
+  type(tree, "government_type", "CENTRAL"); tree = d.render();
+  assert.equal(button(tree, "Submit to HPR").props.disabled, true, "central work names its ministry");
+  type(tree, "ministry", "MinistryMOR ( Mo Railways )"); tree = d.render();
   assert.equal(button(tree, "Submit to HPR").props.disabled, false);
+  await button(tree, "Submit to HPR").props.onClick(); tree = await settle(d);
+  const [body] = d.calls.find((c) => c.name === "registerHprProfessional").args;
+  assert.equal(body.work.government_type, "CENTRAL");
+  assert.equal(body.work.ministry, "MinistryMOR ( Mo Railways )");
+});
+
+test("a login without Aadhaar details is sent to verify Aadhaar first", async () => {
+  const d = form({ hprProfile: async () => {
+    throw new TestApiError(409, "kyc", undefined, { code: "hpr_kyc_required", message: "Verify" });
+  } });
+  const tree = await opened(d);
+  assert.match(content(tree), /carries no Aadhaar details/);
+  assert.match(content(tree), /Start with Aadhaar/);
+  assert.equal(button(tree, "Submit to HPR"), undefined);
 });
 
 test("a professional HPR already holds is updated, not registered again (HPR-079)", async () => {

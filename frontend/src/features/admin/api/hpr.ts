@@ -15,28 +15,43 @@ export async function hprDistricts(stateId: string): Promise<HprOption[]> {
 }
 
 // ------------------------------------------------------------- HPID creation (HPR-002 to 011)
-// The professional authenticates with Aadhaar on NHA's own page; HealthDoc
-// never sees the Aadhaar number or its OTP.
+// In HealthDoc: NHA's consent, a captcha, the Aadhaar OTP. The Aadhaar number
+// goes to HealthDoc's server, which encrypts it for HPR and keeps no copy.
 
 export interface HpidKyc {
   name: string; first_name: string; middle_name: string; last_name: string; gender: string;
-  birth_date: string; year_of_birth: string; address: string; state_name: string; district_name: string;
-  pincode: string; email: string; photo: string;
+  birth_date: string; address: string; state_name: string; district_name: string;
+  pincode: string; email: string; photo: string; mobile_hint: string | null;
 }
-export type HpidCheck =
-  | { authenticated: false }
-  | { authenticated: true; existing_hpr_id: string }
-  | { authenticated: true; kyc: HpidKyc; aadhaar_mobile_hint: string | null; suggestions: string[]; mobile_verified: boolean };
+export type HpidVerified =
+  | { existing: false; kyc: HpidKyc; suggestions: string[]; mobile_verified: boolean }
+  | { existing: true; signed_in: boolean; hpr_id?: string; hpr_id_number: string; kyc: HpidKyc };
 export interface HpidCreate {
   session_id: string; hpr_id: string; email: string; password: string;
-  category_code: number; subcategory_code: number; state_code: string; district_code: string;
+  category_code: number; subcategory_code: number; state_id: string; district_id: string;
+  role: "PROFESSIONAL" | "FACILITY_MANAGER" | "BOTH";
 }
 
-export function startHpid() {
-  return api<{ session_id: string; url: string }>("/abdm/hpr/hpid/start", { method: "POST", idempotencyKey: null });
+export function hpidConsent() {
+  return api<{ version: string; text: string }>("/abdm/hpr/hpid/consent");
 }
-export function checkHpid(sessionId: string): Promise<HpidCheck> {
-  return api<HpidCheck>("/abdm/hpr/hpid/check", { method: "POST", body: JSON.stringify({ session_id: sessionId }), idempotencyKey: null });
+export function hpidCaptcha() {
+  return api<{ captcha_id: string; image: string }>("/abdm/hpr/captcha");
+}
+export function sendHpidAadhaarOtp(body: { aadhaar: string; consent_accepted: true; consent_version: string; captcha_id: string; captcha_answer: string }) {
+  return api<{ session_id: string; masked_mobile: string | null }>("/abdm/hpr/hpid/aadhaar", {
+    method: "POST", body: JSON.stringify(body), idempotencyKey: null,
+  });
+}
+export function resendHpidAadhaarOtp(sessionId: string) {
+  return api<{ masked_mobile: string | null }>("/abdm/hpr/hpid/aadhaar/resend", {
+    method: "POST", body: JSON.stringify({ session_id: sessionId }), idempotencyKey: null,
+  });
+}
+export function verifyHpidAadhaarOtp(sessionId: string, otp: string): Promise<HpidVerified> {
+  return api<HpidVerified>("/abdm/hpr/hpid/aadhaar/verify", {
+    method: "POST", body: JSON.stringify({ session_id: sessionId, otp }), idempotencyKey: null,
+  });
 }
 export function verifyHpidMobile(sessionId: string, mobile: string) {
   return api<{ mobile_verified: boolean; otp_sent: boolean }>("/abdm/hpr/hpid/mobile", {
@@ -59,7 +74,9 @@ export function createHpid(body: HpidCreate) {
 export interface HprSystem extends HprOption { hpr_type: string | null }
 export interface HprCouncil extends HprOption { state_id: string | null; system_of_medicine_id: number | null }
 export interface HprRegistrationOptions {
-  salutations: HprOption[]; work_status: HprOption[]; not_working_reasons: string[]; months: string[];
+  salutations: HprOption[]; categories: HprOption[]; doctor_systems: HprOption[]; nurse_types: HprOption[];
+  pharmacist_type: HprOption; work_status: HprOption[]; government_types: HprOption[];
+  purposes: string[]; not_working_reasons: string[]; months: string[];
 }
 export async function hprSubDistricts(districtId: string): Promise<HprOption[]> {
   return (await api<{ data: HprOption[] }>(`/abdm/hpr/master/sub-districts?district_code=${encodeURIComponent(districtId)}`)).data;
@@ -76,7 +93,7 @@ export async function hprSystems(): Promise<HprSystem[]> {
 export async function hprCouncils(kind: "medical" | "nurse"): Promise<HprCouncil[]> {
   return (await api<{ data: HprCouncil[] }>(`/abdm/hpr/master/councils?kind=${kind}`)).data;
 }
-export async function hprCourses(systemOfMedicine: string, hprType: "doctor" | "nurse"): Promise<HprOption[]> {
+export async function hprCourses(systemOfMedicine: string, hprType: "doctor" | "nurse" | "pharmacist"): Promise<HprOption[]> {
   const query = `system_of_medicine=${encodeURIComponent(systemOfMedicine)}&hpr_type=${hprType}&all_courses=true`;
   return (await api<{ data: HprOption[] }>(`/abdm/hpr/master/courses?${query}`)).data;
 }
@@ -91,12 +108,7 @@ export function hprRegistrationOptions(): Promise<HprRegistrationOptions> {
   return api<HprRegistrationOptions>("/abdm/hpr/master/registration-options");
 }
 
-export interface HprProfile {
-  hpr_id: string; hpr_id_number: string; name: string; first_name: string; middle_name: string; last_name: string;
-  gender: string; birth_date: string; address: string; state_name: string; district_name: string; pincode: string;
-  email: string; photo: string; category_id: number | null; subcategory_id: number | null; kyc_verified: boolean;
-  mobile_hint: string | null;
-}
+export interface HprProfile extends HpidKyc { hpr_id: string; hpr_id_number: string | null }
 export function hprProfile(): Promise<HprProfile> {
   return api<HprProfile>("/abdm/hpr/profile");
 }
@@ -113,13 +125,14 @@ export interface HprProfessionalForm {
   salutation: number; category: number; subcategory: number; nationality: string;
   father_name: string; mother_name: string; spouse_name: string; languages: number[];
   communication_address: { name: string; address: string; country: string; state: string; district: string; sub_district: string; city: string; pincode: string } | null;
-  public_mobile: string; public_email: string; landline: string; landline_code: string;
+  official_mobile: string; public_mobile: string; public_email: string; landline: string; landline_code: string;
   registration: {
     council: number; number: string; registered_on: string; certificate: HprDocument; renewable: boolean;
     renewal_due: string | null; name_differs: boolean; name_change_proof: HprDocument | null; qualifications: HprQualification[];
   };
   work: {
-    working: boolean; reason_not_working: string; status: string | null; proof: HprDocument | null;
+    working: boolean; reason_not_working: string; purpose: string | null; status: string | null;
+    government_type: string | null; ministry: string; proof: HprDocument | null;
     facility_id: string | null; department: string; designation: string;
   };
   show_photo: boolean; public_profile: boolean;

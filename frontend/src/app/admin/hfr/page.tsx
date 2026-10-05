@@ -19,7 +19,7 @@ export default function Page() {
       <h1 className="text-3xl font-semibold">{t("admin.hfr.title")}</h1>
       <HfrFacilityRegistry />
       <HprLoginPanel reloadKey={hprReload} onChange={(session) => setSignedIn(session.logged_in)} />
-      <HpidCreation onCreated={() => setHprReload((n) => n + 1)} />
+      <HpidCreation onSignedIn={() => setHprReload((n) => n + 1)} />
       <HprProfessionalRegistration signedIn={signedIn} />
       <HfrRegistration signedIn={signedIn} />
     </div>

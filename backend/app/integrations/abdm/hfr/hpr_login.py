@@ -86,13 +86,18 @@ def _token_from(body: object) -> str:
     return token
 
 
-async def _keep(facility_id: uuid.UUID, user_id: uuid.UUID, hpr_id: str, token: str) -> HprSession:
+async def _keep(
+    facility_id: uuid.UUID, user_id: uuid.UUID, hpr_id: str, token: str, *, kyc: dict | None = None
+) -> HprSession:
+    """Keep the login. `kyc` is the professional's Aadhaar KYC when HPR handed
+    it over with the token (HPID creation, or an Aadhaar check that found an
+    existing HPID); sealed in the same record, so a later login replaces both."""
     claims = _claims(token)
     now = int(time.time())
     expires_at = min(int(claims.get("exp") or now + MAX_TOKEN_TTL), now + MAX_TOKEN_TTL)
     if expires_at <= now:
         raise HprLoginError("hpr_login_failed", "HPR returned an expired login token")
-    record = json.dumps({"hpr_id": hpr_id, "token": token, "expires_at": expires_at})
+    record = json.dumps({"hpr_id": hpr_id, "token": token, "expires_at": expires_at, "kyc": kyc})
     # The pool decodes replies as text, so the ciphertext is kept as base64.
     sealed = base64.b64encode(encrypt_pii(record, associated_data=_aad(facility_id, user_id)))
     await get_redis().set(_token_key(facility_id, user_id), sealed.decode(), ex=expires_at - now)
@@ -185,6 +190,20 @@ async def current(facility_id: uuid.UUID, user_id: uuid.UUID) -> tuple[HprSessio
         ),
         record["token"],
     )
+
+
+async def kyc(facility_id: uuid.UUID, user_id: uuid.UUID) -> dict | None:
+    """The Aadhaar KYC that came with this login, if HPR handed it over.
+    A password or OTP login carries none: HPR returns only a token."""
+    sealed = await get_redis().get(_token_key(facility_id, user_id))
+    if not sealed:
+        return None
+    record = json.loads(
+        decrypt_pii(base64.b64decode(sealed), associated_data=_aad(facility_id, user_id))
+    )
+    if record["expires_at"] <= int(time.time()):
+        return None
+    return record.get("kyc")
 
 
 async def logout(facility_id: uuid.UUID, user_id: uuid.UUID) -> None:

@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 
 import { ApiError, newIdempotencyKey } from "@/lib/api";
 import {
-  hprCategories,
   hprColleges,
   hprCouncils,
   hprCountries,
@@ -20,7 +19,6 @@ import {
   hprUniversities,
   registerHprProfessional,
   updateHprProfessional,
-  type HprCategory,
   type HprCouncil,
   type HprDocument,
   type HprOption,
@@ -142,7 +140,7 @@ function RegistrationForm({ signedIn }: { signedIn: boolean }) {
   const [registered, setRegistered] = useState<Record<string, unknown> | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [options, setOptions] = useState<HprRegistrationOptions | null>(null);
-  const [categories, setCategories] = useState<HprCategory[] | null>(null);
+  const [kycMissing, setKycMissing] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -151,37 +149,46 @@ function RegistrationForm({ signedIn }: { signedIn: boolean }) {
   const [person, setPerson] = useState({ salutation: "", category: "", subcategory: "", system: "", nationality: "356",
     father_name: "", mother_name: "", spouse_name: "", languages: [] as string[] });
   const [comm, setComm] = useState({ same: true, name: "", address: "", state: "", district: "", sub_district: "", city: "", pincode: "" });
-  const [contact, setContact] = useState({ public_mobile: "", public_email: "", landline: "", landline_code: "" });
+  const [contact, setContact] = useState({ official_mobile: "", public_mobile: "", public_email: "", landline: "", landline_code: "" });
   const [reg, setReg] = useState({ council: "", number: "", registered_on: "", certificate: null as HprDocument | null,
     renewable: false, renewal_due: "", name_differs: false, name_change_proof: null as HprDocument | null });
   const [quals, setQuals] = useState<QualificationDraft[]>([emptyQualification()]);
-  const [work, setWork] = useState({ working: "", reason: "", other_reason: "", status: "", proof: null as HprDocument | null,
-    facility_id: "", department: "", designation: "" });
+  const [work, setWork] = useState({ working: "", reason: "", other_reason: "", purpose: "", status: "", government_type: "",
+    ministry: "", proof: null as HprDocument | null, facility_id: "", department: "", designation: "" });
   const [visibility, setVisibility] = useState({ show_photo: true, public_profile: true });
 
   useEffect(() => {
     let live = true;
-    Promise.all([hprProfile(), hprRegistrationOptions(), hprCategories()]).then(([kyc, opts, cats]) => {
+    Promise.all([hprProfile(), hprRegistrationOptions()]).then(([kyc, opts]) => {
       if (!live) return;
       setProfile(kyc);
       setOptions(opts);
-      setCategories(cats);
-      setPerson((current) => ({ ...current,
-        category: kyc.category_id ? String(kyc.category_id) : current.category,
-        subcategory: kyc.subcategory_id ? String(kyc.subcategory_id) : current.subcategory }));
-    }, (reason: unknown) => { if (live) setLoadError(failure(reason, "HPR did not return this professional's profile.")[0]); });
+    }, (reason: unknown) => {
+      if (!live) return;
+      // A password or OTP login carries no Aadhaar KYC; HPR hands it over only
+      // with an Aadhaar verification, which the panel above does.
+      if (reason instanceof ApiError && (reason.payload as { code?: unknown } | undefined)?.code === "hpr_kyc_required") {
+        setKycMissing(true);
+        return;
+      }
+      setLoadError(failure(reason, "HPR did not return this professional's profile.")[0]);
+    });
     // HPR-078: what HPR already holds, if anything. A failure leaves registering open.
     hprProfessional().then((found) => { if (live) setRegistered(found.practitioner); }, () => undefined);
     return () => { live = false; };
   }, []);
 
-  const hprType: "doctor" | "nurse" = person.category === "2" ? "nurse" : "doctor";
+  const hprType = ({ "1": "doctor", "2": "nurse", "6": "pharmacist" } as const)[person.category as "1" | "2" | "6"] ?? "doctor";
   const systems = useList<HprSystem>("systems", hprSystems);
   const systemRows = (systems.rows ?? []).filter((row) => !row.hpr_type || row.hpr_type === hprType);
-  const systemName = systemRows.find((row) => row.code === person.system)?.label ?? "";
+  // A doctor's subcategory IS their system of medicine (NHA's registration
+  // codes match the system-of-medicine master); nurses and pharmacists choose
+  // the course system separately, for HPR's course and college lists.
+  const systemId = hprType === "doctor" ? person.subcategory : person.system;
+  const systemName = (systems.rows ?? []).find((row) => row.code === systemId)?.label ?? "";
   const councils = useList<HprCouncil>(`councils:${hprType}`, () => hprCouncils(hprType === "nurse" ? "nurse" : "medical"));
-  const councilRows = (councils.rows ?? []).filter((row) => hprType === "nurse" || !person.system
-    || row.system_of_medicine_id === null || String(row.system_of_medicine_id) === person.system);
+  const councilRows = (councils.rows ?? []).filter((row) => hprType !== "doctor" || !systemId
+    || row.system_of_medicine_id === null || String(row.system_of_medicine_id) === systemId);
   const countries = useList("countries", hprCountries);
   const languages = useList("languages", hprLanguages);
   const states = useList("states", hprStates);
@@ -192,18 +199,21 @@ function RegistrationForm({ signedIn }: { signedIn: boolean }) {
   function edit(change: () => void) { key.current = null; setNotice(null); change(); }
   const setQual = (index: number, change: Partial<QualificationDraft>) =>
     edit(() => setQuals((rows) => rows.map((row, i) => (i === index ? { ...row, ...change } : row))));
-  const subcategories = categories?.find((row) => row.code === person.category)?.subcategories ?? [];
+  const subcategories = !options ? [] : person.category === "1" ? options.doctor_systems
+    : person.category === "2" ? options.nurse_types : person.category === "6" ? [options.pharmacist_type] : [];
   const reason = work.reason === "Other" ? work.other_reason.trim() : work.reason;
 
   const qualsValid = quals.every((q) => q.degree && q.state && q.college && q.university && /^\d{4}$/.test(q.year)
     && Number(q.year) <= new Date().getFullYear() && q.certificate && (!q.name_differs || q.name_change_proof));
-  const valid = !!person.salutation && !!person.category && !!person.subcategory && !!person.system && person.languages.length > 0
+  const valid = !!person.salutation && !!person.category && !!person.subcategory && !!systemId && person.languages.length > 0
+    && (!!profile?.mobile_hint || /^[6-9]\d{9}$/.test(contact.official_mobile))
     && [person.father_name, person.mother_name, person.spouse_name].every((n) => n === "" || NAME.test(n))
     && (comm.same || (NAME.test(comm.name) && comm.address.trim() && comm.state && comm.district && PIN.test(comm.pincode)))
     && !!reg.council && REG_NUMBER.test(reg.number) && !!reg.registered_on && reg.registered_on <= today() && !!reg.certificate
     && (!reg.renewable || !!reg.renewal_due) && (!reg.name_differs || !!reg.name_change_proof) && qualsValid
-    && (work.working === "no" ? !!reason : work.working === "yes" && !!work.status && FACILITY_ID.test(work.facility_id)
-      && (work.status === "PRIVATE" || !!work.proof));
+    && (work.working === "no" ? !!reason : work.working === "yes" && !!work.purpose && !!work.status && FACILITY_ID.test(work.facility_id)
+      && (work.status === "PRIVATE" || (!!work.proof && !!work.government_type
+        && (work.government_type !== "CENTRAL" || !!work.ministry.trim()))));
 
   function body(): HprProfessionalForm {
     return {
@@ -222,9 +232,13 @@ function RegistrationForm({ signedIn }: { signedIn: boolean }) {
           name_differs: q.name_differs, name_change_proof: q.name_differs ? q.name_change_proof : null })),
       },
       work: work.working === "yes"
-        ? { working: true, reason_not_working: "", status: work.status, proof: work.status === "PRIVATE" ? null : work.proof,
+        ? { working: true, reason_not_working: "", purpose: work.purpose, status: work.status,
+          government_type: work.status === "PRIVATE" ? null : work.government_type,
+          ministry: work.status !== "PRIVATE" && work.government_type === "CENTRAL" ? work.ministry.trim() : "",
+          proof: work.status === "PRIVATE" ? null : work.proof,
           facility_id: work.facility_id, department: work.department.trim(), designation: work.designation.trim() }
-        : { working: false, reason_not_working: reason, status: null, proof: null, facility_id: null, department: "", designation: "" },
+        : { working: false, reason_not_working: reason, purpose: null, status: null, government_type: null, ministry: "",
+          proof: null, facility_id: null, department: "", designation: "" },
       ...visibility,
     };
   }
@@ -244,6 +258,15 @@ function RegistrationForm({ signedIn }: { signedIn: boolean }) {
     }
   }
 
+  if (kycMissing) {
+    return (
+      <p role="alert" className="rounded-md border border-border p-3 text-sm">
+        This HPR login carries no Aadhaar details, which HPR registration needs: HPR hands them over only after an Aadhaar
+        OTP. Use <strong>Start with Aadhaar</strong> in the panel above with the professional&apos;s Aadhaar; it signs them in with
+        their details, whether or not they already have an HPID. Then open this form again.
+      </p>
+    );
+  }
   if (loadError) return <p role="alert" className="text-sm text-danger">{loadError}</p>;
   if (!profile || !options) return <p role="status" className="text-sm text-muted-foreground">Loading the professional&apos;s HPR profile…</p>;
   const reportError = (message: string) => setErrors([message]);
@@ -276,12 +299,16 @@ function RegistrationForm({ signedIn }: { signedIn: boolean }) {
       <fieldset className="grid gap-3 md:grid-cols-3"><legend className="mb-2 font-medium">Personal details</legend>
         <Pick name="salutation" label="Salutation" value={person.salutation} list={{ rows: options.salutations, error: null }}
           onChange={(v) => edit(() => setPerson({ ...person, salutation: v }))} />
-        <Pick name="category" label="Category" value={person.category} list={{ rows: categories, error: null }}
+        <Pick name="category" label="Category" value={person.category} list={{ rows: options.categories, error: null }}
           onChange={(v) => edit(() => setPerson({ ...person, category: v, subcategory: "", system: "" }))} />
-        <Pick name="subcategory" label="Subcategory" value={person.subcategory} list={{ rows: person.category ? subcategories : null, error: null }}
-          onChange={(v) => edit(() => setPerson({ ...person, subcategory: v }))} />
-        <Pick name="system" label="System of medicine" value={person.system} list={{ rows: systems.rows ? systemRows : null, error: systems.error }}
-          onChange={(v) => { edit(() => setPerson({ ...person, system: v })); setReg((r) => ({ ...r, council: "" })); setQuals([emptyQualification()]); }} />
+        <Pick name="subcategory" label={person.category === "1" ? "System of medicine" : "Subcategory"} value={person.subcategory}
+          list={{ rows: person.category ? subcategories : null, error: null }}
+          onChange={(v) => { edit(() => setPerson({ ...person, subcategory: v })); if (person.category === "1") { setReg((r) => ({ ...r, council: "" })); setQuals([emptyQualification()]); } }} />
+        {person.category && person.category !== "1" ? (
+          <Pick name="system" label="Course system (for HPR's course and college lists)" value={person.system}
+            list={{ rows: systems.rows ? systemRows : null, error: systems.error }}
+            onChange={(v) => { edit(() => setPerson({ ...person, system: v })); setQuals([emptyQualification()]); }} />
+        ) : null}
         <Pick name="nationality" label="Nationality" value={person.nationality} list={countries}
           onChange={(v) => edit(() => setPerson({ ...person, nationality: v }))} />
         <span />
@@ -323,6 +350,11 @@ function RegistrationForm({ signedIn }: { signedIn: boolean }) {
               onChange={(v) => edit(() => setComm({ ...comm, pincode: v.replace(/\D/g, "") }))} />
           </>
         ) : null}
+        {!profile.mobile_hint ? (
+          <Field name="official_mobile" label="Official mobile (required by HPR)" value={contact.official_mobile}
+            valid={/^[6-9]\d{9}$/.test(contact.official_mobile)} inputMode="tel" maxLength={10}
+            onChange={(v) => edit(() => setContact({ ...contact, official_mobile: v.replace(/\D/g, "") }))} />
+        ) : null}
         <Field name="public_mobile" label="Public mobile (optional)" value={contact.public_mobile} valid={/^[6-9]\d{9}$/.test(contact.public_mobile)}
           inputMode="tel" maxLength={10} onChange={(v) => edit(() => setContact({ ...contact, public_mobile: v.replace(/\D/g, "") }))} />
         <Field name="public_email" label="Public email (optional)" value={contact.public_email} inputMode="email"
@@ -362,7 +394,7 @@ function RegistrationForm({ signedIn }: { signedIn: boolean }) {
         {work.working === "no" ? (
           <>
             <Pick name="not_working_reason" label="Reason" value={work.reason}
-              list={{ rows: options.not_working_reasons.map((r) => ({ code: r, label: r })), error: null }}
+              list={{ rows: [...options.not_working_reasons, "Other"].map((r) => ({ code: r, label: r })), error: null }}
               onChange={(v) => edit(() => setWork({ ...work, reason: v }))} />
             {work.reason === "Other" ? <Field name="not_working_other" label="The reason" value={work.other_reason} maxLength={100}
               onChange={(v) => edit(() => setWork({ ...work, other_reason: v }))} /> : null}
@@ -370,10 +402,21 @@ function RegistrationForm({ signedIn }: { signedIn: boolean }) {
         ) : null}
         {work.working === "yes" ? (
           <>
+            <Pick name="work_purpose" label="Nature of work" value={work.purpose}
+              list={{ rows: options.purposes.map((p) => ({ code: p, label: p })), error: null }}
+              onChange={(v) => edit(() => setWork({ ...work, purpose: v }))} />
             <Pick name="work_status" label="Government, private or both" value={work.status} list={{ rows: options.work_status, error: null }}
               onChange={(v) => edit(() => setWork({ ...work, status: v }))} />
-            {work.status && work.status !== "PRIVATE" ? <Attach name="work_proof" label="Payslip or recent transfer order" value={work.proof}
-              onError={reportError} onChange={(v) => edit(() => setWork((w) => ({ ...w, proof: v })))} /> : <span />}
+            {work.status && work.status !== "PRIVATE" ? (
+              <>
+                <Pick name="government_type" label="Central or state government" value={work.government_type}
+                  list={{ rows: options.government_types, error: null }} onChange={(v) => edit(() => setWork({ ...work, government_type: v }))} />
+                {work.government_type === "CENTRAL" ? <Field name="ministry" label="Ministry" value={work.ministry} maxLength={150}
+                  onChange={(v) => edit(() => setWork({ ...work, ministry: v }))} /> : null}
+                <Attach name="work_proof" label="Payslip or recent transfer order" value={work.proof}
+                  onError={reportError} onChange={(v) => edit(() => setWork((w) => ({ ...w, proof: v })))} />
+              </>
+            ) : null}
             <Field name="facility_id" label="Facility ID (HFR) where they work" value={work.facility_id} valid={FACILITY_ID.test(work.facility_id)}
               maxLength={12} onChange={(v) => edit(() => setWork({ ...work, facility_id: v.trim().toUpperCase() }))} />
             <Field name="department" label="Department (optional)" value={work.department} maxLength={100} onChange={(v) => edit(() => setWork({ ...work, department: v }))} />

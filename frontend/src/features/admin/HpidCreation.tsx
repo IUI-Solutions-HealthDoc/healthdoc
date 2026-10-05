@@ -4,13 +4,16 @@ import { useEffect, useState } from "react";
 
 import { ApiError } from "@/lib/api";
 import {
-  checkHpid,
   confirmHpidMobile,
   createHpid,
+  hpidCaptcha,
+  hpidConsent,
   hprCategories,
   hprDistricts,
   hprStates,
-  startHpid,
+  resendHpidAadhaarOtp,
+  sendHpidAadhaarOtp,
+  verifyHpidAadhaarOtp,
   verifyHpidMobile,
   type HpidKyc,
   type HprCategory,
@@ -20,7 +23,8 @@ import {
 const input = "w-full rounded-md border border-border px-3 py-2 text-sm";
 const primary = "rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50";
 const secondary = "rounded-md border border-border px-3 py-2 text-sm disabled:opacity-50";
-// HPR's own rules, checked here so Create stays disabled; HealthDoc and HPR check again.
+// HPR's own rules, checked here so the buttons stay disabled; HealthDoc and HPR check again.
+const AADHAAR = /^[2-9]\d{11}$/;
 const HPR_ID = /^[a-z0-9][a-z0-9._]{3,47}$/;
 const PASSWORD = /^(?=.*[a-z])(?=.*[A-Z])(?=.*[^A-Za-z0-9]).{8,64}$/;
 const EMAIL = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
@@ -31,18 +35,20 @@ function failure(reason: unknown, fallback: string): string {
 
 type Stage =
   | { kind: "idle" }
-  | { kind: "aadhaar"; session: string; url: string; waiting: boolean }
-  | { kind: "existing"; hprId: string }
-  | { kind: "verified"; session: string; kyc: HpidKyc; hint: string | null; suggestions: string[]; mobileVerified: boolean; otpSent: boolean }
+  | { kind: "aadhaar" }
+  | { kind: "otp"; session: string; hint: string | null }
+  | { kind: "existing"; hprId: string; number: string; signedIn: boolean; kyc: HpidKyc }
+  | { kind: "verified"; session: string; kyc: HpidKyc; suggestions: string[]; mobileVerified: boolean; otpSent: boolean }
   | { kind: "done"; hprId: string; number: string };
 
 /**
- * Create an HPID for a health professional (M4 HPR-002 to 011). They verify
- * their Aadhaar on NHA's own page; their name and photo come from that KYC
- * and cannot be edited. The new HPID signs them in to HPR, so registration
- * in HPR can follow.
+ * Create an HPID for a health professional, in HealthDoc (M4 HPR-002 to 011):
+ * NHA's consent, a captcha, the Aadhaar OTP, then the details HPR asks for.
+ * An Aadhaar that already holds an HPID signs that professional in instead.
+ * Either way they leave signed in to HPR with their Aadhaar KYC, which the
+ * HPR registration below needs.
  */
-export function HpidCreation({ onCreated }: { onCreated?: () => void }) {
+export function HpidCreation({ onSignedIn }: { onSignedIn?: () => void }) {
   const [stage, setStage] = useState<Stage>({ kind: "idle" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -53,44 +59,44 @@ export function HpidCreation({ onCreated }: { onCreated?: () => void }) {
     try { await action(); } catch (reason) { setError(failure(reason, fallback)); } finally { setBusy(false); }
   }
 
-  const begin = () => run(async () => {
-    const started = await startHpid();
-    setStage({ kind: "aadhaar", session: started.session_id, url: started.url, waiting: false });
-  }, "HPR did not open the Aadhaar verification.");
-
-  const check = (session: string, url: string) => run(async () => {
-    const result = await checkHpid(session);
-    if (!result.authenticated) { setStage({ kind: "aadhaar", session, url, waiting: true }); return; }
-    if ("existing_hpr_id" in result) { setStage({ kind: "existing", hprId: result.existing_hpr_id }); return; }
-    setStage({ kind: "verified", session, kyc: result.kyc, hint: result.aadhaar_mobile_hint,
-      suggestions: result.suggestions, mobileVerified: result.mobile_verified, otpSent: false });
-  }, "HPR did not answer. Check again.");
-
   return (
     <section className="surface-card space-y-3 p-5" aria-label="Create an HPID">
-      <h2 className="text-lg font-semibold">Create an HPID for a health professional</h2>
+      <h2 className="text-lg font-semibold">Create an HPID, or verify a professional&apos;s Aadhaar</h2>
       {stage.kind === "idle" ? (
         <>
-          <p className="text-sm text-muted-foreground">For a doctor or nurse without a Healthcare Professional ID. They verify their Aadhaar on NHA&apos;s own page; HealthDoc never sees the Aadhaar number or its OTP.</p>
-          <button type="button" className={primary} disabled={busy} onClick={() => void begin()}>Start</button>
+          <p className="text-sm text-muted-foreground">For a doctor, nurse or pharmacist. A professional who already has an HPID is signed in with it instead, ready for their HPR registration.</p>
+          <button type="button" className={primary} onClick={() => setStage({ kind: "aadhaar" })}>Start with Aadhaar</button>
         </>
       ) : null}
 
       {stage.kind === "aadhaar" ? (
-        <div className="space-y-2 text-sm">
-          <p>Ask the professional to verify their Aadhaar on NHA&apos;s page, then come back here.</p>
-          <a href={stage.url} target="_blank" rel="noopener noreferrer" className="font-medium underline">Open NHA&apos;s Aadhaar verification</a>
-          {stage.waiting ? <p role="status">NHA has not confirmed the Aadhaar verification yet.</p> : null}
-          <div className="flex gap-2">
-            <button type="button" className={primary} disabled={busy} onClick={() => void check(stage.session, stage.url)}>{busy ? "Checking…" : "I have verified on NHA's page"}</button>
-            <button type="button" className={secondary} disabled={busy} onClick={() => setStage({ kind: "idle" })}>Cancel</button>
-          </div>
-        </div>
+        <AadhaarStep busy={busy} run={run} onCancel={() => setStage({ kind: "idle" })}
+          onSent={(session, hint) => setStage({ kind: "otp", session, hint })} />
+      ) : null}
+
+      {stage.kind === "otp" ? (
+        <OtpStep stage={stage} busy={busy} run={run} onCancel={() => setStage({ kind: "idle" })}
+          onResent={(hint) => setStage({ ...stage, hint })}
+          onVerified={(result) => {
+            if (result.existing) {
+              setStage({ kind: "existing", hprId: result.hpr_id ?? result.hpr_id_number, number: result.hpr_id_number,
+                signedIn: result.signed_in, kyc: result.kyc });
+              if (result.signed_in) onSignedIn?.();
+              return;
+            }
+            setStage({ kind: "verified", session: stage.session, kyc: result.kyc, suggestions: result.suggestions,
+              mobileVerified: result.mobile_verified, otpSent: false });
+          }} />
       ) : null}
 
       {stage.kind === "existing" ? (
-        <div role="status" className="space-y-2 text-sm">
-          <p>This Aadhaar already holds the HPR ID <span className="font-mono">{stage.hprId}</span>. A person has one HPID; sign in with it above instead.</p>
+        <div ref={(node) => node?.scrollIntoView({ block: "center", behavior: "smooth" })} role="status"
+          className="space-y-1 rounded-md border border-success/30 bg-success-muted p-3 text-sm">
+          <p className="font-semibold text-success">{stage.kyc.name} already has an HPID</p>
+          <p>HPR ID <span className="font-mono">{stage.hprId}</span>{stage.number !== stage.hprId ? <>, number <span className="font-mono">{stage.number}</span></> : null}. A person has one HPID.</p>
+          <p>{stage.signedIn
+            ? "They are now signed in to HPR above, with their Aadhaar details. Continue with “Register a professional in HPR” below."
+            : "HPR did not hand over a login for it; sign in with it above."}</p>
           <button type="button" className={secondary} onClick={() => setStage({ kind: "idle" })}>Done</button>
         </div>
       ) : null}
@@ -98,7 +104,7 @@ export function HpidCreation({ onCreated }: { onCreated?: () => void }) {
       {stage.kind === "verified" ? (
         <Verified stage={stage} busy={busy} run={run}
           update={(change) => setStage({ ...stage, ...change })}
-          finish={(hprId, number) => { setStage({ kind: "done", hprId, number }); onCreated?.(); }} />
+          finish={(hprId, number) => { setStage({ kind: "done", hprId, number }); onSignedIn?.(); }} />
       ) : null}
 
       {stage.kind === "done" ? (
@@ -112,6 +118,99 @@ export function HpidCreation({ onCreated }: { onCreated?: () => void }) {
 
       {error ? <p role="alert" className="text-sm text-danger">{error}</p> : null}
     </section>
+  );
+}
+
+function AadhaarStep({ busy, run, onSent, onCancel }: {
+  busy: boolean; run: (action: () => Promise<void>, fallback: string) => Promise<void>;
+  onSent: (session: string, hint: string | null) => void; onCancel: () => void;
+}) {
+  const [consent, setConsent] = useState<{ version: string; text: string } | null>(null);
+  const [captcha, setCaptcha] = useState<{ captcha_id: string; image: string } | null>(null);
+  const [aadhaar, setAadhaar] = useState("");
+  const [shown, setShown] = useState(false);
+  const [agreed, setAgreed] = useState(false);
+  const [answer, setAnswer] = useState("");
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  function newCaptcha() {
+    setAnswer("");
+    hpidCaptcha().then(setCaptcha, (reason: unknown) => setLoadError(failure(reason, "The captcha could not be loaded.")));
+  }
+  useEffect(() => {
+    let live = true;
+    hpidConsent().then((text) => { if (live) setConsent(text); },
+      (reason: unknown) => { if (live) setLoadError(failure(reason, "NHA's consent could not be loaded.")); });
+    hpidCaptcha().then((next) => { if (live) setCaptcha(next); },
+      (reason: unknown) => { if (live) setLoadError(failure(reason, "The captcha could not be loaded.")); });
+    return () => { live = false; };
+  }, []);
+
+  if (loadError) return <p role="alert" className="text-sm text-danger">{loadError}</p>;
+  if (!consent || !captcha) return <p role="status" className="text-sm text-muted-foreground">Loading…</p>;
+  const ready = AADHAAR.test(aadhaar) && agreed && answer.trim().length > 0;
+  return (
+    <div className="space-y-3 text-sm">
+      <label className="block space-y-1"><span className="text-muted-foreground">Aadhaar number</span>
+        <span className="flex gap-2">
+          <input name="hpid_aadhaar" type={shown ? "text" : "password"} value={aadhaar} inputMode="numeric" autoComplete="off" maxLength={12}
+            onChange={(e) => setAadhaar(e.target.value.replace(/\D/g, ""))} aria-invalid={aadhaar !== "" && !AADHAAR.test(aadhaar)} className={input} />
+          <button type="button" className={secondary} aria-pressed={shown} aria-label={`${shown ? "Hide" : "Show"} aadhaar number`}
+            onClick={() => setShown((now) => !now)}>{shown ? "Hide" : "Show"}</button>
+        </span>
+        {aadhaar !== "" && !AADHAAR.test(aadhaar) ? <span role="alert" className="text-danger">Enter the 12-digit Aadhaar number</span> : null}
+      </label>
+      <p className="text-xs text-muted-foreground">The mobile linked to this Aadhaar receives the OTP. HealthDoc sends the number to NHA encrypted and keeps no copy.</p>
+      <fieldset className="space-y-2 rounded-md border border-border p-3"><legend className="px-1 font-medium">Terms &amp; Conditions (NHA)</legend>
+        <p className="max-h-40 overflow-y-auto whitespace-pre-line text-xs leading-relaxed">{consent.text}</p>
+        <label className="flex items-center gap-2"><input type="checkbox" name="hpid_consent" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} />I agree</label>
+      </fieldset>
+      <div className="flex flex-wrap items-end gap-3">
+        {/* eslint-disable-next-line @next/next/no-img-element -- a one-use captcha data URI, not an optimisable asset */}
+        <img src={captcha.image} alt="Captcha: type the characters shown" width={170} height={56} className="rounded border border-border" />
+        <button type="button" className="text-sm underline" onClick={newCaptcha}>New captcha</button>
+        <label className="block space-y-1"><span className="text-muted-foreground">Captcha</span>
+          <input name="hpid_captcha" value={answer} onChange={(e) => setAnswer(e.target.value)} autoComplete="off" maxLength={16} className={input} /></label>
+      </div>
+      <div className="flex gap-2">
+        <button type="button" className={primary} disabled={busy || !ready}
+          onClick={() => void run(async () => {
+            try {
+              const sent = await sendHpidAadhaarOtp({ aadhaar, consent_accepted: true, consent_version: consent.version,
+                captcha_id: captcha.captcha_id, captcha_answer: answer.trim() });
+              onSent(sent.session_id, sent.masked_mobile);
+            } catch (reason) {
+              newCaptcha(); // a captcha is spent by every attempt
+              throw reason;
+            }
+          }, "HPR did not send the Aadhaar OTP.")}>{busy ? "Sending…" : "Send OTP"}</button>
+        <button type="button" className={secondary} disabled={busy} onClick={onCancel}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+function OtpStep({ stage, busy, run, onResent, onVerified, onCancel }: {
+  stage: Extract<Stage, { kind: "otp" }>; busy: boolean; run: (action: () => Promise<void>, fallback: string) => Promise<void>;
+  onResent: (hint: string | null) => void; onVerified: (result: Awaited<ReturnType<typeof verifyHpidAadhaarOtp>>) => void;
+  onCancel: () => void;
+}) {
+  const [otp, setOtp] = useState("");
+  return (
+    <div className="space-y-2 text-sm">
+      <p>OTP sent to the mobile linked with this Aadhaar{stage.hint ? <> ({stage.hint})</> : null}.</p>
+      <input name="hpid_aadhaar_otp" value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))} inputMode="numeric"
+        autoComplete="one-time-code" maxLength={6} className={input} aria-label="Aadhaar OTP" />
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className={primary} disabled={busy || otp.length !== 6}
+          onClick={() => void run(async () => onVerified(await verifyHpidAadhaarOtp(stage.session, otp)), "HPR did not accept this OTP.")}>
+          {busy ? "Verifying…" : "Verify OTP"}</button>
+        <button type="button" className={secondary} disabled={busy}
+          onClick={() => void run(async () => { setOtp(""); onResent((await resendHpidAadhaarOtp(stage.session)).masked_mobile ?? stage.hint); },
+            "HPR did not resend the OTP.")}>Resend OTP</button>
+        <button type="button" className={secondary} disabled={busy} onClick={onCancel}>Cancel</button>
+      </div>
+    </div>
   );
 }
 
@@ -159,6 +258,23 @@ function Pick({ name, label, value, list, onChange, waitingFor }: {
   );
 }
 
+function Kyc({ kyc }: { kyc: HpidKyc }) {
+  return (
+    <div className="flex items-start gap-4 text-sm">
+      {kyc.photo ? (
+        // eslint-disable-next-line @next/next/no-img-element -- Aadhaar's KYC photo as a one-use data URI, not an optimisable asset
+        <img src={`data:image/jpeg;base64,${kyc.photo}`} alt="Photograph from Aadhaar" className="h-20 w-16 rounded object-cover" />
+      ) : null}
+      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+        <dt className="text-muted-foreground">Name (from Aadhaar)</dt><dd>{kyc.name}</dd>
+        {kyc.gender ? <><dt className="text-muted-foreground">Gender</dt><dd>{kyc.gender}</dd></> : null}
+        {kyc.birth_date ? <><dt className="text-muted-foreground">Date of birth</dt><dd>{kyc.birth_date}</dd></> : null}
+        {kyc.address ? <><dt className="text-muted-foreground">Address</dt><dd>{kyc.address}</dd></> : null}
+      </dl>
+    </div>
+  );
+}
+
 function Verified({ stage, busy, run, update, finish }: {
   stage: Extract<Stage, { kind: "verified" }>; busy: boolean;
   run: (action: () => Promise<void>, fallback: string) => Promise<void>;
@@ -169,7 +285,7 @@ function Verified({ stage, busy, run, update, finish }: {
   const [mobile, setMobile] = useState("");
   const [otp, setOtp] = useState("");
   const [form, setForm] = useState({ hpr_id: stage.suggestions[0] ?? "", email: kyc.email, password: "", confirm: "",
-    category: "", subcategory: "", state: "", district: "" });
+    category: "", subcategory: "", state: "", district: "", role: "PROFESSIONAL" });
   const [categories, setCategories] = useState<HprCategory[] | null>(null);
   useEffect(() => {
     let live = true;
@@ -189,24 +305,12 @@ function Verified({ stage, busy, run, update, finish }: {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-start gap-4 text-sm">
-        {kyc.photo ? (
-          // eslint-disable-next-line @next/next/no-img-element -- Aadhaar's KYC photo as a one-use data URI, not an optimisable asset
-          <img src={`data:image/jpeg;base64,${kyc.photo}`} alt="Photograph from Aadhaar" className="h-20 w-16 rounded object-cover" />
-        ) : null}
-        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
-          <dt className="text-muted-foreground">Name (from Aadhaar)</dt><dd>{kyc.name}</dd>
-          {kyc.gender ? <><dt className="text-muted-foreground">Gender</dt><dd>{kyc.gender}</dd></> : null}
-          {kyc.birth_date || kyc.year_of_birth ? <><dt className="text-muted-foreground">Date of birth</dt><dd>{kyc.birth_date || kyc.year_of_birth}</dd></> : null}
-          {kyc.district_name || kyc.state_name ? <><dt className="text-muted-foreground">District, state</dt><dd>{[kyc.district_name, kyc.state_name].filter(Boolean).join(", ")}</dd></> : null}
-        </dl>
-      </div>
-
+      <Kyc kyc={kyc} />
       {!stage.mobileVerified ? (
         <fieldset className="space-y-2 text-sm"><legend className="font-medium">Communication mobile</legend>
           {!stage.otpSent ? (
             <>
-              <p className="text-muted-foreground">If it is the mobile linked to their Aadhaar{stage.hint ? <> (ending {stage.hint})</> : null}, no OTP is needed.</p>
+              <p className="text-muted-foreground">If it is the mobile linked to their Aadhaar{kyc.mobile_hint ? <> (ending {kyc.mobile_hint})</> : null}, no OTP is needed.</p>
               <input name="hpid_mobile" value={mobile} onChange={(e) => setMobile(e.target.value.replace(/\D/g, ""))} inputMode="tel" maxLength={10} className={input} />
               <button type="button" className={primary} disabled={busy || !/^[6-9]\d{9}$/.test(mobile)}
                 onClick={() => void run(async () => {
@@ -243,7 +347,9 @@ function Verified({ stage, busy, run, update, finish }: {
           </label>
           <label className="block space-y-1 text-sm"><span className="text-muted-foreground">Email</span>
             <input name="hpid_email" value={form.email} onChange={(e) => set("email", e.target.value.trim())} inputMode="email" className={input} /></label>
-          <span />
+          <Pick name="hpid_role" label="Role in HPR" value={form.role} onChange={(v) => set("role", v || "PROFESSIONAL")}
+            list={{ rows: [{ code: "PROFESSIONAL", label: "Healthcare professional" }, { code: "FACILITY_MANAGER", label: "Facility manager" },
+              { code: "BOTH", label: "Healthcare professional and facility manager" }], error: null }} />
           <Password name="hpid_password" label="HPR password" value={form.password} onChange={(v) => set("password", v)} />
           <Password name="hpid_confirm" label="Confirm password" value={form.confirm} onChange={(v) => set("confirm", v)} />
           <p className="text-xs text-muted-foreground md:col-span-2">8 or more characters, with upper and lower case letters and a special character, not containing their first or last name.
@@ -262,7 +368,7 @@ function Verified({ stage, busy, run, update, finish }: {
                 const created = await createHpid({
                   session_id: stage.session, hpr_id: form.hpr_id, email: form.email, password: form.password,
                   category_code: Number(form.category), subcategory_code: Number(form.subcategory),
-                  state_code: form.state, district_code: form.district,
+                  state_id: form.state, district_id: form.district, role: form.role as "PROFESSIONAL" | "FACILITY_MANAGER" | "BOTH",
                 });
                 finish(created.hpr_id, created.hpr_id_number);
               }, "HPR did not create the HPID.")}>{busy ? "Creating…" : "Create HPID"}</button>
