@@ -119,7 +119,7 @@ def _aadhaar(**change):
 
 def _answers(fake, *, exists=None):
     fake.answers.update({
-        "/v2/registration/aadhaar/generateOtp": {"txnId": "txn-1", "mobileNumber": "******4321"},
+        hpid.GENERATE_OTP: {"txnId": "txn-1", "mobileNumber": "******4321"},
         "/v2/registration/aadhaar/verifyOTP": {"txnId": "txn-2", "mobileNumber": None},
         "/v1/registration/aadhaar/checkHpIdAccountExist": exists or KYC_ANSWER,
         "/v1/registration/aadhaar/hpid/suggestion": ["asha.verma", "ashaverma"],
@@ -148,7 +148,7 @@ async def test_the_aadhaar_otp_is_sent_in_healthdoc_after_consent_and_captcha(de
     response = await desk["http"].post("/abdm/hpr/hpid/aadhaar", json=_aadhaar())
     assert response.status_code == 200, response.text
     assert response.json()["masked_mobile"] == "******4321"
-    sent = desk["fake"].body("/v2/registration/aadhaar/generateOtp")
+    sent = desk["fake"].body(hpid.GENERATE_OTP)
     assert sent["aadhaar"] != AADHAAR and _plain(sent["aadhaar"]) == AADHAAR
     assert desk["audit"][0]["resource_type"] == "hpid_consent"
     assert AADHAAR not in json.dumps(desk["audit"], default=str), "the Aadhaar number is never recorded"
@@ -167,7 +167,7 @@ async def test_without_consent_captcha_or_a_valid_number_no_otp_is_sent(desk, ch
 
 async def test_hprs_reason_for_refusing_an_aadhaar_is_shown(desk):
     _answers(desk["fake"])
-    desk["fake"].answers["/v2/registration/aadhaar/generateOtp"] = AbdmRejected(422, {
+    desk["fake"].answers[hpid.GENERATE_OTP] = AbdmRejected(422, {
         "code": "HIS-422", "details": [{"message": "Aadhaar Number/Virtual ID is invalid.", "code": "HIS-2001"}]}, "rid")
     response = await desk["http"].post("/abdm/hpr/hpid/aadhaar", json=_aadhaar())
     assert response.status_code == 400
@@ -178,10 +178,10 @@ async def test_resend_uses_hprs_ciphertext_not_the_number(desk):
     """HPR-008: NHA resends with the same call."""
     _answers(desk["fake"])
     sent = (await desk["http"].post("/abdm/hpr/hpid/aadhaar", json=_aadhaar())).json()
-    first = desk["fake"].body("/v2/registration/aadhaar/generateOtp")["aadhaar"]
+    first = desk["fake"].body(hpid.GENERATE_OTP)["aadhaar"]
     resent = await desk["http"].post("/abdm/hpr/hpid/aadhaar/resend", json={"session_id": sent["session_id"]})
     assert resent.status_code == 200, resent.text
-    assert desk["fake"].body("/v2/registration/aadhaar/generateOtp")["aadhaar"] == first
+    assert desk["fake"].body(hpid.GENERATE_OTP)["aadhaar"] == first
 
 
 async def test_after_the_otp_the_kyc_and_suggestions_come_back(desk):

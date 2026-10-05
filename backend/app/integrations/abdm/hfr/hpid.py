@@ -3,7 +3,7 @@
 NHA's in-app flow (Register Healthcare Professional API document, production
 edition), confirmed against the sandbox on 5 October 2026:
 
-  /v2/registration/aadhaar/generateOtp {aadhaar}   -> txnId; UIDAI sends an OTP
+  generateOtp {aadhaar} (v1 in the sandbox, see GENERATE_OTP) -> txnId; an OTP
         (HPR-002 to 007; resend is the same call). An invalid number is refused
         with HIS-2001, which is how the endpoint was confirmed.
   /v2/registration/aadhaar/verifyOTP {otp, txnId, domainName, idType, restrictions}
@@ -52,6 +52,13 @@ PASSWORD = re.compile(r"^(?=.*[a-z])(?=.*[A-Z])(?=.*[^A-Za-z0-9]).{8,64}$")
 HPR_ID_LOCAL = re.compile(r"^[a-z0-9][a-z0-9._]{3,47}$")
 #: NHA's role codes for createHprIdWithPreVerified (register document, s.4).
 ROLES = {"PROFESSIONAL": 1, "FACILITY_MANAGER": 2, "BOTH": 3}
+#: The Aadhaar OTP pair. NHA's production document names v2 for both; in the
+#: sandbox the v2 generateOtp's transaction is not one verifyOTP can find
+#: ("Failed to retrieve aadhaar transaction details for txnID", 5 Oct live,
+#: both verify versions alike), so the v1 generate is used, whose shape is the
+#: same ({aadhaar}, HIS-2001 for an invalid number).
+GENERATE_OTP = "/v1/registration/aadhaar/generateOtp"
+VERIFY_OTP = "/v2/registration/aadhaar/verifyOTP"
 
 
 class HpidError(ValueError):
@@ -199,7 +206,7 @@ async def send_aadhaar_otp(*, facility_id: uuid.UUID, user_id: uuid.UUID, aadhaa
     if not AADHAAR.match(aadhaar):
         raise HpidError("hpid_aadhaar_invalid", "Enter the 12-digit Aadhaar number")
     sealed = await _encrypt(aadhaar)
-    body = await _call("generateOtp", "POST", "/v2/registration/aadhaar/generateOtp", json={"aadhaar": sealed})
+    body = await _call("generateOtp", "POST", GENERATE_OTP, json={"aadhaar": sealed})
     _shape("generateOtp", body)
     txn = body.get("txnId") if isinstance(body, dict) else None
     if not isinstance(txn, str) or not txn:
@@ -215,8 +222,7 @@ async def resend_aadhaar_otp(*, facility_id: uuid.UUID, user_id: uuid.UUID, sess
     state = await _load(session_id, facility_id, user_id)
     if state["stage"] != "aadhaar_otp":
         raise HpidError("hpid_not_waiting", "The Aadhaar OTP is already verified")
-    body = await _call("generateOtp", "POST", "/v2/registration/aadhaar/generateOtp",
-                       json={"aadhaar": state["aadhaar_sealed"]})
+    body = await _call("generateOtp", "POST", GENERATE_OTP, json={"aadhaar": state["aadhaar_sealed"]})
     state["txn"] = _txn(body, state["txn"])
     await _save(session_id, facility_id, user_id, state)
     return (_text(body, "mobileNumber") if isinstance(body, dict) else "") or None
@@ -230,7 +236,7 @@ async def verify_aadhaar_otp(*, facility_id: uuid.UUID, user_id: uuid.UUID, sess
         raise HpidError("hpid_not_waiting", "The Aadhaar OTP is already verified")
     if not re.fullmatch(r"\d{6}", otp or ""):
         raise HpidError("hpid_otp_invalid", "Enter the 6-digit OTP")
-    verified = await _call("verifyOTP", "POST", "/v2/registration/aadhaar/verifyOTP", json={
+    verified = await _call("verifyOTP", "POST", VERIFY_OTP, json={
         "domainName": "@hpr.abdm", "idType": "hpr_id", "otp": await _encrypt(otp),
         "restrictions": "", "txnId": state["txn"]})
     _shape("verifyOTP", verified)
