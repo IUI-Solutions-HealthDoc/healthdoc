@@ -2112,7 +2112,7 @@ holds the asking one. A confirmed, OTP-verified link then records the address
 facility_id UUID NOT NULL → facilities           -- the HealthDoc facility that registered it
 tracking_id varchar(20) NOT NULL                 -- HFR's key; UNIQUE (facility_id, tracking_id); every edit continues it
 hfr_facility_id varchar(12) NULL                 -- from submit-facility, IN + 10 characters
-status varchar(40) NULL                          -- HFR's own status for the last step (Draft, Submitted...)
+status varchar(50) NULL                          -- HFR's own status for the last step (Draft, Submitted...)
 basic jsonb NULL                                 -- the basic-information form, without board/building/address-proof images
 additional jsonb NULL                            -- the additional-information form
 detailed jsonb NULL                              -- the detailed-information form

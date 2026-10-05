@@ -29,7 +29,7 @@ class AbdmHfrRegistration(Base, UUIDPk, Timestamps, Blame):
     hfr_facility_id = Column(String(12), nullable=True)
     #: The status HFR returned for the last step, as it sent it (Draft,
     #: Submitted, Created...). Read, never assumed.
-    status = Column(String(40), nullable=True)
+    status = Column(String(50), nullable=True)
     #: Each step's form as HFR accepted it, without image content.
     basic = Column(JSONB, nullable=True)
     additional = Column(JSONB, nullable=True)

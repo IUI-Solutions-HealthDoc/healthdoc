@@ -37,7 +37,7 @@ def upgrade() -> None:
         ),
         sa.Column("tracking_id", sa.String(20), nullable=False),
         sa.Column("hfr_facility_id", sa.String(12), nullable=True),
-        sa.Column("status", sa.String(40), nullable=True),
+        sa.Column("status", sa.String(50), nullable=True),
         sa.Column("basic", postgresql.JSONB(), nullable=True),
         sa.Column("additional", postgresql.JSONB(), nullable=True),
         sa.Column("detailed", postgresql.JSONB(), nullable=True),
