@@ -211,6 +211,7 @@ do not merge out of order.**
 | 0090 | facility_ownership | ALTER facilities: ownership | Government or private, CHECK-constrained, NULL until recorded; selects NHA's published ABHA consent wording (CRT_ABHA_102). |
 | 0091 | abdm_discovery_matches | abdm_discovery_matches | A PHR discovery matched by mobile and demographics (USER_INIT_LINK_603): transaction, asking ABHA address, chart and care contexts, kept until the link-init quotes them or they expire. |
 | 0092 | abdm_care_context_immunization | ALTER abdm_care_contexts: hi_type CHECK adds ImmunizationRecord | One NRCeS ImmunizationRecord per recorded vaccine dose, a context with no visit. Downgrade refuses while any immunization context exists rather than withdrawing a possibly linked record. |
+| 0093 | abdm_hfr_registrations | abdm_hfr_registrations | What HealthDoc sent HFR for each facility it registered (M4), image content excluded, so an edit (HFR-064 to 114) reopens it: HFR returns no saved details. Purely additive. |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -2105,6 +2106,19 @@ expires_at timestamptz NOT NULL                  -- 30 minutes after discovery
 The chart is found by this row only while it still holds no ABHA address, or
 holds the asking one. A confirmed, OTP-verified link then records the address
 (and verified number) on the chart unless another chart already holds them.
+
+**abdm_hfr_registrations** (0093) — what HealthDoc sent HFR, to edit a registered facility
+```
+facility_id UUID NOT NULL → facilities           -- the HealthDoc facility that registered it
+tracking_id varchar(20) NOT NULL                 -- HFR's key; UNIQUE (facility_id, tracking_id); every edit continues it
+hfr_facility_id varchar(12) NULL                 -- from submit-facility, IN + 10 characters
+status varchar(50) NULL                          -- HFR's own status for the last step (Draft, Submitted...)
+basic jsonb NULL                                 -- the basic-information form, without board/building/address-proof images
+additional jsonb NULL                            -- the additional-information form
+detailed jsonb NULL                              -- the detailed-information form
+submitted_at timestamptz NULL
+created_at, updated_at, created_by → users, updated_by → users
+```
 
 **abdm_callback_replies** (0067) — committed reply intent, not a clinical inbox
 ```

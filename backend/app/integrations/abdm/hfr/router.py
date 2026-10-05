@@ -2,8 +2,9 @@
 
 Covers the HFR workbook's search cases (HFR-001 to 009), the master data and
 LGD lists every HFR form draws from, registration under the facility manager's
-HPR login (HFR-010 to 063, submit HFR-116/117) and bridge linkage (HFR-118 to
-123). Field rules quoted below are the workbook's.
+HPR login (HFR-010 to 063, submit HFR-116/117), editing a registered facility
+(HFR-064 to 114) and bridge linkage (HFR-118 to 123). Field rules quoted below
+are the workbook's.
 
 HFR answers synchronously; a refusal is passed back as a 502 naming HFR, with
 the status only, never HFR's body, which can echo what was sent.
@@ -13,10 +14,13 @@ from __future__ import annotations
 
 import logging
 import re
+import uuid
+from datetime import UTC, datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pydantic import BaseModel, Field, field_validator, model_validator
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.actions import AuditAction
@@ -31,6 +35,7 @@ from app.integrations.abdm.client import (
     AbdmUnavailable,
 )
 from app.integrations.abdm.hfr import client, hpr_login, registration
+from app.integrations.abdm.hfr.models import AbdmHfrRegistration
 from app.integrations.abdm.hfr.registration import (
     AdditionalInformation,
     BasicInformation,
@@ -386,6 +391,31 @@ def _refused(exc: HfrStepRefused) -> HTTPException:
     return HTTPException(400, {"code": "hfr_registration_refused", "messages": exc.messages})
 
 
+async def _remember(db, current_db_user, tracking_id: str, **fields) -> AbdmHfrRegistration:
+    """Keep what HFR accepted under this tracking id; an edit opens with it."""
+    row = (await db.execute(select(AbdmHfrRegistration).where(
+        AbdmHfrRegistration.facility_id == current_db_user.facility_id,
+        AbdmHfrRegistration.tracking_id == tracking_id,
+    ))).scalar_one_or_none()
+    if row is None:
+        # The id is set here, as for the other ABDM rows, so the row is
+        # addressable before the database has answered.
+        row = AbdmHfrRegistration(
+            id=uuid.uuid4(), facility_id=current_db_user.facility_id, tracking_id=tracking_id,
+            created_by=current_db_user.id)
+        db.add(row)
+    else:
+        row.updated_by = current_db_user.id
+    for field, value in fields.items():
+        setattr(row, field, value)
+    return row
+
+
+def _saved_basic(form: BasicInformation) -> dict:
+    # The images go to HFR only (registration.Upload); an edit attaches them again.
+    return form.model_dump(mode="json", exclude={"tracking_id", "board_photo", "building_photo", "address_proofs"})
+
+
 async def _audit(db, current_db_user, step: str, values: dict) -> None:
     await write_audit_log(
         db,
@@ -401,7 +431,11 @@ async def _audit(db, current_db_user, step: str, values: dict) -> None:
 async def register_basic(
     payload: BasicInformation, current_db_user: CurrentDbUser, db: DbSession
 ) -> dict:
-    """HFR-010 to 038. Returns the tracking id the later steps continue."""
+    """HFR-010 to 038. Returns the tracking id the later steps continue.
+
+    With the tracking id of a registered facility this is its edit
+    (HFR-064 to 092): HFR's basic-details update is the same call.
+    """
     manager = await _manager(current_db_user)
     body = await _step(client.save_basic_information(
         registration.basic_payload(payload), manager.hpr_id_number))
@@ -409,8 +443,10 @@ async def register_basic(
         tracking, status, message = registration.tracking_from(body)
     except HfrStepRefused as exc:
         raise _refused(exc) from None
+    await _remember(db, current_db_user, tracking, basic=_saved_basic(payload), status=status)
     await _audit(db, current_db_user, "basic", {
-        "tracking_id": tracking, "facility_name": payload.name, "hpr_id": manager.hpr_id})
+        "tracking_id": tracking, "facility_name": payload.name, "hpr_id": manager.hpr_id,
+        **({"edit": True} if payload.tracking_id else {})})
     await db.commit()
     return {"tracking_id": tracking, "status": status, "message": message}
 
@@ -425,6 +461,8 @@ async def register_additional(
         tracking, status, message = registration.tracking_from(body)
     except HfrStepRefused as exc:
         raise _refused(exc) from None
+    await _remember(db, current_db_user, tracking,
+                    additional=payload.model_dump(mode="json", exclude={"tracking_id"}), status=status)
     await _audit(db, current_db_user, "additional", {"tracking_id": tracking})
     await db.commit()
     return {"tracking_id": tracking, "status": status, "message": message}
@@ -440,6 +478,8 @@ async def register_detailed(
         tracking, status, message = registration.tracking_from(body)
     except HfrStepRefused as exc:
         raise _refused(exc) from None
+    await _remember(db, current_db_user, tracking,
+                    detailed=payload.model_dump(mode="json", exclude={"tracking_id"}), status=status)
     await _audit(db, current_db_user, "detailed", {"tracking_id": tracking})
     await db.commit()
     return {"tracking_id": tracking, "status": status, "message": message}
@@ -449,14 +489,62 @@ async def register_detailed(
 async def register_submit(
     payload: SubmitFacility, current_db_user: CurrentDbUser, db: DbSession
 ) -> dict:
-    """HFR-116/117: submit the saved details; HFR returns the new facility id."""
+    """HFR-116/117: submit the saved details; HFR returns the facility id.
+    After an edit this is the resubmit, under the same tracking id."""
     manager = await _manager(current_db_user)
     body = await _step(client.submit_facility(registration.submit_payload(payload), manager.hpr_id_number))
     try:
         facility_id, status, message = registration.facility_from(body)
     except HfrStepRefused as exc:
         raise _refused(exc) from None
+    await _remember(db, current_db_user, payload.tracking_id, hfr_facility_id=facility_id,
+                    status=status, submitted_at=datetime.now(UTC))
     await _audit(db, current_db_user, "submit", {
         "tracking_id": payload.tracking_id, "hfr_facility_id": facility_id, "hpr_id": manager.hpr_id})
     await db.commit()
     return {"facility_id": facility_id, "status": status, "message": message}
+
+
+# ---------------------------------------------------------------- editing a registered facility
+
+
+def _registration_out(row: AbdmHfrRegistration, *, forms: bool) -> dict:
+    out = {
+        "tracking_id": row.tracking_id,
+        "facility_id": row.hfr_facility_id,
+        "facility_name": (row.basic or {}).get("name"),
+        "status": row.status,
+        "submitted_at": row.submitted_at,
+        "updated_at": row.updated_at,
+    }
+    if forms:
+        out.update(basic=row.basic, additional=row.additional, detailed=row.detailed)
+    return out
+
+
+@router.get("/registrations")
+async def list_registrations(current_db_user: CurrentDbUser, db: DbSession) -> dict:
+    """The facilities this HealthDoc facility registered in HFR, newest first."""
+    rows = (await db.execute(
+        select(AbdmHfrRegistration)
+        .where(AbdmHfrRegistration.facility_id == current_db_user.facility_id)
+        .order_by(AbdmHfrRegistration.updated_at.desc())
+        .limit(50)
+    )).scalars().all()
+    return {"registrations": [_registration_out(row, forms=False) for row in rows]}
+
+
+@router.get("/registrations/{tracking_id}")
+async def get_registration(
+    tracking_id: Annotated[str, Path(pattern=r"^\d{1,20}$")], current_db_user: CurrentDbUser, db: DbSession
+) -> dict:
+    """The forms HFR accepted for this tracking id, to open its edit
+    (HFR-064 to 114). Images are not kept and are attached again."""
+    row = (await db.execute(select(AbdmHfrRegistration).where(
+        AbdmHfrRegistration.facility_id == current_db_user.facility_id,
+        AbdmHfrRegistration.tracking_id == tracking_id,
+    ))).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(404, {"code": "hfr_registration_not_found",
+                                  "message": "HealthDoc has no HFR registration with this tracking id"})
+    return _registration_out(row, forms=True)

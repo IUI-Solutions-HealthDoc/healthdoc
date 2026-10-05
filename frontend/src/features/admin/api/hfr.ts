@@ -157,3 +157,28 @@ export function submitHfrFacility(trackingId: string, idempotencyKey: string) {
     method: "POST", body: JSON.stringify({ tracking_id: trackingId }), idempotencyKey,
   });
 }
+
+// ------------------------------------------------------------- editing a registered facility
+// HFR-064 to 114. HFR returns no saved details, so HealthDoc keeps what it sent
+// (images excluded) and an edit opens with it.
+
+export interface HfrRegistrationSummary {
+  tracking_id: string;
+  facility_id: string | null;
+  facility_name: string | null;
+  status: string | null;
+  submitted_at: string | null;
+  updated_at: string;
+}
+export interface HfrSavedRegistration extends HfrRegistrationSummary {
+  basic: Omit<HfrBasicInformation, "tracking_id" | "board_photo" | "building_photo" | "address_proofs"> | null;
+  additional: Omit<HfrAdditionalInformation, "tracking_id"> | null;
+  detailed: Omit<HfrDetailedInformation, "tracking_id"> | null;
+}
+
+export async function listHfrRegistrations(): Promise<HfrRegistrationSummary[]> {
+  return (await api<{ registrations: HfrRegistrationSummary[] }>("/abdm/hfr/registrations")).registrations;
+}
+export function getHfrRegistration(trackingId: string): Promise<HfrSavedRegistration> {
+  return api<HfrSavedRegistration>(`/abdm/hfr/registrations/${encodeURIComponent(trackingId)}`);
+}

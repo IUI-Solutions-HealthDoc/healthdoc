@@ -21,6 +21,7 @@ from app.auth.deps import AuthUser, DbUser, get_current_db_user, get_current_use
 from app.common.db import get_db
 from app.integrations.abdm.client import AbdmRejected
 from app.integrations.abdm.hfr import client, hpr_login, registration
+from app.integrations.abdm.hfr import models as hfr_models
 from app.integrations.abdm.hfr import router as hfr_router
 from app.users.models import Facility, User
 
@@ -281,3 +282,86 @@ def test_the_payload_builders_never_invent_codes():
                                                                 ownership_subtype_code2="MOHF"))
     info = registration.basic_payload(form)["facilityInformation"]
     assert (info["ownershipCode"], info["ownershipSubTypeCode"], info["ownershipSubTypeCode2"]) == ("G", "C", "MOHF")
+
+
+# ------------------------------------------------------------ editing (HFR-064 to 114)
+
+
+async def _register(desk, tracking="76803"):
+    saved = {"trackingId": tracking, "status": "Draft", "message": "saved", "errorStatus": None}
+    for path in ("basic-information", "additional-information", "detailed-information"):
+        desk["fake"].answers[f"/v1.5/facility/{path}"] = saved
+    desk["fake"].answers["/v1.5/facility/submit-facility"] = {
+        "facilityId": "IN0610090166", "status": "Submitted", "message": "Facility created successfully."}
+    http = desk["http"]
+    assert (await http.post("/abdm/hfr/registration/basic", json=_basic())).status_code == 200
+    assert (await http.post("/abdm/hfr/registration/additional", json={
+        "tracking_id": tracking, "nin": "1234", "general": {"pharmacy": "YALL"}})).status_code == 200
+    assert (await http.post("/abdm/hfr/registration/detailed", json={
+        "tracking_id": tracking, "infrastructure": {"ipd_beds_with_oxygen": 5}})).status_code == 200
+    assert (await http.post("/abdm/hfr/registration/submit", json={"tracking_id": tracking})).status_code == 200
+
+
+async def test_a_registered_facility_opens_for_edit_with_what_hfr_accepted(desk):
+    await _sign_in(desk)
+    await _register(desk)
+    listed = (await desk["http"].get("/abdm/hfr/registrations")).json()["registrations"]
+    assert [(r["tracking_id"], r["facility_id"], r["facility_name"], r["status"]) for r in listed] == [
+        ("76803", "IN0610090166", "HealthDoc Sandbox Test Hospital", "Submitted")]
+    assert "basic" not in listed[0], "the list carries no forms"
+    saved = (await desk["http"].get("/abdm/hfr/registrations/76803")).json()
+    assert saved["basic"]["address"]["sub_district_code"] == "4194"
+    assert saved["basic"]["timings"][0] == {"days": ["Mon", "Tue"], "hours": "9:00 AM - 6:00 PM"}
+    assert saved["additional"]["nin"] == "1234" and saved["additional"]["general"]["pharmacy"] == "YALL"
+    assert saved["detailed"]["infrastructure"]["ipd_beds_with_oxygen"] == 5
+    assert saved["submitted_at"] is not None
+
+
+async def test_the_photos_go_to_hfr_and_are_never_kept(desk):
+    await _sign_in(desk)
+    await _register(desk)
+    saved = (await desk["http"].get("/abdm/hfr/registrations/76803")).json()
+    assert {"board_photo", "building_photo", "address_proofs"}.isdisjoint(saved["basic"])
+    assert PNG not in json.dumps(saved)
+
+
+async def test_an_edit_resends_basic_details_under_the_same_tracking_id(desk):
+    """HFR-064 to 092: the basic-details update is basic-information with the tracking id."""
+    await _sign_in(desk)
+    await _register(desk)
+    edited = _basic(tracking_id="76803", name="HealthDoc Sandbox Test Hospital East",
+                    operational_status="TC")
+    response = await desk["http"].post("/abdm/hfr/registration/basic", json=edited)
+    assert response.status_code == 200, response.text
+    path, body, headers = desk["fake"].calls[-1]
+    assert path == "/v1.5/facility/basic-information" and headers == {"x-hprid-auth": HPR_NUMBER}
+    assert body["trackingId"] == "76803"
+    assert body["facilityInformation"]["facilityName"] == "HealthDoc Sandbox Test Hospital East"
+    listed = (await desk["http"].get("/abdm/hfr/registrations")).json()["registrations"]
+    assert len(listed) == 1, "an edit updates the facility's row, not a second one"
+    saved = (await desk["http"].get("/abdm/hfr/registrations/76803")).json()
+    assert saved["basic"]["name"] == "HealthDoc Sandbox Test Hospital East"
+    assert saved["basic"]["operational_status"] == "TC"
+    assert saved["facility_id"] == "IN0610090166", "the facility id survives the edit"
+    audits = (await desk["db"].execute(select(AuditLog).where(
+        AuditLog.resource_type == "hfr_registration").order_by(AuditLog.created_at))).scalars().all()
+    assert audits[-1].new_value["edit"] is True
+
+
+async def test_another_facilitys_registration_is_not_found(desk):
+    await _sign_in(desk)
+    await _register(desk)
+    other = Facility(id=uuid.uuid4(), code=f"HR{uuid.uuid4().hex[:4]}", name="Other", state_code="MH")
+    desk["db"].add(other)
+    await desk["db"].flush()
+    row = (await desk["db"].execute(select(hfr_models.AbdmHfrRegistration))).scalar_one()
+    row.facility_id = other.id
+    await desk["db"].flush()
+    missing = await desk["http"].get("/abdm/hfr/registrations/76803")
+    assert missing.status_code == 404
+    assert missing.json()["detail"]["code"] == "hfr_registration_not_found"
+    assert (await desk["http"].get("/abdm/hfr/registrations")).json() == {"registrations": []}
+
+
+async def test_a_tracking_id_is_digits(desk):
+    assert (await desk["http"].get("/abdm/hfr/registrations/76803x")).status_code == 422
