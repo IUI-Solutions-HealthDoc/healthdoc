@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import re
 import secrets
 import time
@@ -33,6 +34,8 @@ from dataclasses import dataclass
 from app.common.redis import get_redis
 from app.common.security import decrypt_pii, encrypt_pii
 from app.integrations.abdm.hfr import client
+
+log = logging.getLogger(__name__)
 
 #: An HPR ID ("name@hpr.abdm") or HPR ID number (71-1234-5678-9012).
 HPR_ID = re.compile(r"^(?:[a-z0-9][a-z0-9._]{2,48}@hpr\.abdm|\d{2}-\d{4}-\d{4}-\d{4})$")
@@ -68,6 +71,42 @@ def _aad(facility_id: uuid.UUID, user_id: uuid.UUID) -> bytes:
     return f"abdm:hfr:hpr-token:{facility_id}:{user_id}".encode()
 
 
+def _held_kyc_key(facility_id: uuid.UUID, user_id: uuid.UUID) -> str:
+    return f"hfr:hpr-held-kyc:{facility_id}:{user_id}"
+
+
+def _held_kyc_aad(facility_id: uuid.UUID, user_id: uuid.UUID) -> bytes:
+    return f"abdm:hfr:hpr-held-kyc:{facility_id}:{user_id}".encode()
+
+
+async def hold_kyc(facility_id: uuid.UUID, user_id: uuid.UUID, *, hpr_id_number: str, kyc: dict) -> None:
+    """Keep an Aadhaar KYC for the professional who signs in next.
+
+    An Aadhaar check that finds an existing HPID returns a token, but not an
+    HPR login: it carries no roles or category, and register-professional
+    refuses it ("roles or category in Hrp token can not be empty/null", live
+    5 Oct 2026). The professional signs in through HPR's own login instead,
+    and the KYC joins that login if it is the same HPR ID number."""
+    record = json.dumps({"hpr_id_number": hpr_id_number, "kyc": kyc})
+    sealed = base64.b64encode(encrypt_pii(record, associated_data=_held_kyc_aad(facility_id, user_id)))
+    await get_redis().set(_held_kyc_key(facility_id, user_id), sealed.decode(), ex=MAX_TOKEN_TTL)
+
+
+async def _take_held_kyc(facility_id: uuid.UUID, user_id: uuid.UUID, hpr_id_number: object) -> dict | None:
+    redis = get_redis()
+    sealed = await redis.get(_held_kyc_key(facility_id, user_id))
+    if not sealed:
+        return None
+    try:
+        held = json.loads(decrypt_pii(base64.b64decode(sealed), associated_data=_held_kyc_aad(facility_id, user_id)))
+    except Exception:  # noqa: BLE001 — another admin's record reads as absent
+        return None
+    if not isinstance(hpr_id_number, str) or held.get("hpr_id_number") != hpr_id_number:
+        return None
+    await redis.delete(_held_kyc_key(facility_id, user_id))
+    return held.get("kyc")
+
+
 def _claims(token: str) -> dict:
     """The JWT payload, for display and expiry only; HFR verifies the token."""
     try:
@@ -90,9 +129,15 @@ async def _keep(
     facility_id: uuid.UUID, user_id: uuid.UUID, hpr_id: str, token: str, *, kyc: dict | None = None
 ) -> HprSession:
     """Keep the login. `kyc` is the professional's Aadhaar KYC when HPR handed
-    it over with the token (HPID creation, or an Aadhaar check that found an
-    existing HPID); sealed in the same record, so a later login replaces both."""
+    it over with the token (HPID creation), or the one held for this HPR ID
+    number by an Aadhaar check that found an existing HPID; sealed in the same
+    record, so a later login replaces both."""
     claims = _claims(token)
+    # Which claims HPR put in this login, never their values: registration
+    # needs roles and a category in it.
+    log.warning("HPR login token carries claims %s", sorted(claims))
+    if kyc is None:
+        kyc = await _take_held_kyc(facility_id, user_id, claims.get("hprIdNumber"))
     now = int(time.time())
     expires_at = min(int(claims.get("exp") or now + MAX_TOKEN_TTL), now + MAX_TOKEN_TTL)
     if expires_at <= now:
