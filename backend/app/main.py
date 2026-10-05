@@ -262,6 +262,7 @@ _B1_ROUTERS = [
     "app.integrations.abdm.hiu.router",
     "app.integrations.abdm.operations",
     "app.integrations.abdm.hfr.router",  # Health Facility Registry (M4)
+    "app.integrations.abdm.hfr.hpr_router",  # Healthcare Professionals Registry (M4)
     "app.patients.portal_router",  # verified account-to-patient identity boundary (#228)
     "app.patients.portal_self_router",  # bound patient self-service reads (#228)
     # Break-glass (#391). This sat unregistered behind a note saying

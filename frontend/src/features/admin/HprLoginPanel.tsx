@@ -18,7 +18,7 @@ function failure(reason: unknown, fallback: string): string {
  * manager signs in here; the OTP or password goes to HPR through HealthDoc and
  * is not kept. HealthDoc holds the login for at most 30 minutes.
  */
-export function HprLoginPanel({ onChange }: { onChange?: (session: HprSession) => void }) {
+export function HprLoginPanel({ onChange, reloadKey = 0 }: { onChange?: (session: HprSession) => void; reloadKey?: number }) {
   const [session, setSession] = useState<HprSession | null>(null);
   const [stateError, setStateError] = useState<string | null>(null);
   const [hprId, setHprId] = useState("");
@@ -42,9 +42,10 @@ export function HprLoginPanel({ onChange }: { onChange?: (session: HprSession) =
     hprLoginState().then((next) => { if (!disposed) { setSession(next); onChange?.(next); } },
       (reason: unknown) => { if (!disposed) setStateError(failure(reason, "HPR login state could not be loaded.")); });
     return () => { disposed = true; };
-    // onChange is a notification hook; reloading on every parent render is not wanted.
+    // onChange is a notification hook; reloading on every parent render is not
+    // wanted. reloadKey changes when another panel signs someone in.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [reloadKey]);
 
   async function run(action: () => Promise<void>) {
     setBusy(true);
