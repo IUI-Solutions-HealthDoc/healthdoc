@@ -44,7 +44,7 @@
     "dayjs": "^1.11.21",
     "keycloak-js": "^25.0.0",
     "lucide-react": "^1.24.0",
-    "next": "^16.3.3",
+    "next": "^16.3.8",
     "pdfjs-dist": "6.3.289",
     "react": "^19.0.0",
     "react-barcode": "^1.6.1",
@@ -66,15 +66,18 @@
     "@types/node": "^22.10.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "electron": "^43.4.1",
+    "electron": "^43.7.7",
     "eslint": "^9.17.0",
-    "eslint-config-next": "^16.3.3",
+    "eslint-config-next": "^16.3.8",
     "ffmpeg-static": "^5.3.0",
     "puppeteer": "^25.3.0",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.0"
   },
   "overrides": {
-    "browserslist": "^4.28.9"
+    "browserslist": "^4.28.9",
+    "undici@7": "^7.29.1",
+    "brace-expansion@1": "^1.1.21",
+    "brace-expansion@5": "^5.0.12"
   }
 }
