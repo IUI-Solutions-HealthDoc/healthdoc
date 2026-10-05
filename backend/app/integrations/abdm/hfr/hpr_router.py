@@ -1,6 +1,6 @@
 """Healthcare Professionals Registry for the facility administrator (ABDM M4, HPR).
 
-HPR's master data, HPID creation in HealthDoc (HPR-002 to 011) and
+HPR's master data, HPID creation (HPR-002 to 011, Aadhaar on NHA's page) and
 registration of the signed-in professional (HPR-018 to 079). Master lists come back
 as {code, label}; HPR's own field names differ per list. HPR's state and
 district ids are its own, not LGD codes (district/27 is Punjab, 5 Oct live),
@@ -9,20 +9,19 @@ so every HPR form takes them from these lists only.
 
 from __future__ import annotations
 
-import base64
 from typing import Annotated, Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.audit.actions import AuditAction
-from app.audit.service import write_audit_log
 from app.auth.deps import CurrentDbUser, require_roles
-from app.common import captcha
-from app.common.db import get_db
-from app.integrations.abdm.client import AbdmAuthError, AbdmNotConfigured, AbdmRejected, AbdmUnavailable
+from app.integrations.abdm.client import (
+    AbdmAuthError,
+    AbdmNotConfigured,
+    AbdmRejected,
+    AbdmUnavailable,
+)
 from app.integrations.abdm.hfr import client, hpid, hpr_login, hpr_registration
 from app.integrations.abdm.hfr.router import _hfr
 
@@ -142,29 +141,6 @@ async def universities(college_code: Annotated[str, Query(pattern=_ID)]) -> dict
 
 # ----------------------------------------------------------------- HPID creation, in HealthDoc (HPR-002 to 011)
 
-#: NHA's HPID consent, word for word from its Aadhaar gateway (5 Oct 2026).
-#: HPR-003 requires the professional to read and accept it.
-HPID_CONSENT_VERSION = "nha-hpid-consent-2026-10-05"
-HPID_CONSENT_TEXT = (
-    "I, hereby declare that I am voluntarily sharing my Aadhaar Number / Virtual ID and demographic information "
-    "issued by UIDAI, with National Health Authority (NHA) for the sole purpose of creation of Healthcare "
-    "Professional ID. I understand that my Healthcare Professional ID can be used and shared for purposes as may "
-    "be notified by Ayushman Bharat Digital Mission (ABDM) from time to time including provision of healthcare "
-    "services. Further, I am aware that my personal identifiable information (Name, Address, Age, Date of Birth, "
-    "Gender and Photograph) may be made available to the entities working in the National Digital Health "
-    "Ecosystem (NDHE) which inter alia includes stakeholders and entities such as healthcare professional (e.g. "
-    "doctors), facilities (e.g. hospitals, laboratories) and data fiduciaries (e.g. health programmes), which are "
-    "registered with or linked to the Ayushman Bharat Digital Mission (ABDM), and various processes there under. "
-    "I authorize NHA to use my Aadhaar number / Virtual ID for performing Aadhaar based authentication with UIDAI "
-    "as per the provisions of the Aadhaar (Targeted Delivery of Financial and other Subsidies, Benefits and "
-    "Services) Act, 2016 for the aforesaid purpose. I understand that UIDAI will share my e-KYC details, or "
-    "response of “Yes” with NHA upon successful authentication. I consciously choose to use Aadhaar "
-    "number / Virtual ID for the purpose of availing benefits across the NDHE. I am aware that my personal "
-    "identifiable information excluding Aadhaar number / VID number can be used and shared for purposes as "
-    "mentioned above. I reserve the right to revoke the given consent at any point of time as per provisions of "
-    "Aadhar Act and Regulations and other laws, rules and regulations."
-)
-DbSession = Annotated[AsyncSession, Depends(get_db)]
 
 
 def _refused(exc: hpid.HpidError) -> HTTPException:
@@ -181,11 +157,6 @@ async def _step(call):
     except AbdmRejected as exc:
         detail = exc.detail if isinstance(exc.detail, dict) else {}
         messages = [str(d.get("message")) for d in detail.get("details") or [] if isinstance(d, dict) and d.get("message")]
-        if any(hpid.TXN_MISSING in m for m in messages):
-            # HPR's sandbox defect: its verify cannot find its own transaction.
-            raise HTTPException(400, {"code": "hpid_inapp_unavailable", "message":
-                "HPR could not verify this OTP in HealthDoc (NHA's in-app verification is not working). "
-                "Verify on NHA's page instead."}) from None
         raise HTTPException(400, {"code": "hpr_refused", "message": "; ".join(messages)
                                   or f"HPR refused this (HTTP {exc.status_code})"}) from None
     except hpid.HpidError as exc:
@@ -196,15 +167,6 @@ async def _step(call):
 
 class HpidSession(BaseModel):
     session_id: str = Field(min_length=8, max_length=64)
-
-
-class HpidAadhaar(BaseModel):
-    #: Encrypted for HPR at once; never stored or logged.
-    aadhaar: str = Field(pattern=r"^[2-9]\d{11}$", repr=False)
-    consent_accepted: Literal[True]
-    consent_version: Literal["nha-hpid-consent-2026-10-05"]
-    captcha_id: str = Field(min_length=1, max_length=64)
-    captcha_answer: str = Field(min_length=1, max_length=16)
 
 
 class HpidMobile(HpidSession):
@@ -228,62 +190,9 @@ class HpidCreate(HpidSession):
     role: Literal["PROFESSIONAL", "FACILITY_MANAGER", "BOTH"] = "PROFESSIONAL"
 
 
-@router.get("/hpid/consent")
-async def hpid_consent() -> dict:
-    """HPR-003: NHA's consent text, shown before the Aadhaar number is taken."""
-    return {"version": HPID_CONSENT_VERSION, "text": HPID_CONSENT_TEXT}
-
-
-@router.get("/captcha")
-async def hpid_captcha() -> dict:
-    """HPR-006: a captcha before an Aadhaar OTP is sent."""
-    captcha_id, png = await captcha.issue()
-    return {"captcha_id": captcha_id, "image": "data:image/png;base64," + base64.b64encode(png).decode()}
-
-
-@router.post("/hpid/aadhaar")
-async def hpid_aadhaar(payload: HpidAadhaar, current_db_user: CurrentDbUser, db: DbSession) -> dict:
-    """HPR-002 to 007: send the Aadhaar OTP, after the consent and captcha."""
-    if not await captcha.check(payload.captcha_id, payload.captcha_answer):
-        raise HTTPException(400, {"code": "captcha_invalid", "message": "The captcha did not match; try a new one"})
-    try:
-        session_id, hint = await _step(hpid.send_aadhaar_otp(
-            facility_id=current_db_user.facility_id, user_id=current_db_user.id, aadhaar=payload.aadhaar))
-    except hpid.HpidError as exc:
-        raise _refused(exc) from None
-    await write_audit_log(db, facility_id=current_db_user.facility_id, action=AuditAction.CREATE,
-                          resource_type="hpid_consent", user_id=current_db_user.id,
-                          new_value={"consent_version": payload.consent_version, "purpose": "HPID creation"})
-    await db.commit()
-    return {"session_id": session_id, "masked_mobile": hint}
-
-
-@router.post("/hpid/aadhaar/resend")
-async def hpid_aadhaar_resend(payload: HpidSession, current_db_user: CurrentDbUser) -> dict:
-    """HPR-008."""
-    try:
-        hint = await _step(hpid.resend_aadhaar_otp(
-            facility_id=current_db_user.facility_id, user_id=current_db_user.id, session_id=payload.session_id))
-    except hpid.HpidError as exc:
-        raise _refused(exc) from None
-    return {"masked_mobile": hint}
-
-
-@router.post("/hpid/aadhaar/verify")
-async def hpid_aadhaar_verify(payload: HpidOtp, current_db_user: CurrentDbUser) -> dict:
-    """The Aadhaar KYC, or, for an Aadhaar that already holds an HPID, that
-    professional signed in to HPR with their KYC."""
-    try:
-        return await _step(hpid.verify_aadhaar_otp(
-            facility_id=current_db_user.facility_id, user_id=current_db_user.id,
-            session_id=payload.session_id, otp=payload.otp))
-    except hpid.HpidError as exc:
-        raise _refused(exc) from None
-
-
 @router.post("/hpid/link")
 async def hpid_link(current_db_user: CurrentDbUser) -> dict:
-    """NHA's own Aadhaar page, when the in-app verify is unavailable."""
+    """HPR-002 to 007 on NHA's own page; HealthDoc never sees the Aadhaar number."""
     session_id, url = await _step(hpid.start_link(facility_id=current_db_user.facility_id, user_id=current_db_user.id))
     return {"session_id": session_id, "url": url}
 
@@ -291,7 +200,7 @@ async def hpid_link(current_db_user: CurrentDbUser) -> dict:
 @router.post("/hpid/link/check")
 async def hpid_link_check(payload: HpidSession, current_db_user: CurrentDbUser) -> dict:
     """{"authenticated": false} until the professional finishes on NHA's page;
-    then the same answer as an in-app verify."""
+    then their KYC, and an existing HPID's login or HPR ID suggestions."""
     return await _step(hpid.check_link(
         facility_id=current_db_user.facility_id, user_id=current_db_user.id, session_id=payload.session_id))
 

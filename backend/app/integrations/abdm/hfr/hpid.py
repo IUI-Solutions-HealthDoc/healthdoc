@@ -1,37 +1,31 @@
-"""Create an HPID for a health professional, in HealthDoc (M4 HPR-002 to 011).
+"""Create an HPID for a health professional (M4 HPR-002 to 011).
 
-NHA's in-app flow (Register Healthcare Professional API document, production
-edition), confirmed against the sandbox on 5 October 2026:
+NHA's link flow, the one integrators use (5 Oct 2026): the professional
+verifies their Aadhaar (consent, number, OTP) on NHA's own page, so the
+Aadhaar number never passes through HealthDoc.
 
-  /v2/registration/aadhaar/generateOtp {aadhaar}   -> txnId; UIDAI sends an OTP
-        (HPR-002 to 007; resend is the same call). An invalid number is refused
-        with HIS-2001, which is how the endpoint was confirmed.
-  /v2/registration/aadhaar/verifyOTP {otp, txnId, domainName, idType, restrictions}
+  /aadhaar/generateLink       -> {status: "URL GENERATED", txnId, url}
+  /aadhaar/isAuthenticated    -> a bare false until they finish on NHA's page
+  /v2/registration/aadhaar/verifyOTP {txnId}  -> the Aadhaar KYC
   /v1/registration/aadhaar/checkHpIdAccountExist {txnId}
-        -> the Aadhaar KYC; when the Aadhaar already holds an HPID, also its
-        token and HPR ID number, which sign the professional in.
+        -> the KYC again; for an Aadhaar that already holds an HPID, also its
+        token and HPR ID number, which sign the professional in
   /v1/registration/aadhaar/hpid/suggestion          -> HPR IDs to offer
   /v2/registration/aadhaar/demographicAuthViaMobile -> {verified}; when false,
   /v1/registration/aadhaar/generateMobileOTP + verifyMobileOTP (HPR-010/011)
   /v2/registration/aadhaar/createHprIdWithPreVerified -> token, HPR ID number, KYC
 
-In the sandbox (5 Oct 2026) verifyOTP cannot find the transaction the v2
-generateOtp made: "Failed to retrieve aadhaar transaction details for txnID",
-the same for every body shape, OTP encoding and version (HPR's defect,
-reported to NHA). So NHA's other route is kept beside it: generateLink opens
-NHA's own Aadhaar page; isAuthenticated is a bare false until the
-professional finishes there; verifyOTP {txnId} then returns the KYC. Both
-routes continue the same way from checkHpIdAccountExist.
+NHA's in-app Aadhaar OTP (generateOtp / verifyOTP with an OTP) is not used:
+in the sandbox its verify cannot find the transaction its generate made.
 
-Aadhaar, OTPs, mobile, email and password travel RSA-encrypted under HPR's
-own certificate (GET /api/v1/auth/cert) with PKCS#1 v1.5 padding, NHA's
+Mobile, OTP, email and password travel RSA-encrypted under HPR's own
+certificate (GET /api/v1/auth/cert) with PKCS#1 v1.5 padding, NHA's
 "RSA/ECB/PKCS1Padding" (OAEP and plain text get HIS-500, 5 Oct live).
 
-The Aadhaar number is never stored or logged: it is encrypted for HPR at once,
-and only HPR's ciphertext is kept, for a resend. The KYC that HPR returns
-travels with the professional's HPR login (hpr_login), which is how
-registration in HPR gets their Aadhaar details without asking the browser.
-Each step logs the field names of HPR's answer, never a value.
+The KYC that HPR returns travels with the professional's HPR login
+(hpr_login), which is how registration in HPR gets their Aadhaar details
+without asking the browser. Each step logs the field names of HPR's answer,
+never a value.
 """
 
 from __future__ import annotations
@@ -53,16 +47,12 @@ from app.integrations.abdm.hfr import client, hpr_login
 
 log = logging.getLogger("healthdoc.abdm")
 SESSION_TTL = 900
-AADHAAR = re.compile(r"^[2-9]\d{11}$")
 #: HPR's rule, quoted in NHA's Postman: a lower and an upper case letter, a
 #: special character, at least 8 characters. HPR checks the rest.
 PASSWORD = re.compile(r"^(?=.*[a-z])(?=.*[A-Z])(?=.*[^A-Za-z0-9]).{8,64}$")
 HPR_ID_LOCAL = re.compile(r"^[a-z0-9][a-z0-9._]{3,47}$")
 #: NHA's role codes for createHprIdWithPreVerified (register document, s.4).
 ROLES = {"PROFESSIONAL": 1, "FACILITY_MANAGER": 2, "BOTH": 3}
-#: The Aadhaar OTP pair, NHA's production document's v2 calls. The v1
-#: generate refuses a valid Aadhaar as invalid (HIS-2001, 5 Oct live).
-GENERATE_OTP = "/v2/registration/aadhaar/generateOtp"
 VERIFY_OTP = "/v2/registration/aadhaar/verifyOTP"
 
 
@@ -141,7 +131,7 @@ async def _encrypt(value: str) -> str:
 def _text(body: dict, *names: str) -> str:
     for name in names:
         value = body.get(name)
-        if isinstance(value, (str, int)) and not isinstance(value, bool) and str(value).strip():
+        if isinstance(value, str | int) and not isinstance(value, bool) and str(value).strip():
             return str(value).strip()
     return ""
 
@@ -180,7 +170,7 @@ def kyc_from(*bodies: object) -> dict:
         if isinstance(address, dict):
             parts = [str(address.get(k)).strip() for k in
                      ("house", "street", "landmark", "locality", "vtc", "subdistrict", "district", "state")
-                     if isinstance(address.get(k), (str, int)) and str(address.get(k)).strip()]
+                     if isinstance(address.get(k), str | int) and str(address.get(k)).strip()]
             found["address"] = ", ".join(parts)
             found["pincode"] = found["pincode"] or _text(address, "pincode")
         elif isinstance(address, str):
@@ -205,60 +195,15 @@ def public(kyc: dict) -> dict:
     return shown
 
 
-async def send_aadhaar_otp(*, facility_id: uuid.UUID, user_id: uuid.UUID, aadhaar: str) -> tuple[str, str | None]:
-    """HPR-002 to 007: the professional consented and the captcha passed (the
-    router checks both). Returns (session id, the masked mobile UIDAI used)."""
-    if not AADHAAR.match(aadhaar):
-        raise HpidError("hpid_aadhaar_invalid", "Enter the 12-digit Aadhaar number")
-    sealed = await _encrypt(aadhaar)
-    body = await _call("generateOtp", "POST", GENERATE_OTP, json={"aadhaar": sealed})
-    _shape("generateOtp", body)
-    txn = body.get("txnId") if isinstance(body, dict) else None
-    if not isinstance(txn, str) or not txn:
-        raise HpidError("hpid_otp_failed", "HPR did not send the Aadhaar OTP")
-    session_id = secrets.token_urlsafe(18)
-    # Only HPR's ciphertext is kept, for a resend (the same call, NHA's note).
-    await _save(session_id, facility_id, user_id, {"txn": txn, "stage": "aadhaar_otp", "aadhaar_sealed": sealed})
-    return session_id, (_text(body, "mobileNumber") or None)
-
-
-async def resend_aadhaar_otp(*, facility_id: uuid.UUID, user_id: uuid.UUID, session_id: str) -> str | None:
-    """HPR-008: NHA resends with the same generate call."""
-    state = await _load(session_id, facility_id, user_id)
-    if state["stage"] != "aadhaar_otp":
-        raise HpidError("hpid_not_waiting", "The Aadhaar OTP is already verified")
-    body = await _call("generateOtp", "POST", GENERATE_OTP, json={"aadhaar": state["aadhaar_sealed"]})
-    state["txn"] = _txn(body, state["txn"])
-    await _save(session_id, facility_id, user_id, state)
-    return (_text(body, "mobileNumber") if isinstance(body, dict) else "") or None
-
-
-async def verify_aadhaar_otp(*, facility_id: uuid.UUID, user_id: uuid.UUID, session_id: str, otp: str) -> dict:
-    """Verify the Aadhaar OTP, then read the KYC. An Aadhaar that already
-    holds an HPID signs that professional in (HPR hands over their token)."""
-    state = await _load(session_id, facility_id, user_id)
-    if state["stage"] != "aadhaar_otp":
-        raise HpidError("hpid_not_waiting", "The Aadhaar OTP is already verified")
-    if not re.fullmatch(r"\d{6}", otp or ""):
-        raise HpidError("hpid_otp_invalid", "Enter the 6-digit OTP")
-    verified = await _call("verifyOTP", "POST", VERIFY_OTP, json={
-        "domainName": "@hpr.abdm", "idType": "hpr_id", "otp": await _encrypt(otp),
-        "restrictions": "", "txnId": state["txn"]})
-    _shape("verifyOTP", verified)
-    state["txn"] = _txn(verified, state["txn"])
-    return await _after_aadhaar(state, verified, facility_id=facility_id, user_id=user_id, session_id=session_id)
-
-
 async def _after_aadhaar(state: dict, verified: object, *, facility_id: uuid.UUID, user_id: uuid.UUID,
                          session_id: str) -> dict:
-    """Common to both routes once Aadhaar is verified: the KYC, an existing
-    HPID's login, or HPR ID suggestions for a new one."""
+    """Once Aadhaar is verified: the KYC, an existing HPID's login, or HPR ID
+    suggestions for a new one."""
     exists = await _call("checkHpIdAccountExist", "POST", "/v1/registration/aadhaar/checkHpIdAccountExist",
                          json={"txnId": state["txn"]})
     _shape("checkHpIdAccountExist", exists)
     state["txn"] = _txn(exists, state["txn"])
     kyc = kyc_from(verified, exists)
-    state.pop("aadhaar_sealed", None)
 
     number = _text(exists, "hprIdNumber") if isinstance(exists, dict) else ""
     token = _text(exists, "token") if isinstance(exists, dict) else ""
@@ -282,12 +227,9 @@ async def _after_aadhaar(state: dict, verified: object, *, facility_id: uuid.UUI
     return {"existing": False, "kyc": public(kyc), "suggestions": state["suggestions"], "mobile_verified": False}
 
 
-TXN_MISSING = "Failed to retrieve aadhaar transaction details"
-
-
 async def start_link(*, facility_id: uuid.UUID, user_id: uuid.UUID) -> tuple[str, str]:
-    """NHA's own Aadhaar page, for when the in-app verify is unavailable.
-    NHA's page collects the consent, Aadhaar and OTP. Returns (session, URL)."""
+    """HPR-002 to 007, on NHA's own page: it collects the consent, the Aadhaar
+    number, a captcha and the OTP. Returns (session id, page URL)."""
     body = await _call("generateLink", "POST", "/aadhaar/generateLink", json={"scopes": ["nhpr-register"], "source": "NHPR"})
     _shape("generateLink", body)
     txn = body.get("txnId") if isinstance(body, dict) else None
@@ -300,8 +242,9 @@ async def start_link(*, facility_id: uuid.UUID, user_id: uuid.UUID) -> tuple[str
 
 
 async def check_link(*, facility_id: uuid.UUID, user_id: uuid.UUID, session_id: str) -> dict:
-    """After the professional finishes on NHA's page: the same answer as an
-    in-app verify. Before then: {"authenticated": False}."""
+    """After the professional finishes on NHA's page: their KYC, and either an
+    existing HPID's login or HPR ID suggestions. Before then:
+    {"authenticated": False}."""
     state = await _load(session_id, facility_id, user_id)
     if state["stage"] != "link":
         raise HpidError("hpid_not_waiting", "This Aadhaar verification is already done")
@@ -321,7 +264,7 @@ async def verify_mobile(*, facility_id: uuid.UUID, user_id: uuid.UUID, session_i
     a mistyped one."""
     state = await _load(session_id, facility_id, user_id)
     if state["stage"] != "verified":
-        raise HpidError("hpid_not_verified", "Verify the Aadhaar OTP first")
+        raise HpidError("hpid_not_verified", "Verify the Aadhaar on NHA's page first")
     body = await _call("demographicAuthViaMobile", "POST", "/v2/registration/aadhaar/demographicAuthViaMobile",
                        json={"txnId": state["txn"], "mobileNumber": await _encrypt(mobile)})
     _shape("demographicAuthViaMobile", body)

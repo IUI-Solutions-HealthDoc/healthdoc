@@ -15,8 +15,7 @@ export async function hprDistricts(stateId: string): Promise<HprOption[]> {
 }
 
 // ------------------------------------------------------------- HPID creation (HPR-002 to 011)
-// In HealthDoc: NHA's consent, a captcha, the Aadhaar OTP. The Aadhaar number
-// goes to HealthDoc's server, which encrypts it for HPR and keeps no copy.
+// The Aadhaar is verified on NHA's own page; HealthDoc never sees the number.
 
 export interface HpidKyc {
   name: string; first_name: string; middle_name: string; last_name: string; gender: string;
@@ -32,28 +31,7 @@ export interface HpidCreate {
   role: "PROFESSIONAL" | "FACILITY_MANAGER" | "BOTH";
 }
 
-export function hpidConsent() {
-  return api<{ version: string; text: string }>("/abdm/hpr/hpid/consent");
-}
-export function hpidCaptcha() {
-  return api<{ captcha_id: string; image: string }>("/abdm/hpr/captcha");
-}
-export function sendHpidAadhaarOtp(body: { aadhaar: string; consent_accepted: true; consent_version: string; captcha_id: string; captcha_answer: string }) {
-  return api<{ session_id: string; masked_mobile: string | null }>("/abdm/hpr/hpid/aadhaar", {
-    method: "POST", body: JSON.stringify(body), idempotencyKey: null,
-  });
-}
-export function resendHpidAadhaarOtp(sessionId: string) {
-  return api<{ masked_mobile: string | null }>("/abdm/hpr/hpid/aadhaar/resend", {
-    method: "POST", body: JSON.stringify({ session_id: sessionId }), idempotencyKey: null,
-  });
-}
-export function verifyHpidAadhaarOtp(sessionId: string, otp: string): Promise<HpidVerified> {
-  return api<HpidVerified>("/abdm/hpr/hpid/aadhaar/verify", {
-    method: "POST", body: JSON.stringify({ session_id: sessionId, otp }), idempotencyKey: null,
-  });
-}
-/** NHA's own Aadhaar page, when HPR's in-app verify is unavailable. */
+/** NHA's own Aadhaar page: consent, Aadhaar number, captcha and OTP. */
 export function startHpidLink() {
   return api<{ session_id: string; url: string }>("/abdm/hpr/hpid/link", { method: "POST", idempotencyKey: null });
 }

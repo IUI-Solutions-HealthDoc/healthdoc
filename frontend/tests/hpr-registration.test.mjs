@@ -160,7 +160,7 @@ test("a login without Aadhaar details is sent to verify Aadhaar first", async ()
   } });
   const tree = await opened(d);
   assert.match(content(tree), /carries no Aadhaar details/);
-  assert.match(content(tree), /Start with Aadhaar/);
+  assert.match(content(tree), /Verify Aadhaar on NHA/);
   assert.equal(button(tree, "Submit to HPR"), undefined);
 });
 

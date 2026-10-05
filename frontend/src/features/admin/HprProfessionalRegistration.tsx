@@ -264,8 +264,8 @@ function RegistrationForm({ signedIn }: { signedIn: boolean }) {
     return (
       <p role="alert" className="rounded-md border border-border p-3 text-sm">
         This HPR login carries no Aadhaar details, which HPR registration needs: HPR hands them over only after an Aadhaar
-        OTP. Use <strong>Start with Aadhaar</strong> in the panel above with the professional&apos;s Aadhaar; it signs them in with
-        their details, whether or not they already have an HPID. Then open this form again.
+        verification. Use <strong>Verify Aadhaar on NHA&apos;s page</strong> in the panel above with the professional; it signs
+        them in with their details, whether or not they already have an HPID. Then open this form again.
       </p>
     );
   }
