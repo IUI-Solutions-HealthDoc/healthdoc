@@ -3,7 +3,7 @@
 NHA's in-app flow (Register Healthcare Professional API document, production
 edition), confirmed against the sandbox on 5 October 2026:
 
-  generateOtp {aadhaar} (v1 in the sandbox, see GENERATE_OTP) -> txnId; an OTP
+  /v2/registration/aadhaar/generateOtp {aadhaar}   -> txnId; UIDAI sends an OTP
         (HPR-002 to 007; resend is the same call). An invalid number is refused
         with HIS-2001, which is how the endpoint was confirmed.
   /v2/registration/aadhaar/verifyOTP {otp, txnId, domainName, idType, restrictions}
@@ -52,12 +52,9 @@ PASSWORD = re.compile(r"^(?=.*[a-z])(?=.*[A-Z])(?=.*[^A-Za-z0-9]).{8,64}$")
 HPR_ID_LOCAL = re.compile(r"^[a-z0-9][a-z0-9._]{3,47}$")
 #: NHA's role codes for createHprIdWithPreVerified (register document, s.4).
 ROLES = {"PROFESSIONAL": 1, "FACILITY_MANAGER": 2, "BOTH": 3}
-#: The Aadhaar OTP pair. NHA's production document names v2 for both; in the
-#: sandbox the v2 generateOtp's transaction is not one verifyOTP can find
-#: ("Failed to retrieve aadhaar transaction details for txnID", 5 Oct live,
-#: both verify versions alike), so the v1 generate is used, whose shape is the
-#: same ({aadhaar}, HIS-2001 for an invalid number).
-GENERATE_OTP = "/v1/registration/aadhaar/generateOtp"
+#: The Aadhaar OTP pair, NHA's production document's v2 calls. The v1
+#: generate refuses a valid Aadhaar as invalid (HIS-2001, 5 Oct live).
+GENERATE_OTP = "/v2/registration/aadhaar/generateOtp"
 VERIFY_OTP = "/v2/registration/aadhaar/verifyOTP"
 
 
