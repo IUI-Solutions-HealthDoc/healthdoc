@@ -190,10 +190,17 @@ class HpidCreate(HpidSession):
     role: Literal["PROFESSIONAL", "FACILITY_MANAGER", "BOTH"] = "PROFESSIONAL"
 
 
+class HpidLinkStart(BaseModel):
+    #: After Cancel: a new NHA page, not the one still waiting.
+    fresh: bool = False
+
+
 @router.post("/hpid/link")
-async def hpid_link(current_db_user: CurrentDbUser) -> dict:
-    """HPR-002 to 007 on NHA's own page; HealthDoc never sees the Aadhaar number."""
-    session_id, url = await _step(hpid.start_link(facility_id=current_db_user.facility_id, user_id=current_db_user.id))
+async def hpid_link(current_db_user: CurrentDbUser, payload: HpidLinkStart | None = None) -> dict:
+    """HPR-002 to 007 on NHA's own page; HealthDoc never sees the Aadhaar number.
+    The admin's attempt still waiting on that page comes back unless fresh."""
+    session_id, url = await _step(hpid.start_link(
+        facility_id=current_db_user.facility_id, user_id=current_db_user.id, fresh=bool(payload and payload.fresh)))
     return {"session_id": session_id, "url": url}
 
 

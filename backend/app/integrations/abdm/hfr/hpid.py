@@ -227,9 +227,28 @@ async def _after_aadhaar(state: dict, verified: object, *, facility_id: uuid.UUI
     return {"existing": False, "kyc": public(kyc), "suggestions": state["suggestions"], "mobile_verified": False}
 
 
-async def start_link(*, facility_id: uuid.UUID, user_id: uuid.UUID) -> tuple[str, str]:
+def _open_key(facility_id: uuid.UUID, user_id: uuid.UUID) -> str:
+    return f"hpr:hpid:open:{facility_id}:{user_id}"
+
+
+async def start_link(*, facility_id: uuid.UUID, user_id: uuid.UUID, fresh: bool = False) -> tuple[str, str]:
     """HPR-002 to 007, on NHA's own page: it collects the consent, the Aadhaar
-    number, a captcha and the OTP. Returns (session id, page URL)."""
+    number, a captcha and the OTP. Returns (session id, page URL).
+
+    An admin's attempt still waiting on NHA's page is handed back rather than
+    replaced: the desk forgets it on a reload, and NHA confirms only the link
+    the professional actually used (5 Oct 2026, a second link read false while
+    the first read true). fresh=True, after Cancel, opens a new one."""
+    if not fresh:
+        open_id = await get_redis().get(_open_key(facility_id, user_id))
+        if open_id:
+            open_id = open_id.decode() if isinstance(open_id, bytes) else open_id
+            try:
+                state = await _load(open_id, facility_id, user_id)
+            except HpidError:
+                state = {}
+            if state.get("stage") == "link" and state.get("url"):
+                return open_id, state["url"]
     body = await _call("generateLink", "POST", "/aadhaar/generateLink", json={"scopes": ["nhpr-register"], "source": "NHPR"})
     _shape("generateLink", body)
     txn = body.get("txnId") if isinstance(body, dict) else None
@@ -237,7 +256,8 @@ async def start_link(*, facility_id: uuid.UUID, user_id: uuid.UUID) -> tuple[str
     if not isinstance(txn, str) or not txn or not isinstance(url, str) or not url.startswith("https://"):
         raise HpidError("hpid_start_failed", "HPR did not open an Aadhaar verification page")
     session_id = secrets.token_urlsafe(18)
-    await _save(session_id, facility_id, user_id, {"txn": txn, "stage": "link"})
+    await _save(session_id, facility_id, user_id, {"txn": txn, "stage": "link", "url": url})
+    await get_redis().set(_open_key(facility_id, user_id), session_id, ex=SESSION_TTL)
     return session_id, url
 
 
@@ -250,6 +270,9 @@ async def check_link(*, facility_id: uuid.UUID, user_id: uuid.UUID, session_id: 
         raise HpidError("hpid_not_waiting", "This Aadhaar verification is already done")
     authenticated = await _call("isAuthenticated", "POST", "/aadhaar/isAuthenticated", json={"txnId": state["txn"]})
     if authenticated is not True:
+        # Only a bare true has been seen; anything else would read as "not yet" forever.
+        if authenticated is not False:
+            _shape("isAuthenticated", authenticated)
         return {"authenticated": False}
     verified = await _call("verifyOTP", "POST", VERIFY_OTP, json={"txnId": state["txn"]})
     _shape("verifyOTP", verified)

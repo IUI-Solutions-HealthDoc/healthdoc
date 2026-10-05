@@ -31,9 +31,13 @@ export interface HpidCreate {
   role: "PROFESSIONAL" | "FACILITY_MANAGER" | "BOTH";
 }
 
-/** NHA's own Aadhaar page: consent, Aadhaar number, captcha and OTP. */
-export function startHpidLink() {
-  return api<{ session_id: string; url: string }>("/abdm/hpr/hpid/link", { method: "POST", idempotencyKey: null });
+/** NHA's own Aadhaar page: consent, Aadhaar number, captcha and OTP. The
+ * admin's page still waiting comes back, so a reload does not orphan it;
+ * fresh (after Cancel) opens a new one. */
+export function startHpidLink(fresh = false) {
+  return api<{ session_id: string; url: string }>("/abdm/hpr/hpid/link", {
+    method: "POST", body: JSON.stringify({ fresh }), idempotencyKey: null,
+  });
 }
 export function checkHpidLink(sessionId: string): Promise<{ authenticated: false } | ({ authenticated: true } & HpidVerified)> {
   return api<{ authenticated: false } | ({ authenticated: true } & HpidVerified)>("/abdm/hpr/hpid/link/check", {

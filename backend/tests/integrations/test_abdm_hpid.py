@@ -136,6 +136,37 @@ async def test_until_nha_says_authenticated_nothing_else_is_asked(desk):
     assert desk["fake"].paths() == ["/aadhaar/generateLink", "/aadhaar/isAuthenticated"]
 
 
+async def test_a_waiting_nha_page_is_handed_back_not_replaced(desk):
+    """5 Oct 2026: the desk reloaded, opened a second link and kept asking about
+    it while NHA had confirmed the first."""
+    _answers(desk["fake"])
+    first = (await desk["http"].post("/abdm/hpr/hpid/link")).json()
+    desk["fake"].answers["/aadhaar/generateLink"] = {"status": "URL GENERATED", "txnId": "txn-9", "url": NHA_PAGE + "2"}
+    again = (await desk["http"].post("/abdm/hpr/hpid/link")).json()
+    assert again == first
+    assert desk["fake"].paths().count("/aadhaar/generateLink") == 1
+    await desk["http"].post("/abdm/hpr/hpid/link/check", json={"session_id": again["session_id"]})
+    assert desk["fake"].body("/aadhaar/isAuthenticated") == {"txnId": "txn-1"}
+
+
+async def test_cancel_opens_a_new_nha_page(desk):
+    _answers(desk["fake"])
+    first = (await desk["http"].post("/abdm/hpr/hpid/link")).json()
+    desk["fake"].answers["/aadhaar/generateLink"] = {"status": "URL GENERATED", "txnId": "txn-9", "url": NHA_PAGE + "2"}
+    fresh = (await desk["http"].post("/abdm/hpr/hpid/link", json={"fresh": True})).json()
+    assert fresh["session_id"] != first["session_id"] and fresh["url"] == NHA_PAGE + "2"
+
+
+async def test_another_admin_gets_their_own_nha_page(desk):
+    _answers(desk["fake"])
+    first = (await desk["http"].post("/abdm/hpr/hpid/link")).json()
+    other = DbUser(id=uuid.uuid4(), keycloak_sub="sub-other", username="other",
+                   facility_id=desk["caller"].facility_id, roles=["admin"])
+    desk["app"].dependency_overrides[get_current_db_user] = lambda: other
+    theirs = (await desk["http"].post("/abdm/hpr/hpid/link")).json()
+    assert theirs["session_id"] != first["session_id"]
+
+
 async def test_after_nhas_page_the_kyc_and_suggestions_come_back(desk):
     _, checked = await _verified(desk)
     body = checked.json()

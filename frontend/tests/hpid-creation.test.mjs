@@ -70,6 +70,15 @@ test("the Aadhaar is verified on NHA's own page, never typed here (HPR-002 to 00
   assert.match(content(tree), /NHA has not confirmed the Aadhaar verification yet/);
 });
 
+test("Cancel asks for a new NHA page; otherwise the waiting one comes back", async () => {
+  const d = panel();
+  let tree = await opened(d);
+  assert.deepEqual(d.calls.find((c) => c.name === "startHpidLink").args, [false]);
+  await button(tree, "Cancel").props.onClick(); tree = await settle(d);
+  await button(tree, "Verify Aadhaar on NHA's page").props.onClick(); await settle(d);
+  assert.deepEqual(d.calls.filter((c) => c.name === "startHpidLink").map((c) => c.args), [[false], [true]]);
+});
+
 test("HPR's own reason is shown when it refuses", async () => {
   const d = panel({ startHpidLink: async () => {
     throw new TestApiError(400, "generic", undefined, { code: "hpr_refused", message: "HPR is busy; try again" });

@@ -53,6 +53,9 @@ export function HpidCreation({ onSignedIn }: { onSignedIn?: () => void }) {
   const [stage, setStage] = useState<Stage>({ kind: "idle" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // After Cancel the next start opens a new NHA page; otherwise the one still
+  // waiting comes back, since NHA confirms only the link actually used.
+  const [freshNext, setFreshNext] = useState(false);
 
   function verified(session: string, result: HpidVerified) {
     if (result.existing) {
@@ -65,7 +68,8 @@ export function HpidCreation({ onSignedIn }: { onSignedIn?: () => void }) {
       mobileVerified: result.mobile_verified, otpSent: false });
   }
   const openNhaPage = () => run(async () => {
-    const started = await startHpidLink();
+    const started = await startHpidLink(freshNext);
+    setFreshNext(false);
     setStage({ kind: "link", session: started.session_id, url: started.url, waiting: false });
   }, "HPR did not open NHA's Aadhaar verification.");
 
@@ -98,7 +102,7 @@ export function HpidCreation({ onSignedIn }: { onSignedIn?: () => void }) {
                 if (!result.authenticated) { setStage({ ...stage, waiting: true }); return; }
                 verified(stage.session, result);
               }, "HPR did not answer. Check again.")}>{busy ? "Checking…" : "I have verified on NHA's page"}</button>
-            <button type="button" className={secondary} disabled={busy} onClick={() => setStage({ kind: "idle" })}>Cancel</button>
+            <button type="button" className={secondary} disabled={busy} onClick={() => { setStage({ kind: "idle" }); setFreshNext(true); }}>Cancel</button>
           </div>
         </div>
       ) : null}
