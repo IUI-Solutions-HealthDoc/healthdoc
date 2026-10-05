@@ -17,8 +17,8 @@ NHA's v4 flow, as the sandbox answered it on 5 October 2026:
 
 The mobile number, OTP, email and password travel RSA-encrypted under HPR's
 own certificate (GET /api/v1/auth/cert, a bare PEM with no algorithm named),
-as NHA's Postman sends them. OAEP with SHA-1 is ABDM's published padding for
-the ABHA service; that HPR uses the same is NOT yet confirmed live.
+as NHA's Postman sends them, with PKCS#1 v1.5 padding: HPR answers OAEP (the
+ABHA service's padding) and plain text with HIS-500 (5 Oct 2026 live).
 
 Response shapes after verifyOTP are unconfirmed: each step logs the keys it
 received, never the values, and reads fields permissively. The session is
@@ -34,7 +34,7 @@ import re
 import secrets
 import uuid
 
-from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 from app.common.redis import get_redis
@@ -118,9 +118,9 @@ async def _encrypt(value: str) -> str:
     key = serialization.load_pem_public_key(pem.encode())
     if not isinstance(key, rsa.RSAPublicKey):
         raise HpidError("hpid_certificate_unavailable", "HPR's certificate is not an RSA key")
-    sealed = key.encrypt(
-        value.encode(), padding.OAEP(mgf=padding.MGF1(hashes.SHA1()), algorithm=hashes.SHA1(), label=None)
-    )
+    # PKCS#1 v1.5, not ABHA's OAEP: HPR refuses OAEP and plain text with
+    # HIS-500 and decrypts PKCS#1 v1.5 (5 Oct 2026 live, same mobile and txn).
+    sealed = key.encrypt(value.encode(), padding.PKCS1v15())
     return base64.b64encode(sealed).decode()
 
 

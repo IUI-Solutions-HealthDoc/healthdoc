@@ -12,7 +12,7 @@ import uuid
 import httpx
 import pytest
 import pytest_asyncio
-from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from fastapi import FastAPI
 
@@ -37,8 +37,8 @@ def _jwt(**claims) -> str:
 
 
 def _plain(sealed: str) -> str:
-    return KEY.decrypt(base64.b64decode(sealed), padding.OAEP(
-        mgf=padding.MGF1(hashes.SHA1()), algorithm=hashes.SHA1(), label=None)).decode()
+    # HPR decrypts PKCS#1 v1.5 and refuses OAEP (5 Oct live).
+    return KEY.decrypt(base64.b64decode(sealed), padding.PKCS1v15()).decode()
 
 
 class _Redis:
