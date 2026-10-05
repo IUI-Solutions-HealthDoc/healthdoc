@@ -53,6 +53,15 @@ export function verifyHpidAadhaarOtp(sessionId: string, otp: string): Promise<Hp
     method: "POST", body: JSON.stringify({ session_id: sessionId, otp }), idempotencyKey: null,
   });
 }
+/** NHA's own Aadhaar page, when HPR's in-app verify is unavailable. */
+export function startHpidLink() {
+  return api<{ session_id: string; url: string }>("/abdm/hpr/hpid/link", { method: "POST", idempotencyKey: null });
+}
+export function checkHpidLink(sessionId: string): Promise<{ authenticated: false } | ({ authenticated: true } & HpidVerified)> {
+  return api<{ authenticated: false } | ({ authenticated: true } & HpidVerified)>("/abdm/hpr/hpid/link/check", {
+    method: "POST", body: JSON.stringify({ session_id: sessionId }), idempotencyKey: null,
+  });
+}
 export function verifyHpidMobile(sessionId: string, mobile: string) {
   return api<{ mobile_verified: boolean; otp_sent: boolean }>("/abdm/hpr/hpid/mobile", {
     method: "POST", body: JSON.stringify({ session_id: sessionId, mobile }), idempotencyKey: null,

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { ApiError } from "@/lib/api";
 import {
+  checkHpidLink,
   confirmHpidMobile,
   createHpid,
   hpidCaptcha,
@@ -13,9 +14,11 @@ import {
   hprStates,
   resendHpidAadhaarOtp,
   sendHpidAadhaarOtp,
+  startHpidLink,
   verifyHpidAadhaarOtp,
   verifyHpidMobile,
   type HpidKyc,
+  type HpidVerified,
   type HprCategory,
   type HprOption,
 } from "./api/hpr";
@@ -41,6 +44,7 @@ type Stage =
   | { kind: "idle" }
   | { kind: "aadhaar" }
   | { kind: "otp"; session: string; hint: string | null }
+  | { kind: "link"; session: string; url: string; waiting: boolean }
   | { kind: "existing"; hprId: string; number: string; signedIn: boolean; kyc: HpidKyc }
   | { kind: "verified"; session: string; kyc: HpidKyc; suggestions: string[]; mobileVerified: boolean; otpSent: boolean }
   | { kind: "done"; hprId: string; number: string };
@@ -56,6 +60,21 @@ export function HpidCreation({ onSignedIn }: { onSignedIn?: () => void }) {
   const [stage, setStage] = useState<Stage>({ kind: "idle" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  function verified(session: string, result: HpidVerified) {
+    if (result.existing) {
+      setStage({ kind: "existing", hprId: result.hpr_id ?? result.hpr_id_number, number: result.hpr_id_number,
+        signedIn: result.signed_in, kyc: result.kyc });
+      if (result.signed_in) onSignedIn?.();
+      return;
+    }
+    setStage({ kind: "verified", session, kyc: result.kyc, suggestions: result.suggestions,
+      mobileVerified: result.mobile_verified, otpSent: false });
+  }
+  const openNhaPage = () => run(async () => {
+    const started = await startHpidLink();
+    setStage({ kind: "link", session: started.session_id, url: started.url, waiting: false });
+  }, "HPR did not open NHA's Aadhaar page.");
 
   async function run(action: () => Promise<void>, fallback: string) {
     setBusy(true);
@@ -81,16 +100,25 @@ export function HpidCreation({ onSignedIn }: { onSignedIn?: () => void }) {
       {stage.kind === "otp" ? (
         <OtpStep stage={stage} busy={busy} run={run} onCancel={() => setStage({ kind: "idle" })}
           onResent={(hint) => setStage({ ...stage, hint })}
-          onVerified={(result) => {
-            if (result.existing) {
-              setStage({ kind: "existing", hprId: result.hpr_id ?? result.hpr_id_number, number: result.hpr_id_number,
-                signedIn: result.signed_in, kyc: result.kyc });
-              if (result.signed_in) onSignedIn?.();
-              return;
-            }
-            setStage({ kind: "verified", session: stage.session, kyc: result.kyc, suggestions: result.suggestions,
-              mobileVerified: result.mobile_verified, otpSent: false });
-          }} />
+          onVerified={(result) => verified(stage.session, result)}
+          onUseNhaPage={() => void openNhaPage()} />
+      ) : null}
+
+      {stage.kind === "link" ? (
+        <div className="space-y-2 text-sm">
+          <p>The professional verifies their Aadhaar on NHA&apos;s own page (consent, Aadhaar number and OTP), then comes back here.</p>
+          <a href={stage.url} target="_blank" rel="noopener noreferrer" className="font-medium underline">Open NHA&apos;s Aadhaar verification</a>
+          {stage.waiting ? <p role="status">NHA has not confirmed the Aadhaar verification yet.</p> : null}
+          <div className="flex gap-2">
+            <button type="button" className={primary} disabled={busy}
+              onClick={() => void run(async () => {
+                const result = await checkHpidLink(stage.session);
+                if (!result.authenticated) { setStage({ ...stage, waiting: true }); return; }
+                verified(stage.session, result);
+              }, "HPR did not answer. Check again.")}>{busy ? "Checking…" : "I have verified on NHA's page"}</button>
+            <button type="button" className={secondary} disabled={busy} onClick={() => setStage({ kind: "idle" })}>Cancel</button>
+          </div>
+        </div>
       ) : null}
 
       {stage.kind === "existing" ? (
@@ -194,12 +222,13 @@ function AadhaarStep({ busy, run, onSent, onCancel }: {
   );
 }
 
-function OtpStep({ stage, busy, run, onResent, onVerified, onCancel }: {
+function OtpStep({ stage, busy, run, onResent, onVerified, onCancel, onUseNhaPage }: {
   stage: Extract<Stage, { kind: "otp" }>; busy: boolean; run: (action: () => Promise<void>, fallback: string) => Promise<void>;
-  onResent: (hint: string | null) => void; onVerified: (result: Awaited<ReturnType<typeof verifyHpidAadhaarOtp>>) => void;
-  onCancel: () => void;
+  onResent: (hint: string | null) => void; onVerified: (result: HpidVerified) => void;
+  onCancel: () => void; onUseNhaPage: () => void;
 }) {
   const [otp, setOtp] = useState("");
+  const [inAppDown, setInAppDown] = useState(false);
   return (
     <div className="space-y-2 text-sm">
       <p>OTP sent to the mobile linked with this Aadhaar{stage.hint ? <> ({stage.hint})</> : null}.</p>
@@ -207,13 +236,27 @@ function OtpStep({ stage, busy, run, onResent, onVerified, onCancel }: {
         autoComplete="one-time-code" maxLength={6} className={input} aria-label="Aadhaar OTP" />
       <div className="flex flex-wrap gap-2">
         <button type="button" className={primary} disabled={busy || otp.length !== 6}
-          onClick={() => void run(async () => onVerified(await verifyHpidAadhaarOtp(stage.session, otp)), "HPR did not accept this OTP.")}>
+          onClick={() => void run(async () => {
+            try {
+              onVerified(await verifyHpidAadhaarOtp(stage.session, otp));
+            } catch (reason) {
+              // HPR's sandbox cannot find its own transaction (5 Oct 2026):
+              // offer NHA's page, which does the same verification.
+              if (reason instanceof ApiError && (reason.payload as { code?: unknown } | undefined)?.code === "hpid_inapp_unavailable") {
+                setInAppDown(true);
+              }
+              throw reason;
+            }
+          }, "HPR did not accept this OTP.")}>
           {busy ? "Verifying…" : "Verify OTP"}</button>
         <button type="button" className={secondary} disabled={busy}
           onClick={() => void run(async () => { setOtp(""); onResent((await resendHpidAadhaarOtp(stage.session)).masked_mobile ?? stage.hint); },
             "HPR did not resend the OTP.")}>Resend OTP</button>
         <button type="button" className={secondary} disabled={busy} onClick={onCancel}>Cancel</button>
       </div>
+      {inAppDown ? (
+        <button type="button" className={primary} disabled={busy} onClick={onUseNhaPage}>Verify on NHA&apos;s page instead</button>
+      ) : null}
     </div>
   );
 }

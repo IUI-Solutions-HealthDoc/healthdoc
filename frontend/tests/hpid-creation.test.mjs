@@ -5,7 +5,7 @@ import { compile, componentHarness, content, flush, nodes } from "./helpers/comp
 /** HPID creation in HealthDoc (ABDM M4 HPR-002 to 011): NHA's consent, a
  * captcha and the Aadhaar OTP on HealthDoc's own screen. Synthetic transport. */
 class TestApiError extends Error {
-  constructor(code, message) { super(message); this.code = code; }
+  constructor(code, message, requestId, payload) { super(message); this.code = code; this.payload = payload; }
 }
 const source = new URL("../src/features/admin/HpidCreation.tsx", import.meta.url);
 const find = (tree, predicate) => nodes(tree).find(predicate);
@@ -31,6 +31,8 @@ function panel(overrides = {}) {
     hprCategories: async () => [{ code: "1", label: "Doctor", subcategories: [{ code: "1", label: "Modern Medicine" }] }],
     hprStates: async () => [{ code: "20", label: "Maharashtra" }],
     hprDistricts: async () => [{ code: "499", label: "Washim" }],
+    startHpidLink: async () => ({ session_id: "link-1", url: "https://healthidbeta.abdm.gov.in/x" }),
+    checkHpidLink: async () => ({ authenticated: false }),
     ...overrides,
   };
   const api = Object.fromEntries(Object.entries(stubs).map(([name, impl]) =>
@@ -161,4 +163,27 @@ test("the password can be shown and hidden, and empty lists say what to choose f
   assert.equal(field(tree, "hpid_confirm").props.type, "password");
   assert.match(content(field(tree, "hpid_subcategory")), /Choose the category first/);
   assert.match(content(field(tree, "hpid_district")), /Choose the state first/);
+});
+
+test("when HPR cannot verify in HealthDoc, NHA's page takes over on the same card", async () => {
+  let checks = 0;
+  const d = panel({
+    verifyHpidAadhaarOtp: async () => {
+      throw new TestApiError(400, "generic", undefined, { code: "hpid_inapp_unavailable",
+        message: "HPR could not verify this OTP in HealthDoc (NHA's in-app verification is not working). Verify on NHA's page instead." });
+    },
+    checkHpidLink: async () => (checks++ === 0 ? { authenticated: false }
+      : { authenticated: true, existing: true, signed_in: true, hpr_id: "suprabha@hpr.abdm", hpr_id_number: "71-8847-0813-4805", kyc: KYC }),
+  });
+  let tree = await verified(d);
+  assert.match(content(tree), /NHA's in-app verification is not working/);
+  await button(tree, "Verify on NHA's page instead").props.onClick(); tree = await settle(d);
+  const link = find(tree, (n) => n.type === "a");
+  assert.equal(link.props.href, "https://healthidbeta.abdm.gov.in/x");
+  assert.match(link.props.rel, /noopener/);
+  await button(tree, "I have verified on NHA's page").props.onClick(); tree = await settle(d);
+  assert.match(content(tree), /NHA has not confirmed/);
+  await button(tree, "I have verified on NHA's page").props.onClick(); tree = await settle(d);
+  assert.match(content(tree), /already has an HPID/);
+  assert.equal(d.signedIn(), 1);
 });

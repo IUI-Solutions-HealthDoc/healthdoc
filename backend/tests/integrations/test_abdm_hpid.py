@@ -337,3 +337,55 @@ async def test_a_college_path_cannot_be_steered(desk):
     await desk["http"].get("/abdm/hpr/master/colleges?state_code=27&system_of_medicine=../x")
     assert desk["fake"].calls[-1][1] == "/apis/v1/masters/colleges/27/..%2Fx"
     assert (await desk["http"].get("/abdm/hpr/master/districts?state_code=27/../1")).status_code == 422
+
+
+# ----------------------------------------------------------------- NHA's page, the fallback
+
+
+async def test_hprs_missing_transaction_offers_nhas_page(desk):
+    """5 Oct live: verifyOTP cannot find the v2 generateOtp's transaction."""
+    _answers(desk["fake"])
+    desk["fake"].answers["/v2/registration/aadhaar/verifyOTP"] = AbdmRejected(422, {"code": "HIS-422", "details": [
+        {"message": "Failed to retrieve aadhaar transaction details for txnID - 88e4d337", "code": "HIS-500"}]}, "rid")
+    sent = (await desk["http"].post("/abdm/hpr/hpid/aadhaar", json=_aadhaar())).json()
+    refused = await desk["http"].post("/abdm/hpr/hpid/aadhaar/verify", json={"session_id": sent["session_id"], "otp": "123456"})
+    assert refused.status_code == 400
+    assert refused.json()["detail"]["code"] == "hpid_inapp_unavailable"
+
+
+async def test_nhas_page_waits_then_continues_like_the_in_app_route(desk):
+    _answers(desk["fake"])
+    fake = desk["fake"]
+    fake.answers["/aadhaar/generateLink"] = {"status": "URL GENERATED", "txnId": "link-1",
+                                             "url": "https://healthidbeta.abdm.gov.in/abdm/aadhaar/gateway/auth?l=x"}
+    fake.answers["/aadhaar/isAuthenticated"] = False
+    started = (await desk["http"].post("/abdm/hpr/hpid/link")).json()
+    assert started["url"].startswith("https://healthidbeta.abdm.gov.in/")
+    waiting = await desk["http"].post("/abdm/hpr/hpid/link/check", json={"session_id": started["session_id"]})
+    assert waiting.json() == {"authenticated": False}
+    fake.answers["/aadhaar/isAuthenticated"] = True
+    fake.answers["/v2/registration/aadhaar/verifyOTP"] = {
+        "txnId": "link-2", "name": "Asha Kumari Verma", "gender": "F", "dob": "1990-04-07", "photo": "cGhvdG8=",
+        "address": {"house": "1", "street": "Synthetic Lane", "district": "Pune", "state": "Maharashtra", "pincode": "411001"}}
+    done = (await desk["http"].post("/abdm/hpr/hpid/link/check", json={"session_id": started["session_id"]})).json()
+    assert done["authenticated"] is True and done["existing"] is False
+    assert done["kyc"]["birth_date"] == "1990-04-07" and done["suggestions"] == ["asha.verma", "ashaverma"]
+    assert fake.body("/v2/registration/aadhaar/verifyOTP") == {"txnId": "link-1"}
+    assert fake.body("/v1/registration/aadhaar/checkHpIdAccountExist") == {"txnId": "link-2"}
+    # the session continues to the mobile step like the in-app route
+    fake.answers["/v2/registration/aadhaar/demographicAuthViaMobile"] = {"verified": True}
+    mobile = await desk["http"].post("/abdm/hpr/hpid/mobile", json={"session_id": started["session_id"], "mobile": "9876543210"})
+    assert mobile.json() == {"mobile_verified": True, "otp_sent": False}
+
+
+async def test_nhas_page_signs_in_an_existing_hpid_with_its_kyc(desk):
+    token = _jwt(hprId="suprabha@hpr.abdm", hprIdNumber="71-8847-0813-4805", exp=int(time.time()) + 900)
+    _answers(desk["fake"], exists={**KYC_ANSWER, "hprIdNumber": "71-8847-0813-4805", "hprId": "suprabha@hpr.abdm", "token": token})
+    fake = desk["fake"]
+    fake.answers["/aadhaar/generateLink"] = {"txnId": "link-1", "url": "https://healthidbeta.abdm.gov.in/x"}
+    fake.answers["/aadhaar/isAuthenticated"] = True
+    started = (await desk["http"].post("/abdm/hpr/hpid/link")).json()
+    done = (await desk["http"].post("/abdm/hpr/hpid/link/check", json={"session_id": started["session_id"]})).json()
+    assert done["existing"] is True and done["signed_in"] is True
+    kept = await hpr_login.kyc(desk["caller"].facility_id, desk["caller"].id)
+    assert kept["first_name"] == "Asha"

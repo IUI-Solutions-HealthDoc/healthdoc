@@ -181,6 +181,11 @@ async def _step(call):
     except AbdmRejected as exc:
         detail = exc.detail if isinstance(exc.detail, dict) else {}
         messages = [str(d.get("message")) for d in detail.get("details") or [] if isinstance(d, dict) and d.get("message")]
+        if any(hpid.TXN_MISSING in m for m in messages):
+            # HPR's sandbox defect: its verify cannot find its own transaction.
+            raise HTTPException(400, {"code": "hpid_inapp_unavailable", "message":
+                "HPR could not verify this OTP in HealthDoc (NHA's in-app verification is not working). "
+                "Verify on NHA's page instead."}) from None
         raise HTTPException(400, {"code": "hpr_refused", "message": "; ".join(messages)
                                   or f"HPR refused this (HTTP {exc.status_code})"}) from None
     except hpid.HpidError as exc:
@@ -274,6 +279,21 @@ async def hpid_aadhaar_verify(payload: HpidOtp, current_db_user: CurrentDbUser) 
             session_id=payload.session_id, otp=payload.otp))
     except hpid.HpidError as exc:
         raise _refused(exc) from None
+
+
+@router.post("/hpid/link")
+async def hpid_link(current_db_user: CurrentDbUser) -> dict:
+    """NHA's own Aadhaar page, when the in-app verify is unavailable."""
+    session_id, url = await _step(hpid.start_link(facility_id=current_db_user.facility_id, user_id=current_db_user.id))
+    return {"session_id": session_id, "url": url}
+
+
+@router.post("/hpid/link/check")
+async def hpid_link_check(payload: HpidSession, current_db_user: CurrentDbUser) -> dict:
+    """{"authenticated": false} until the professional finishes on NHA's page;
+    then the same answer as an in-app verify."""
+    return await _step(hpid.check_link(
+        facility_id=current_db_user.facility_id, user_id=current_db_user.id, session_id=payload.session_id))
 
 
 @router.post("/hpid/mobile")

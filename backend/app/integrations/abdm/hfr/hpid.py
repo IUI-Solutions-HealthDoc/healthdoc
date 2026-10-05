@@ -15,6 +15,14 @@ edition), confirmed against the sandbox on 5 October 2026:
   /v1/registration/aadhaar/generateMobileOTP + verifyMobileOTP (HPR-010/011)
   /v2/registration/aadhaar/createHprIdWithPreVerified -> token, HPR ID number, KYC
 
+In the sandbox (5 Oct 2026) verifyOTP cannot find the transaction the v2
+generateOtp made: "Failed to retrieve aadhaar transaction details for txnID",
+the same for every body shape, OTP encoding and version (HPR's defect,
+reported to NHA). So NHA's other route is kept beside it: generateLink opens
+NHA's own Aadhaar page; isAuthenticated is a bare false until the
+professional finishes there; verifyOTP {txnId} then returns the KYC. Both
+routes continue the same way from checkHpIdAccountExist.
+
 Aadhaar, OTPs, mobile, email and password travel RSA-encrypted under HPR's
 own certificate (GET /api/v1/auth/cert) with PKCS#1 v1.5 padding, NHA's
 "RSA/ECB/PKCS1Padding" (OAEP and plain text get HIS-500, 5 Oct live).
@@ -238,6 +246,13 @@ async def verify_aadhaar_otp(*, facility_id: uuid.UUID, user_id: uuid.UUID, sess
         "restrictions": "", "txnId": state["txn"]})
     _shape("verifyOTP", verified)
     state["txn"] = _txn(verified, state["txn"])
+    return await _after_aadhaar(state, verified, facility_id=facility_id, user_id=user_id, session_id=session_id)
+
+
+async def _after_aadhaar(state: dict, verified: object, *, facility_id: uuid.UUID, user_id: uuid.UUID,
+                         session_id: str) -> dict:
+    """Common to both routes once Aadhaar is verified: the KYC, an existing
+    HPID's login, or HPR ID suggestions for a new one."""
     exists = await _call("checkHpIdAccountExist", "POST", "/v1/registration/aadhaar/checkHpIdAccountExist",
                          json={"txnId": state["txn"]})
     _shape("checkHpIdAccountExist", exists)
@@ -265,6 +280,39 @@ async def verify_aadhaar_otp(*, facility_id: uuid.UUID, user_id: uuid.UUID, sess
                  suggestions=[s for s in suggestions if isinstance(s, str)][:10] if isinstance(suggestions, list) else [])
     await _save(session_id, facility_id, user_id, state)
     return {"existing": False, "kyc": public(kyc), "suggestions": state["suggestions"], "mobile_verified": False}
+
+
+TXN_MISSING = "Failed to retrieve aadhaar transaction details"
+
+
+async def start_link(*, facility_id: uuid.UUID, user_id: uuid.UUID) -> tuple[str, str]:
+    """NHA's own Aadhaar page, for when the in-app verify is unavailable.
+    NHA's page collects the consent, Aadhaar and OTP. Returns (session, URL)."""
+    body = await _call("generateLink", "POST", "/aadhaar/generateLink", json={"scopes": ["nhpr-register"], "source": "NHPR"})
+    _shape("generateLink", body)
+    txn = body.get("txnId") if isinstance(body, dict) else None
+    url = body.get("url") if isinstance(body, dict) else None
+    if not isinstance(txn, str) or not txn or not isinstance(url, str) or not url.startswith("https://"):
+        raise HpidError("hpid_start_failed", "HPR did not open an Aadhaar verification page")
+    session_id = secrets.token_urlsafe(18)
+    await _save(session_id, facility_id, user_id, {"txn": txn, "stage": "link"})
+    return session_id, url
+
+
+async def check_link(*, facility_id: uuid.UUID, user_id: uuid.UUID, session_id: str) -> dict:
+    """After the professional finishes on NHA's page: the same answer as an
+    in-app verify. Before then: {"authenticated": False}."""
+    state = await _load(session_id, facility_id, user_id)
+    if state["stage"] != "link":
+        raise HpidError("hpid_not_waiting", "This Aadhaar verification is already done")
+    authenticated = await _call("isAuthenticated", "POST", "/aadhaar/isAuthenticated", json={"txnId": state["txn"]})
+    if authenticated is not True:
+        return {"authenticated": False}
+    verified = await _call("verifyOTP", "POST", VERIFY_OTP, json={"txnId": state["txn"]})
+    _shape("verifyOTP", verified)
+    state["txn"] = _txn(verified, state["txn"])
+    return {"authenticated": True} | await _after_aadhaar(
+        state, verified, facility_id=facility_id, user_id=user_id, session_id=session_id)
 
 
 async def verify_mobile(*, facility_id: uuid.UUID, user_id: uuid.UUID, session_id: str, mobile: str) -> dict:
