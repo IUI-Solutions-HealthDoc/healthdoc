@@ -205,6 +205,9 @@ function Verified({ stage, busy, run, update, finish }: {
                   await confirmHpidMobile(stage.session, otp);
                   update({ mobileVerified: true });
                 }, "HPR did not accept this OTP.")}>Verify OTP</button>
+              {/* A mistyped number: correct it and HPR sends the OTP to the new one. */}
+              <button type="button" className={`${secondary} ml-2`} disabled={busy}
+                onClick={() => { setOtp(""); update({ otpSent: false }); }}>Change mobile</button>
             </>
           )}
         </fieldset>
