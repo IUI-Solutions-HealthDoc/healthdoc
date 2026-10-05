@@ -42,6 +42,8 @@ function registration(overrides = {}) {
     saveHfrAdditional: async () => ({ tracking_id: "98060", status: "Created", message: "saved" }),
     saveHfrDetailed: async () => ({ tracking_id: "98060", status: "Saved", message: "saved" }),
     submitHfrFacility: async () => ({ facility_id: "IN2710005985", status: "Created", message: "Facility created successfully." }),
+    listHfrRegistrations: async () => [],
+    getHfrRegistration: async () => { throw new Error("no saved registration in this test"); },
     ...overrides,
   };
   const api = Object.fromEntries(Object.entries(stubs).map(([name, impl]) =>
@@ -100,7 +102,8 @@ test("nothing is asked of HFR until registration starts, and only when signed in
   assert.match(content(tree), /Sign in to HPR above first/);
   tree = d.render({ signedIn: true });
   await flush();
-  assert.deepEqual(d.calls, [], "the page alone asks HFR for nothing");
+  // Listing what HealthDoc registered reads HealthDoc's own record, not HFR.
+  assert.deepEqual(d.calls.filter((c) => c.name !== "listHfrRegistrations"), [], "the page alone asks HFR for nothing");
 });
 
 test("the four steps carry one tracking id and end with HFR's facility id", async () => {
@@ -178,4 +181,98 @@ test("save stays disabled until the workbook's rules hold", async () => {
   assert.equal(button(tree, "Save basic information").props.disabled, true);
   type(tree, "hours0", "24*7"); tree = d.render();
   assert.equal(button(tree, "Save basic information").props.disabled, false);
+});
+
+const SAVED = {
+  tracking_id: "98060", facility_id: "IN2710005985", facility_name: "HealthDoc Sandbox Test Hospital",
+  status: "Submitted", submitted_at: "2026-10-02T06:00:00Z", updated_at: "2026-10-02T06:00:00Z",
+  basic: {
+    name: "HealthDoc Sandbox Test Hospital",
+    address: { state_code: "27", district_code: "490", sub_district_code: "4194", region: "U", village_city_town_code: "",
+      address_line1: "Synthetic Test Block, 1 Test Road", address_line2: "", pincode: "411001", latitude: "18.520430", longitude: "73.856743" },
+    contact: { email: "hfr-test@example.org", mobile: "7078594541", website: "", landline: "", std_code: "" },
+    ownership_code: "P", ownership_subtype_code: "P", ownership_subtype_code2: "PP02",
+    systems_of_medicine: ["M"], types_of_service: ["OPD"], facility_type_code: "40", facility_subtype_code: "28",
+    speciality_type: "MULTI", operational_status: "F", timings: [{ days: ["Mon"], hours: "9:00 AM - 6:00 PM" }],
+  },
+  additional: { nhrr_id: "", nin: "1234", abpmjay_id: "", rohini_id: "", echs_id: "", cghs_id: "", cea_registration: "",
+    state_insurance_scheme_id: "", general: { dialysis: "N", pharmacy: "YALL", blood_bank: "N", cath_lab: "N", diagnostic_lab: "N", imaging: "N" },
+    imaging_services: [] },
+  detailed: { specialities: [{ system_of_medicine: "M", available: "Y", codes: ["M-S1"] }],
+    infrastructure: { ipd_beds_without_oxygen: 10, hdu_beds_with_ventilators: 2 }, imaging_services: [], diagnostic_services: [] },
+};
+
+async function openEdit(d) {
+  let tree = await settle(d);
+  assert.match(content(tree), /Registered from HealthDoc/);
+  assert.match(content(tree), /IN2710005985/);
+  await button(tree, "Edit").props.onClick(); await flush();
+  return settle(d);
+}
+
+test("a registered facility opens for edit with what HealthDoc sent (HFR-064 to 114)", async () => {
+  const d = registration({ listHfrRegistrations: async () => [SAVED], getHfrRegistration: async () => SAVED });
+  let tree = await openEdit(d);
+  assert.deepEqual(d.calls.find((c) => c.name === "getHfrRegistration").args, ["98060"]);
+  assert.match(content(tree), /Editing\s*HealthDoc Sandbox Test Hospital/);
+  assert.equal(field(tree, "facility_name").props.value, "HealthDoc Sandbox Test Hospital");
+  assert.equal(field(tree, "pincode").props.value, "411001");
+  assert.equal(field(tree, "operational_status").props.value, "F");
+  assert.match(content(tree), /attach them again/);
+  assert.equal(button(tree, "Save basic information").props.disabled, true, "the photographs are needed again");
+
+  type(tree, "operational_status", "F"); tree = d.render();
+  type(tree, "facility_name", "HealthDoc Sandbox Test Hospital East"); tree = d.render();
+  for (const name of ["board_photo", "building_photo"]) {
+    await field(tree, name).props.onChange({ target: { files: [{ name: `${name}.png` }] } });
+    tree = await settle(d);
+  }
+  await button(tree, "Save basic information").props.onClick(); await flush();
+  const [basic] = d.calls.find((c) => c.name === "saveHfrBasic").args;
+  assert.equal(basic.tracking_id, "98060", "an edit continues the facility's tracking id");
+  assert.equal(basic.name, "HealthDoc Sandbox Test Hospital East");
+  assert.equal(basic.address.sub_district_code, "4194");
+});
+
+test("an edit can change detailed information alone, then resubmit", async () => {
+  const d = registration({ listHfrRegistrations: async () => [SAVED], getHfrRegistration: async () => SAVED });
+  let tree = await openEdit(d);
+  await button(tree, "3. Detailed information").props.onClick();
+  tree = await settle(d);
+  assert.equal(field(tree, "ipd_beds_without_oxygen").props.value, "10");
+  assert.match(content(tree), /Total beds \(IPD and HDU\):\s*12/);
+  type(tree, "ipd_beds_without_oxygen", "20"); tree = d.render();
+  await button(tree, "Save detailed information").props.onClick(); await flush();
+  const [detailed] = d.calls.find((c) => c.name === "saveHfrDetailed").args;
+  assert.equal(detailed.tracking_id, "98060");
+  assert.deepEqual(detailed.specialities, [{ system_of_medicine: "M", available: "Y", codes: ["M-S1"] }], "kept as saved");
+  assert.equal(detailed.infrastructure.ipd_beds_without_oxygen, 20);
+  assert.equal(d.calls.some((c) => c.name === "saveHfrBasic"), false, "basic details are not re-sent");
+  tree = await settle(d);
+  await button(tree, "Resubmit to HFR").props.onClick(); await flush();
+  assert.deepEqual(d.calls.find((c) => c.name === "submitHfrFacility").args, ["98060", "synthetic-key"]);
+  tree = await settle(d);
+  assert.match(content(tree), /Changes resubmitted to HFR/);
+});
+
+test("editing needs the HPR login, like registering", async () => {
+  const d = registration({ listHfrRegistrations: async () => [SAVED] });
+  d.render({ signedIn: false });
+  const tree = await settle(d);
+  assert.equal(button(tree, "Edit").props.disabled, true);
+});
+
+test("a facility HealthDoc holds no forms for opens empty under its tracking id", async () => {
+  const d = registration({
+    getHfrRegistration: async () => {
+      throw new TestApiError(404, "not found", undefined, { code: "hfr_registration_not_found", message: "none" });
+    },
+  });
+  let tree = await settle(d);
+  type(tree, "edit_tracking_id", "98060"); tree = d.render();
+  await button(tree, "Edit by tracking ID").props.onClick(); await flush();
+  tree = await settle(d);
+  assert.match(content(tree), /Editing\s*this facility/);
+  assert.match(content(tree), /Tracking ID\s*98060/);
+  assert.equal(field(tree, "facility_name").props.value, "");
 });
