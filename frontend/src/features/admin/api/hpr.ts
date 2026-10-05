@@ -11,7 +11,7 @@ export async function hprStates(): Promise<HprOption[]> {
   return (await api<{ data: HprOption[] }>("/abdm/hpr/master/states")).data;
 }
 export async function hprDistricts(stateId: string): Promise<HprOption[]> {
-  return (await api<{ data: HprOption[] }>(`/abdm/hpr/master/districts?state_id=${encodeURIComponent(stateId)}`)).data;
+  return (await api<{ data: HprOption[] }>(`/abdm/hpr/master/districts?state_code=${encodeURIComponent(stateId)}`)).data;
 }
 
 // ------------------------------------------------------------- HPID creation (HPR-002 to 011)

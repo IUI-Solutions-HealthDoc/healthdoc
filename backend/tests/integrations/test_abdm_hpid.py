@@ -242,7 +242,7 @@ async def test_master_lists_come_back_as_code_and_label(desk):
     fake.answers["/hpid/get/categories?role=1"] = [
         {"code": 1, "name": "Doctor", "subCategories": [{"code": "1", "name": "Modern Medicine"}]}]
     fake.answers["/apis/v1/masters/languages"] = [{"id": 1, "name": " English "}]
-    assert (await desk["http"].get("/abdm/hpr/master/districts?state_id=27")).json() == {
+    assert (await desk["http"].get("/abdm/hpr/master/districts?state_code=27")).json() == {
         "data": [{"code": "484", "label": "Amritsar"}]}
     assert (await desk["http"].get("/abdm/hpr/master/categories")).json() == {"data": [
         {"code": "1", "label": "Doctor", "subcategories": [{"code": "1", "label": "Modern Medicine"}]}]}
@@ -259,6 +259,6 @@ async def test_courses_ask_for_every_course_only_when_told(desk):
 
 async def test_a_college_path_cannot_be_steered(desk):
     desk["fake"].answers["/apis/v1/masters/colleges/27/..%2Fx"] = []
-    await desk["http"].get("/abdm/hpr/master/colleges?state_id=27&system_of_medicine=../x")
+    await desk["http"].get("/abdm/hpr/master/colleges?state_code=27&system_of_medicine=../x")
     assert desk["fake"].calls[-1][1] == "/apis/v1/masters/colleges/27/..%2Fx"
-    assert (await desk["http"].get("/abdm/hpr/master/districts?state_id=27/../1")).status_code == 422
+    assert (await desk["http"].get("/abdm/hpr/master/districts?state_code=27/../1")).status_code == 422

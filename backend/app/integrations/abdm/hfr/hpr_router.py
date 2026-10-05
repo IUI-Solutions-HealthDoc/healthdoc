@@ -62,13 +62,13 @@ async def states() -> dict:
 
 
 @router.get("/master/districts")
-async def districts(state_id: Annotated[str, Query(pattern=_ID)]) -> dict:
-    return {"data": _options(await _hfr(client.call("GET", f"/apis/v1/masters/district/{state_id}")), "districtName")}
+async def districts(state_code: Annotated[str, Query(pattern=_ID)]) -> dict:
+    return {"data": _options(await _hfr(client.call("GET", f"/apis/v1/masters/district/{state_code}")), "districtName")}
 
 
 @router.get("/master/sub-districts")
-async def sub_districts(district_id: Annotated[str, Query(pattern=_ID)]) -> dict:
-    body = await _hfr(client.call("GET", f"/apis/v1/masters/sub-districts/{district_id}"))
+async def sub_districts(district_code: Annotated[str, Query(pattern=_ID)]) -> dict:
+    body = await _hfr(client.call("GET", f"/apis/v1/masters/sub-districts/{district_code}"))
     return {"data": _options(body, "subDistrictName")}
 
 
@@ -118,18 +118,18 @@ async def courses(
 
 @router.get("/master/colleges")
 async def colleges(
-    state_id: Annotated[str, Query(pattern=_ID)],
+    state_code: Annotated[str, Query(pattern=_ID)],
     system_of_medicine: Annotated[str, Query(min_length=1, max_length=120)],
 ) -> dict:
     """HPR-065. HPR keys colleges by state and system-of-medicine name."""
-    path = f"/apis/v1/masters/colleges/{state_id}/{quote(system_of_medicine, safe='')}"
+    path = f"/apis/v1/masters/colleges/{state_code}/{quote(system_of_medicine, safe='')}"
     return {"data": _options(await _hfr(client.call("GET", path)), "name")}
 
 
 @router.get("/master/universities")
-async def universities(college_id: Annotated[str, Query(pattern=_ID)]) -> dict:
+async def universities(college_code: Annotated[str, Query(pattern=_ID)]) -> dict:
     """HPR-066: the universities a college is affiliated to."""
-    return {"data": _options(await _hfr(client.call("GET", f"/apis/v1/masters/universites/{college_id}")), "name")}
+    return {"data": _options(await _hfr(client.call("GET", f"/apis/v1/masters/universites/{college_code}")), "name")}
 
 
 # ----------------------------------------------------------------- HPID creation (HPR-002 to 011)
