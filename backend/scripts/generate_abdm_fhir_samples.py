@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 from datetime import UTC, date, datetime
+from decimal import Decimal
 from pathlib import Path
 
 from app.integrations.abdm.fhir.builder import build_clinical_bundle
@@ -104,6 +105,21 @@ def _samples() -> dict[str, dict]:
             "WellnessRecord",
             **common,
             observations=[{"name": "Pulse rate", "value": 72, "unit": "/min"}],
+        ),
+        "Invoice": build_clinical_bundle(
+            "Invoice",
+            **{**common, "encounter": None, "practitioner": None},
+            invoice={
+                "id": "validation-invoice", "number": "VALIDATION-INV-1", "status": "paid",
+                "type_code": "03", "issued_at": common["authored_at"], "net_amount": Decimal("450.00"),
+                "discount_amount": Decimal("50.00"),
+                "lines": [
+                    {"id": "validation-line-1", "category": "consultation", "description": "OPD consultation",
+                     "quantity": Decimal("1"), "amount": Decimal("400.00")},
+                    {"id": "validation-line-2", "category": "pharmacy", "description": "Paracetamol 500 mg",
+                     "quantity": Decimal("10"), "amount": Decimal("100.00")},
+                ],
+            },
         ),
     }
 

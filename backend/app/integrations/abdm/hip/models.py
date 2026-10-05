@@ -77,7 +77,7 @@ class AbdmCareContext(Base, UUIDPk, Timestamps, Blame):
         # agreement.
         CheckConstraint(
             "hi_type IN ('OPConsultation','Prescription','DiagnosticReport',"
-            "'DischargeSummary','WellnessRecord','ImmunizationRecord')",
+            "'DischargeSummary','WellnessRecord','ImmunizationRecord','Invoice')",
             name="abdm_care_context_hi_type",
         ),
         Index("ix_abdm_care_contexts_facility_id", "facility_id"),
