@@ -394,7 +394,10 @@ function RegistrationForm({ signedIn }: { signedIn: boolean }) {
         <button type="button" className={registered ? primary : secondary} disabled={busy || !signedIn || !valid} onClick={() => void submit(true)}>Update in HPR</button>
       </div>
       {!signedIn ? <p role="alert" className="text-sm text-danger">The HPR login has ended. Sign in again above to continue.</p> : null}
-      {notice ? <p role="status" className="text-sm">{notice}</p> : null}
+      {notice ? (
+        <p ref={(node) => node?.scrollIntoView({ block: "center", behavior: "smooth" })} role="status"
+          className="rounded-md border border-success/30 bg-success-muted p-3 text-sm font-medium text-success">{notice}</p>
+      ) : null}
       {errors.length ? <ul role="alert" className="list-disc space-y-1 pl-5 text-sm text-danger">{errors.map((m) => <li key={m}>{m}</li>)}</ul> : null}
     </div>
   );

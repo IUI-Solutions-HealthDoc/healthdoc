@@ -107,7 +107,8 @@ test("Create HPID waits for HPR's rules, then signs the professional in", async 
     session_id: "session-1", hpr_id: "asha.verma", email: "asha@example.org", password: "Synthetic#Pass9",
     category_code: 1, subcategory_code: 1, state_code: "20", district_code: "499" });
   assert.deepEqual(d.calls.find((c) => c.name === "hprDistricts").args, ["20"], "districts are HPR's, by HPR state id");
-  assert.match(content(tree), /HPID created:\s*asha\.verma@hpr\.abdm/);
+  assert.match(content(tree), /HPID created successfully/);
+  assert.match(content(tree), /asha\.verma@hpr\.abdm/);
   assert.equal(d.created(), 1, "the HPR login panel is told to reload");
 });
 
@@ -124,4 +125,18 @@ test("a mistyped mobile can be changed and the OTP sent to the new one", async (
   const sent = d.calls.filter((c) => c.name === "verifyHpidMobile").map((c) => c.args[1]);
   assert.deepEqual(sent, ["9876543210", "9876543211"]);
   assert.match(content(tree), /OTP sent to\s*9876543211/);
+});
+
+test("the password can be shown and hidden, and empty lists say what to choose first", async () => {
+  const d = panel({ verifyHpidMobile: async () => ({ mobile_verified: true, otp_sent: false }) });
+  let tree = await verified(d);
+  type(tree, "hpid_mobile", "9876543210"); tree = d.render();
+  await button(tree, "Verify mobile").props.onClick(); tree = await settle(d);
+  assert.equal(field(tree, "hpid_password").props.type, "password");
+  const show = find(tree, (n) => n.type === "button" && n.props["aria-label"] === "Show hpr password");
+  show.props.onClick(); tree = d.render();
+  assert.equal(field(tree, "hpid_password").props.type, "text");
+  assert.equal(field(tree, "hpid_confirm").props.type, "password", "each field toggles on its own");
+  assert.match(content(field(tree, "hpid_subcategory")), /Choose the category first/);
+  assert.match(content(field(tree, "hpid_district")), /Choose the state first/);
 });

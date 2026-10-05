@@ -102,14 +102,30 @@ export function HpidCreation({ onCreated }: { onCreated?: () => void }) {
       ) : null}
 
       {stage.kind === "done" ? (
-        <div role="status" className="space-y-1 text-sm">
-          <p className="font-medium">HPID created: <span className="font-mono">{stage.hprId}</span> ({stage.number}).</p>
-          <p>They are signed in to HPR above, so their HPR registration can follow.</p>
+        <div ref={(node) => node?.scrollIntoView({ block: "center", behavior: "smooth" })} role="status"
+          className="space-y-1 rounded-md border border-success/30 bg-success-muted p-3 text-sm">
+          <p className="font-semibold text-success">HPID created successfully</p>
+          <p>HPR ID <span className="font-mono">{stage.hprId}</span>, HPR ID number <span className="font-mono">{stage.number}</span>.</p>
+          <p>They are now signed in to HPR above. Continue with &ldquo;Register a professional in HPR&rdquo; below.</p>
         </div>
       ) : null}
 
       {error ? <p role="alert" className="text-sm text-danger">{error}</p> : null}
     </section>
+  );
+}
+
+function Password({ name, label, value, onChange }: { name: string; label: string; value: string; onChange: (value: string) => void }) {
+  const [shown, setShown] = useState(false);
+  return (
+    <label className="block space-y-1 text-sm"><span className="text-muted-foreground">{label}</span>
+      <span className="flex gap-2">
+        <input name={name} type={shown ? "text" : "password"} value={value} onChange={(e) => onChange(e.target.value)}
+          autoComplete="new-password" className={input} />
+        <button type="button" className={secondary} aria-pressed={shown} aria-label={`${shown ? "Hide" : "Show"} ${label.toLowerCase()}`}
+          onClick={() => setShown((now) => !now)}>{shown ? "Hide" : "Show"}</button>
+      </span>
+    </label>
   );
 }
 
@@ -127,13 +143,15 @@ function useOptions(load: (() => Promise<HprOption[]>) | null, key: string | nul
   return state.key === key ? state : { rows: null, error: null };
 }
 
-function Pick({ name, label, value, list, onChange }: {
+function Pick({ name, label, value, list, onChange, waitingFor }: {
   name: string; label: string; value: string; list: { rows: HprOption[] | null; error: string | null }; onChange: (value: string) => void;
+  /** What must be chosen first; shown instead of "Loading…" until it is. */
+  waitingFor?: string | null;
 }) {
   return (
     <label className="block space-y-1 text-sm"><span className="text-muted-foreground">{label}</span>
       <select name={name} value={value} onChange={(e) => onChange(e.target.value)} disabled={!list.rows} className={input}>
-        <option value="">{list.rows ? "Choose" : list.error ? "Unavailable" : "Loading…"}</option>
+        <option value="">{list.rows ? "Choose" : list.error ? "Unavailable" : waitingFor ? `Choose the ${waitingFor} first` : "Loading…"}</option>
         {(list.rows ?? []).map((row) => <option key={row.code} value={row.code}>{row.label}</option>)}
       </select>
       {list.error ? <span role="alert" className="text-danger">{list.error}</span> : null}
@@ -226,19 +244,18 @@ function Verified({ stage, busy, run, update, finish }: {
           <label className="block space-y-1 text-sm"><span className="text-muted-foreground">Email</span>
             <input name="hpid_email" value={form.email} onChange={(e) => set("email", e.target.value.trim())} inputMode="email" className={input} /></label>
           <span />
-          <label className="block space-y-1 text-sm"><span className="text-muted-foreground">HPR password</span>
-            <input name="hpid_password" type="password" value={form.password} onChange={(e) => set("password", e.target.value)} autoComplete="new-password" className={input} /></label>
-          <label className="block space-y-1 text-sm"><span className="text-muted-foreground">Confirm password</span>
-            <input name="hpid_confirm" type="password" value={form.confirm} onChange={(e) => set("confirm", e.target.value)} autoComplete="new-password" className={input} /></label>
+          <Password name="hpid_password" label="HPR password" value={form.password} onChange={(v) => set("password", v)} />
+          <Password name="hpid_confirm" label="Confirm password" value={form.confirm} onChange={(v) => set("confirm", v)} />
           <p className="text-xs text-muted-foreground md:col-span-2">8 or more characters, with upper and lower case letters and a special character, not containing their first or last name.
             {form.password && namePart ? <span role="alert" className="text-danger"> The password contains their name.</span> : null}
             {form.confirm && form.password !== form.confirm ? <span role="alert" className="text-danger"> The passwords differ.</span> : null}</p>
           <Pick name="hpid_category" label="Category" value={form.category} onChange={(v) => set("category", v)}
             list={{ rows: categories, error: categories && !categories.length ? "HPR did not return its categories." : null }} />
           <Pick name="hpid_subcategory" label="Subcategory" value={form.subcategory} onChange={(v) => set("subcategory", v)}
-            list={{ rows: form.category ? subcategories : null, error: null }} />
+            list={{ rows: form.category ? subcategories : null, error: null }} waitingFor={form.category ? null : "category"} />
           <Pick name="hpid_state" label="State (HPR's list)" value={form.state} list={states} onChange={(v) => set("state", v)} />
-          <Pick name="hpid_district" label="District" value={form.district} list={form.state ? districts : { rows: null, error: null }} onChange={(v) => set("district", v)} />
+          <Pick name="hpid_district" label="District" value={form.district} list={form.state ? districts : { rows: null, error: null }}
+            waitingFor={form.state ? null : "state"} onChange={(v) => set("district", v)} />
           <div className="md:col-span-2">
             <button type="button" className={primary} disabled={busy || !ready}
               onClick={() => void run(async () => {
