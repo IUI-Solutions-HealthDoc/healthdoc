@@ -39,6 +39,7 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 from app.common.redis import get_redis
 from app.common.security import decrypt_pii, encrypt_pii
+from app.integrations.abdm.client import AbdmError, AbdmRejected
 from app.integrations.abdm.hfr import client, hpr_login
 
 log = logging.getLogger("healthdoc.abdm")
@@ -81,10 +82,27 @@ async def _load(session_id: str, facility_id: uuid.UUID, user_id: uuid.UUID) -> 
     return json.loads(plain)
 
 
+async def _call(step: str, method: str, path: str, *, json: dict | None = None) -> object:
+    """One HPR call. A failure is logged with the step, HPR's status and its
+    own HIS codes and field names, never the values sent or received."""
+    try:
+        return await client.call(method, path, json=json)
+    except AbdmError as exc:
+        codes = list(exc.error_codes)
+        if isinstance(exc, AbdmRejected) and isinstance(exc.detail, dict):
+            codes += [str(d.get("code")) for d in exc.detail.get("details") or [] if isinstance(d, dict) and d.get("code")]
+            codes.append(str(exc.detail.get("code") or ""))
+        log.warning("HPR %s failed: %s status=%s codes=%s shape=%s",
+                    step, type(exc).__name__, exc.status_code, [c for c in codes if c], exc.body_shape)
+        raise
+
+
 def _shape(step: str, body: object) -> None:
     """Learn the answer's shape without logging what it says."""
     keys = sorted(body) if isinstance(body, dict) else type(body).__name__
-    log.info("HPR %s answered with %s", step, keys)
+    # Warning, not info, until HPR's shapes are confirmed: INFO is filtered
+    # on the running stack, and the field names are what a live run needs.
+    log.warning("HPR %s answered with %s", step, keys)
 
 
 def _txn(body: object, current: str) -> str:
@@ -94,7 +112,7 @@ def _txn(body: object, current: str) -> str:
 
 
 async def _encrypt(value: str) -> str:
-    pem = await client.call("GET", "/api/v1/auth/cert")
+    pem = await _call("cert", "GET", "/api/v1/auth/cert")
     if not isinstance(pem, str) or "BEGIN PUBLIC KEY" not in pem:
         raise HpidError("hpid_certificate_unavailable", "HPR did not return its encryption certificate")
     key = serialization.load_pem_public_key(pem.encode())
@@ -141,7 +159,7 @@ def _kyc(body: dict) -> dict:
 
 async def start(*, facility_id: uuid.UUID, user_id: uuid.UUID) -> tuple[str, str]:
     """HPR-002: open NHA's Aadhaar page. Returns (session id, page URL)."""
-    body = await client.call("POST", "/aadhaar/generateLink", json={"scopes": ["nhpr-register"], "source": "NHPR"})
+    body = await _call("generateLink", "POST", "/aadhaar/generateLink", json={"scopes": ["nhpr-register"], "source": "NHPR"})
     _shape("generateLink", body)
     txn = body.get("txnId") if isinstance(body, dict) else None
     url = body.get("url") if isinstance(body, dict) else None
@@ -157,17 +175,16 @@ async def check(*, facility_id: uuid.UUID, user_id: uuid.UUID, session_id: str) 
     already hold an HPID, and HPR ID suggestions. Before then: waiting."""
     state = await _load(session_id, facility_id, user_id)
     if state["stage"] == "aadhaar":
-        authenticated = await client.call("POST", "/aadhaar/isAuthenticated", json={"txnId": state["txn"]})
+        authenticated = await _call("isAuthenticated", "POST", "/aadhaar/isAuthenticated", json={"txnId": state["txn"]})
         if authenticated is not True:
             return {"authenticated": False}
-        body = await client.call("POST", "/v2/registration/aadhaar/verifyOTP", json={"txnId": state["txn"]})
+        body = await _call("verifyOTP", "POST", "/v2/registration/aadhaar/verifyOTP", json={"txnId": state["txn"]})
         _shape("verifyOTP", body)
         if not isinstance(body, dict):
             raise HpidError("hpid_kyc_failed", "HPR did not return the Aadhaar details")
         state.update(txn=_txn(body, state["txn"]), kyc=_kyc(body), stage="verified")
 
-        exists = await client.call(
-            "POST", "/v1/registration/aadhaar/checkHpIdAccountExist", json={"txnId": state["txn"]})
+        exists = await _call("checkHpIdAccountExist", "POST", "/v1/registration/aadhaar/checkHpIdAccountExist", json={"txnId": state["txn"]})
         _shape("checkHpIdAccountExist", exists)
         existing = None
         if isinstance(exists, dict):
@@ -178,8 +195,7 @@ async def check(*, facility_id: uuid.UUID, user_id: uuid.UUID, session_id: str) 
             await get_redis().delete(_key(session_id))
             return {"authenticated": True, "existing_hpr_id": str(existing)}
 
-        suggestions = await client.call(
-            "POST", "/v1/registration/aadhaar/hpid/suggestion", json={"txnId": state["txn"]})
+        suggestions = await _call("suggestion", "POST", "/v1/registration/aadhaar/hpid/suggestion", json={"txnId": state["txn"]})
         _shape("suggestion", suggestions)
         state["suggestions"] = [s for s in suggestions if isinstance(s, str)][:10] if isinstance(suggestions, list) else []
         await _save(session_id, facility_id, user_id, state)
@@ -199,8 +215,7 @@ async def verify_mobile(*, facility_id: uuid.UUID, user_id: uuid.UUID, session_i
     state = await _load(session_id, facility_id, user_id)
     if state["stage"] != "verified":
         raise HpidError("hpid_not_verified", "Finish the Aadhaar verification first")
-    body = await client.call(
-        "POST", "/v2/registration/aadhaar/demographicAuthViaMobile",
+    body = await _call("demographicAuthViaMobile", "POST", "/v2/registration/aadhaar/demographicAuthViaMobile",
         json={"txnId": state["txn"], "mobileNumber": await _encrypt(mobile)},
     )
     _shape("demographicAuthViaMobile", body)
@@ -211,8 +226,7 @@ async def verify_mobile(*, facility_id: uuid.UUID, user_id: uuid.UUID, session_i
         state["mobile_verified"] = True
         await _save(session_id, facility_id, user_id, state)
         return {"mobile_verified": True, "otp_sent": False}
-    sent = await client.call(
-        "POST", "/v1/registration/aadhaar/generateMobileOTP", json={"mobile": mobile, "txnId": state["txn"]})
+    sent = await _call("generateMobileOTP", "POST", "/v1/registration/aadhaar/generateMobileOTP", json={"mobile": mobile, "txnId": state["txn"]})
     _shape("generateMobileOTP", sent)
     state["txn"] = _txn(sent, state["txn"])
     await _save(session_id, facility_id, user_id, state)
@@ -225,8 +239,7 @@ async def confirm_mobile(*, facility_id: uuid.UUID, user_id: uuid.UUID, session_
         raise HpidError("hpid_mobile_missing", "Enter the mobile number first")
     if not re.fullmatch(r"\d{6}", otp or ""):
         raise HpidError("hpid_otp_invalid", "Enter the 6-digit OTP")
-    body = await client.call(
-        "POST", "/v1/registration/aadhaar/verifyMobileOTP",
+    body = await _call("verifyMobileOTP", "POST", "/v1/registration/aadhaar/verifyMobileOTP",
         json={"otp": await _encrypt(otp), "txnId": state["txn"]},
     )
     _shape("verifyMobileOTP", body)
@@ -254,8 +267,7 @@ async def create(
         raise HpidError("hpid_password_invalid",
                         "Use 8 or more characters with upper and lower case letters and a special character, "
                         "not containing your first or last name")
-    body = await client.call(
-        "POST", "/v2/registration/aadhaar/createHprIdWithPreVerified",
+    body = await _call("createHprIdWithPreVerified", "POST", "/v2/registration/aadhaar/createHprIdWithPreVerified",
         json={
             "txnId": state["txn"],
             "email": await _encrypt(email),
