@@ -5,6 +5,7 @@ import { useState } from "react";
 import { HfrFacilityRegistry } from "@/features/admin/HfrFacilityRegistry";
 import { HfrRegistration } from "@/features/admin/HfrRegistration";
 import { HpidCreation } from "@/features/admin/HpidCreation";
+import { HprProfessionalRegistration } from "@/features/admin/HprProfessionalRegistration";
 import { HprLoginPanel } from "@/features/admin/HprLoginPanel";
 import { useLocale } from "@/lib/i18n";
 
@@ -19,6 +20,7 @@ export default function Page() {
       <HfrFacilityRegistry />
       <HprLoginPanel reloadKey={hprReload} onChange={(session) => setSignedIn(session.logged_in)} />
       <HpidCreation onCreated={() => setHprReload((n) => n + 1)} />
+      <HprProfessionalRegistration signedIn={signedIn} />
       <HfrRegistration signedIn={signedIn} />
     </div>
   );
