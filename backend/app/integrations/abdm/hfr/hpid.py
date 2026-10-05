@@ -206,16 +206,14 @@ async def _after_aadhaar(state: dict, verified: object, *, facility_id: uuid.UUI
     kyc = kyc_from(verified, exists)
 
     number = _text(exists, "hprIdNumber") if isinstance(exists, dict) else ""
-    token = _text(exists, "token") if isinstance(exists, dict) else ""
     if number:
-        # HPR-002: one HPID per person. HPR returned theirs and, with it, a
-        # login: sign them in, carrying the KYC registration will need.
+        # HPR-002: one HPID per person. The token beside it is not an HPR
+        # login (no roles or category; registration refuses it), so the
+        # professional signs in through HPR's login, and the KYC joins it.
         await get_redis().delete(_key(session_id))
-        if not token:
-            return {"existing": True, "hpr_id_number": number, "signed_in": False, "kyc": public(kyc)}
+        await hpr_login.hold_kyc(facility_id, user_id, hpr_id_number=number, kyc=kyc)
         hpr_id = _text(exists, "hprId") or number
-        session = await hpr_login._keep(facility_id, user_id, hpr_id, token, kyc=kyc)
-        return {"existing": True, "hpr_id": session.hpr_id, "hpr_id_number": number, "signed_in": True,
+        return {"existing": True, "hpr_id": hpr_id, "hpr_id_number": number, "signed_in": False,
                 "kyc": public(kyc)}
 
     suggestions = await _call("suggestion", "POST", "/v1/registration/aadhaar/hpid/suggestion",

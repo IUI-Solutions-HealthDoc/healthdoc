@@ -192,22 +192,37 @@ async def test_hprs_refusal_is_passed_on(desk):
     assert refused.json()["detail"]["message"] == "Aadhaar verification is pending. Please complete it to continue."
 
 
-async def test_an_existing_hpid_is_signed_in_with_its_kyc(desk):
-    """One HPID per person; HPR hands over the existing one's login."""
-    token = _jwt(hprId="asha.verma@hpr.abdm", hprIdNumber="71-0000-0000-0001", exp=int(time.time()) + 900)
+async def test_an_existing_hpid_is_sent_to_hprs_login_and_its_kyc_joins_it(desk):
+    """One HPID per person. The token beside it is not an HPR login: live on
+    5 Oct 2026 register-professional refused it ("roles or category in Hrp
+    token can not be empty/null"). The professional signs in through HPR's
+    login, and the Aadhaar KYC joins that login."""
+    identity = _jwt(hprId="asha.verma@hpr.abdm", hprIdNumber="71-0000-0000-0001", exp=int(time.time()) + 900)
     _answers(desk["fake"], exists={**KYC_ANSWER, "hprIdNumber": "71-0000-0000-0001", "hprId": "asha.verma@hpr.abdm",
-                                   "token": token})
+                                   "token": identity})
     started = (await desk["http"].post("/abdm/hpr/hpid/link")).json()
     checked = (await desk["http"].post("/abdm/hpr/hpid/link/check", json={"session_id": started["session_id"]})).json()
-    assert checked["existing"] is True and checked["signed_in"] is True
-    assert checked["hpr_id_number"] == "71-0000-0000-0001"
+    assert checked["existing"] is True and checked["signed_in"] is False
+    assert checked["hpr_id"] == "asha.verma@hpr.abdm" and checked["hpr_id_number"] == "71-0000-0000-0001"
+    assert await hpr_login.current(desk["caller"].facility_id, desk["caller"].id) is None
+    assert "/v1/registration/aadhaar/hpid/suggestion" not in desk["fake"].paths()
+
+    login = _jwt(hprId="asha.verma@hpr.abdm", hprIdNumber="71-0000-0000-0001", roles=["PROFESSIONAL"],
+                 exp=int(time.time()) + 900)
+    await hpr_login._keep(desk["caller"].facility_id, desk["caller"].id, "asha.verma@hpr.abdm", login)
     held = await hpr_login.current(desk["caller"].facility_id, desk["caller"].id)
-    assert held is not None and held[1] == token
+    assert held is not None and held[1] == login
     kept = await hpr_login.kyc(desk["caller"].facility_id, desk["caller"].id)
     assert kept["first_name"] == "Asha" and kept["birth_date"] == "1990-04-07"
-    profile = (await desk["http"].get("/abdm/hpr/profile")).json()
-    assert profile["name"] == "Asha Kumari Verma" and profile["hpr_id_number"] == "71-0000-0000-0001"
-    assert "/v1/registration/aadhaar/hpid/suggestion" not in desk["fake"].paths()
+
+
+async def test_a_held_kyc_never_joins_another_professionals_login(desk):
+    _answers(desk["fake"], exists={**KYC_ANSWER, "hprIdNumber": "71-0000-0000-0001", "hprId": "asha.verma@hpr.abdm"})
+    started = (await desk["http"].post("/abdm/hpr/hpid/link")).json()
+    await desk["http"].post("/abdm/hpr/hpid/link/check", json={"session_id": started["session_id"]})
+    other = _jwt(hprId="ravi@hpr.abdm", hprIdNumber="71-0000-0000-0009", exp=int(time.time()) + 900)
+    await hpr_login._keep(desk["caller"].facility_id, desk["caller"].id, "ravi@hpr.abdm", other)
+    assert await hpr_login.kyc(desk["caller"].facility_id, desk["caller"].id) is None
 
 
 async def test_a_password_login_carries_no_kyc_so_registration_asks_for_aadhaar(desk):
