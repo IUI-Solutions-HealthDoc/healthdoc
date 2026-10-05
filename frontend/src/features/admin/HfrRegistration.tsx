@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { ApiError, newIdempotencyKey } from "@/lib/api";
 import {
+  getHfrRegistration,
   hfrDistricts,
   hfrFacilitySubtypes,
   hfrFacilityTypes,
@@ -12,12 +13,15 @@ import {
   hfrSpecialities,
   hfrStates,
   hfrSubdistricts,
+  listHfrRegistrations,
   saveHfrAdditional,
   saveHfrBasic,
   saveHfrDetailed,
   submitHfrFacility,
   type HfrBasicInformation,
   type HfrOption,
+  type HfrRegistrationSummary,
+  type HfrSavedRegistration,
   type HfrUpload,
 } from "./api/hfr";
 import { readHfrUpload } from "./hfrUpload";
@@ -167,41 +171,123 @@ function emptyBasic(): HfrBasicInformation {
   };
 }
 
+/** HFR keeps no copy we can read back; an edit opens with what HealthDoc sent. */
+function savedBasic(saved?: HfrSavedRegistration): HfrBasicInformation {
+  if (!saved?.basic) return { ...emptyBasic(), tracking_id: saved?.tracking_id ?? "" };
+  // The images were never kept: an edit attaches them again.
+  return { ...emptyBasic(), ...saved.basic, tracking_id: saved.tracking_id, board_photo: null, building_photo: null, address_proofs: [] };
+}
+const counts = (rows: { service: string; count: number }[] = []) =>
+  Object.fromEntries(rows.map((row) => [row.service, String(row.count)])) as Record<string, string>;
+function savedAdditional(saved?: HfrSavedRegistration) {
+  const form = saved?.additional;
+  return {
+    links: Object.fromEntries(LINKED.map(([key]) => [key, form?.[key] ?? ""])) as Record<string, string>,
+    general: Object.fromEntries(GENERAL.map(([key]) => [key, form?.general?.[key] ?? "N"])) as Record<string, string>,
+    imaging: counts(form?.imaging_services),
+  };
+}
+function savedDetailed(saved?: HfrSavedRegistration) {
+  const form = saved?.detailed;
+  return {
+    specialities: Object.fromEntries((form?.specialities ?? []).map((group) =>
+      [group.system_of_medicine, { available: group.available, codes: group.codes }])) as Record<string, { available: "Y" | "N"; codes: string[] }>,
+    beds: Object.fromEntries(BEDS.map(([key]) => [key, form?.infrastructure?.[key] ? String(form.infrastructure[key]) : ""])) as Record<string, string>,
+    imaging: counts(form?.imaging_services),
+    diagnostics: form?.diagnostic_services ?? [],
+  };
+}
+
 /**
  * HFR facility registration (M4 HFR-010 to 117) under the facility manager's
  * HPR login. Four HFR steps keep one tracking id; submit returns the facility
  * id. Every list is HFR's own; HFR's field messages are shown as it sends them.
+ * A registered facility is edited (HFR-064 to 114) through the same steps under
+ * its tracking id, then resubmitted.
  */
 export function HfrRegistration({ signedIn }: { signedIn: boolean }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState<false | "new" | HfrSavedRegistration>(false);
+  const [registered, setRegistered] = useState<HfrRegistrationSummary[] | null>(null);
+  const [listError, setListError] = useState<string | null>(null);
+  const [opening, setOpening] = useState<string | null>(null);
+  const [otherTracking, setOtherTracking] = useState("");
+  useEffect(() => {
+    let live = true;
+    // HealthDoc's own record of what it registered; this asks HFR nothing.
+    listHfrRegistrations().then(
+      (rows) => { if (live) setRegistered(rows); },
+      (reason: unknown) => { if (live) setListError(failure(reason, "The registered facilities could not be loaded.")[0]); },
+    );
+    return () => { live = false; };
+  }, []);
+  async function startEdit(trackingId: string) {
+    setOpening(trackingId);
+    setListError(null);
+    try {
+      setOpen(await getHfrRegistration(trackingId));
+    } catch (reason) {
+      const code = reason instanceof ApiError ? (reason.payload as { code?: unknown } | undefined)?.code : undefined;
+      if (code === "hfr_registration_not_found") {
+        // Registered before HealthDoc kept the forms, or elsewhere: HFR returns
+        // no saved details, so the edit opens empty under the tracking id.
+        setOpen({ tracking_id: trackingId, facility_id: null, facility_name: null, status: null,
+          submitted_at: null, updated_at: "", basic: null, additional: null, detailed: null });
+        return;
+      }
+      setListError(failure(reason, "This registration could not be opened.")[0]);
+    } finally {
+      setOpening(null);
+    }
+  }
   return (
     <section className="surface-card space-y-3 p-5" aria-label="Register a facility in HFR">
       <h2 className="font-medium">Register a facility in HFR</h2>
       {!open ? (
         <>
           <p className="text-sm text-muted-foreground">Registration is done under the facility manager&apos;s HPR login. HFR verifies the facility after it is submitted.</p>
-          <button type="button" className={primary} disabled={!signedIn} onClick={() => setOpen(true)}>Start registration</button>
+          <button type="button" className={primary} disabled={!signedIn} onClick={() => setOpen("new")}>Start registration</button>
           {!signedIn ? <p className="text-sm text-muted-foreground">Sign in to HPR above first.</p> : null}
+          {registered?.length ? (
+            <div className="space-y-2">
+              <h3 className="text-sm font-medium">Registered from HealthDoc</h3>
+              <ul className="divide-y divide-border text-sm">
+                {registered.map((row) => (
+                  <li key={row.tracking_id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                    <span>
+                      <strong>{row.facility_name ?? "Unnamed facility"}</strong>
+                      {row.facility_id ? <span className="ml-2 font-mono">{row.facility_id}</span> : null}
+                      <span className="ml-2 text-muted-foreground">Tracking ID {row.tracking_id}{row.status ? ` · ${row.status}` : ""}</span>
+                    </span>
+                    <button type="button" className="rounded-md border border-border px-3 py-1 text-sm disabled:opacity-50"
+                      disabled={!signedIn || opening !== null} onClick={() => void startEdit(row.tracking_id)}>
+                      {opening === row.tracking_id ? "Opening…" : "Edit"}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          <div className="flex flex-wrap items-end gap-2">
+            <Text name="edit_tracking_id" label="Edit another facility by its HFR tracking ID" value={otherTracking}
+              valid={/^\d{1,20}$/.test(otherTracking)} onChange={(v) => setOtherTracking(v.replace(/\D/g, ""))} inputMode="numeric" maxLength={20} />
+            <button type="button" className="rounded-md border border-border px-3 py-2 text-sm disabled:opacity-50"
+              disabled={!signedIn || opening !== null || !/^\d{1,20}$/.test(otherTracking)} onClick={() => void startEdit(otherTracking)}>
+              Edit by tracking ID
+            </button>
+          </div>
+          {listError ? <p role="alert" className="text-sm text-danger">{listError}</p> : null}
         </>
-      ) : <RegistrationSteps signedIn={signedIn} />}
+      ) : <RegistrationSteps signedIn={signedIn} initial={open === "new" ? undefined : open} />}
     </section>
   );
 }
 
-function RegistrationSteps({ signedIn }: { signedIn: boolean }) {
+function RegistrationSteps({ signedIn, initial }: { signedIn: boolean; initial?: HfrSavedRegistration }) {
+  const editing = initial !== undefined;
   const [step, setStep] = useState<Step>("basic");
-  const [basic, setBasic] = useState<HfrBasicInformation>(emptyBasic);
-  const [additional, setAdditional] = useState({
-    links: Object.fromEntries(LINKED.map(([key]) => [key, ""])) as Record<string, string>,
-    general: Object.fromEntries(GENERAL.map(([key]) => [key, "N"])) as Record<string, string>,
-    imaging: {} as Record<string, string>,
-  });
-  const [detailed, setDetailed] = useState({
-    specialities: {} as Record<string, { available: "Y" | "N"; codes: string[] }>,
-    beds: Object.fromEntries(BEDS.map(([key]) => [key, ""])) as Record<string, string>,
-    imaging: {} as Record<string, string>,
-    diagnostics: [] as string[],
-  });
+  const [basic, setBasic] = useState<HfrBasicInformation>(() => savedBasic(initial));
+  const [additional, setAdditional] = useState(() => savedAdditional(initial));
+  const [detailed, setDetailed] = useState(() => savedDetailed(initial));
   const [facilityId, setFacilityId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
@@ -340,6 +426,7 @@ function RegistrationSteps({ signedIn }: { signedIn: boolean }) {
   if (step === "done" && facilityId) {
     return (
       <div role="status" className="space-y-1 text-sm">
+        {editing ? <p className="font-medium">Changes resubmitted to HFR.</p> : null}
         <p className="font-medium">HFR facility ID: <span className="font-mono">{facilityId}</span></p>
         <p>{notice}</p>
         <p className="text-muted-foreground">HFR now verifies the facility; its status reads &ldquo;Submitted&rdquo; until then. Search for it above to follow it.</p>
@@ -349,12 +436,19 @@ function RegistrationSteps({ signedIn }: { signedIn: boolean }) {
 
   return (
     <div className="space-y-4">
+      {editing ? (
+        <p className="text-sm">Editing <strong>{initial.facility_name ?? "this facility"}</strong>{initial.facility_id ? <> (<span className="font-mono">{initial.facility_id}</span>)</> : null}. Save the steps you change, then resubmit.</p>
+      ) : null}
       <ol className="flex flex-wrap gap-3 text-xs text-muted-foreground" aria-label="Registration steps">
-        {(["basic", "additional", "detailed", "submit"] as const).map((name, index) => (
-          <li key={name} aria-current={step === name ? "step" : undefined} className={step === name ? "font-semibold text-foreground" : ""}>
-            {index + 1}. {{ basic: "Basic information", additional: "Additional information", detailed: "Detailed information", submit: "Submit" }[name]}
-          </li>
-        ))}
+        {(["basic", "additional", "detailed", "submit"] as const).map((name, index) => {
+          const label = `${index + 1}. ${{ basic: "Basic information", additional: "Additional information", detailed: "Detailed information", submit: "Submit" }[name]}`;
+          return (
+            <li key={name} aria-current={step === name ? "step" : undefined} className={step === name ? "font-semibold text-foreground" : ""}>
+              {/* An edit already has its tracking id, so any step can be changed on its own. */}
+              {editing && step !== name ? <button type="button" className="underline" onClick={() => { setErrors([]); setNotice(null); setStep(name); }}>{label}</button> : label}
+            </li>
+          );
+        })}
       </ol>
       {basic.tracking_id ? <p className="text-xs text-muted-foreground">Tracking ID {basic.tracking_id}</p> : null}
       {notice ? <p role="status" className="text-sm">{notice}</p> : null}
@@ -403,6 +497,7 @@ function RegistrationSteps({ signedIn }: { signedIn: boolean }) {
             </div>
           ))}
           <div className="md:col-span-2"><button type="button" className="text-sm underline" onClick={() => setB("timings", [...basic.timings, { days: [], hours: "" }])}>Add different hours for other days</button></div>
+          {editing ? <p className="text-sm text-muted-foreground md:col-span-2">HFR needs the board and building photographs with every save of these details. HealthDoc does not keep them, so attach them again.</p> : null}
           {(["board_photo", "building_photo"] as const).map((field) => (
             <label key={field} className="block space-y-1 text-sm"><span className="text-muted-foreground">{field === "board_photo" ? "Facility board photograph" : "Facility building photograph"} (PNG or JPEG, up to 5 MB)</span>
               <input type="file" name={field} accept="image/png,image/jpeg" onChange={(e) => void choose(e.target.files?.[0], (upload) => setB(field, upload))} className={input} />
@@ -469,8 +564,12 @@ function RegistrationSteps({ signedIn }: { signedIn: boolean }) {
 
       {step === "submit" ? (
         <div className="space-y-2 text-sm">
-          <p>Submit <strong>{basic.name}</strong> (tracking ID {basic.tracking_id}) to HFR. HFR returns the facility ID and verifies the facility afterwards.</p>
-          <button type="button" className={primary} disabled={busy || !signedIn} onClick={() => void submit()}>{busy ? "Submitting…" : "Submit to HFR"}</button>
+          {editing ? (
+            <p>Resubmit <strong>{basic.name}</strong> (tracking ID {basic.tracking_id}) to HFR with the saved changes. HFR verifies the changes afterwards.</p>
+          ) : (
+            <p>Submit <strong>{basic.name}</strong> (tracking ID {basic.tracking_id}) to HFR. HFR returns the facility ID and verifies the facility afterwards.</p>
+          )}
+          <button type="button" className={primary} disabled={busy || !signedIn} onClick={() => void submit()}>{busy ? "Submitting…" : editing ? "Resubmit to HFR" : "Submit to HFR"}</button>
         </div>
       ) : null}
 
