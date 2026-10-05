@@ -1,6 +1,7 @@
 """Healthcare Professionals Registry for the facility administrator (ABDM M4, HPR).
 
-HPR's master data and HPID creation (HPR-002 to 011). Master lists come back
+HPR's master data, HPID creation (HPR-002 to 011) and registration of the
+signed-in professional (HPR-018 to 079). Master lists come back
 as {code, label}; HPR's own field names differ per list. HPR's state and
 district ids are its own, not LGD codes (district/27 is Punjab, 5 Oct live),
 so every HPR form takes them from these lists only.
@@ -15,7 +16,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.auth.deps import CurrentDbUser, require_roles
-from app.integrations.abdm.hfr import client, hpid
+from app.integrations.abdm.client import AbdmAuthError, AbdmNotConfigured, AbdmRejected, AbdmUnavailable
+from app.integrations.abdm.hfr import client, hpid, hpr_login, hpr_registration
 from app.integrations.abdm.hfr.router import _hfr
 
 router = APIRouter(
@@ -218,3 +220,103 @@ async def hpid_create(payload: HpidCreate, current_db_user: CurrentDbUser) -> di
         raise _refused(exc) from None
     return {"hpr_id": session.hpr_id, "hpr_id_number": number, "logged_in": True,
             "expires_at": session.expires_at}
+
+
+# ----------------------------------------------------------------- registration in HPR (HPR-018 to 079)
+
+
+#: How /v1/account/information takes the professional's token. NHA's skill
+#: names X-Token for "the HPR token of the signed-in professional"; NOT yet
+#: confirmed live.
+def _token_headers(token: str) -> dict[str, str]:
+    return {"X-Token": f"Bearer {token}"}
+
+
+async def _signed_in(current_db_user) -> tuple[hpr_login.HprSession, str]:
+    held = await hpr_login.current(current_db_user.facility_id, current_db_user.id)
+    if held is None:
+        raise HTTPException(409, {"code": "hpr_login_required", "message": "Sign in to HPR as the professional first"})
+    return held
+
+
+async def _kyc(token: str) -> dict:
+    body = await _hfr(client.call("GET", "/v1/account/information", headers=_token_headers(token)))
+    try:
+        return hpr_registration.kyc_from(body)
+    except hpr_registration.HprProfileMissing as exc:
+        raise HTTPException(502, {"code": "hpr_profile_missing", "message": str(exc)}) from None
+
+
+@router.get("/profile")
+async def hpr_profile(current_db_user: CurrentDbUser) -> dict:
+    """HPR-019 to 037: the signed-in professional's Aadhaar details, shown
+    read-only on the registration form."""
+    _, token = await _signed_in(current_db_user)
+    kyc = await _kyc(token)
+    return {k: v for k, v in kyc.items() if k != "mobile"} | {
+        "mobile_hint": kyc["mobile"][-4:] if kyc["mobile"] else None}
+
+
+@router.get("/professional")
+async def hpr_professional(current_db_user: CurrentDbUser) -> dict:
+    """HPR-078: what HPR holds for the signed-in professional, as labels."""
+    session, _ = await _signed_in(current_db_user)
+    if not session.hpr_id_number:
+        raise HTTPException(409, {"code": "hpr_login_required", "message": "This HPR login carries no HPR ID number"})
+    body = await _hfr(client.call("POST", "/apis/v1/doctors/fetch-professional-info", json={"practitioner": {
+        "id": session.hpr_id_number, "name": "", "contactNumber": "", "state": "", "registrationNumber": ""}}))
+    rows = body.get("practitioners") if isinstance(body, dict) else None
+    # HPR nests the list one level deeper than its own example (5 Oct live).
+    while isinstance(rows, list) and rows and isinstance(rows[0], list):
+        rows = rows[0]
+    return {"practitioner": rows[0] if isinstance(rows, list) and rows and isinstance(rows[0], dict) else None}
+
+
+async def _raise(exc: Exception):
+    raise exc
+
+
+async def _submit(path: str, payload: hpr_registration.Professional, current_db_user) -> dict:
+    session, token = await _signed_in(current_db_user)
+    kyc = await _kyc(token)
+    hpr_type = "nurse" if payload.category == 2 else "doctor"
+    body = {"practitioner": hpr_registration.practitioner(payload, kyc, hpr_type=hpr_type), "hprToken": token}
+    try:
+        answer = await client.call("POST", path, json=body)
+    except AbdmRejected as exc:
+        detail = exc.detail if isinstance(exc.detail, dict) else {}
+        messages = [str(d.get("message")) for d in detail.get("details") or [] if isinstance(d, dict) and d.get("message")]
+        raise HTTPException(400, {"code": "hpr_registration_refused",
+                                  "messages": messages or [f"HPR refused this (HTTP {exc.status_code})"]}) from None
+    except (AbdmNotConfigured, AbdmUnavailable, AbdmAuthError) as exc:
+        # Mapped as every HPR failure is, without sending the registration again.
+        await _hfr(_raise(exc))
+    try:
+        result = hpr_registration.outcome(answer)
+    except ValueError as exc:
+        raise HTTPException(400, {"code": "hpr_registration_refused",
+                                  "messages": [hpr_registration.safe_text(str(exc))]}) from None
+    return result | {"hpr_id_number": session.hpr_id_number}
+
+
+@router.post("/professional")
+async def register_professional(payload: hpr_registration.Professional, current_db_user: CurrentDbUser) -> dict:
+    """HPR-018 to 077: register the signed-in professional in HPR."""
+    return await _submit("/apis/v1/doctors/register-professional-new", payload, current_db_user)
+
+
+@router.post("/professional/update")
+async def update_professional(payload: hpr_registration.Professional, current_db_user: CurrentDbUser) -> dict:
+    """HPR-079: the same form, sent as an update."""
+    return await _submit("/apis/v1/doctors/update-professional-new", payload, current_db_user)
+
+
+@router.get("/master/registration-options")
+async def registration_options() -> dict:
+    """The fixed choices HPR publishes no master for (see hpr_registration)."""
+    return {
+        "salutations": [{"code": str(code), "label": label} for code, label in hpr_registration.SALUTATIONS.items()],
+        "work_status": [{"code": code, "label": code.title()} for code in hpr_registration.WORK_STATUS],
+        "not_working_reasons": list(hpr_registration.NOT_WORKING_REASONS),
+        "months": list(hpr_registration.MONTHS),
+    }
