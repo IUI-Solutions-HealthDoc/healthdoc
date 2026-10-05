@@ -91,12 +91,16 @@ async def _call(step: str, method: str, path: str, *, json: dict | None = None) 
     try:
         return await client.call(method, path, json=json)
     except AbdmError as exc:
-        codes = list(exc.error_codes)
+        codes, reasons = list(exc.error_codes), []
         if isinstance(exc, AbdmRejected) and isinstance(exc.detail, dict):
-            codes += [str(d.get("code")) for d in exc.detail.get("details") or [] if isinstance(d, dict) and d.get("code")]
+            details = [d for d in exc.detail.get("details") or [] if isinstance(d, dict)]
+            codes += [str(d.get("code")) for d in details if d.get("code")]
             codes.append(str(exc.detail.get("code") or ""))
-        log.warning("HPR %s failed: %s status=%s codes=%s shape=%s",
-                    step, type(exc).__name__, exc.status_code, [c for c in codes if c], exc.body_shape)
+            # HPR's own reasons are fixed texts ("Invalid OTP", "Failed to retrieve
+            # aadhaar transaction details for txnID - <uuid>"); no value we sent.
+            reasons = [str(d.get("message"))[:160] for d in details if d.get("message")]
+        log.warning("HPR %s failed: %s status=%s codes=%s reasons=%s shape=%s",
+                    step, type(exc).__name__, exc.status_code, [c for c in codes if c], reasons, exc.body_shape)
         raise
 
 

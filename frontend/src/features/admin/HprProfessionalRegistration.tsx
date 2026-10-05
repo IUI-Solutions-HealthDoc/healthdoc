@@ -40,8 +40,10 @@ const today = () => new Date().toISOString().slice(0, 10);
 
 function failure(reason: unknown, fallback: string): string[] {
   if (reason instanceof ApiError) {
-    const messages = (reason.payload as { messages?: unknown } | undefined)?.messages;
-    if (Array.isArray(messages) && messages.length) return messages.map(String);
+    const payload = reason.payload as { messages?: unknown; message?: unknown } | undefined;
+    if (Array.isArray(payload?.messages) && payload.messages.length) return payload.messages.map(String);
+    // HealthDoc's server words these itself; the generic text says nothing.
+    if (typeof payload?.message === "string" && payload.message) return [payload.message];
     return [reason.message];
   }
   return [reason instanceof Error ? reason.message : fallback];

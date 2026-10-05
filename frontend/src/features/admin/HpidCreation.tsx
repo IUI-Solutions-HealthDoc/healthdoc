@@ -30,7 +30,11 @@ const PASSWORD = /^(?=.*[a-z])(?=.*[A-Z])(?=.*[^A-Za-z0-9]).{8,64}$/;
 const EMAIL = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
 
 function failure(reason: unknown, fallback: string): string {
-  return reason instanceof ApiError ? reason.message : fallback;
+  if (!(reason instanceof ApiError)) return fallback;
+  // HealthDoc's server words these itself, passing on HPR's own reason ("Aadhaar
+  // Number/Virtual ID is invalid", a wrong OTP); the generic text says nothing.
+  const message = (reason.payload as { message?: unknown } | undefined)?.message;
+  return typeof message === "string" && message ? message : reason.message;
 }
 
 type Stage =
