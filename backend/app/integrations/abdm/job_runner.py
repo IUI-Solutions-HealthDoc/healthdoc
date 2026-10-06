@@ -15,7 +15,6 @@ from datetime import UTC, datetime
 
 from sqlalchemy import or_, select
 
-from app.common.config import get_settings
 from app.common.db import SessionLocal
 from app.integrations.abdm import jobs
 from app.integrations.abdm.client import (
@@ -25,6 +24,7 @@ from app.integrations.abdm.client import (
     safe_failure_summary,
     safe_rejection_message,
 )
+from app.integrations.abdm.facilities import FacilityNotServed, service_id_for
 from app.integrations.abdm.hip import gateway, linking, worker
 from app.integrations.abdm.hip.documents import DocumentUnavailable, resolve_context_document
 from app.integrations.abdm.hip.models import (
@@ -63,8 +63,10 @@ async def notify_context(job: jobs.AbdmJob) -> None:
             raise DocumentUnavailable("Context unavailable")
         await resolve_context_document(db, context)
         facility = await db.get(Facility, context.facility_id)
-        if facility is None or facility.hfr_facility_id != get_settings().abdm_hfr_facility_id:
-            raise DeferredJob("Facility is not configured for this bridge")
+        try:
+            service_id = await service_id_for(db, context.facility_id, "hip")
+        except FacilityNotServed as exc:
+            raise DeferredJob("Facility is not configured for this bridge") from exc
         links = (
             (
                 await db.execute(
@@ -90,6 +92,7 @@ async def notify_context(job: jobs.AbdmJob) -> None:
                 # address, so ABDM texts them a deep link instead. One request
                 # id per record, so a retry is the same notification.
                 await gateway.notify_patient_sms(
+                    service_id=service_id,
                     mobile=patient.mobile,
                     hip_name=facility.name,
                     request_id=str(uuid.uuid5(job.id, "sms-notify")),
@@ -100,6 +103,7 @@ async def notify_context(job: jobs.AbdmJob) -> None:
             raise DeferredJob("Document is awaiting confirmed linkage")
         for address in sorted({link.abha_address for link in links}):
             await gateway.notify_care_context(
+                service_id=service_id,
                 abha_address=address,
                 care_context_reference=context.reference,
                 hi_types=[context.hi_type],
@@ -123,9 +127,10 @@ async def _dispatch(job: jobs.AbdmJob) -> None:
                 raise DocumentUnavailable("Link unavailable")
             if link.status != "pending":
                 return
-            facility = await db.get(Facility, link.facility_id)
-            if facility is None or facility.hfr_facility_id != get_settings().abdm_hfr_facility_id:
-                raise DeferredJob("Facility is not configured for this bridge")
+            try:
+                service_id = await service_id_for(db, link.facility_id, "hip")
+            except FacilityNotServed as exc:
+                raise DeferredJob("Facility is not configured for this bridge") from exc
             if job.kind == "link_context":
                 await linking.send_link(db, link)
             else:
@@ -139,7 +144,9 @@ async def _dispatch(job: jobs.AbdmJob) -> None:
                 if patient is None or patient.abha_address != link.abha_address:
                     raise DocumentUnavailable("Patient identity changed during linking")
                 await gateway.generate_link_token(
-                    **linking.demographics(patient), request_id=link.token_request_id
+                    service_id=service_id,
+                    **linking.demographics(patient),
+                    request_id=link.token_request_id,
                 )
     elif job.kind == "context_notify":
         await notify_context(job)

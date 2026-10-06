@@ -17,7 +17,6 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.common.config import get_settings
 from app.common.db import get_db
 from app.integrations.abdm import callback_replies, jobs
 from app.integrations.abdm.callback_auth import (
@@ -45,6 +44,7 @@ from app.integrations.abdm.contracts_v3 import (
     ProfileShareCallback,
     raw_dict,
 )
+from app.integrations.abdm.facilities import Role, facility_for_service_id, served_ids
 from app.integrations.abdm.hip import discovery, link_otp
 from app.integrations.abdm.hip import service as hip_service
 from app.integrations.abdm.hip.documents import DocumentUnavailable, resolve_context_document
@@ -82,27 +82,14 @@ def _accepted() -> Response:
     return Response(status_code=202)
 
 
-async def _facility_id(db: AsyncSession) -> uuid.UUID:
-    hfr_id = get_settings().abdm_hfr_facility_id
-    if not hfr_id or hfr_id == _PLACEHOLDER:
-        raise HTTPException(
-            503,
-            {
-                "code": "abdm_hfr_not_configured",
-                "message": "ABDM_HFR_FACILITY_ID is not configured",
-            },
-        )
-    facility = (
-        await db.execute(select(Facility).where(Facility.hfr_facility_id == hfr_id))
-    ).scalar_one_or_none()
+async def _facility_id(db: AsyncSession, service_id: str | None, role: Role) -> uuid.UUID:
+    """The facility NHA addressed: X-HIP-ID or X-HIU-ID names one of this
+    bridge's services (integrations/abdm/facilities.py). An id we do not serve
+    is refused, never attributed to whichever facility is configured first."""
+    facility = await facility_for_service_id(db, service_id, role)
     if facility is None:
-        raise HTTPException(
-            503,
-            {
-                "code": "abdm_hfr_not_seeded",
-                "message": "No HealthDoc facility matches ABDM_HFR_FACILITY_ID",
-            },
-        )
+        # 404, not 403: a 403 would confirm which HFR ids this deployment serves.
+        raise HTTPException(404, {"code": "unknown_service", "message": "Unknown ABDM service"})
     return facility.id
 
 
@@ -329,7 +316,7 @@ async def discover(
 ) -> Response:
     if callback.replayed:
         return _accepted()
-    facility_id = await _facility_id(db)
+    facility_id = await _facility_id(db, callback.recipient_id, "hip")
     patient = await _patient_by_address(
         db, facility_id=facility_id, abha_address=payload.patient.id
     )
@@ -406,7 +393,7 @@ async def link_init(
 ) -> Response:
     if callback.replayed:
         return _accepted()
-    facility_id = await _facility_id(db)
+    facility_id = await _facility_id(db, callback.recipient_id, "hip")
     patient = await _patient_by_address(
         db, facility_id=facility_id, abha_address=payload.abha_address
     )
@@ -545,7 +532,7 @@ async def link_confirm(
             select(AbdmCareContextLink)
             .where(
                 AbdmCareContextLink.link_ref_number == payload.confirmation.link_ref_number,
-                AbdmCareContextLink.facility_id == await _facility_id(db),
+                AbdmCareContextLink.facility_id == await _facility_id(db, callback.recipient_id, "hip"),
                 AbdmCareContextLink.status.in_(["pending", "confirmed", "expired"]),
             )
             .with_for_update()
@@ -650,7 +637,7 @@ async def generated_link_token(
             select(AbdmCareContextLink)
             .where(
                 AbdmCareContextLink.token_request_id == payload.response.request_id,
-                AbdmCareContextLink.facility_id == await _facility_id(db),
+                AbdmCareContextLink.facility_id == await _facility_id(db, callback.recipient_id, "hip"),
             )
             .with_for_update()
         )
@@ -687,7 +674,7 @@ async def on_care_context(
             select(AbdmCareContextLink)
             .where(
                 AbdmCareContextLink.gateway_request_id == payload.response.request_id,
-                AbdmCareContextLink.facility_id == await _facility_id(db),
+                AbdmCareContextLink.facility_id == await _facility_id(db, callback.recipient_id, "hip"),
             )
             .with_for_update()
         )
@@ -727,10 +714,16 @@ async def profile_share(
     """Receive ABDM scan-and-share demographics and return a facility token."""
     if callback.replayed:
         return _accepted()
-    settings = get_settings()
-    if payload.meta_data.hip_id and payload.meta_data.hip_id != settings.abdm_hip_id:
+    # The share names its HIP in metaData.hipId, and in X-HIP-ID when NHA sends
+    # one; they must agree. The published shape carries X-CM-ID only, which
+    # names no facility: then only a bridge serving exactly one can place it.
+    header_hip = callback.recipient_id if callback.recipient_id in served_ids("hip") else None
+    named = payload.meta_data.hip_id or header_hip
+    if payload.meta_data.hip_id and header_hip and payload.meta_data.hip_id != header_hip:
         raise HTTPException(404, {"code": "unknown_service", "message": "Unknown ABDM service"})
-    facility_id = await _facility_id(db)
+    if not named and len(served_ids("hip")) == 1:
+        named = next(iter(served_ids("hip")))
+    facility_id = await _facility_id(db, named, "hip")
     facility = await db.get(Facility, facility_id)
     if facility is None:
         raise HTTPException(
@@ -917,7 +910,7 @@ async def hip_consent_notify(
         raise HTTPException(
             422, {"code": "consent_detail_missing", "message": "Consent detail is required"}
         )
-    facility_id = await _facility_id(db)
+    facility_id = await _facility_id(db, callback.recipient_id, "hip")
     status = payload.notification.status.lower()
     await hip_service.record_consent_notification(
         db,
@@ -951,7 +944,7 @@ async def hip_health_information_request(
 ) -> Response:
     if callback.replayed:
         return _accepted()
-    facility_id = await _facility_id(db)
+    facility_id = await _facility_id(db, callback.recipient_id, "hip")
     consent_id = payload.hi_request.consent.id
     artefact = (
         await db.execute(
@@ -1043,9 +1036,9 @@ async def hip_health_information_request(
 
 
 async def _consent_request_by_gateway_id(
-    db: AsyncSession, request_id: str
+    db: AsyncSession, request_id: str, *, service_id: str
 ) -> AbdmConsentRequest | None:
-    facility_id = await _facility_id(db)
+    facility_id = await _facility_id(db, service_id, "hiu")
     return (
         await db.execute(
             select(AbdmConsentRequest)
@@ -1080,7 +1073,9 @@ async def consent_on_init(
 ) -> Response:
     if callback.replayed:
         return _accepted()
-    row = await _consent_request_by_gateway_id(db, payload.response.request_id)
+    row = await _consent_request_by_gateway_id(
+        db, payload.response.request_id, service_id=callback.recipient_id
+    )
     if row is None:
         raise HTTPException(
             404, {"code": "consent_request_not_found", "message": "Consent request not found"}
@@ -1113,7 +1108,9 @@ async def consent_on_status(
 ) -> Response:
     if callback.replayed:
         return _accepted()
-    row = await _consent_request_by_gateway_id(db, payload.response.request_id)
+    row = await _consent_request_by_gateway_id(
+        db, payload.response.request_id, service_id=callback.recipient_id
+    )
     if row is None and payload.consent_request and payload.consent_request.id:
         # A status poll carries its own REQUEST-ID, so the answer is matched by
         # NHA's consent-request id, exactly; never by patient or time.
@@ -1122,7 +1119,7 @@ async def consent_on_status(
                 select(AbdmConsentRequest)
                 .where(
                     AbdmConsentRequest.consent_request_id == payload.consent_request.id,
-                    AbdmConsentRequest.facility_id == await _facility_id(db),
+                    AbdmConsentRequest.facility_id == await _facility_id(db, callback.recipient_id, "hiu"),
                 )
                 .with_for_update()
             )
@@ -1171,7 +1168,7 @@ async def hiu_consent_notify(
 ) -> Response:
     if callback.replayed:
         return _accepted()
-    facility_id = await _facility_id(db)
+    facility_id = await _facility_id(db, callback.recipient_id, "hiu")
     row = (
         await db.execute(
             select(AbdmConsentRequest)
@@ -1231,7 +1228,7 @@ async def consent_on_fetch(
             422, {"code": "consent_fetch_failed", "message": "Consent artefact was not returned"}
         )
     detail = payload.consent.consent_detail
-    facility_id = await _facility_id(db)
+    facility_id = await _facility_id(db, callback.recipient_id, "hiu")
     existing = (
         await db.execute(
             select(AbdmHiuConsentArtefact).where(
@@ -1322,7 +1319,7 @@ async def hiu_health_information_on_request(
 ) -> Response:
     if callback.replayed:
         return _accepted()
-    facility_id = await _facility_id(db)
+    facility_id = await _facility_id(db, callback.recipient_id, "hiu")
     row = (
         await db.execute(
             select(AbdmHiuHealthInformationRequest)

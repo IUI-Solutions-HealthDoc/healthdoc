@@ -25,6 +25,7 @@ import pytest
 
 from app.common.config import Settings
 from app.integrations.abdm.client import AbdmError, AbdmResponse
+from app.integrations.abdm import facilities
 from app.integrations.abdm.hip import gateway as hip_gw
 from app.integrations.abdm.hiu import gateway as hiu_gw
 
@@ -77,6 +78,7 @@ def stub(monkeypatch):
     )
     monkeypatch.setattr(hip_gw, "get_settings", lambda: settings)
     monkeypatch.setattr(hiu_gw, "get_settings", lambda: settings)
+    monkeypatch.setattr(facilities, "get_settings", lambda: settings)
     return client
 
 
@@ -85,32 +87,42 @@ def stub(monkeypatch):
 # =============================================================================
 
 
-@pytest.mark.parametrize("value", ["change-me", ""])
-async def test_hip_calls_refuse_an_unset_identity(monkeypatch, stub, value):
-    """ "change-me" as a HIP id either fails confusingly or hits someone else's
-    registration. Neither is acceptable, so it never reaches the wire."""
-    monkeypatch.setattr(
-        hip_gw,
-        "get_settings",
-        lambda: Settings(_env_file=None, abdm_hip_id=value),
-    )
+@pytest.mark.parametrize("value", ["change-me", "", "ANOTHER-HOSPITALS-HIP"])
+async def test_hip_calls_refuse_an_identity_this_bridge_does_not_serve(stub, value):
+    """ "change-me", nothing, or another HIP's id either fails confusingly or
+    hits someone else's registration. None of them reaches the wire."""
     with pytest.raises(hip_gw.HipIdentityNotConfigured):
         await hip_gw.notify_care_context(
-            abha_address="x@sbx", care_context_reference="C1", hi_types=["Prescription"]
+            service_id=value, abha_address="x@sbx", care_context_reference="C1", hi_types=["Prescription"]
         )
-    assert stub.calls == [], "a request was built with an unconfigured identity"
+    assert stub.calls == [], "a request was built with an identity we do not serve"
 
 
-@pytest.mark.parametrize("value", ["change-me", ""])
-async def test_hiu_calls_refuse_an_unset_identity(monkeypatch, stub, value):
-    monkeypatch.setattr(
-        hiu_gw,
-        "get_settings",
-        lambda: Settings(_env_file=None, abdm_hiu_id=value),
-    )
+@pytest.mark.parametrize("value", ["change-me", "", "SBXID_TEST_HIP"])
+async def test_hiu_calls_refuse_an_identity_this_bridge_does_not_serve(stub, value):
+    """The HIP id of the same facility is not its HIU id when they differ."""
     with pytest.raises(hiu_gw.HiuIdentityNotConfigured):
-        await hiu_gw.fetch_consent_artefact(consent_id="c-1")
+        await hiu_gw.fetch_consent_artefact(service_id=value, consent_id="c-1")
     assert stub.calls == []
+
+
+async def test_each_additional_facility_speaks_as_its_own_hfr_id(monkeypatch, stub):
+    settings = Settings(
+        _env_file=None, abdm_hip_id="SBXID_TEST_HIP", abdm_hiu_id="SBXID_TEST_HIU",
+        abdm_hfr_facility_id="IN-FIRST", abdm_additional_hfr_facility_ids="IN-SECOND, IN-THIRD",
+        abdm_hiu_callback_base_url="https://abdm.example.org",
+    )
+    monkeypatch.setattr(facilities, "get_settings", lambda: settings)
+    await hip_gw.notify_care_context(
+        service_id="IN-SECOND", abha_address="x@sbx", care_context_reference="C1", hi_types=["Prescription"]
+    )
+    assert stub.last["headers"]["X-HIP-ID"] == "IN-SECOND"
+    await hiu_gw.fetch_consent_artefact(service_id="IN-THIRD", consent_id="c-1")
+    assert stub.last["headers"]["X-HIU-ID"] == "IN-THIRD"
+    with pytest.raises(hip_gw.HipIdentityNotConfigured):  # the first speaks as its HIP id
+        await hip_gw.notify_care_context(
+            service_id="IN-FIRST", abha_address="x@sbx", care_context_reference="C1", hi_types=["Prescription"]
+        )
 
 
 async def test_an_hi_request_refuses_an_unset_push_url(monkeypatch, stub):
@@ -123,7 +135,7 @@ async def test_an_hi_request_refuses_an_unset_push_url(monkeypatch, stub):
         lambda: Settings(_env_file=None, abdm_hiu_id="X", abdm_hiu_callback_base_url="change-me"),
     )
     with pytest.raises(hiu_gw.DataPushUrlNotConfigured):
-        await hiu_gw.request_health_information(
+        await hiu_gw.request_health_information(service_id="SBXID_TEST_HIU", 
             consent_id="c-1",
             date_from=FROM,
             date_to=TO,
@@ -142,7 +154,7 @@ async def test_an_hi_request_refuses_an_unset_push_url(monkeypatch, stub):
 async def test_link_care_contexts_sends_the_link_token_header(stub):
     """Without X-LINK-TOKEN the gateway answers 401, which reads as a
     credentials problem and sends you to the wrong place entirely."""
-    await hip_gw.link_care_contexts(
+    await hip_gw.link_care_contexts(service_id="SBXID_TEST_HIP", 
         abha_address="ram@sbx",
         link_token="LT-1",
         display="Blood Test",
@@ -202,7 +214,7 @@ async def test_the_label_nha_refused_twice_is_linked_in_accepted_form(stub):
         "ABDM SANDBOX TEST — SYNTHETIC WellnessRecord; "
         "fabricated observation, not clinical advice"
     )
-    await hip_gw.link_care_contexts(
+    await hip_gw.link_care_contexts(service_id="SBXID_TEST_HIP", 
         abha_address="test@sbx",
         link_token="SYNTHETIC",
         display="José Test",
@@ -226,14 +238,14 @@ async def test_stored_reply_groups_are_cleaned_only_on_the_way_out(stub):
         "hiType": "OPConsultation",
         "count": 1,
     }
-    await hip_gw.respond_to_discovery_groups(
+    await hip_gw.respond_to_discovery_groups(service_id="SBXID_TEST_HIP", 
         transaction_id="T-1",
         gateway_request_id="G-1",
         patient_groups=[group],
         matched_by=["ABHA_ADDRESS"],
     )
     discovered = stub.last["json"]["patient"]
-    await hip_gw.respond_to_link_confirm_groups(gateway_request_id="G-2", patient_groups=[group])
+    await hip_gw.respond_to_link_confirm_groups(service_id="SBXID_TEST_HIP", gateway_request_id="G-2", patient_groups=[group])
     confirmed = stub.last["json"]["patient"]
     for sent in (discovered, confirmed):
         assert sent == [
@@ -255,7 +267,7 @@ async def test_stored_reply_groups_are_cleaned_only_on_the_way_out(stub):
 @pytest.mark.parametrize("label", ["राम", " \t ", "​"])
 async def test_a_label_with_nothing_sendable_is_refused_before_the_wire(stub, label):
     with pytest.raises(ValueError):
-        await hip_gw.link_care_contexts(
+        await hip_gw.link_care_contexts(service_id="SBXID_TEST_HIP", 
             abha_address="test@sbx",
             link_token="SYNTHETIC",
             display="Synthetic Test",
@@ -270,7 +282,7 @@ async def test_mixed_hi_types_share_one_authenticated_link_request(stub):
         kind: [{"referenceNumber": f"test-{kind}", "display": "Synthetic record"}]
         for kind in hip_gw.HI_TYPES
     }
-    await hip_gw.link_care_contexts(
+    await hip_gw.link_care_contexts(service_id="SBXID_TEST_HIP", 
         abha_address="test@sbx",
         link_token="SYNTHETIC",
         display="Synthetic Test",
@@ -299,7 +311,7 @@ async def test_grouped_linking_rejects_ambiguous_document_sets(stub, problem):
     else:
         groups["UnknownType"] = groups.pop("WellnessRecord")
     with pytest.raises(ValueError):
-        await hip_gw.link_care_contexts(
+        await hip_gw.link_care_contexts(service_id="SBXID_TEST_HIP", 
             abha_address="test@sbx",
             link_token="SYNTHETIC",
             display="Synthetic Test",
@@ -316,11 +328,11 @@ async def test_linking_requires_documented_async_acceptance(stub, operation, sta
     stub._body = {"message": "SECRET patient@sbx"}
     with pytest.raises(AbdmError) as caught:
         if operation == "token":
-            await hip_gw.generate_link_token(
+            await hip_gw.generate_link_token(service_id="SBXID_TEST_HIP", 
                 abha_address="patient@sbx", name="Test", gender="M", year_of_birth="1990"
             )
         else:
-            await hip_gw.link_care_contexts(
+            await hip_gw.link_care_contexts(service_id="SBXID_TEST_HIP", 
                 abha_address="patient@sbx",
                 link_token="SECRET",
                 display="Synthetic record",
@@ -335,7 +347,7 @@ async def test_linking_requires_documented_async_acceptance(stub, operation, sta
 
 
 async def test_notify_care_context_shape(stub):
-    await hip_gw.notify_care_context(
+    await hip_gw.notify_care_context(service_id="SBXID_TEST_HIP", 
         abha_address="ram@sbx",
         care_context_reference="V-1",
         hi_types=["DiagnosticReport", "DischargeSummary"],
@@ -353,7 +365,7 @@ async def test_on_discover_echoes_the_gateways_request_id(stub):
     """`response.requestId` is how the gateway matches our answer to its
     question. Get it wrong and there is no error — the discovery times out and
     the patient is shown no records."""
-    await hip_gw.respond_to_discovery(
+    await hip_gw.respond_to_discovery(service_id="SBXID_TEST_HIP", 
         transaction_id="T-1",
         gateway_request_id="GW-REQ-9",
         abha_address="ram@sbx",
@@ -372,7 +384,7 @@ async def test_on_discover_echoes_the_gateways_request_id(stub):
 async def test_on_discover_with_no_matches_sends_an_empty_patient_list(stub):
     """ "We found nobody" is a valid discovery answer and is not an error.
     Sending a patient element with zero care contexts would claim a match."""
-    await hip_gw.respond_to_discovery(
+    await hip_gw.respond_to_discovery(service_id="SBXID_TEST_HIP", 
         transaction_id="T-1",
         gateway_request_id="GW-1",
         abha_address="ram@sbx",
@@ -385,7 +397,7 @@ async def test_on_discover_with_no_matches_sends_an_empty_patient_list(stub):
 
 
 async def test_link_init_declares_mediated_mobile_otp(stub):
-    await hip_gw.respond_to_link_init(
+    await hip_gw.respond_to_link_init(service_id="SBXID_TEST_HIP", 
         transaction_id="T-1",
         gateway_request_id="GW-1",
         link_ref_number="LINK-1",
@@ -406,7 +418,7 @@ async def test_link_init_declares_mediated_mobile_otp(stub):
 
 
 async def test_invalid_link_otp_is_returned_as_an_error_not_a_patient(stub):
-    await hip_gw.respond_to_link_confirm_error(
+    await hip_gw.respond_to_link_confirm_error(service_id="SBXID_TEST_HIP", 
         gateway_request_id="GW-1",
         code="ABDM-1035",
         message="Incorrect OTP",
@@ -421,7 +433,7 @@ async def test_hip_acknowledgement_is_an_object_not_a_list(stub):
     """The HIP takes an object and the HIU takes a list. ABDM's asymmetry, and
     exactly the shape that produces a validation error naming a field that
     looks correct."""
-    await hip_gw.acknowledge_consent_notification(consent_id="C-1", gateway_request_id="GW-1")
+    await hip_gw.acknowledge_consent_notification(service_id="SBXID_TEST_HIP", consent_id="C-1", gateway_request_id="GW-1")
     ack = stub.last["json"]["acknowledgement"]
     assert isinstance(ack, dict)
     assert ack == {"status": "OK", "consentId": "C-1"}
@@ -429,7 +441,7 @@ async def test_hip_acknowledgement_is_an_object_not_a_list(stub):
 
 
 async def test_profile_share_ack_uses_duration_not_timestamp(stub):
-    await hip_gw.acknowledge_profile_share(
+    await hip_gw.acknowledge_profile_share(service_id="SBXID_TEST_HIP", 
         gateway_request_id="GW-1",
         abha_address="ram@sbx",
         context="5",
@@ -446,7 +458,7 @@ async def test_profile_share_ack_uses_duration_not_timestamp(stub):
 
 
 async def test_hi_transfer_notification_identifies_us_as_the_hip(stub):
-    await hip_gw.notify_hi_transfer(
+    await hip_gw.notify_hi_transfer(service_id="SBXID_TEST_HIP", 
         consent_id="C-1",
         transaction_id="T-1",
         session_status="TRANSFERRED",
@@ -472,7 +484,7 @@ async def test_hip_notification_sends_only_the_hips_own_values(stub, session_sta
     """ABDM's data-flow specification: a HIP reports TRANSFERRED or FAILED and
     DELIVERED or ERRORED per named care context. OK and RECEIVED are the HIU's."""
     with pytest.raises(ValueError):
-        await hip_gw.notify_hi_transfer(
+        await hip_gw.notify_hi_transfer(service_id="SBXID_TEST_HIP", 
             consent_id="C-1",
             transaction_id="T-1",
             session_status=session_status,
@@ -487,7 +499,7 @@ async def test_hip_notification_sends_only_the_hips_own_values(stub, session_sta
 
 
 async def test_consent_request_shape(stub):
-    await hiu_gw.request_consent(
+    await hiu_gw.request_consent(service_id="SBXID_TEST_HIU", 
         abha_address="ram@sbx",
         hi_types=["Prescription"],
         date_from=FROM,
@@ -510,7 +522,7 @@ async def test_consent_request_shape(stub):
 
 
 async def test_hiu_acknowledgement_is_a_list_not_an_object(stub):
-    await hiu_gw.acknowledge_consent_notification(consent_id="C-1", gateway_request_id="GW-1")
+    await hiu_gw.acknowledge_consent_notification(service_id="SBXID_TEST_HIU", consent_id="C-1", gateway_request_id="GW-1")
     ack = stub.last["json"]["acknowledgement"]
     assert isinstance(ack, list)
     assert ack == [{"status": "OK", "consentId": "C-1"}]
@@ -518,7 +530,7 @@ async def test_hiu_acknowledgement_is_a_list_not_an_object(stub):
 
 
 async def test_health_information_request_carries_key_material_and_push_url(stub):
-    await hiu_gw.request_health_information(
+    await hiu_gw.request_health_information(service_id="SBXID_TEST_HIU", 
         consent_id="C-1",
         date_from=FROM,
         date_to=TO,
@@ -540,7 +552,7 @@ async def test_health_information_request_carries_key_material_and_push_url(stub
 
 
 async def test_fetch_artefact_sends_the_hiu_header(stub):
-    await hiu_gw.fetch_consent_artefact(consent_id="C-1")
+    await hiu_gw.fetch_consent_artefact(service_id="SBXID_TEST_HIU", consent_id="C-1")
     assert stub.last["path"] == "/api/hiecm/consent/v3/fetch"
     assert stub.last["headers"] == {"X-HIU-ID": "SBXID_TEST_HIU"}
     assert stub.last["json"] == {"consentId": "C-1"}
@@ -549,7 +561,7 @@ async def test_fetch_artefact_sends_the_hiu_header(stub):
 async def test_hiu_receipt_notification_identifies_us_as_the_hiu(stub):
     """Same endpoint as the HIP notification — `notifier.type` is the only
     thing distinguishing the two sides."""
-    await hiu_gw.notify_hi_receipt(
+    await hiu_gw.notify_hi_receipt(service_id="SBXID_TEST_HIU", 
         consent_id="C-1",
         transaction_id="T-1",
         session_status="RECEIVED",
@@ -569,7 +581,7 @@ async def test_hiu_receipt_notification_identifies_us_as_the_hiu(stub):
 )
 async def test_hiu_receipt_refuses_hip_or_request_statuses(stub, session_status, entry_status):
     with pytest.raises(ValueError):
-        await hiu_gw.notify_hi_receipt(
+        await hiu_gw.notify_hi_receipt(service_id="SBXID_TEST_HIU", 
             consent_id="C-1",
             transaction_id="T-1",
             session_status=session_status,
@@ -585,7 +597,7 @@ async def test_hiu_async_operations_require_documented_202(stub, status, operati
     stub._status = status
     with pytest.raises(AbdmError) as caught:
         if operation == "consent":
-            await hiu_gw.request_consent(
+            await hiu_gw.request_consent(service_id="SBXID_TEST_HIU", 
                 abha_address="test@sbx",
                 hi_types=["WellnessRecord"],
                 date_from=FROM,
@@ -594,7 +606,7 @@ async def test_hiu_async_operations_require_documented_202(stub, status, operati
                 requester=REQUESTER,
             )
         elif operation == "request":
-            await hiu_gw.request_health_information(
+            await hiu_gw.request_health_information(service_id="SBXID_TEST_HIU", 
                 consent_id="C-1",
                 date_from=FROM,
                 date_to=TO,
@@ -603,7 +615,7 @@ async def test_hiu_async_operations_require_documented_202(stub, status, operati
                 nonce="SYNTHETIC",
             )
         else:
-            await hiu_gw.notify_hi_receipt(
+            await hiu_gw.notify_hi_receipt(service_id="SBXID_TEST_HIU", 
                 consent_id="C-1",
                 transaction_id="T-1",
                 session_status="RECEIVED",
@@ -624,7 +636,7 @@ async def test_an_unknown_hi_type_is_refused_before_the_wire(stub):
     """ABDM rejects these with a message that names the field and not the
     allowed values, so the list is checked where it can be read."""
     with pytest.raises(ValueError, match="Unknown ABDM health-information type"):
-        await hip_gw.notify_care_context(
+        await hip_gw.notify_care_context(service_id="SBXID_TEST_HIP", 
             abha_address="ram@sbx",
             care_context_reference="V-1",
             hi_types=["Prescription", "NotARealType"],
@@ -634,7 +646,7 @@ async def test_an_unknown_hi_type_is_refused_before_the_wire(stub):
 
 async def test_an_empty_hi_type_list_is_refused(stub):
     with pytest.raises(ValueError, match="At least one"):
-        await hip_gw.notify_care_context(
+        await hip_gw.notify_care_context(service_id="SBXID_TEST_HIP", 
             abha_address="ram@sbx", care_context_reference="V-1", hi_types=[]
         )
     assert stub.calls == []
@@ -642,7 +654,7 @@ async def test_an_empty_hi_type_list_is_refused(stub):
 
 async def test_a_backwards_date_range_is_refused(stub):
     with pytest.raises(ValueError, match="before"):
-        await hiu_gw.request_consent(
+        await hiu_gw.request_consent(service_id="SBXID_TEST_HIU", 
             abha_address="ram@sbx",
             hi_types=["Prescription"],
             date_from=TO,
@@ -656,7 +668,7 @@ async def test_a_backwards_date_range_is_refused(stub):
 async def test_timestamps_use_a_literal_z_not_an_offset(stub):
     """`datetime.isoformat()` produces `+00:00`, which some ABDM endpoints
     reject and others silently accept — the inconsistent kind of bug."""
-    await hiu_gw.request_consent(
+    await hiu_gw.request_consent(service_id="SBXID_TEST_HIU", 
         abha_address="ram@sbx",
         hi_types=["Prescription"],
         date_from=FROM,
@@ -672,7 +684,7 @@ async def test_timestamps_use_a_literal_z_not_an_offset(stub):
 async def test_a_naive_datetime_is_treated_as_utc_not_local(stub):
     """A naive datetime reaching the wire as local time would shift a consent
     window by hours, silently widening or narrowing what was permitted."""
-    await hiu_gw.request_consent(
+    await hiu_gw.request_consent(service_id="SBXID_TEST_HIU", 
         abha_address="ram@sbx",
         hi_types=["Prescription"],
         date_from=datetime(2026, 1, 1),
@@ -688,7 +700,7 @@ async def test_a_naive_datetime_is_treated_as_utc_not_local(stub):
 async def test_the_request_id_is_returned_for_correlation(stub):
     """Every one of these flows answers on a callback minutes later carrying
     `response.requestId`. Without the id we sent there is nothing to match."""
-    request_id, _ = await hip_gw.acknowledge_hi_request(
+    request_id, _ = await hip_gw.acknowledge_hi_request(service_id="SBXID_TEST_HIP", 
         transaction_id="T-1", gateway_request_id="GW-1"
     )
     assert request_id == stub.last["request_id"]
@@ -698,7 +710,7 @@ async def test_the_request_id_is_returned_for_correlation(stub):
 async def test_a_supplied_request_id_is_reused_for_retries(stub):
     """ABDM treats REQUEST-ID as the idempotency key on several endpoints, so a
     genuine retry has to carry the original or it books twice."""
-    await hip_gw.acknowledge_hi_request(
+    await hip_gw.acknowledge_hi_request(service_id="SBXID_TEST_HIP", 
         transaction_id="T-1", gateway_request_id="GW-1", request_id="FIXED-ID"
     )
     assert stub.last["request_id"] == "FIXED-ID"

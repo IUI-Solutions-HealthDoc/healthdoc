@@ -43,6 +43,7 @@ from fastapi import Header, HTTPException, Request
 
 from app.common.config import get_settings
 from app.common.redis import get_redis
+from app.integrations.abdm.facilities import served_ids
 
 log = logging.getLogger("healthdoc.abdm")
 
@@ -238,7 +239,7 @@ async def _verify_gateway_headers(
     request: Request,
     *,
     recipient_header: str | None,
-    expected_recipient: str | None,
+    expected_recipients: frozenset[str] | None,
     require_cm_id: bool = True,
     require_request_id: bool = True,
     replay_scope: str | None = None,
@@ -288,7 +289,7 @@ async def _verify_gateway_headers(
         ) from exc
 
     settings = get_settings()
-    if recipient_header and (not expected_recipient or expected_recipient == _PLACEHOLDER):
+    if recipient_header and not expected_recipients:
         raise HTTPException(
             503,
             {
@@ -296,7 +297,10 @@ async def _verify_gateway_headers(
                 "message": f"{recipient_header} is not configured on this server",
             },
         )
-    if recipient_header and not hmac.compare_digest(recipient or "", expected_recipient or ""):
+    # Every served id is compared, so the time taken says nothing about which.
+    if recipient_header and not sum(
+        hmac.compare_digest(recipient or "", served) for served in sorted(expected_recipients or ())
+    ):
         raise HTTPException(404, {"code": "unknown_service", "message": "Unknown ABDM service"})
     if cm_id is not None and not hmac.compare_digest(cm_id, settings.abdm_x_cm_id):
         raise HTTPException(401, {"code": "invalid_cm_id", "message": "Unauthorised"})
@@ -370,7 +374,7 @@ async def verify_hip_gateway_callback(request: Request) -> GatewayCallback:
     return await _verify_gateway_headers(
         request,
         recipient_header="X-HIP-ID",
-        expected_recipient=get_settings().abdm_hip_id,
+        expected_recipients=served_ids("hip"),
         require_cm_id=request.url.path not in _HIP_CALLBACKS_WITHOUT_CM_ID,
     )
 
@@ -379,7 +383,7 @@ async def verify_hiu_gateway_callback(request: Request) -> GatewayCallback:
     return await _verify_gateway_headers(
         request,
         recipient_header="X-HIU-ID",
-        expected_recipient=get_settings().abdm_hiu_id,
+        expected_recipients=served_ids("hiu"),
         require_cm_id=request.url.path not in _HIU_CALLBACKS_WITHOUT_CM_ID,
     )
 
@@ -395,7 +399,7 @@ async def verify_hip_link_gateway_callback(request: Request) -> GatewayCallback:
     return await _verify_gateway_headers(
         request,
         recipient_header="X-HIP-ID",
-        expected_recipient=get_settings().abdm_hip_id,
+        expected_recipients=served_ids("hip"),
         require_cm_id=False,
     )
 
@@ -413,7 +417,7 @@ async def verify_hip_ack_callback(request: Request) -> GatewayCallback:
     return await _verify_gateway_headers(
         request,
         recipient_header="X-HIP-ID",
-        expected_recipient=get_settings().abdm_hip_id,
+        expected_recipients=served_ids("hip"),
         require_cm_id=False,
         require_request_id=False,
     )
@@ -434,14 +438,14 @@ async def verify_profile_gateway_callback(request: Request) -> GatewayCallback:
         return await _verify_gateway_headers(
             request,
             recipient_header="X-HIP-ID",
-            expected_recipient=get_settings().abdm_hip_id,
+            expected_recipients=served_ids("hip"),
             require_cm_id=False,
             replay_scope="profile-share",
         )
     return await _verify_gateway_headers(
         request,
         recipient_header=None,
-        expected_recipient=None,
+        expected_recipients=None,
         replay_scope="profile-share",
     )
 
