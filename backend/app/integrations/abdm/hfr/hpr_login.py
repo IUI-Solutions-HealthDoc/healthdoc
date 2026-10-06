@@ -79,17 +79,31 @@ def _held_kyc_aad(facility_id: uuid.UUID, user_id: uuid.UUID) -> bytes:
     return f"abdm:hfr:hpr-held-kyc:{facility_id}:{user_id}".encode()
 
 
-async def hold_kyc(facility_id: uuid.UUID, user_id: uuid.UUID, *, hpr_id_number: str, kyc: dict) -> None:
-    """Keep an Aadhaar KYC for the professional who signs in next.
+async def hold_kyc(facility_id: uuid.UUID, user_id: uuid.UUID, *, hpr_id_number: str, kyc: dict) -> bool:
+    """Give an Aadhaar KYC to this professional's HPR login. True when it
+    joined a login already open for the same HPR ID number.
 
     An Aadhaar check that finds an existing HPID returns a token, but not an
     HPR login: it carries no roles or category, and register-professional
     refuses it ("roles or category in Hrp token can not be empty/null", live
-    5 Oct 2026). The professional signs in through HPR's own login instead,
-    and the KYC joins that login if it is the same HPR ID number."""
+    5 Oct 2026). If the professional is already signed in through HPR's own
+    login, the KYC joins it now (live 6 Oct 2026: signed in first, then
+    verified; a second OTP would have bought nothing). Otherwise it is held
+    and joins the next login with the same HPR ID number."""
+    sealed_login = await get_redis().get(_token_key(facility_id, user_id))
+    if sealed_login:
+        login = json.loads(decrypt_pii(base64.b64decode(sealed_login), associated_data=_aad(facility_id, user_id)))
+        if login["expires_at"] > int(time.time()) and _claims(login["token"]).get("hprIdNumber") == hpr_id_number:
+            login["kyc"] = kyc
+            resealed = base64.b64encode(encrypt_pii(json.dumps(login), associated_data=_aad(facility_id, user_id)))
+            await get_redis().set(
+                _token_key(facility_id, user_id), resealed.decode(), ex=login["expires_at"] - int(time.time())
+            )
+            return True
     record = json.dumps({"hpr_id_number": hpr_id_number, "kyc": kyc})
     sealed = base64.b64encode(encrypt_pii(record, associated_data=_held_kyc_aad(facility_id, user_id)))
     await get_redis().set(_held_kyc_key(facility_id, user_id), sealed.decode(), ex=MAX_TOKEN_TTL)
+    return False
 
 
 async def _take_held_kyc(facility_id: uuid.UUID, user_id: uuid.UUID, hpr_id_number: object) -> dict | None:
