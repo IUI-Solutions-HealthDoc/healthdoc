@@ -242,8 +242,8 @@ async def bind_confirmed_identity(
     in their HIMS along with the ABHA Address and ABHA Number." The CM verified
     the address; the HIP's OTP went to the mobile this chart holds. Nothing is
     recorded if the chart already holds an address, or if another chart holds
-    this address or number: both are unique, and overwriting either is a desk
-    decision, not a callback's.
+    this address or number at this facility: both are unique per facility
+    (0095), and overwriting either is a desk decision, not a callback's.
     """
     from app.integrations.abdm.hip.models import AbdmDiscoveryMatch
 
@@ -251,7 +251,11 @@ async def bind_confirmed_identity(
         return False
     held = (
         await db.execute(
-            select(Patient.id).where(Patient.abha_address == abha_address, Patient.id != patient.id)
+            select(Patient.id).where(
+                Patient.abha_address == abha_address,
+                Patient.id != patient.id,
+                Patient.facility_id == patient.facility_id,
+            )
         )
     ).first()
     if held is not None:
@@ -266,7 +270,11 @@ async def bind_confirmed_identity(
         (patient.abha_number not in (None, number))
         or (
             await db.execute(
-                select(Patient.id).where(Patient.abha_number == number, Patient.id != patient.id)
+                select(Patient.id).where(
+                    Patient.abha_number == number,
+                    Patient.id != patient.id,
+                    Patient.facility_id == patient.facility_id,
+                )
             )
         ).first()
         is not None

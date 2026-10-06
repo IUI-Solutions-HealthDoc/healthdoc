@@ -262,9 +262,8 @@ async def _link_through_otp(monkeypatch, db, caller_patient, staff):
     )
 
 
-async def test_an_abha_held_at_another_facility_is_refused_without_naming_a_patient(
-    desk, db, monkeypatch
-):
+async def test_an_abha_held_at_another_facility_links_here_too(desk, db, monkeypatch):
+    """Each facility is its own HIP (0095): one person, a linked chart at each."""
     from app.patients.models import Patient
     from app.users.models import Facility
 
@@ -272,18 +271,19 @@ async def test_an_abha_held_at_another_facility_is_refused_without_naming_a_pati
                               state_code="MH")
     db.add(other_facility)
     await db.flush()
-    db.add(Patient(
+    elsewhere = Patient(
         id=uuid.uuid4(), facility_id=other_facility.id, uhid=f"UHID-ELS-{uuid.uuid4().hex[:6]}",
         full_name="Someone Else", sex="female", age_years=40, status="active",
         identity_path="demographics_only", created_by=desk["staff"].id, abha_number=LINKED_ABHA,
-    ))
+    )
+    db.add(elsewhere)
     await db.commit()
 
-    with pytest.raises(HTTPException) as refused:
-        await _link_through_otp(monkeypatch, db, desk["patient"], desk["staff"])
-    assert refused.value.status_code == 409
-    assert refused.value.detail["code"] == "abha_link_unavailable"
-    assert "patient" not in refused.value.detail["message"].lower()
+    await _link_through_otp(monkeypatch, db, desk["patient"], desk["staff"])
+    await db.refresh(desk["patient"])
+    await db.refresh(elsewhere)
+    assert desk["patient"].abha_number == LINKED_ABHA
+    assert elsewhere.abha_number == LINKED_ABHA, "the other facility's chart is untouched"
 
 
 async def test_an_abha_held_at_this_facility_still_says_duplicate(desk, db, monkeypatch):
@@ -354,9 +354,7 @@ async def test_a_second_chart_cannot_take_a_linked_abha_address(desk, db):
     assert verified.json()["detail"]["code"] == "duplicate_abha_address"
 
 
-async def test_an_abha_address_held_at_another_facility_is_refused_without_naming_a_patient(
-    desk, db
-):
+async def test_an_abha_address_held_at_another_facility_links_here_too(desk, db):
     from app.patients.models import Patient
     from app.users.models import Facility
 
@@ -374,9 +372,9 @@ async def test_an_abha_address_held_at_another_facility_is_refused_without_namin
 
     verified = await _address_login(desk)
 
-    assert verified.status_code == 409, verified.text
-    assert verified.json()["detail"]["code"] == "abha_link_unavailable"
-    assert "patient" not in verified.json()["detail"]["message"].lower()
+    assert verified.status_code == 200, verified.text
+    await db.refresh(desk["patient"])
+    assert desk["patient"].abha_address == "singh128@sbx"
 
 
 async def test_phr_card_is_fetched_from_the_phr_endpoint_and_unlink_resets_the_kind(desk, db):

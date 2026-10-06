@@ -46,6 +46,8 @@ class Patient(Base, UUIDPk, Timestamps, Blame, Versioned):
         # the constraint in the database. This bit us once already — see
         # PR review discussion on constraint naming.
         CheckConstraint("dob IS NOT NULL OR age_years IS NOT NULL", name="dob_or_age"),
+        UniqueConstraint("facility_id", "abha_number", name="uq_patients_facility_abha_number"),
+        UniqueConstraint("facility_id", "abha_address", name="uq_patients_facility_abha_address"),
         CheckConstraint("uhid IS NOT NULL OR thid IS NOT NULL", name="has_identifier"),
         CheckConstraint(Sex.sql_check("sex"), name="sex"),
         CheckConstraint(IdentityPath.sql_check("identity_path"), name="identity_path"),
@@ -87,11 +89,13 @@ class Patient(Base, UUIDPk, Timestamps, Blame, Versioned):
     photo_file_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True
     )  # FK to files added in 0019
-    abha_number: Mapped[str | None] = mapped_column(String(17), unique=True, nullable=True)
+    #: Unique per facility (0095), as is abha_address: each facility is its own
+    #: HIP, and one person may hold a linked chart at each facility they visit.
+    abha_number: Mapped[str | None] = mapped_column(String(17), nullable=True)
     # PHR address (for example name@sbx) is the identity ABDM uses in M2/M3
     # discovery and consent callbacks. It is distinct from the 14-digit ABHA
     # number and must be retained after a verified M1 exchange.
-    abha_address: Mapped[str | None] = mapped_column(String(120), unique=True, nullable=True)
+    abha_address: Mapped[str | None] = mapped_column(String(120), nullable=True)
 
     # 0030 — ABHA linking token (B1). Encrypted same scheme as patient_identifiers.
     abha_linking_token_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)

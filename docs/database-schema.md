@@ -213,6 +213,7 @@ do not merge out of order.**
 | 0092 | abdm_care_context_immunization | ALTER abdm_care_contexts: hi_type CHECK adds ImmunizationRecord | One NRCeS ImmunizationRecord per recorded vaccine dose, a context with no visit. Downgrade refuses while any immunization context exists rather than withdrawing a possibly linked record. |
 | 0093 | abdm_hfr_registrations | abdm_hfr_registrations | What HealthDoc sent HFR for each facility it registered (M4), image content excluded, so an edit (HFR-064 to 114) reopens it: HFR returns no saved details. Purely additive. |
 | 0094 | abdm_invoice_record | ALTER abdm_care_contexts: hi_type CHECK adds Invoice; ALTER invoices: issued_at | An issued invoice is shared as an NRCeS InvoiceRecord, the eighth HI type. `issued_at` is its document date, set on issue and frozen by `trg_invoices_freeze` so a payment never moves it; invoices issued earlier stay NULL and are not offered. Downgrade refuses while any invoice context exists. |
+| 0095 | abha_unique_per_facility | ALTER patients: abha_number, abha_address | One ABHA per chart per facility, not per installation: each facility is its own HIP and one person may hold a linked chart at each. Downgrade refuses while an ABHA is linked at two facilities. |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -546,8 +547,8 @@ guardian_relationship varchar(50)
 mobile          varchar(20)                      -- contact only, NEVER identity
 address_line    text · village_town text · district text · state_code varchar(5) · pincode varchar(6)
 photo_file_id   UUID NULL                        -- MinIO ref via files (FK added 0019); photo mandatory per ADR 0001
-abha_number     varchar(17) UNIQUE NULL
-abha_address    varchar(120) NULL                  -- verified M2/M3 address, added by 0057
+abha_number     varchar(17) NULL                   -- UNIQUE (facility_id, abha_number) from 0095
+abha_address    varchar(120) NULL                  -- verified M2/M3 address, added by 0057; UNIQUE (facility_id, abha_address) from 0095
 abha_linking_token_encrypted bytea NULL          -- AES-256-GCM, added by 0030. NEVER plaintext
 abha_linking_key_version smallint NULL           -- added by 0030; which key encrypted the token
 abha_linked_at  timestamptz NULL                 -- added by 0030; when ABHA was linked to a care context
