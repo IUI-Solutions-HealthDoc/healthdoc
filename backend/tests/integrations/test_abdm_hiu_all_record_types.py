@@ -51,6 +51,7 @@ def test_the_hiu_vocabulary_is_the_eight_hi_types_and_wider_than_what_we_build()
 async def test_a_consent_request_may_name_all_eight_types(stub):  # noqa: F811
     now = datetime.now(UTC)
     await hiu_gw.request_consent(
+        service_id="SBXID_TEST_HIU",
         abha_address="ram@sbx",
         hi_types=sorted(EIGHT),
         date_from=now - timedelta(days=30),
@@ -66,6 +67,7 @@ async def test_a_type_outside_the_eight_is_refused_before_the_wire(stub, unknown
     now = datetime.now(UTC)
     with pytest.raises(ValueError, match="Unknown ABDM health-information type"):
         await hiu_gw.request_consent(
+        service_id="SBXID_TEST_HIU",
             abha_address="ram@sbx",
             hi_types=["ImmunizationRecord", unknown],
             date_from=now - timedelta(days=30),

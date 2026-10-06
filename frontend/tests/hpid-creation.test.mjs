@@ -87,15 +87,17 @@ test("HPR's own reason is shown when it refuses", async () => {
   assert.match(content(tree), /HPR is busy; try again/);
 });
 
-test("an Aadhaar that already has an HPID signs that professional in", async () => {
-  const d = panel({ checkHpidLink: async () => ({ authenticated: true, existing: true, signed_in: true,
-    hpr_id: "suprabha@hpr.abdm", hpr_id_number: "71-8847-0813-4805", kyc: KYC }) });
+test("an Aadhaar that already has an HPID is sent to HPR's own login", async () => {
+  // Live 5 Oct 2026: the token beside an existing HPID is not an HPR login;
+  // registration refused it. The professional signs in above instead.
+  const d = panel({ checkHpidLink: async () => ({ authenticated: true, existing: true, signed_in: false,
+    hpr_id: "asha.verma@hpr.abdm", hpr_id_number: "71-0000-0000-0001", kyc: KYC }) });
   let tree = await opened(d);
   await button(tree, "I have verified on NHA's page").props.onClick(); tree = await settle(d);
   assert.match(content(tree), /already has an HPID/);
-  assert.match(content(tree), /suprabha@hpr\.abdm/);
-  assert.match(content(tree), /signed in to HPR above, with their Aadhaar details/);
-  assert.equal(d.signedIn(), 1, "the HPR login panel is told to reload");
+  assert.match(content(tree), /asha\.verma@hpr\.abdm/);
+  assert.match(content(tree), /Sign in with it above/);
+  assert.equal(d.signedIn(), 0, "not signed in until HPR's own login");
 });
 
 test("the KYC is shown, the mobile verified, and the HPID created with HPR's ids", async () => {

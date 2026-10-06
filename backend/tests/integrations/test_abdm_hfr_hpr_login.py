@@ -87,7 +87,7 @@ async def test_aadhaar_otp_login_keeps_the_token_server_side_only(hpr):
     assert token not in verified.text
     assert fake.calls[0][2] == {"idType": "", "domainName": "", "authMethod": "AADHAAR_OTP", "hprId": "kumar682000@hpr.abdm"}
     assert fake.calls[1][2] == {"otp": "123456", "txnId": "txn-1"}
-    (sealed, ttl), = [v for k, v in redis.store.items() if k.startswith("hfr:hpr-token:")]
+    (sealed, ttl), = (v for k, v in redis.store.items() if k.startswith("hfr:hpr-token:"))
     assert token not in sealed and "kumar682000" not in sealed
     assert 0 < ttl <= 600
     state = await http.get("/abdm/hfr/hpr-login")
@@ -97,7 +97,7 @@ async def test_aadhaar_otp_login_keeps_the_token_server_side_only(hpr):
 async def test_a_long_lived_token_is_kept_for_thirty_minutes_at_most(hpr):
     fake, redis, http, _ = hpr
     await _otp_login(fake, http, _jwt(hprId="kumar682000@hpr.abdm", exp=int(time.time()) + 86400))
-    (_, ttl), = [v for k, v in redis.store.items() if k.startswith("hfr:hpr-token:")]
+    (_, ttl), = (v for k, v in redis.store.items() if k.startswith("hfr:hpr-token:"))
     assert ttl <= hpr_login.MAX_TOKEN_TTL
 
 

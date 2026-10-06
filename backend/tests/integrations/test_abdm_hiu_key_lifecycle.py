@@ -34,6 +34,7 @@ from app.integrations.abdm.hiu.models import (
 )
 from app.patients.models import Patient
 from app.users.models import Facility, User
+from tests.integrations.abdm_serving import serve
 
 NOW = datetime(2026, 8, 29, 12, 0, tzinfo=UTC)
 FACILITY = uuid.uuid4()
@@ -42,9 +43,7 @@ ACTOR = uuid.uuid4()
 
 @pytest.fixture
 async def hiu_db(db, monkeypatch):
-    from types import SimpleNamespace
 
-    from app.integrations.abdm.hiu import worker
 
     db.add(
         Facility(
@@ -72,9 +71,7 @@ async def hiu_db(db, monkeypatch):
         )
     )
     await db.flush()
-    monkeypatch.setattr(
-        worker, "get_settings", lambda: SimpleNamespace(abdm_hfr_facility_id="TEST-HFR")
-    )
+    serve(monkeypatch, "TEST-HFR")
     return db
 
 

@@ -18,6 +18,7 @@ from sqlalchemy import select, text
 from app.common.config import get_settings
 from app.common.db import SessionLocal
 from app.integrations.abdm import job_runner
+from app.integrations.abdm.facilities import served_hfr_ids
 from app.integrations.abdm.hip.linking import release_links_refused_before
 from app.integrations.abdm.hip.worker import abandon_exhausted_transfers
 from app.integrations.abdm.job_runner import run_once
@@ -28,15 +29,14 @@ from scripts.freeze_abdm_jobs import utc_timestamp
 
 async def check_scope(facility_id, service_id):
     settings = get_settings()
+    # One runner per facility: each is its own HIP/HIU, addressed by its HFR id,
+    # and the claim below takes only that facility's jobs.
     if (
         settings.abdm_gateway_base_url.rstrip("/") != "https://dev.abdm.gov.in"
         or settings.abdm_x_cm_id != "sbx"
-        or any(
-            value != service_id
-            for value in (settings.abdm_hfr_facility_id, settings.abdm_hip_id, settings.abdm_hiu_id)
-        )
+        or service_id not in served_hfr_ids()
     ):
-        raise ValueError("Sandbox gateway/CM and HFR/HIP/HIU must match the expected service")
+        raise ValueError("Sandbox gateway/CM required, and the service must be one this bridge serves")
     async with SessionLocal() as db:
         await db.execute(text("SET TRANSACTION READ ONLY"))
         facility = await db.get(Facility, facility_id)

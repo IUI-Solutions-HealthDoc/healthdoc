@@ -40,6 +40,7 @@ from typing import Any
 
 from app.common.config import get_settings
 from app.integrations.abdm.client import AbdmProtocolError, AbdmResponse, get_abdm_client
+from app.integrations.abdm.facilities import FacilityNotServed, require_served
 
 log = logging.getLogger("healthdoc.abdm")
 
@@ -83,14 +84,21 @@ class HipIdentityNotConfigured(RuntimeError):
     """
 
 
-def hip_id() -> str:
-    value = get_settings().abdm_hip_id
-    if not value or value == _PLACEHOLDER:
+def hip_id(service_id: str) -> str:
+    """The facility speaking: one of this bridge's services, never a default.
+
+    Every call names its facility (integrations/abdm/facilities.py). An id
+    this bridge does not serve is refused rather than sent, because a call
+    that claims another HIP's identity either fails confusingly or, worse,
+    succeeds against somebody else's registration.
+    """
+    try:
+        return require_served("hip", service_id)
+    except FacilityNotServed as exc:
         raise HipIdentityNotConfigured(
-            "ABDM_HIP_ID is not set. Register a service with "
-            "PUT /api/hiecm/gateway/v3/bridge-service and set the id it returns."
-        )
-    return value
+            "This facility is not an ABDM service of this bridge. Link its HFR id to the "
+            "bridge and list it in ABDM_HFR_FACILITY_ID or ABDM_ADDITIONAL_HFR_FACILITY_IDS."
+        ) from exc
 
 
 def _now_iso() -> str:
@@ -244,6 +252,7 @@ async def _post(
 
 async def generate_link_token(
     *,
+    service_id: str,
     abha_address: str,
     name: str,
     gender: str,
@@ -270,7 +279,7 @@ async def generate_link_token(
             "gender": gender,
             "yearOfBirth": year_of_birth,
         },
-        extra_headers={"X-HIP-ID": hip_id()},
+        extra_headers={"X-HIP-ID": hip_id(service_id)},
         request_id=request_id,
         expected_status=202,
     )
@@ -278,6 +287,7 @@ async def generate_link_token(
 
 async def link_care_contexts(
     *,
+    service_id: str,
     abha_address: str,
     link_token: str,
     display: str,
@@ -328,7 +338,7 @@ async def link_care_contexts(
             "abhaAddress": abha_address,
             "patient": patient_groups,
         },
-        extra_headers={"X-HIP-ID": hip_id(), "X-LINK-TOKEN": link_token},
+        extra_headers={"X-HIP-ID": hip_id(service_id), "X-LINK-TOKEN": link_token},
         request_id=request_id,
         expected_status=202,
     )
@@ -336,6 +346,7 @@ async def link_care_contexts(
 
 async def notify_care_context(
     *,
+    service_id: str,
     abha_address: str,
     care_context_reference: str,
     hi_types: Sequence[str],
@@ -360,10 +371,10 @@ async def notify_care_context(
                 },
                 "hiTypes": list(hi_types),
                 "date": _now_iso(),
-                "hip": {"id": hip_id()},
+                "hip": {"id": hip_id(service_id)},
             }
         },
-        extra_headers={"X-HIP-ID": hip_id()},
+        extra_headers={"X-HIP-ID": hip_id(service_id)},
         request_id=request_id,
     )
 
@@ -384,6 +395,7 @@ def deep_link_phone(mobile: str | None) -> str:
 
 async def notify_patient_sms(
     *,
+    service_id: str,
     mobile: str,
     hip_name: str,
     request_id: str | None = None,
@@ -403,7 +415,7 @@ async def notify_patient_sms(
             "timestamp": _now_iso(),
             "notification": {
                 "phoneNo": deep_link_phone(mobile),
-                "hip": {"name": hip_name, "id": hip_id()},
+                "hip": {"name": hip_name, "id": hip_id(service_id)},
             },
         },
         request_id=rid,
@@ -417,6 +429,7 @@ async def notify_patient_sms(
 
 async def respond_to_discovery(
     *,
+    service_id: str,
     transaction_id: str,
     gateway_request_id: str,
     abha_address: str,
@@ -463,13 +476,14 @@ async def respond_to_discovery(
         # X-HIP-ID is what identifies the sender. Both are sent: the gateway
         # ignores headers it does not use, and sending only the one the
         # collection shows would mean claiming to be an HIU.
-        extra_headers={"X-HIP-ID": hip_id()},
+        extra_headers={"X-HIP-ID": hip_id(service_id)},
         request_id=request_id,
     )
 
 
 async def respond_to_discovery_groups(
     *,
+    service_id: str,
     transaction_id: str,
     gateway_request_id: str,
     patient_groups: Sequence[Mapping[str, Any]],
@@ -488,13 +502,14 @@ async def respond_to_discovery_groups(
             "matchedBy": list(matched_by),
             "response": {"requestId": gateway_request_id},
         },
-        extra_headers={"X-HIP-ID": hip_id()},
+        extra_headers={"X-HIP-ID": hip_id(service_id)},
         request_id=request_id,
     )
 
 
 async def respond_to_link_init(
     *,
+    service_id: str,
     transaction_id: str,
     gateway_request_id: str,
     link_ref_number: str,
@@ -524,13 +539,14 @@ async def respond_to_link_init(
             },
             "response": {"requestId": gateway_request_id},
         },
-        extra_headers={"X-HIP-ID": hip_id()},
+        extra_headers={"X-HIP-ID": hip_id(service_id)},
         request_id=request_id,
     )
 
 
 async def respond_to_link_confirm_error(
     *,
+    service_id: str,
     gateway_request_id: str,
     code: str,
     message: str,
@@ -544,13 +560,14 @@ async def respond_to_link_confirm_error(
             "error": {"code": code, "message": message},
             "response": {"requestId": gateway_request_id},
         },
-        extra_headers={"X-HIP-ID": hip_id()},
+        extra_headers={"X-HIP-ID": hip_id(service_id)},
         request_id=request_id,
     )
 
 
 async def respond_to_link_confirm(
     *,
+    service_id: str,
     gateway_request_id: str,
     abha_address: str,
     display: str,
@@ -578,13 +595,14 @@ async def respond_to_link_confirm(
             ],
             "response": {"requestId": gateway_request_id},
         },
-        extra_headers={"X-HIP-ID": hip_id()},
+        extra_headers={"X-HIP-ID": hip_id(service_id)},
         request_id=request_id,
     )
 
 
 async def respond_to_link_confirm_groups(
     *,
+    service_id: str,
     gateway_request_id: str,
     patient_groups: Sequence[Mapping[str, Any]],
     request_id: str | None = None,
@@ -599,7 +617,7 @@ async def respond_to_link_confirm_groups(
             "patient": [_wire_group(group) for group in patient_groups],
             "response": {"requestId": gateway_request_id},
         },
-        extra_headers={"X-HIP-ID": hip_id()},
+        extra_headers={"X-HIP-ID": hip_id(service_id)},
         request_id=request_id,
     )
 
@@ -611,6 +629,7 @@ async def respond_to_link_confirm_groups(
 
 async def acknowledge_consent_notification(
     *,
+    service_id: str,
     consent_id: str,
     gateway_request_id: str,
     status: str = "OK",
@@ -628,13 +647,14 @@ async def acknowledge_consent_notification(
             "acknowledgement": {"status": status, "consentId": consent_id},
             "response": {"requestId": gateway_request_id},
         },
-        extra_headers={"X-HIP-ID": hip_id()},
+        extra_headers={"X-HIP-ID": hip_id(service_id)},
         request_id=request_id,
     )
 
 
 async def acknowledge_profile_share(
     *,
+    service_id: str,
     gateway_request_id: str,
     abha_address: str,
     context: str,
@@ -660,13 +680,14 @@ async def acknowledge_profile_share(
             },
             "response": {"requestId": gateway_request_id},
         },
-        extra_headers={"X-HIP-ID": hip_id()},
+        extra_headers={"X-HIP-ID": hip_id(service_id)},
         request_id=request_id,
     )
 
 
 async def acknowledge_hi_request(
     *,
+    service_id: str,
     transaction_id: str,
     gateway_request_id: str,
     session_status: str = "ACKNOWLEDGED",
@@ -689,13 +710,14 @@ async def acknowledge_hi_request(
             },
             "response": {"requestId": gateway_request_id},
         },
-        extra_headers={"X-HIP-ID": hip_id()},
+        extra_headers={"X-HIP-ID": hip_id(service_id)},
         request_id=request_id,
     )
 
 
 async def notify_hi_transfer(
     *,
+    service_id: str,
     consent_id: str,
     transaction_id: str,
     session_status: str,
@@ -727,14 +749,14 @@ async def notify_hi_transfer(
                 "consentId": consent_id,
                 "transactionId": transaction_id,
                 "doneAt": _now_iso(),
-                "notifier": {"type": "HIP", "id": hip_id()},
+                "notifier": {"type": "HIP", "id": hip_id(service_id)},
                 "statusNotification": {
                     "sessionStatus": session_status,
-                    "hipId": hip_id(),
+                    "hipId": hip_id(service_id),
                     "statusResponses": [dict(s) for s in status_responses],
                 },
             }
         },
-        extra_headers={"X-HIP-ID": hip_id()},
+        extra_headers={"X-HIP-ID": hip_id(service_id)},
         request_id=request_id,
     )
