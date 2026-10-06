@@ -571,33 +571,29 @@ def _unavailable(reason: str) -> HTTPException:
 async def _refuse_identity_clash(
     db: AsyncSession, patient: Patient, column, value: str, duplicate_code: str, label: str
 ) -> None:
-    """Refuse an ABHA number or address that another chart already holds.
+    """Refuse an ABHA number or address another chart at this facility holds.
 
-    Both columns are unique across the installation, so the link cannot succeed
-    either way. Inside this facility it is a duplicate chart the desk can
-    resolve. In another facility, saying "linked to another patient" would
-    confirm that another facility treats this person, which this desk has no
-    right to learn.
+    Both are unique per facility (0095): a second chart here is a duplicate the
+    desk resolves. A chart at another facility is no clash at all. Each
+    facility is its own HIP, and ABDM links one ABHA to every provider that
+    treats the person; whether another facility does is not this desk's to
+    learn, and this check never asks.
     """
-    clash_facility_id = (
+    clash = (
         await db.execute(
-            select(Patient.facility_id).where(column == value, Patient.id != patient.id)
+            select(Patient.id).where(
+                column == value,
+                Patient.id != patient.id,
+                Patient.facility_id == patient.facility_id,
+            )
         )
-    ).scalar_one_or_none()
-    if clash_facility_id == patient.facility_id:
+    ).first()
+    if clash is not None:
         raise HTTPException(
             409,
             {
                 "code": duplicate_code,
                 "message": f"This {label} is already linked to another patient",
-            },
-        )
-    if clash_facility_id is not None:
-        raise HTTPException(
-            409,
-            {
-                "code": "abha_link_unavailable",
-                "message": f"This {label} cannot be linked at this facility",
             },
         )
 
