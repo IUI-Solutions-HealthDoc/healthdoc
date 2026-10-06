@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admissions.models import Admission, Discharge
 from app.allergies.models import Allergy
+from app.billing.models import Invoice, InvoiceItem
 from app.common.config import get_settings
 from app.common.db import SessionLocal
 from app.immunization.models import ImmunizationRecord, VaccineCatalogue
@@ -33,7 +34,11 @@ from app.integrations.abdm.facilities import service_id_for
 from app.integrations.abdm.fhir.builder import build_clinical_bundle
 from app.integrations.abdm.hip import gateway as hip_gateway
 from app.integrations.abdm.hip import service as hip_service
-from app.integrations.abdm.hip.documents import DocumentUnavailable, resolve_context_document
+from app.integrations.abdm.hip.documents import (
+    DocumentSource,
+    DocumentUnavailable,
+    resolve_context_document,
+)
 from app.integrations.abdm.hip.models import (
     AbdmCareContext,
     AbdmHipConsentArtefact,
@@ -129,6 +134,77 @@ def _result_observations(test_name: str, result_data: dict[str, Any], result_id:
     return observations
 
 
+#: HealthDoc's visit types onto ndhm-invoice-types; anything else is "Others".
+_INVOICE_TYPE_BY_VISIT = {"opd": "03", "teleconsult": "03", "emergency": "03", "ipd": "02"}
+
+
+async def _invoice_facts(
+    db: AsyncSession,
+    context: AbdmCareContext,
+    source: DocumentSource,
+    *,
+    patient: Patient,
+    facility: Facility,
+) -> dict[str, Any]:
+    """An issued bill: its lines and totals, authored by the facility."""
+    invoice = await db.get(Invoice, source.source_id, populate_existing=True)
+    if invoice is None:
+        raise TransferError("Invoice is unavailable")
+    if not facility.hfr_facility_id:
+        raise TransferError("Facility has no HFR identifier")
+    lines = list(
+        (
+            await db.execute(
+                select(InvoiceItem)
+                .where(InvoiceItem.invoice_id == invoice.id)
+                .order_by(InvoiceItem.created_at, InvoiceItem.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not lines:
+        raise TransferError("Invoice has no charge lines")
+    visit_type = str(getattr(source.visit, "visit_type", "") or "").lower()
+    return {
+        "patient": {
+            "id": patient.id,
+            "name": patient.full_name,
+            "identifier": patient.uhid or patient.thid,
+            "abha_number": patient.abha_number,
+            "gender": patient.sex,
+            "birth_date": patient.dob,
+            "mobile": patient.mobile,
+        },
+        "practitioner": None,
+        "organization": {"id": facility.id, "name": facility.name, "hfr_id": facility.hfr_facility_id},
+        "encounter": None,
+        "authored_at": source.authored_at,
+        "care_context_reference": context.reference,
+        "document_label": context.display,
+        "invoice": {
+            "id": invoice.id,
+            "number": invoice.invoice_number,
+            "status": invoice.status,
+            "type_code": _INVOICE_TYPE_BY_VISIT.get(visit_type, "99"),
+            "issued_at": source.authored_at,
+            "discount_amount": invoice.discount_amount,
+            "scheme_adjustment": invoice.scheme_adjustment,
+            "net_amount": invoice.net_amount,
+            "lines": [
+                {
+                    "id": line.id,
+                    "category": line.charge_category,
+                    "description": line.description,
+                    "quantity": line.quantity,
+                    "amount": line.amount,
+                }
+                for line in lines
+            ],
+        },
+    }
+
+
 async def _clinical_facts(
     db: AsyncSession,
     context: AbdmCareContext,
@@ -145,6 +221,8 @@ async def _clinical_facts(
         raise TransferError(str(exc)) from exc
     visit, primary = source.visit, source.encounter
     encounters = [primary] if primary is not None else []
+    if source.kind == "invoice":
+        return await _invoice_facts(db, context, source, patient=patient, facility=facility)
     practitioner = await db.get(User, source.author_id)
     if practitioner is None:
         raise TransferError("Document author has no registration number")

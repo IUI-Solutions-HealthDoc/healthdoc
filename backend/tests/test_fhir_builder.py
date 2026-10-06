@@ -1,4 +1,5 @@
 from datetime import UTC, date, datetime
+from decimal import Decimal
 from xml.etree import ElementTree
 
 import pytest
@@ -12,10 +13,10 @@ from app.integrations.abdm.fhir.builder import (
 )
 
 
-def test_all_six_record_types_valid():
+def test_all_seven_record_types_valid():
     bundles = build_all("patient-123", "HPR-9999")
     assert set(bundles) == set(RECORD_TYPES)
-    assert len(RECORD_TYPES) == 6
+    assert len(RECORD_TYPES) == 7
     for rt, b in bundles.items():
         assert validate_min(b) == [], (rt, validate_min(b))
 
@@ -163,6 +164,8 @@ def test_document_label_survives_export_without_changing_the_profile_type(record
     facts = (
         {**_facts(), "encounter": None, "immunizations": [_dose()]}
         if record_type == "ImmunizationRecord"
+        else {**_facts(), "encounter": None, "practitioner": None, "invoice": _bill()}
+        if record_type == "Invoice"
         else {**_facts(), "care_plan": "Synthetic test content"}
     )
     original = build_clinical_bundle(record_type, **facts)["entry"][0]["resource"]
@@ -339,7 +342,9 @@ def test_an_immunization_record_carries_nothing_but_immunizations(extra):
         )
 
 
-@pytest.mark.parametrize("record_type", [t for t in RECORD_TYPES if t != "ImmunizationRecord"])
+@pytest.mark.parametrize(
+    "record_type", [t for t in RECORD_TYPES if t not in {"ImmunizationRecord", "Invoice"}]
+)
 def test_every_other_document_still_requires_an_encounter_and_refuses_doses(record_type):
     with pytest.raises(ValueError, match="requires an encounter"):
         build_clinical_bundle(
@@ -355,3 +360,48 @@ def test_the_minimum_check_still_demands_an_encounter_outside_immunization_recor
         entry for entry in bundle["entry"] if entry["resource"]["resourceType"] != "Encounter"
     ]
     assert validate_min(bundle) == ["bundle must contain a Encounter"]
+
+def _bill() -> dict:
+    return {
+        "id": "bill-1", "number": "INV-TEST-1", "status": "paid", "type_code": "03",
+        "issued_at": datetime(2026, 10, 5, 9, 0, tzinfo=UTC), "net_amount": Decimal("450.00"),
+        "discount_amount": Decimal("50.00"), "scheme_adjustment": Decimal("0"),
+        "lines": [
+            {"id": "l1", "category": "consultation", "description": "OPD consultation",
+             "quantity": Decimal("1"), "amount": Decimal("400.00")},
+            {"id": "l2", "category": "pharmacy", "description": "Paracetamol 500 mg",
+             "quantity": Decimal("10"), "amount": Decimal("100.00")},
+        ],
+    }
+
+
+def test_an_invoice_record_is_authored_by_the_facility_and_carries_only_the_bill():
+    bundle = build_clinical_bundle("Invoice", **{**_facts(), "encounter": None, "practitioner": None},
+                                   invoice=_bill())
+    assert validate_min(bundle) == []
+    kinds = [e["resource"]["resourceType"] for e in bundle["entry"]]
+    assert kinds == ["Composition", "Organization", "Patient", "Invoice", "ChargeItem", "ChargeItem"]
+    invoice = bundle["entry"][3]["resource"]
+    assert invoice["status"] == "balanced"
+    assert invoice["totalNet"] == invoice["totalGross"] == {"value": 450.0, "currency": "INR"}
+    assert invoice["totalPriceComponent"][0]["type"] == "discount"
+    assert invoice["totalPriceComponent"][0]["amount"]["value"] == 50.0
+    medicines = bundle["entry"][5]["resource"]
+    assert medicines["code"]["coding"][0]["code"] == "05" and medicines["quantity"] == {"value": 10.0}
+
+
+@pytest.mark.parametrize("status", ["draft", "cancelled"])
+def test_a_draft_or_cancelled_bill_is_never_built(status):
+    with pytest.raises(ValueError, match="not shared"):
+        build_clinical_bundle("Invoice", **{**_facts(), "encounter": None, "practitioner": None},
+                              invoice={**_bill(), "status": status})
+
+
+def test_an_invoice_carries_no_clinical_content_and_others_carry_no_invoice():
+    with pytest.raises(ValueError, match="invoice only"):
+        build_clinical_bundle("Invoice", **{**_facts(), "practitioner": None}, invoice=_bill(),
+                              care_plan="Synthetic")
+    with pytest.raises(ValueError, match="cannot carry an invoice"):
+        build_clinical_bundle("OPConsultation", **_facts(), invoice=_bill(), care_plan="Synthetic")
+    with pytest.raises(ValueError, match="requires a practitioner"):
+        build_clinical_bundle("OPConsultation", **{**_facts(), "practitioner": None}, care_plan="Synthetic")

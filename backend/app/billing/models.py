@@ -150,6 +150,11 @@ class Invoice(UUIDPk, Blame, Timestamps, Base):
     # saving no longer silently last-write-wins; a client can send back
     # the row_version it read and get a 409 if it's stale.
     row_version: Mapped[int] = mapped_column(nullable=False, server_default="1")
+    #: When the invoice left draft (0094). Its date as a document: shared to
+    #: ABHA as an InvoiceRecord, it must not move when a payment updates the
+    #: row. Frozen with the amounts by trg_invoices_freeze. NULL for invoices
+    #: issued before 0094, which are therefore not offered to ABHA.
+    issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         Index("ix_invoices_visit_id", "visit_id"),

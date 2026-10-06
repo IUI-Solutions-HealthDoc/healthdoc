@@ -212,6 +212,7 @@ do not merge out of order.**
 | 0091 | abdm_discovery_matches | abdm_discovery_matches | A PHR discovery matched by mobile and demographics (USER_INIT_LINK_603): transaction, asking ABHA address, chart and care contexts, kept until the link-init quotes them or they expire. |
 | 0092 | abdm_care_context_immunization | ALTER abdm_care_contexts: hi_type CHECK adds ImmunizationRecord | One NRCeS ImmunizationRecord per recorded vaccine dose, a context with no visit. Downgrade refuses while any immunization context exists rather than withdrawing a possibly linked record. |
 | 0093 | abdm_hfr_registrations | abdm_hfr_registrations | What HealthDoc sent HFR for each facility it registered (M4), image content excluded, so an edit (HFR-064 to 114) reopens it: HFR returns no saved details. Purely additive. |
+| 0094 | abdm_invoice_record | ALTER abdm_care_contexts: hi_type CHECK adds Invoice; ALTER invoices: issued_at | An issued invoice is shared as an NRCeS InvoiceRecord, the eighth HI type. `issued_at` is its document date, set on issue and frozen by `trg_invoices_freeze` so a payment never moves it; invoices issued earlier stay NULL and are not offered. Downgrade refuses while any invoice context exists. |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -1075,7 +1076,7 @@ adjustment_type varchar(50) NOT NULL            -- 0024. NOT mapped by the ORM �
 line; departments append lines as chargeable work completes. CRITICAL sync sensitivity.
 An **immutability trigger** (`trg_invoices_freeze`) applies once `status != 'draft'`:
 **frozen columns** = `invoice_number, visit_id, patient_id, facility_id, gross_amount,
-discount_amount, scheme_adjustment, net_amount, scheme_code`.
+discount_amount, scheme_adjustment, net_amount, scheme_code, issued_at` (`issued_at` from 0094).
 **Always mutable** = `status, updated_at, updated_by` — payment posting MUST be able to
 move `issued → partially_paid → paid`; the trigger checks column changes, not row
 updates. Corrections happen by `cancelled` + new invoice, never edits. B7: unit-test
@@ -1092,6 +1093,7 @@ scheme_adjustment numeric(12,2) NOT NULL DEFAULT 0
 net_amount numeric(12,2) NOT NULL DEFAULT 0 CHECK (>= 0)
 scheme_code varchar(30) NULL                     -- PM-JAY etc.; full waiver ⇒ status 'waived'
 sensitivity varchar(30) NOT NULL DEFAULT 'critical'
+issued_at timestamptz NULL                       -- 0094: when it left draft; its ABHA document date
 INDEX ix_invoices_visit_id (visit_id)
 ```
 
@@ -2165,18 +2167,18 @@ checksum, context identity and page count. A crash after remote acceptance but
 before local acknowledgement can replay a page: the receiver must deduplicate
 transaction/page/entry. The payload is excluded from the append-only audit log.
 
-**abdm_care_contexts** (0055, 0062, 0092) — one finalized document that can be offered to an ABHA
+**abdm_care_contexts** (0055, 0062, 0092, 0094) — one finalized document that can be offered to an ABHA
 ```
 patient_id UUID NOT NULL → patients · visit_id UUID → visits (NULL for an immunization)
 reference varchar(100) NOT NULL                   -- quoted back by ABDM forever; never recomputed
 display varchar(200) NOT NULL
-hi_type varchar(50) NOT NULL                      -- OPConsultation|Prescription|DiagnosticReport|DischargeSummary|WellnessRecord|ImmunizationRecord (narrowed in 0059, ImmunizationRecord back in 0092)
+hi_type varchar(50) NOT NULL                      -- OPConsultation|Prescription|DiagnosticReport|DischargeSummary|WellnessRecord|ImmunizationRecord|Invoice (narrowed in 0059, ImmunizationRecord back in 0092, Invoice in 0094)
 document_at timestamptz                          -- finalized source time; NULL legacy rows cannot be shared
 facility_id UUID NOT NULL → facilities
 UNIQUE (patient_id, reference)                    -- two facilities may both hold a context for one person
 ```
 References are canonical `encounter/UUID`, `prescription/UUID`, `lab-result/UUID`,
-`radiology-report/UUID`, `discharge/UUID` or `wellness/UUID`. The source must
+`radiology-report/UUID`, `discharge/UUID`, `wellness/UUID`, `immunization/UUID` or `invoice/UUID`. The source must
 resolve to this patient/facility/visit and its finalized date must match
 `document_at`. Migration 0062 does not infer document identities or dates from
 old visit-level contexts. Discovery and transfer exclude unresolved records.

@@ -1110,9 +1110,15 @@ async def issue_invoice(
         )
 
     invoice.status = "issued"
+    invoice.issued_at = datetime.now(UTC)
     invoice.updated_by = updated_by
     invoice.row_version = invoice.row_version + 1
     await db.flush()
+    from app.integrations.abdm.hip.publisher import publish_invoice
+
+    # Offered to the patient's ABHA as an InvoiceRecord, like a closed
+    # consultation; nothing is sent until the patient links it.
+    await publish_invoice(db, invoice, updated_by)
     return invoice
 
 

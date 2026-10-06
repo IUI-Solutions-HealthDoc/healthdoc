@@ -44,9 +44,10 @@ from app.integrations.abdm.hiu.requester import validate_requester
 
 log = logging.getLogger("healthdoc.abdm")
 
-#: What an HIU may ASK for: all seven HI types ABDM's M3 cases name
+#: What an HIU may ASK for: the seven HI types ABDM's M3 cases name
 #: (HIU_FLOW_102: "all or any of the 7 Health Info types"; 111 is
-#: ImmunizationRecord, 112 HealthDocumentRecord). Deliberately not the HIP
+#: ImmunizationRecord, 112 HealthDocumentRecord), and Invoice, the eighth
+#: (billing) type of NHA's November 2025 HMIS FAQ. Deliberately not the HIP
 #: vocabulary in hip/gateway.py: that is what HealthDoc can BUILD, while
 #: another HIP's immunization or scanned-document records must still be
 #: requestable and viewable here.
@@ -59,6 +60,7 @@ REQUESTABLE_HI_TYPES: frozenset[str] = frozenset(
         "ImmunizationRecord",
         "HealthDocumentRecord",
         "WellnessRecord",
+        "Invoice",
     }
 )
 
