@@ -69,6 +69,32 @@ def _validate_pdf(value: dict) -> None:
             raise RecordRefused("The PDF attachment hash does not match")
 
 
+#: The one non-PDF attachment accepted: the PACS study reference an imaging
+#: DiagnosticReport carries in place of DICOM bytes (fhir/builder.py, the
+#: HealthDoc HIP's own shape). It is data, never rendered as a document.
+PACS_REFERENCE_KEYS = frozenset({"pacsStudyUid", "modality", "report"})
+MAX_PACS_REFERENCE_BYTES = 16 * 1024
+
+
+def _validate_attachment(value: dict) -> None:
+    if value.get("contentType") != "application/json":
+        _validate_pdf(value)
+        return
+    encoded = value.get("data")
+    if not isinstance(encoded, str) or len(encoded) > 4 * ((MAX_PACS_REFERENCE_BYTES + 2) // 3):
+        raise RecordRefused("The study reference attachment exceeds the size limit")
+    try:
+        reference = json.loads(base64.b64decode(encoded, validate=True))
+    except ValueError as exc:
+        raise RecordRefused("The study reference attachment is not valid JSON") from exc
+    if (
+        not isinstance(reference, dict)
+        or set(reference) != PACS_REFERENCE_KEYS
+        or not all(isinstance(v, str) and v.strip() for v in reference.values())
+    ):
+        raise RecordRefused("Only embedded PDF attachments or a PACS study reference are supported")
+
+
 def _reachable_resources(composition: dict, refs: dict) -> set[int]:
     """Local reference traversal only. No URLs are fetched, ever."""
     stack, seen = [composition], set()
@@ -284,7 +310,7 @@ def validate_document(bundle: dict, grant: Grant, reference: str | None) -> tupl
             if "contentType" in node and "data" in node:
                 if id(node) not in reachable:
                     raise RecordRefused("An attachment is not referenced by the consented document")
-                _validate_pdf(node)
+                _validate_attachment(node)
             for name, value in node.items():
                 if name in {"subject", "patient"}:
                     if not is_patient_reference(value):

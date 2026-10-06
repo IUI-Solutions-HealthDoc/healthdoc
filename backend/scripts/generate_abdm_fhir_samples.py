@@ -101,6 +101,14 @@ def _samples() -> dict[str, dict]:
             **common,
             care_plan="Patient discharged with follow-up instructions.",
         ),
+        "ImmunizationRecord": build_clinical_bundle(
+            "ImmunizationRecord",
+            **{**common, "encounter": None},
+            immunizations=[{
+                "id": "validation-dose", "vaccine": "Validation vaccine", "occurred_at": common["authored_at"],
+                "dose_number": 1, "target_disease": "Validation disease", "lot_number": "VALIDATION-LOT",
+            }],
+        ),
         "WellnessRecord": build_clinical_bundle(
             "WellnessRecord",
             **common,
