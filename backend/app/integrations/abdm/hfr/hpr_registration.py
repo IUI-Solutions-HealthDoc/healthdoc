@@ -37,6 +37,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.common.config import get_settings
+
 SALUTATIONS = {1: "Dr.", 2: "Mr.", 3: "Ms.", 0: "Do not specify"}
 CATEGORIES = {1: "doctor", 2: "nurse", 6: "pharmacist"}
 #: Registration's categoryId for doctors: the system of medicine.
@@ -260,6 +262,10 @@ def practitioner(form: Professional, kyc: dict, iso: dict[str, str]) -> dict:
     nurse = form.category == 2
     government = work.working and work.status in ("GOVERNMENT", "BOTH")
     return {
+        # Both in NHA's register-professional-new example and absent before;
+        # HPR answered a generic 500 without them (live 6 Oct 2026).
+        "apiClientId": get_settings().abdm_client_id,
+        "specialities": [],
         "healthProfessionalType": CATEGORIES[form.category],
         "profilePhoto": kyc.get("photo", ""),
         "officialMobileCode": "+91",
