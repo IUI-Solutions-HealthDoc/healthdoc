@@ -65,3 +65,15 @@ test("the chosen facility gets its HFR id, first admin and another facility's se
   assert.deepEqual(d.calls[2], ["copy", "f-2", "f-1"]);
   assert.match(content(tree), /Copied 42 departments, 3 rooms, 1 wards, 2 stores and 23 tariff rows/);
 });
+
+test("an email-style username is refused before the server, with the reason shown", async () => {
+  const d = panel();
+  let tree = d.render();
+  type(tree, "Facility to set up", "f-2"); tree = await settle(d);
+  type(tree, "Admin username", "dev2@example.org"); type(tree, "Admin full name", "Second Admin");
+  type(tree, "Temporary password", "Synthetic#Pass1"); tree = await settle(d);
+  assert.equal(button(tree, "Create first admin").props.disabled, true);
+  assert.match(content(tree), /not an email/);
+  type(tree, "Admin username", "dev2.admin"); tree = await settle(d);
+  assert.equal(button(tree, "Create first admin").props.disabled, false);
+});
