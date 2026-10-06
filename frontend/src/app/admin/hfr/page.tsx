@@ -20,7 +20,8 @@ export default function Page() {
       <HfrFacilityRegistry />
       <HprLoginPanel reloadKey={hprReload} onChange={(session) => setSignedIn(session.logged_in)} />
       <HpidCreation onSignedIn={() => setHprReload((n) => n + 1)} />
-      <HprProfessionalRegistration signedIn={signedIn} />
+      {/* Remounted too: an Aadhaar check can give an open login its KYC, which the form reads on mount. */}
+      <HprProfessionalRegistration key={hprReload} signedIn={signedIn} />
       <HfrRegistration signedIn={signedIn} />
     </div>
   );

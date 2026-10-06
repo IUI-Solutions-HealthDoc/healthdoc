@@ -205,6 +205,10 @@ class Professional(BaseModel):
     communication_address: CommunicationAddress | None = None
     #: officialMobile is mandatory; used when the KYC carried no unmasked mobile.
     official_mobile: str = Field(default="", pattern=r"^$|^[6-9]\d{9}$")
+    #: officialEmail is mandatory too (HPR, live 6 Oct 2026: "officialEmail is
+    #: mandatory"); used when the KYC carried no email, as Aadhaar KYC often does not.
+    official_email: str = Field(default="", max_length=120,
+                                pattern=r"^$|^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
     public_mobile: str = Field(default="", pattern=r"^$|^[6-9]\d{9}$")
     public_email: str = Field(default="", max_length=120,
                               pattern=r"^$|^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
@@ -249,6 +253,9 @@ def practitioner(form: Professional, kyc: dict, iso: dict[str, str]) -> dict:
     official_mobile = kyc.get("mobile") or form.official_mobile
     if not official_mobile:
         raise HprKycMissing("Give the professional's official mobile number")
+    official_email = kyc.get("email") or form.official_email
+    if not official_email:
+        raise HprKycMissing("Give the professional's official email")
     reg, comm, work = form.registration, form.communication_address, form.work
     nurse = form.category == 2
     government = work.working and work.status in ("GOVERNMENT", "BOTH")
@@ -258,7 +265,7 @@ def practitioner(form: Professional, kyc: dict, iso: dict[str, str]) -> dict:
         "officialMobileCode": "+91",
         "officialMobile": official_mobile,
         "officialMobileStatus": "",
-        "officialEmail": kyc.get("email", ""),
+        "officialEmail": official_email,
         "officialEmailStatus": "",
         "visibleProfilePicture": _flag(form.show_photo),
         "profileVisibleToPublic": _flag(form.public_profile),

@@ -151,7 +151,7 @@ function RegistrationForm({ signedIn }: { signedIn: boolean }) {
   const [person, setPerson] = useState({ salutation: "", category: "", subcategory: "", system: "", nationality: "356",
     father_name: "", mother_name: "", spouse_name: "", languages: [] as string[] });
   const [comm, setComm] = useState({ same: true, name: "", address: "", state: "", district: "", sub_district: "", city: "", pincode: "" });
-  const [contact, setContact] = useState({ official_mobile: "", public_mobile: "", public_email: "", landline: "", landline_code: "" });
+  const [contact, setContact] = useState({ official_mobile: "", official_email: "", public_mobile: "", public_email: "", landline: "", landline_code: "" });
   const [reg, setReg] = useState({ council: "", number: "", registered_on: "", certificate: null as HprDocument | null,
     renewable: false, renewal_due: "", name_differs: false, name_change_proof: null as HprDocument | null });
   const [quals, setQuals] = useState<QualificationDraft[]>([emptyQualification()]);
@@ -209,6 +209,8 @@ function RegistrationForm({ signedIn }: { signedIn: boolean }) {
     && Number(q.year) <= new Date().getFullYear() && q.certificate && (!q.name_differs || q.name_change_proof));
   const valid = !!person.salutation && !!person.category && !!person.subcategory && !!systemId && person.languages.length > 0
     && (!!profile?.mobile_hint || /^[6-9]\d{9}$/.test(contact.official_mobile))
+    // HPR requires an official email; Aadhaar KYC often has none (live 6 Oct 2026).
+    && (!!profile?.email || /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(contact.official_email))
     && [person.father_name, person.mother_name, person.spouse_name].every((n) => n === "" || NAME.test(n))
     && (comm.same || (NAME.test(comm.name) && comm.address.trim() && comm.state && comm.district && PIN.test(comm.pincode)))
     && !!reg.council && REG_NUMBER.test(reg.number) && !!reg.registered_on && reg.registered_on <= today() && !!reg.certificate
@@ -356,6 +358,11 @@ function RegistrationForm({ signedIn }: { signedIn: boolean }) {
           <Field name="official_mobile" label="Official mobile (required by HPR)" value={contact.official_mobile}
             valid={/^[6-9]\d{9}$/.test(contact.official_mobile)} inputMode="tel" maxLength={10}
             onChange={(v) => edit(() => setContact({ ...contact, official_mobile: v.replace(/\D/g, "") }))} />
+        ) : null}
+        {!profile.email ? (
+          <Field name="official_email" label="Official email (required by HPR)" value={contact.official_email} inputMode="email"
+            valid={/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(contact.official_email)}
+            onChange={(v) => edit(() => setContact((c) => ({ ...c, official_email: v.trim() })))} />
         ) : null}
         <Field name="public_mobile" label="Public mobile (optional)" value={contact.public_mobile} valid={/^[6-9]\d{9}$/.test(contact.public_mobile)}
           inputMode="tel" maxLength={10} onChange={(v) => edit(() => setContact({ ...contact, public_mobile: v.replace(/\D/g, "") }))} />

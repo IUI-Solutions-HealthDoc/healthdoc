@@ -116,7 +116,7 @@ export interface HprProfessionalForm {
   salutation: number; category: number; subcategory: number; nationality: string;
   father_name: string; mother_name: string; spouse_name: string; languages: number[];
   communication_address: { name: string; address: string; country: string; state: string; district: string; sub_district: string; city: string; pincode: string } | null;
-  official_mobile: string; public_mobile: string; public_email: string; landline: string; landline_code: string;
+  official_mobile: string; official_email: string; public_mobile: string; public_email: string; landline: string; landline_code: string;
   registration: {
     council: number; number: string; registered_on: string; certificate: HprDocument; renewable: boolean;
     renewal_due: string | null; name_differs: boolean; name_change_proof: HprDocument | null; qualifications: HprQualification[];

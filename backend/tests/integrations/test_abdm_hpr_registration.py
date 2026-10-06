@@ -131,6 +131,20 @@ async def test_the_profile_shows_aadhaars_details_without_the_full_mobile(desk):
     assert all(c[1] != "/v1/account/information" for c in desk["fake"].calls)
 
 
+async def test_a_kyc_without_email_needs_the_official_email_from_the_form(desk):
+    """Live 6 Oct 2026, HPR: "officialEmail is mandatory". Aadhaar KYC often
+    carries no email; the form supplies it, as it does a missing mobile."""
+    await _sign_in(desk, kyc={**KYC, "email": ""})
+    desk["fake"].answers[REGISTER] = {"referenceNumber": "REF2", "status": "SUBMITTED", "message": "Registered"}
+    refused = await desk["http"].post("/abdm/hpr/professional", json=_form())
+    assert refused.status_code == 409, refused.text
+    assert refused.json()["detail"]["message"] == "Give the professional's official email"
+    assert all(c[1] != REGISTER for c in desk["fake"].calls), "never sent without an official email"
+    sent = await desk["http"].post("/abdm/hpr/professional", json=_form(official_email="asha.official@example.org"))
+    assert sent.status_code == 200, sent.text
+    assert desk["fake"].sent(REGISTER)[2]["practitioner"]["officialEmail"] == "asha.official@example.org"
+
+
 async def test_registration_follows_nhas_document(desk):
     """HPR-018/027-029/037: token in the body, KYC from the login, NHA's codes."""
     token = await _sign_in(desk)
