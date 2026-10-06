@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { getUserFacingError } from "@/lib/api";
+import { ApiError, getUserFacingError } from "@/lib/api";
 
 import {
   copyPlatformFacilitySetup,
@@ -16,6 +16,24 @@ const input = "w-full rounded-md border border-border px-3 py-2 text-sm";
 const primary = "rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50";
 const HFR_ID = /^IN\d{10}$/;
 const CODE = /^[A-Za-z0-9_]{1,20}$/;
+// The server's own rules (users/schemas.StaffUsername, EmailStr): an email-style
+// username was refused with a bare 422 that the panel could not explain (6 Oct 2026).
+const USERNAME = /^[A-Za-z0-9._-]{3,100}$/;
+const EMAIL = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+
+/** A 422's field-by-field reasons, so the superadmin sees what to change. */
+function said(reason: unknown, fallback: string): string {
+  if (reason instanceof ApiError && reason.code === 422) {
+    const detail = (reason.payload as { detail?: unknown } | undefined)?.detail;
+    if (Array.isArray(detail)) {
+      const parts = detail
+        .map((d: { loc?: unknown[]; msg?: unknown }) => `${(d.loc ?? []).slice(-1).join("")}: ${String(d.msg ?? "")}`)
+        .filter((text) => text.length > 2);
+      if (parts.length) return parts.join("; ");
+    }
+  }
+  return getUserFacingError(reason, fallback);
+}
 
 /**
  * Bring a facility into this deployment: create it, give it its first admin,
@@ -46,7 +64,7 @@ export function FacilityOnboarding({ facilities, onChanged }: {
       setNotice(await action());
       onChanged();
     } catch (reason) {
-      setError(getUserFacingError(reason, fallback));
+      setError(said(reason, fallback));
     } finally {
       setBusy(false);
     }
@@ -54,7 +72,8 @@ export function FacilityOnboarding({ facilities, onChanged }: {
 
   const canCreate = CODE.test(form.code) && form.name.trim() && /^[A-Z]{2,5}$/.test(form.state_code)
     && (!form.hfr_facility_id || HFR_ID.test(form.hfr_facility_id));
-  const canAdmin = admin.username.length >= 3 && admin.full_name.trim() && admin.temporary_password.length >= 8;
+  const canAdmin = USERNAME.test(admin.username) && admin.full_name.trim() && admin.temporary_password.length >= 8
+    && (admin.email === "" || EMAIL.test(admin.email));
 
   return (
     <section className="surface-card space-y-5 p-5" aria-label="Onboard a facility">
@@ -118,8 +137,14 @@ export function FacilityOnboarding({ facilities, onChanged }: {
           </div>
 
           <div className="grid gap-3 sm:grid-cols-4">
-            <input aria-label="Admin username" placeholder="Admin username" className={input} value={admin.username}
-              onChange={(e) => setAdmin((a) => ({ ...a, username: e.target.value.trim() }))} />
+            <div className="space-y-1">
+              <input aria-label="Admin username" placeholder="Admin username" className={input} value={admin.username}
+                aria-invalid={admin.username !== "" && !USERNAME.test(admin.username)}
+                onChange={(e) => setAdmin((a) => ({ ...a, username: e.target.value.trim() }))} />
+              {admin.username !== "" && !USERNAME.test(admin.username) ? (
+                <p role="alert" className="text-xs text-danger">Letters, digits, dot, underscore or hyphen only (e.g. dev2.admin), not an email.</p>
+              ) : null}
+            </div>
             <input aria-label="Admin full name" placeholder="Full name" className={input} value={admin.full_name}
               onChange={(e) => setAdmin((a) => ({ ...a, full_name: e.target.value }))} />
             <input aria-label="Admin email" placeholder="Email (optional)" className={input} value={admin.email}
