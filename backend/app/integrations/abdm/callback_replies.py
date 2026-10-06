@@ -17,10 +17,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.db import SessionLocal
 from app.common.security import encrypt_pii
+from app.integrations.abdm.facilities import FacilityNotServed, service_id_for
 from app.integrations.abdm.hip import gateway as hip_gateway
 from app.integrations.abdm.hiu import gateway as hiu_gateway
 from app.integrations.abdm.hiu.models import AbdmHiuConsentArtefact
-from app.integrations.abdm.hiu.worker import _require_configured_facility
 from app.integrations.abdm.jobs import AbdmCallbackReply, AbdmJob, enqueue
 
 M2_REPLY_KINDS = frozenset({"hip_discover", "hip_link_init", "hip_link_reject", "hip_profile"})
@@ -104,10 +104,16 @@ async def schedule(
 
 async def dispatch(job: AbdmJob) -> None:
     async with SessionLocal() as db:
-        await _require_configured_facility(db, job)
         reply = await db.get(AbdmCallbackReply, job.target_id)
         if reply is None or reply.facility_id != job.facility_id:
             raise ValueError("Callback reply unavailable")
+        # Acknowledged as the facility NHA addressed, in the role it was addressed in.
+        try:
+            service_id = await service_id_for(
+                db, job.facility_id, "hiu" if reply.kind == "hiu_consent" else "hip"
+            )
+        except FacilityNotServed as exc:
+            raise ValueError("Facility is not configured for this bridge") from exc
         if reply.kind in M2_REPLY_KINDS:
             from app.integrations.abdm.m2_replies import dispatch as dispatch_m2
 
@@ -129,6 +135,7 @@ async def dispatch(job: AbdmJob) -> None:
                 raise ValueError("Confirmed link selection unavailable")
             patient, contexts = await _link_patient_contexts(db, link)
             await hip_gateway.respond_to_link_confirm_groups(
+                service_id=service_id,
                 gateway_request_id=reply.gateway_request_id,
                 patient_groups=_groups(patient, contexts),
                 request_id=str(job.id),
@@ -140,6 +147,7 @@ async def dispatch(job: AbdmJob) -> None:
             request_id = str(uuid.uuid5(job.id, subject))
             if reply.kind == "hip_request":
                 await hip_gateway.acknowledge_hi_request(
+                    service_id=service_id,
                     transaction_id=subject,
                     gateway_request_id=reply.gateway_request_id,
                     request_id=request_id,
@@ -147,6 +155,7 @@ async def dispatch(job: AbdmJob) -> None:
             else:
                 gateway = hip_gateway if reply.kind == "hip_consent" else hiu_gateway
                 await gateway.acknowledge_consent_notification(
+                    service_id=service_id,
                     consent_id=subject,
                     gateway_request_id=reply.gateway_request_id,
                     request_id=request_id,

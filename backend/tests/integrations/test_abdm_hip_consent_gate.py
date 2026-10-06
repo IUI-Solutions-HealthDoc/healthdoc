@@ -15,6 +15,7 @@ from sqlalchemy import text
 
 from app.integrations.abdm.hip import service
 from app.integrations.abdm.hip.models import AbdmHipConsentArtefact
+from tests.integrations.abdm_serving import serve
 
 NOW = datetime(2026, 8, 29, 12, 0, tzinfo=UTC)
 FACILITY = uuid.uuid4()
@@ -204,9 +205,12 @@ async def test_an_unrecognised_status_is_refused(hip_db):
 
 
 @pytest.fixture
-def hip_client(hip_db):
-    """TestClient with the callback gate opened and the fixture session bound."""
+def hip_client(hip_db, monkeypatch):
+    """TestClient with the callback gate opened, the fixture session bound and
+    HFR-1 served by the bridge."""
     from fastapi.testclient import TestClient
+
+    serve(monkeypatch, "HFR-1")
 
     from app.common.db import get_db
     from app.integrations.abdm.callback_auth import verify_callback

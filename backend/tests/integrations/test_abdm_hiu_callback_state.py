@@ -21,6 +21,7 @@ from app.integrations.abdm.contracts_v3 import (
 from app.integrations.abdm.hiu import service, worker
 from app.integrations.abdm.hiu.models import AbdmConsentRequest
 from app.integrations.abdm.jobs import AbdmJob
+from tests.integrations.abdm_serving import serve
 from tests.integrations.test_abdm_hiu_key_lifecycle import (
     ACTOR,
     FACILITY,
@@ -36,16 +37,13 @@ hiu_db = hiu_fixture
 
 @pytest.mark.parametrize("kind", ["hiu_consent", "hiu_request", "hiu_notify"])
 async def test_outbound_job_cannot_use_another_facilitys_bridge(hiu_db, monkeypatch, kind):
-    from types import SimpleNamespace
 
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
     monkeypatch.setattr(
         worker, "SessionLocal", async_sessionmaker(hiu_db.bind, expire_on_commit=False)
     )
-    monkeypatch.setattr(
-        worker, "get_settings", lambda: SimpleNamespace(abdm_hfr_facility_id="OTHER-HFR")
-    )
+    serve(monkeypatch, "OTHER-HFR")
     calls = [AsyncMock(), AsyncMock(), AsyncMock()]
     for name, call in zip(
         ("request_consent", "request_health_information", "notify_hi_receipt"), calls, strict=True
@@ -372,7 +370,6 @@ async def test_on_init_asks_for_the_status_a_decision_may_already_have(hiu_db, c
 
 
 async def test_the_consent_job_polls_status_once_the_id_is_known(hiu_db, callback_case, monkeypatch):
-    from types import SimpleNamespace
 
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -380,7 +377,7 @@ async def test_the_consent_job_polls_status_once_the_id_is_known(hiu_db, callbac
     request.consent_request_id = remote = str(uuid.uuid4())
     await hiu_db.commit()
     monkeypatch.setattr(worker, "SessionLocal", async_sessionmaker(hiu_db.bind, expire_on_commit=False))
-    monkeypatch.setattr(worker, "get_settings", lambda: SimpleNamespace(abdm_hfr_facility_id="TEST-HFR"))
+    serve(monkeypatch, "TEST-HFR")
     status, consent = AsyncMock(), AsyncMock()
     monkeypatch.setattr(worker.gateway, "check_consent_request_status", status)
     monkeypatch.setattr(worker.gateway, "request_consent", consent)

@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.security import decrypt_pii, encrypt_pii
+from app.integrations.abdm.facilities import service_id_for
 from app.integrations.abdm.hip import gateway
 from app.integrations.abdm.hip.documents import DocumentUnavailable, resolve_context_document
 from app.integrations.abdm.hip.models import AbdmCareContext, AbdmCareContextLink
@@ -189,6 +190,7 @@ async def send_link(db: AsyncSession, link: AbdmCareContextLink) -> None:
         else {"groups": groups}
     )
     await gateway.link_care_contexts(
+        service_id=await service_id_for(db, link.facility_id, "hip"),
         abha_address=link.abha_address,
         link_token=decrypt_pii(link.link_token_encrypted, associated_data=token_aad(link)),
         display=patient.full_name,

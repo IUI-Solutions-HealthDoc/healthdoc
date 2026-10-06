@@ -40,6 +40,7 @@ from app.common.idempotency import (
 )
 from app.integrations.abdm.callback_auth import verify_callback
 from app.integrations.abdm.client import AbdmError
+from app.integrations.abdm.facilities import facility_for_service_id
 from app.integrations.abdm.hip import gateway, service
 from app.integrations.abdm.hip.documents import (
     DocumentUnavailable,
@@ -123,9 +124,8 @@ def _refusal(exc: service.HipError, status: int = 409) -> HTTPException:
 
 
 async def _facility_for_hfr_id(db: AsyncSession, hfr_id: str) -> uuid.UUID:
-    facility = (
-        await db.execute(select(Facility).where(Facility.hfr_facility_id == hfr_id))
-    ).scalar_one_or_none()
+    # Only a facility this bridge serves: an HFR id on a row is not a link at NHA.
+    facility = await facility_for_service_id(db, hfr_id, "hip")
     if facility is None:
         # 404 rather than 403, the same rule the rest of this codebase follows
         # for a record that is not yours: a 403 would confirm which HFR ids
@@ -337,7 +337,9 @@ async def notify_care_context(
         )
 
     try:
+        facility = await db.get(Facility, context.facility_id)
         request_id, _ = await gateway.notify_care_context(
+            service_id=facility.hfr_facility_id if facility else "",
             abha_address=link.abha_address,
             care_context_reference=context.reference,
             hi_types=[context.hi_type],
@@ -624,6 +626,7 @@ async def consent_notify(
         await _acknowledge(
             "consent notification",
             gateway.acknowledge_consent_notification(
+                service_id=payload.hip_id,
                 consent_id=payload.consent_artefact_id,
                 gateway_request_id=payload.gateway_request_id,
             ),
@@ -747,6 +750,7 @@ async def hi_request(
         await _acknowledge(
             "health-information request",
             gateway.acknowledge_hi_request(
+                service_id=payload.hip_id,
                 transaction_id=payload.transaction_id,
                 gateway_request_id=payload.gateway_request_id,
             ),

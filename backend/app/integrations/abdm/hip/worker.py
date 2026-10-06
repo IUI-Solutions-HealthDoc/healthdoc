@@ -29,6 +29,7 @@ from app.common.config import get_settings
 from app.common.db import SessionLocal
 from app.immunization.models import ImmunizationRecord, VaccineCatalogue
 from app.integrations.abdm.client import safe_rejection_message
+from app.integrations.abdm.facilities import service_id_for
 from app.integrations.abdm.fhir.builder import build_clinical_bundle
 from app.integrations.abdm.hip import gateway as hip_gateway
 from app.integrations.abdm.hip import service as hip_service
@@ -554,6 +555,7 @@ def _push_refusal(response: httpx.Response) -> str:
 async def _notify_gateway(
     row: AbdmHipHealthInformationRequest,
     *,
+    service_id: str,
     session_status: str,
     statuses: list[dict[str, str]],
 ) -> None:
@@ -561,6 +563,7 @@ async def _notify_gateway(
     for attempt in range(_MAX_ATTEMPTS):
         try:
             await hip_gateway.notify_hi_transfer(
+                service_id=service_id,
                 consent_id=row.consent_artefact_id,
                 transaction_id=row.transaction_id,
                 session_status=session_status,
@@ -853,6 +856,7 @@ async def notify_transaction(request_id: uuid.UUID) -> None:
             ]
         await _notify_gateway(
             row,
+            service_id=await service_id_for(db, row.facility_id, "hip"),
             session_status="TRANSFERRED" if row.status == "delivered" else "FAILED",
             statuses=statuses,
         )
