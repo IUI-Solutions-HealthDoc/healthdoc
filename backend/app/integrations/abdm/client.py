@@ -82,6 +82,9 @@ _DEFAULT_TIMEOUT = httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0)
 
 _PLACEHOLDER = "change-me"
 
+#: Pause before the single retry of a session request ABDM answered with a 5xx.
+SESSION_RETRY_DELAY_SECONDS = 1.0
+
 
 class AbdmError(Exception):
     """Base for every ABDM failure. Catch this to treat them alike."""
@@ -461,7 +464,21 @@ class AbdmClient:
                 cached = self._tokens.get_if_fresh()
                 if cached:
                     return cached
-            token, ttl = await self._fetch_token()
+            try:
+                token, ttl = await self._fetch_token()
+            except AbdmUnavailable as exc:
+                # The sandbox session endpoint answers an occasional 500 and
+                # then 200s straight after (live, 6 Oct 2026). Asking for a
+                # session is safe to repeat; one paced retry, never a loop.
+                # Credential refusals are AbdmAuthError and a malformed answer
+                # is not transient, so neither is retried.
+                transient = (exc.status_code or 0) >= 500 or isinstance(
+                    exc.__cause__, httpx.TimeoutException | httpx.TransportError
+                )
+                if not transient:
+                    raise
+                await asyncio.sleep(SESSION_RETRY_DELAY_SECONDS)
+                token, ttl = await self._fetch_token()
             self._tokens.set(token, ttl)
             return token
 

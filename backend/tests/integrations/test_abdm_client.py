@@ -171,6 +171,50 @@ async def test_session_without_access_token_is_unavailable_not_crash():
         await _client(handler).request("GET", "/v3/a")
 
 
+async def test_a_session_5xx_is_retried_once_then_succeeds(monkeypatch):
+    """The sandbox answers an occasional session 500 and a 200 straight after."""
+    monkeypatch.setattr("app.integrations.abdm.client.SESSION_RETRY_DELAY_SECONDS", 0)
+    sessions = 0
+
+    def handler(request):
+        nonlocal sessions
+        if request.url.path == SESSION_PATH:
+            sessions += 1
+            return httpx.Response(500, json={"code": "500"}) if sessions == 1 else _session_ok(request)
+        return httpx.Response(200, json={"ok": True})
+
+    response = await _client(handler).request("GET", "/v3/a")
+    assert response.body == {"ok": True}
+    assert sessions == 2
+
+
+async def test_a_session_that_keeps_failing_is_tried_twice_not_looped(monkeypatch):
+    monkeypatch.setattr("app.integrations.abdm.client.SESSION_RETRY_DELAY_SECONDS", 0)
+    sessions = 0
+
+    def handler(request):
+        nonlocal sessions
+        sessions += 1
+        return httpx.Response(503, json={})
+
+    with pytest.raises(AbdmUnavailable):
+        await _client(handler).request("GET", "/v3/a")
+    assert sessions == 2
+
+
+async def test_a_malformed_session_answer_is_not_retried():
+    sessions = 0
+
+    def handler(request):
+        nonlocal sessions
+        sessions += 1
+        return httpx.Response(200, json={"unexpected": "shape"})
+
+    with pytest.raises(AbdmUnavailable):
+        await _client(handler).request("GET", "/v3/a")
+    assert sessions == 1
+
+
 async def test_bad_credentials_raise_auth_error_not_unavailable():
     """A wrong secret must not look like an outage.
 

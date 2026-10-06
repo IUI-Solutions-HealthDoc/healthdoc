@@ -228,16 +228,23 @@ async def run_once(
         finished = await jobs.finish(db, job, error=error, deferred=deferred, terminal=terminal)
         if finished and refused:
             await linking.release_refused_link(db, link_id=job.target_id, reason=error or "")
-        exhausted = (
+        dead = (
             finished
-            and job.kind == "hip_transfer"
             and error is not None
             and not deferred
             and await db.scalar(select(jobs.AbdmJob.status).where(jobs.AbdmJob.id == job.id))
             == "dead"
         )
+        exhausted = dead and job.kind == "hip_transfer"
+        unacknowledged = None
+        if dead and job.kind == "callback_ack":
+            reply = await db.get(jobs.AbdmCallbackReply, job.target_id)
+            if reply is not None and reply.kind == "hip_request":
+                unacknowledged = reply.target_id
     if exhausted:
         await worker.abandon_transfer(job.target_id)
+    if unacknowledged is not None:
+        await worker.close_unacknowledged_request(unacknowledged, error or "")
     return True
 
 

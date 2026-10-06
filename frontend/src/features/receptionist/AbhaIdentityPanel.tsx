@@ -213,6 +213,9 @@ function PatientAbhaIdentity({ patient }: Props) {
   const otpValid = /^\d{4,8}$/.test(otp);
   const mobileNormalised = mobile.trim() ? normaliseIndianMobileInput(mobile) : null;
   const mobileValid = !mobile.trim() || mobileNormalised !== null;
+  // ABDM's byAadhaar refuses an enrolment without the communication mobile
+  // (live, 6 Oct 2026), so a new ABHA cannot be verified without one.
+  const enrolMobileMissing = flow === "new" && mobileNormalised === null;
   const resendWaitSeconds = resendAvailableAt === null ? 0 : Math.max(0, Math.ceil((resendAvailableAt - now) / 1000));
   const canResend = sessionId !== null && (resendsRemaining ?? 0) > 0 && resendWaitSeconds === 0 && !busy;
 
@@ -329,6 +332,10 @@ function PatientAbhaIdentity({ patient }: Props) {
   async function verifyOtp() {
     if (!sessionId || !otpValid || !mobileValid) {
       setError("Enter the OTP sent to the patient before continuing.");
+      return;
+    }
+    if (enrolMobileMissing) {
+      setError("Enter the patient's 10-digit mobile number. ABDM needs it to create the ABHA.");
       return;
     }
     const generation = beginRequest();
@@ -671,12 +678,12 @@ function PatientAbhaIdentity({ patient }: Props) {
           </p>
           {flow === "new" ? (
             <label className="block space-y-1 text-sm">
-              <span className="text-muted-foreground">Mobile override (only if ABDM asks for it)</span>
+              <span className="text-muted-foreground">Mobile number for this ABHA (required)</span>
               <input value={mobile} onChange={(event) => setMobile(event.target.value)} inputMode="tel" autoComplete="tel" aria-invalid={!mobileValid} className={`w-full rounded-md border px-3 py-2 ${mobileValid ? "border-border" : "border-danger"}`} />
             </label>
           ) : null}
           <div className="flex gap-3">
-            <button type="button" disabled={busy || !otpValid || !mobileValid} onClick={() => void verifyOtp()} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{busy ? t("receptionist.abha.verifying") : t("receptionist.abha.verifyAndLink")}</button>
+            <button type="button" disabled={busy || !otpValid || !mobileValid || enrolMobileMissing} onClick={() => void verifyOtp()} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{busy ? t("receptionist.abha.verifying") : t("receptionist.abha.verifyAndLink")}</button>
             <button type="button" disabled={busy} onClick={() => changeFlow(flow)} className="text-sm underline">{t("receptionist.abha.startAgain")}</button>
           </div>
         </div>

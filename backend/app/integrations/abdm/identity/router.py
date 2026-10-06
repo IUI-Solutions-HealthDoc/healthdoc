@@ -490,6 +490,17 @@ def _otp_rejected(exc: AbdmRejected, leg: str) -> HTTPException:
     session stays alive so the desk can retry or request a fresh OTP. Status
     only is logged: the body can echo the OTP or identifier just sent."""
     log.warning("ABDM declined a %s verification (%s)", leg, exc.status_code)
+    if isinstance(exc.detail, dict) and "mobile" in exc.detail:
+        # byAadhaar refuses the communication mobile under its own key, not
+        # the OTP (live, 6 Oct 2026). Calling that a wrong OTP sends the desk
+        # to re-type a code that was right.
+        return HTTPException(
+            400,
+            {
+                "code": "abha_mobile_rejected",
+                "message": "ABDM did not accept the mobile number for this ABHA.",
+            },
+        )
     return HTTPException(
         400,
         {
@@ -550,8 +561,8 @@ async def _resend(
         raise _unavailable("ABDM credentials are not configured on this server") from None
     except AbdmPublicKeyMissing:
         raise _unavailable("ABDM public certificate is not configured on this server") from None
-    except AbdmUnavailable:
-        raise _unavailable("ABDM did not respond") from None
+    except AbdmUnavailable as exc:
+        raise _abdm_down(exc) from None
     except AbdmRejected as exc:
         log.warning("ABDM declined an OTP resend (%s)", exc.status_code)
         raise HTTPException(502, {"code": "abdm_rejected", "message": "ABDM declined the request"}) from exc
@@ -566,6 +577,23 @@ async def _resend(
 
 def _unavailable(reason: str) -> HTTPException:
     return HTTPException(503, {"code": "abdm_unavailable", "message": reason})
+
+
+def _abdm_down(exc: AbdmUnavailable) -> HTTPException:
+    """Tell the desk which service is down, not only that one is.
+
+    ABDM answers 504 ABDM-1206 "Aadhaar Gateway is unavailable" when it cannot
+    reach UIDAI (live, 6 Oct 2026). That outage stops every Aadhaar OTP while
+    mobile and ABHA-address OTPs keep working, so the desk needs to know it was
+    Aadhaar and not ABDM as a whole.
+    """
+    codes = exc.error_codes or ()
+    if any(str(code).startswith("ABDM-1206") for code in codes):
+        return HTTPException(
+            503,
+            {"code": "aadhaar_service_unavailable", "message": "ABDM could not reach the Aadhaar service"},
+        )
+    return _unavailable("ABDM did not respond")
 
 
 async def _refuse_identity_clash(
@@ -768,8 +796,8 @@ async def enrol_request_otp(
         raise _unavailable("ABDM credentials are not configured on this server") from None
     except AbdmPublicKeyMissing:
         raise _unavailable("ABDM public certificate is not configured on this server") from None
-    except AbdmUnavailable:
-        raise _unavailable("ABDM did not respond") from None
+    except AbdmUnavailable as exc:
+        raise _abdm_down(exc) from None
     except AbdmRejected as exc:
         # Status only. The gateway's body can echo the identifier we just sent.
         log.warning("ABDM declined an enrolment OTP request (%s)", exc.status_code)
@@ -849,6 +877,13 @@ async def enrol_verify_otp(
         await _bound_otp_session(
             db, current_db_user, payload.session_id, OtpPurpose.ENROL_BY_AADHAAR
         )
+        if not payload.mobile:
+            # byAadhaar requires the communication mobile and refuses a request
+            # without it (live, 6 Oct 2026). Refuse here, before the OTP is spent.
+            raise HTTPException(
+                422,
+                {"code": "abha_mobile_required", "message": "Enter the mobile number for this ABHA"},
+            )
         issued = await identity_service.enrol_by_aadhaar_otp(
             session_id=payload.session_id,
             otp=payload.otp,
@@ -872,8 +907,8 @@ async def enrol_verify_otp(
         raise _unavailable("ABDM credentials are not configured on this server") from None
     except AbdmPublicKeyMissing:
         raise _unavailable("ABDM public certificate is not configured on this server") from None
-    except AbdmUnavailable:
-        raise _unavailable("ABDM did not respond") from None
+    except AbdmUnavailable as exc:
+        raise _abdm_down(exc) from None
     except AbdmRejected as exc:
         raise _otp_rejected(exc, "enrolment") from exc
     except identity_service.AbdmIdentityError as exc:
@@ -1000,8 +1035,8 @@ async def enrol_by_demographics(
         raise _unavailable("ABDM credentials are not configured on this server") from None
     except AbdmPublicKeyMissing:
         raise _unavailable("ABDM public certificate is not configured on this server") from None
-    except AbdmUnavailable:
-        raise _unavailable("ABDM did not respond") from None
+    except AbdmUnavailable as exc:
+        raise _abdm_down(exc) from None
     except AbdmRejected as exc:
         # Status only: the body can echo what was just sent.
         log.warning("ABDM declined a demographic enrolment (%s)", exc.status_code)
@@ -1192,7 +1227,7 @@ def _licence_flow_refusal(exc: Exception) -> HTTPException:
     if isinstance(exc, AbdmPublicKeyMissing):
         return _unavailable("ABDM public certificate is not configured on this server")
     if isinstance(exc, AbdmUnavailable):
-        return _unavailable("ABDM did not respond")
+        return _abdm_down(exc)
     if isinstance(exc, identity_service.AbdmIdentityError):
         return _identity_error(exc)
     raise exc
@@ -1487,8 +1522,8 @@ async def enrol_mobile_request_otp(
         raise _unavailable("ABDM credentials are not configured on this server") from None
     except AbdmPublicKeyMissing:
         raise _unavailable("ABDM public certificate is not configured on this server") from None
-    except AbdmUnavailable:
-        raise _unavailable("ABDM did not respond") from None
+    except AbdmUnavailable as exc:
+        raise _abdm_down(exc) from None
     except AbdmRejected as exc:
         log.warning("ABDM declined an enrolment mobile OTP request (%s)", exc.status_code)
         raise HTTPException(502, {"code": "abdm_rejected", "message": "ABDM declined the request"}) from exc
@@ -1549,8 +1584,8 @@ async def enrol_mobile_resend_otp(
         raise _unavailable("ABDM credentials are not configured on this server") from None
     except AbdmPublicKeyMissing:
         raise _unavailable("ABDM public certificate is not configured on this server") from None
-    except AbdmUnavailable:
-        raise _unavailable("ABDM did not respond") from None
+    except AbdmUnavailable as exc:
+        raise _abdm_down(exc) from None
     except AbdmRejected as exc:
         log.warning("ABDM declined an enrolment mobile OTP resend (%s)", exc.status_code)
         raise HTTPException(502, {"code": "abdm_rejected", "message": "ABDM declined the request"}) from exc
@@ -1603,8 +1638,8 @@ async def enrol_mobile_verify_otp(
         raise _unavailable("ABDM credentials are not configured on this server") from None
     except AbdmPublicKeyMissing:
         raise _unavailable("ABDM public certificate is not configured on this server") from None
-    except AbdmUnavailable:
-        raise _unavailable("ABDM did not respond") from None
+    except AbdmUnavailable as exc:
+        raise _abdm_down(exc) from None
     except AbdmRejected as exc:
         raise _otp_rejected(exc, "enrolment mobile") from exc
     except identity_service.AbdmIdentityError as exc:
@@ -1644,8 +1679,8 @@ async def enrol_address_suggestions(
         ) from None
     except AbdmNotConfigured:
         raise _unavailable("ABDM credentials are not configured on this server") from None
-    except AbdmUnavailable:
-        raise _unavailable("ABDM did not respond") from None
+    except AbdmUnavailable as exc:
+        raise _abdm_down(exc) from None
     except AbdmRejected as exc:
         log.warning("ABDM declined ABHA address suggestions (%s)", exc.status_code)
         raise HTTPException(502, {"code": "abdm_rejected", "message": "ABDM declined the request"}) from exc
@@ -1683,8 +1718,8 @@ async def enrol_submit_abha_address(
         ) from None
     except AbdmNotConfigured:
         raise _unavailable("ABDM credentials are not configured on this server") from None
-    except AbdmUnavailable:
-        raise _unavailable("ABDM did not respond") from None
+    except AbdmUnavailable as exc:
+        raise _abdm_down(exc) from None
     except AbdmRejected as exc:
         log.warning("ABDM declined an ABHA address submission (%s)", exc.status_code)
         raise HTTPException(
@@ -1747,8 +1782,8 @@ async def get_nha_abha_profile(
         )
     except AbdmNotConfigured:
         raise _unavailable("ABDM credentials are not configured on this server") from None
-    except AbdmUnavailable:
-        raise _unavailable("ABDM did not respond") from None
+    except AbdmUnavailable as exc:
+        raise _abdm_down(exc) from None
     except AbdmRejected as exc:
         log.warning("ABDM declined an ABHA profile read (%s)", exc.status_code)
         raise HTTPException(502, {"code": "abdm_rejected", "message": "ABDM declined the request"}) from exc
@@ -1793,8 +1828,8 @@ async def download_nha_abha_card(
         )
     except AbdmNotConfigured:
         raise _unavailable("ABDM credentials are not configured on this server") from None
-    except AbdmUnavailable:
-        raise _unavailable("ABDM did not respond") from None
+    except AbdmUnavailable as exc:
+        raise _abdm_down(exc) from None
     except AbdmRejected as exc:
         log.warning("ABDM declined an ABHA card download (%s)", exc.status_code)
         raise HTTPException(502, {"code": "abdm_rejected", "message": "ABDM declined the request"}) from exc
@@ -1861,8 +1896,8 @@ async def login_request_otp(
         raise _unavailable("ABDM credentials are not configured on this server") from None
     except AbdmPublicKeyMissing:
         raise _unavailable("ABDM public certificate is not configured on this server") from None
-    except AbdmUnavailable:
-        raise _unavailable("ABDM did not respond") from None
+    except AbdmUnavailable as exc:
+        raise _abdm_down(exc) from None
     except AbdmRejected as exc:
         log.warning("ABDM declined a login OTP request (%s)", exc.status_code)
         raise HTTPException(
@@ -1928,8 +1963,8 @@ async def login_verify_otp(
         raise _unavailable("ABDM credentials are not configured on this server") from None
     except AbdmPublicKeyMissing:
         raise _unavailable("ABDM public certificate is not configured on this server") from None
-    except AbdmUnavailable:
-        raise _unavailable("ABDM did not respond") from None
+    except AbdmUnavailable as exc:
+        raise _abdm_down(exc) from None
     except AbdmRejected as exc:
         raise _otp_rejected(exc, "login") from exc
     except identity_service.AbdmIdentityError as exc:
@@ -1997,8 +2032,8 @@ async def login_select_account(
         ) from None
     except AbdmNotConfigured:
         raise _unavailable("ABDM credentials are not configured on this server") from None
-    except AbdmUnavailable:
-        raise _unavailable("ABDM did not respond") from None
+    except AbdmUnavailable as exc:
+        raise _abdm_down(exc) from None
     except AbdmRejected as exc:
         log.warning("ABDM declined an account selection (%s)", exc.status_code)
         raise HTTPException(400, {"code": "abha_account_not_in_selection", "message": "ABDM did not accept this account. Choose another one."}) from exc

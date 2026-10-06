@@ -17,7 +17,7 @@ from sqlalchemy import select
 
 from app.auth.deps import AuthUser, DbUser, get_current_db_user, get_current_user
 from app.common.db import get_db
-from app.integrations.abdm.client import AbdmRejected, AbdmResponse
+from app.integrations.abdm.client import AbdmRejected, AbdmResponse, AbdmUnavailable
 from app.integrations.abdm.identity import crypto, otp_session, service
 from app.integrations.abdm.identity.router import router as identity_router
 from tests.test_suite_8_immunization_blood_forms import _setup_suite_8_fixture
@@ -192,6 +192,52 @@ async def test_declined_enrolment_consent_is_400_and_does_not_call_abdm(desk):
     assert response.status_code == 400, response.text
     assert response.json()["detail"]["code"] == "enrolment_consent_refused"
     assert desk["gateway"].calls == []
+    assert AADHAAR not in response.text
+
+
+async def _enrolment_session(desk) -> str:
+    desk["gateway"].responses = [{"txnId": "abdm-txn-1"}]
+    requested = await desk["client"].post("/abdm/abha/enrol/aadhaar/request-otp", json={
+        "patient_id": str(desk["patient"].id), "aadhaar": AADHAAR, "consent": await consent_for(desk)})
+    assert requested.status_code == 200, requested.text
+    return requested.json()["session_id"]
+
+
+async def test_enrolment_verify_without_a_mobile_is_refused_before_the_otp_is_spent(desk):
+    session_id = await _enrolment_session(desk)
+    response = await desk["client"].post("/abdm/abha/enrol/aadhaar/verify-otp",
+                                         json={"session_id": session_id, "otp": "123456"})
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"]["code"] == "abha_mobile_required"
+    assert len(desk["gateway"].calls) == 1, "the OTP must not reach ABDM without the mobile"
+    assert f"abdm:otp:{session_id}" in desk["redis"].store
+
+
+async def test_a_refused_enrolment_mobile_is_not_reported_as_a_wrong_otp(desk):
+    session_id = await _enrolment_session(desk)
+    # byAadhaar's refusal names the mobile field (live, 6 Oct 2026).
+    desk["gateway"].responses = [AbdmRejected(400, {"mobile": "Invalid mobile", "timestamp": "t"}, "rid")]
+    response = await desk["client"].post("/abdm/abha/enrol/aadhaar/verify-otp",
+                                         json={"session_id": session_id, "otp": "123456", "mobile": "9876543210"})
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"]["code"] == "abha_mobile_rejected"
+    assert f"abdm:otp:{session_id}" in desk["redis"].store
+    assert "9876543210" not in response.text
+
+
+@pytest.mark.parametrize(
+    ("codes", "expected"),
+    [(("ABDM-1206",), "aadhaar_service_unavailable"),
+     (("ABDM-1206: ",), "aadhaar_service_unavailable"),
+     ((), "abdm_unavailable")],
+)
+async def test_an_abdm_outage_names_the_service_that_is_down(desk, codes, expected):
+    desk["gateway"].responses = [
+        AbdmUnavailable("ABDM request unavailable", status_code=504, stage="request", error_codes=codes)]
+    response = await desk["client"].post("/abdm/abha/enrol/aadhaar/request-otp", json={
+        "patient_id": str(desk["patient"].id), "aadhaar": AADHAAR, "consent": await consent_for(desk)})
+    assert response.status_code == 503, response.text
+    assert response.json()["detail"]["code"] == expected
     assert AADHAAR not in response.text
 
 

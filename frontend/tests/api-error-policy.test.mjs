@@ -88,3 +88,24 @@ test("requester profile errors consistently describe all three registration fiel
   assert.match(message, /registration number, identifier type and issuing registry URI/);
   assert.match(message, /all three/);
 });
+
+test("ABHA enrolment refusals name their cause instead of 'highlighted fields' or an outage", () => {
+  // Live, 6 Oct 2026: a missing mobile, a refused mobile and a UIDAI outage
+  // all reached the desk as the generic 400/503 copy.
+  const cases = [
+    [400, "otp_rejected", /did not accept this OTP/],
+    [422, "abha_mobile_required", /10-digit mobile number/],
+    [400, "abha_mobile_rejected", /did not accept this mobile number/],
+    [503, "aadhaar_service_unavailable", /Aadhaar \(UIDAI\) service/],
+  ];
+  for (const [status, code, expected] of cases) {
+    const message = userFacingApiError(status, { code, message: "server text 9876543210" });
+    assert.match(message, expected);
+    assert.doesNotMatch(message, /highlighted fields|temporarily unavailable|server text|9876543210/);
+  }
+  // Configuration faults share abdm_unavailable; it keeps the neutral copy.
+  assert.equal(
+    userFacingApiError(503, { code: "abdm_unavailable" }),
+    "The service is temporarily unavailable. Try again shortly.",
+  );
+});

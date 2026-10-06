@@ -50,6 +50,7 @@ from app.common.enums import AbhaProfileTokenKind
 from app.integrations.abdm.client import (
     AbdmRejected,
     AbdmResponse,
+    AbdmUnavailable,
     _body_shape,
     get_abdm_client,
     safe_rejection_message,
@@ -190,13 +191,24 @@ async def _call(
             _body_shape(exc.detail), _refusal_reason(exc.detail),
         )
         raise
+    except AbdmUnavailable as exc:
+        # A 5xx or timeout reached the desk as "temporarily unavailable" with
+        # nothing logged (live, 6 Oct 2026). Keep status, codes, shape and the
+        # scrubbed message so the cause can be told from a sandbox outage.
+        log.warning(
+            "ABDM identity unavailable (%s %s status=%s stage=%s codes=%s shape=%s reason=%s)",
+            method, path, exc.status_code, exc.stage, exc.error_codes, exc.body_shape, exc.safe_message,
+        )
+        raise
 
 
 #: Licence-document fields whose ABDM refusal text describes the check, not the
 #: person ("Invalid DOB", "...size less than 150KB"). Names, numbers and other
 #: identifiers stay out: ABHA error text can echo them.
 _LOGGED_FIELD_REFUSALS = frozenset(
-    {"Dob", "FrontSidePhoto", "BackSidePhoto", "Gender", "PinCode", "State", "District"}
+    {"Dob", "FrontSidePhoto", "BackSidePhoto", "Gender", "PinCode", "State", "District",
+     # byAadhaar refuses the communication mobile under this key (live, 6 Oct 2026).
+     "mobile"}
 )
 
 

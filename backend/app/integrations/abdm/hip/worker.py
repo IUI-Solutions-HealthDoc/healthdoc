@@ -856,6 +856,34 @@ async def abandon_transfer(request_id: uuid.UUID) -> bool:
         return True
 
 
+async def close_unacknowledged_request(request_id: uuid.UUID, reason: str) -> bool:
+    """Fail a health-information request whose acknowledgement ABDM refused.
+
+    The push starts only after ABDM accepts the acknowledgement, so a dead
+    acknowledgement left the request "transferring" with nothing ever sent
+    (6 Oct 2026: ABDM delivered request 49a2bc64 sixteen minutes after its
+    own timestamp and answered the immediate reply with ABDM-1015 "Invalid
+    Response"). No FAILED notification is queued: ABDM has already closed
+    the transaction it would be addressed to.
+    """
+    async with SessionLocal() as db:
+        row = (
+            await db.execute(
+                select(AbdmHipHealthInformationRequest)
+                .where(AbdmHipHealthInformationRequest.id == request_id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        # bundles_sent is a string column; anything but "0" means data left.
+        if row is None or row.status != "transferring" or (row.bundles_sent or "0") != "0":
+            return False
+        row.status = "failed"
+        row.failure_reason = f"ABDM did not accept the acknowledgement: {reason or 'no detail'}"[:500]
+        row.completed_at = datetime.now(UTC)
+        await db.commit()
+        return True
+
+
 async def abandon_exhausted_transfers(facility_id: uuid.UUID) -> int:
     """Reconcile transfers stranded by a dead push job before abandon_transfer existed."""
     async with SessionLocal() as db:

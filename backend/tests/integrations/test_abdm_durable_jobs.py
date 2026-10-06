@@ -218,6 +218,30 @@ async def test_a_delivered_transfer_is_never_abandoned(db, transfer_case):
     assert (await db.get(AbdmHipHealthInformationRequest, request_ident)).status == "delivered"
 
 
+async def test_a_refused_acknowledgement_fails_the_request_instead_of_stranding_it(
+    db, transfer_case, monkeypatch
+):
+    # 6 Oct 2026: ABDM delivered a request 16 minutes late and refused the
+    # immediate acknowledgement (ABDM-1015, then 401). The request stayed
+    # "transferring" with nothing sent and no job left to finish it.
+    from app.integrations.abdm.client import AbdmAuthError
+    from app.integrations.abdm.hip import gateway
+
+    payload, callback, _, pushes = transfer_case
+    monkeypatch.setattr(gateway, "acknowledge_hi_request", AsyncMock(
+        side_effect=AbdmAuthError("ABDM rejected operation authorization", status_code=401, stage="request")))
+    await external_router.hip_health_information_request(payload, BackgroundTasks(), callback, db)
+    assert await job_runner.run_once()
+    db.expire_all()
+    row = (await db.execute(select(AbdmHipHealthInformationRequest))).scalar_one()
+    assert row.status == "failed"
+    assert row.failure_reason.startswith("ABDM did not accept the acknowledgement")
+    assert pushes.await_count == 0
+    kinds = (await db.execute(select(jobs.AbdmJob.kind))).scalars().all()
+    assert "hip_transfer" not in kinds and "hip_notify" not in kinds
+    assert await worker.close_unacknowledged_request(row.id, "again") is False
+
+
 async def test_notification_retry_does_not_repeat_clinical_transfer(db, transfer_case, monkeypatch):
     payload, callback, _, pushes = transfer_case
     await external_router.hip_health_information_request(payload, BackgroundTasks(), callback, db)
