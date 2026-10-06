@@ -172,6 +172,7 @@ async def test_hiu_notification_survives_ack_and_fetch_outages_without_patient_c
         fetch.call_args_list[0].kwargs
         == fetch.call_args_list[1].kwargs
         == {
+            "service_id": "TEST-HFR",
             "consent_id": artefact.consent_artefact_id,
             "request_id": str(fetch_ident),
         }

@@ -1,4 +1,4 @@
-"""The HIU asks for and accepts all seven ABDM record types, not only ours.
+"""The HIU asks for and accepts all eight ABDM record types, not only ours.
 
 M3 HIU_FLOW_102 lets a consent request carry "all or any of the 7 Health Info
 types", and HIU_FLOW_111/112 fetch an Immunization record and a Health
@@ -27,7 +27,9 @@ from tests.integrations.test_abdm_received_records import (  # noqa: F401
     received_case,
 )
 
-SEVEN = {
+#: The M3 workbook's seven, and Invoice: NHA's own refusal lists all eight
+#: ("Invalid HIType, it must be in ...,WellnessRecord,Invoice").
+EIGHT = {
     "OPConsultation",
     "Prescription",
     "DiagnosticReport",
@@ -35,34 +37,37 @@ SEVEN = {
     "ImmunizationRecord",
     "HealthDocumentRecord",
     "WellnessRecord",
+    "Invoice",
 }
 PDF = b"%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n"
 
 
-def test_the_hiu_vocabulary_is_the_seven_m3_types_and_wider_than_what_we_build():
-    assert hiu_gw.REQUESTABLE_HI_TYPES == SEVEN
+def test_the_hiu_vocabulary_is_the_eight_hi_types_and_wider_than_what_we_build():
+    assert hiu_gw.REQUESTABLE_HI_TYPES == EIGHT
     assert hip_gw.HI_TYPES < hiu_gw.REQUESTABLE_HI_TYPES
-    assert set(records.PROFILES.values()) == SEVEN
+    assert set(records.PROFILES.values()) == EIGHT
 
 
-async def test_a_consent_request_may_name_all_seven_types(stub):  # noqa: F811
+async def test_a_consent_request_may_name_all_eight_types(stub):  # noqa: F811
     now = datetime.now(UTC)
     await hiu_gw.request_consent(
+        service_id="SBXID_TEST_HIU",
         abha_address="ram@sbx",
-        hi_types=sorted(SEVEN),
+        hi_types=sorted(EIGHT),
         date_from=now - timedelta(days=30),
         date_to=now,
         expiry=now + timedelta(days=1),
         requester=REQUESTER,
     )
-    assert set(stub.last["json"]["consent"]["hiTypes"]) == SEVEN
+    assert set(stub.last["json"]["consent"]["hiTypes"]) == EIGHT
 
 
-@pytest.mark.parametrize("unknown", ["Invoice", "NotARealType"])
-async def test_a_type_outside_the_seven_is_refused_before_the_wire(stub, unknown):  # noqa: F811
+@pytest.mark.parametrize("unknown", ["NotARealType", "invoice"])
+async def test_a_type_outside_the_eight_is_refused_before_the_wire(stub, unknown):  # noqa: F811
     now = datetime.now(UTC)
     with pytest.raises(ValueError, match="Unknown ABDM health-information type"):
         await hiu_gw.request_consent(
+        service_id="SBXID_TEST_HIU",
             abha_address="ram@sbx",
             hi_types=["ImmunizationRecord", unknown],
             date_from=now - timedelta(days=30),
@@ -73,11 +78,11 @@ async def test_a_type_outside_the_seven_is_refused_before_the_wire(stub, unknown
     assert stub.calls == []
 
 
-async def test_service_type_check_refuses_only_outside_the_seven(hiu_db):  # noqa: F811
+async def test_service_type_check_refuses_only_outside_the_eight(hiu_db):  # noqa: F811
     with pytest.raises(service.HiuError) as refused:
         await service.create_consent_request(
             hiu_db, facility_id=FACILITY, patient_id=None, abha_address="ram@sbx",
-            purpose_code="CAREMGT", hi_types=["Invoice"],
+            purpose_code="CAREMGT", hi_types=["NotARealType"],
             date_range_from=datetime.now(UTC) - timedelta(days=1),
             date_range_to=datetime.now(UTC),
             requested_expiry=datetime.now(UTC) + timedelta(days=1),

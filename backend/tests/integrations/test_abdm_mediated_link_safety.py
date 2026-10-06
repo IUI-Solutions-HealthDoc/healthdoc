@@ -2,7 +2,6 @@
 
 import uuid
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -15,7 +14,7 @@ from app.integrations.abdm.callback_auth import GatewayCallback
 from app.integrations.abdm.contracts_v3 import LinkConfirmCallback, LinkInitCallback
 from app.integrations.abdm.hip import gateway, link_otp
 from app.integrations.abdm.hip.models import AbdmCareContextLink
-from app.integrations.abdm.hiu import worker as hiu_worker
+from tests.integrations.abdm_serving import serve
 from tests.integrations.test_abdm_document_exports import documents as documents_fixture
 from tests.integrations.test_abdm_hip_link_operations import link_case as link_case_fixture
 
@@ -49,9 +48,7 @@ async def mediated_case(db, link_case, monkeypatch):
     monkeypatch.setattr(
         callback_replies, "SessionLocal", async_sessionmaker(db.bind, expire_on_commit=False)
     )
-    monkeypatch.setattr(
-        hiu_worker, "get_settings", lambda: SimpleNamespace(abdm_hfr_facility_id="TEST-HFR")
-    )
+    serve(monkeypatch, "TEST-HFR")
     return patient, contexts, link
 
 

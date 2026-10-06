@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 
 from app.common.security import decrypt_pii
 from app.integrations.abdm.callback_replies import response_aad
+from app.integrations.abdm.facilities import service_id_for
 from app.integrations.abdm.hip import gateway, link_otp
 from app.integrations.abdm.hip.models import AbdmCareContextLink
 from app.patients.models import Patient
@@ -29,7 +30,11 @@ async def dispatch(db, reply, job):
             associated_data=response_aad(reply.id, reply.facility_id, reply.kind),
         )
     )
-    common = {"gateway_request_id": reply.gateway_request_id, "request_id": str(job.id)}
+    common = {
+        "service_id": await service_id_for(db, job.facility_id, "hip"),
+        "gateway_request_id": reply.gateway_request_id,
+        "request_id": str(job.id),
+    }
     if reply.kind == "hip_link_reject":
         await gateway.respond_to_link_confirm_error(
             **common, code="ABDM-1035", message="Incorrect OTP"

@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admissions.models import Admission, Discharge
+from app.billing.models import Invoice
 from app.immunization.models import ImmunizationRecord
 from app.integrations.abdm.hip.models import AbdmCareContext
 from app.opd.models import Encounter, Visit
@@ -27,7 +28,12 @@ SOURCE_TYPES = {
     "discharge": "DischargeSummary",
     "wellness": "WellnessRecord",
     "immunization": "ImmunizationRecord",
+    "invoice": "Invoice",
 }
+
+#: A bill is a document once issued; a draft can still change, and a cancelled
+#: one was replaced by another invoice.
+SHAREABLE_INVOICE_STATUSES = frozenset({"issued", "partially_paid", "paid", "waived"})
 
 
 class DocumentUnavailable(ValueError):
@@ -117,6 +123,19 @@ async def resolve_document(
                 encounter = await _fresh(db, Encounter, order.encounter_id)
                 authored_at = result.updated_at if kind == "lab-result" else result.created_at
                 author_id = result.created_by
+    elif kind == "invoice":
+        invoice = await _fresh(db, Invoice, source_id)
+        if (
+            invoice is not None
+            and invoice.patient_id == patient_id
+            and invoice.facility_id == facility_id
+            and invoice.status in SHAREABLE_INVOICE_STATUSES
+            and invoice.issued_at is not None
+        ):
+            visit = await _fresh(db, Visit, invoice.visit_id)
+            # Issued by the facility; the clerk who issued it is recorded as
+            # the document's author for audit, not as a health professional.
+            authored_at, author_id = invoice.issued_at, invoice.updated_by or invoice.created_by
     elif kind == "discharge":
         discharge = await _fresh(db, Discharge, source_id)
         admission = await _fresh(db, Admission, discharge.admission_id) if discharge else None

@@ -79,6 +79,11 @@ class Settings(BaseSettings):
     abdm_hiu_id: str = "change-me"
     abdm_client_secret: str = Field(default="change-me", repr=False)
     abdm_hfr_facility_id: str = "change-me"
+    #: More facilities of this deployment linked to the same bridge, as HFR
+    #: facility ids separated by commas. Each is its own HIP and HIU at NHA,
+    #: addressed by that id (X-HIP-ID / X-HIU-ID), the way abdm_hfr_facility_id
+    #: is for the first; see integrations/abdm/facilities.py. Empty serves one.
+    abdm_additional_hfr_facility_ids: str = ""
     # Consent-manager id sent as X-CM-ID on every gateway call. 'sbx' is the
     # sandbox; production is 'abdm'. Wrong value returns a 400 the gateway
     # does not explain, so it is configuration rather than a constant.

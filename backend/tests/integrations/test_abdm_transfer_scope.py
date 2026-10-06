@@ -24,21 +24,18 @@ from app.integrations.abdm.hip.models import (
     AbdmHipConsentArtefact,
     AbdmHipHealthInformationRequest,
 )
-from app.integrations.abdm.hiu import worker as hiu_worker
 from app.opd.models import Encounter, Visit
 from app.users.models import Facility
+from tests.integrations.abdm_serving import serve
 
 
 @pytest.fixture
 async def transfer_case(db, seed, opd_visit, monkeypatch):
     dept, _, doctor = seed
-    from types import SimpleNamespace
 
     facility = await db.get(Facility, dept.facility_id)
     facility.hfr_facility_id = "TEST-HFR"
-    monkeypatch.setattr(
-        hiu_worker, "get_settings", lambda: SimpleNamespace(abdm_hfr_facility_id="TEST-HFR")
-    )
+    serve(monkeypatch, "TEST-HFR")
     monkeypatch.setattr(
         callback_replies, "SessionLocal", async_sessionmaker(db.bind, expire_on_commit=False)
     )

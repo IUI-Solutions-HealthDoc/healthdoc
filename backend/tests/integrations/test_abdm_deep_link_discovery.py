@@ -19,6 +19,7 @@ from app.integrations.abdm.contracts_v3 import DiscoverCallback
 from app.integrations.abdm.hip import discovery, gateway
 from app.patients.models import Patient
 from app.users.models import Facility
+from tests.integrations.abdm_serving import serve
 from tests.integrations.test_abdm_document_exports import documents  # noqa: F401
 from tests.integrations.test_abdm_gateway_calls import stub  # noqa: F401
 from tests.integrations.test_abdm_hip_link_operations import callback, link_case  # noqa: F401
@@ -65,6 +66,7 @@ async def test_a_new_record_for_a_mobile_only_patient_asks_abdm_to_text_them(
     assert sms.await_count == 2
     first, retry = (call.kwargs for call in sms.await_args_list)
     assert first == {
+        "service_id": facility.hfr_facility_id,
         "mobile": "+919876543210",
         "hip_name": "Synthetic District Hospital",
         "request_id": str(uuid.uuid5(job.id, "sms-notify")),
@@ -95,8 +97,9 @@ async def test_no_text_when_the_case_does_not_apply(db, mobile_only, monkeypatch
 
 
 async def test_the_notice_carries_only_the_mobile_and_this_hip(stub, monkeypatch):  # noqa: F811
-    monkeypatch.setattr(gateway, "hip_id", lambda: "HIP-TEST")
+    monkeypatch.setattr(gateway, "hip_id", lambda service_id: "HIP-TEST")
     await gateway.notify_patient_sms(
+        service_id="HIP-TEST",
         mobile="+919876543210", hip_name="Synthetic District Hospital", request_id="rid-1"
     )
     assert stub.last["path"] == "/api/hiecm/hip/v3/link/patient/links/sms/notify2"
@@ -291,18 +294,14 @@ async def test_discovery_writes_nothing_to_the_patient(db, mobile_only, monkeypa
 
 def _dispatchable(db, monkeypatch):
     """Let the real reply job run against this session, as the mediated fixture does."""
-    from types import SimpleNamespace
 
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
-    from app.integrations.abdm.hiu import worker as hiu_worker
 
     monkeypatch.setattr(
         callback_replies, "SessionLocal", async_sessionmaker(db.bind, expire_on_commit=False)
     )
-    monkeypatch.setattr(
-        hiu_worker, "get_settings", lambda: SimpleNamespace(abdm_hfr_facility_id="TEST-HFR")
-    )
+    serve(monkeypatch, "TEST-HFR")
 
 
 async def test_the_discovery_answer_for_a_mobile_only_chart_is_actually_sent(

@@ -17,6 +17,8 @@ from app.integrations.abdm.hip import gateway, linking
 from app.integrations.abdm.hip.models import AbdmCareContextLink
 from app.integrations.abdm.hip.recovery import queue_token_callback_retry
 from app.patients.models import Patient
+from app.users.models import Facility
+from tests.integrations.abdm_serving import serve
 from tests.integrations.test_abdm_callback_auth import _ReplayStore
 from tests.integrations.test_abdm_document_exports import documents as documents_fixture
 
@@ -40,11 +42,7 @@ async def link_case(db, documents, monkeypatch):
     monkeypatch.setattr(
         job_runner, "SessionLocal", async_sessionmaker(db.bind, expire_on_commit=False)
     )
-    monkeypatch.setattr(
-        job_runner,
-        "get_settings",
-        lambda: SimpleNamespace(abdm_hfr_facility_id=facility.hfr_facility_id),
-    )
+    serve(monkeypatch, facility.hfr_facility_id)
     monkeypatch.setattr(external_router, "_facility_id", AsyncMock(return_value=facility.id))
     monkeypatch.setattr(gateway, "generate_link_token", AsyncMock())
     monkeypatch.setattr(gateway, "link_care_contexts", AsyncMock())
@@ -260,6 +258,8 @@ async def test_linking_http_callbacks_accept_the_m2_documented_header_set(
         "get_settings",
         lambda: SimpleNamespace(abdm_hip_id="HIP-TEST", abdm_x_cm_id="sbx"),
     )
+    facility = await db.get(Facility, patient.facility_id)
+    serve(monkeypatch, facility.hfr_facility_id, hip="HIP-TEST")
     replay = _ReplayStore()
     app = FastAPI()
     app.include_router(external_router.router)

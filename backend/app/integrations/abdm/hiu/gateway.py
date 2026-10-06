@@ -39,13 +39,15 @@ from typing import Any
 
 from app.common.config import get_settings
 from app.integrations.abdm.client import AbdmProtocolError, AbdmResponse, get_abdm_client
+from app.integrations.abdm.facilities import FacilityNotServed, require_served
 from app.integrations.abdm.hiu.requester import validate_requester
 
 log = logging.getLogger("healthdoc.abdm")
 
-#: What an HIU may ASK for: all seven HI types ABDM's M3 cases name
+#: What an HIU may ASK for: the seven HI types ABDM's M3 cases name
 #: (HIU_FLOW_102: "all or any of the 7 Health Info types"; 111 is
-#: ImmunizationRecord, 112 HealthDocumentRecord). Deliberately not the HIP
+#: ImmunizationRecord, 112 HealthDocumentRecord), and Invoice, the eighth
+#: (billing) type of NHA's November 2025 HMIS FAQ. Deliberately not the HIP
 #: vocabulary in hip/gateway.py: that is what HealthDoc can BUILD, while
 #: another HIP's immunization or scanned-document records must still be
 #: requestable and viewable here.
@@ -58,6 +60,7 @@ REQUESTABLE_HI_TYPES: frozenset[str] = frozenset(
         "ImmunizationRecord",
         "HealthDocumentRecord",
         "WellnessRecord",
+        "Invoice",
     }
 )
 
@@ -115,14 +118,19 @@ class DataPushUrlNotConfigured(RuntimeError):
     """
 
 
-def hiu_id() -> str:
-    value = get_settings().abdm_hiu_id
-    if not value or value == _PLACEHOLDER:
+def hiu_id(service_id: str) -> str:
+    """The facility asking: one of this bridge's services, never a default.
+
+    Every call names its facility (integrations/abdm/facilities.py). An id
+    this bridge does not serve is refused rather than sent.
+    """
+    try:
+        return require_served("hiu", service_id)
+    except FacilityNotServed as exc:
         raise HiuIdentityNotConfigured(
-            "ABDM_HIU_ID is not set. Register a service with "
-            "PUT /api/hiecm/gateway/v3/bridge-service and set the id it returns."
-        )
-    return value
+            "This facility is not an ABDM service of this bridge. Link its HFR id to the "
+            "bridge and list it in ABDM_HFR_FACILITY_ID or ABDM_ADDITIONAL_HFR_FACILITY_IDS."
+        ) from exc
 
 
 def data_push_url() -> str:
@@ -178,6 +186,7 @@ async def _post(
 
 async def request_consent(
     *,
+    service_id: str,
     abha_address: str,
     hi_types: Sequence[str],
     date_from: datetime,
@@ -208,7 +217,7 @@ async def request_consent(
         {
             "consent": {
                 "hip": {"id": hip_id} if hip_id else None,
-                "hiu": {"id": hiu_id()},
+                "hiu": {"id": hiu_id(service_id)},
                 "requester": verified_requester,
                 "hiTypes": list(hi_types),
                 "patient": {"id": abha_address},
@@ -225,14 +234,14 @@ async def request_consent(
                 },
             }
         },
-        extra_headers={"X-HIU-ID": hiu_id()},
+        extra_headers={"X-HIU-ID": hiu_id(service_id)},
         request_id=request_id,
         expected_status=202,
     )
 
 
 async def check_consent_request_status(
-    *, consent_request_id: str, request_id: str | None = None
+    *, service_id: str, consent_request_id: str, request_id: str | None = None
 ) -> tuple[str, AbdmResponse]:
     """HIU -> gateway. Poll a consent request.
 
@@ -244,13 +253,13 @@ async def check_consent_request_status(
     return await _post(
         settings.abdm_path_hiu_consent_request_status,
         {"consentRequestId": consent_request_id},
-        extra_headers={"X-HIU-ID": hiu_id()},
+        extra_headers={"X-HIU-ID": hiu_id(service_id)},
         request_id=request_id,
     )
 
 
 async def fetch_consent_artefact(
-    *, consent_id: str, request_id: str | None = None
+    *, service_id: str, consent_id: str, request_id: str | None = None
 ) -> tuple[str, AbdmResponse]:
     """HIU -> gateway. Fetch the granted artefact by id.
 
@@ -263,13 +272,14 @@ async def fetch_consent_artefact(
     return await _post(
         settings.abdm_path_hiu_consent_fetch,
         {"consentId": consent_id},
-        extra_headers={"X-HIU-ID": hiu_id()},
+        extra_headers={"X-HIU-ID": hiu_id(service_id)},
         request_id=request_id,
     )
 
 
 async def acknowledge_consent_notification(
     *,
+    service_id: str,
     consent_id: str,
     gateway_request_id: str,
     status: str = "OK",
@@ -288,7 +298,7 @@ async def acknowledge_consent_notification(
             "acknowledgement": [{"status": status, "consentId": consent_id}],
             "response": {"requestId": gateway_request_id},
         },
-        extra_headers={"X-HIU-ID": hiu_id()},
+        extra_headers={"X-HIU-ID": hiu_id(service_id)},
         request_id=request_id,
     )
 
@@ -300,6 +310,7 @@ async def acknowledge_consent_notification(
 
 async def request_health_information(
     *,
+    service_id: str,
     consent_id: str,
     date_from: datetime,
     date_to: datetime,
@@ -341,7 +352,7 @@ async def request_health_information(
                 },
             }
         },
-        extra_headers={"X-HIU-ID": hiu_id()},
+        extra_headers={"X-HIU-ID": hiu_id(service_id)},
         request_id=request_id,
         expected_status=202,
     )
@@ -349,6 +360,7 @@ async def request_health_information(
 
 async def notify_hi_receipt(
     *,
+    service_id: str,
     consent_id: str,
     transaction_id: str,
     session_status: str,
@@ -378,7 +390,7 @@ async def notify_hi_receipt(
                 "consentId": consent_id,
                 "transactionId": transaction_id,
                 "doneAt": _now_iso(),
-                "notifier": {"type": "HIU", "id": hiu_id()},
+                "notifier": {"type": "HIU", "id": hiu_id(service_id)},
                 "statusNotification": {
                     "sessionStatus": session_status,
                     "hipId": hip_id,
@@ -386,7 +398,7 @@ async def notify_hi_receipt(
                 },
             }
         },
-        extra_headers={"X-HIU-ID": hiu_id()},
+        extra_headers={"X-HIU-ID": hiu_id(service_id)},
         request_id=request_id,
         expected_status=202,
     )
