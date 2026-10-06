@@ -1271,6 +1271,11 @@ async def list_enrolment_address_suggestions(
     return suggestions
 
 
+#: An ABHA address as the desk may submit it: the bare name enrol/suggestion
+#: returns, or a full address with its CM suffix.
+_ABHA_ADDRESS = re.compile(r"[A-Za-z0-9._]{3,40}(@[a-z]{2,10})?")
+
+
 async def submit_enrolment_abha_address(
     *,
     session_id: str,
@@ -1283,7 +1288,11 @@ async def submit_enrolment_abha_address(
     )
     _require_stage(session, STAGE_ADDRESS_PENDING)
     chosen = abha_address.strip()
-    if not chosen or "@" not in chosen:
+    # enrol/suggestion offers bare names ("suprabhakumari1009") and
+    # enrol/abha-address takes them bare, answering with the full address in
+    # preferredAbhaAddress. Requiring "@" refused every suggestion ABDM made
+    # (live, 6 Oct 2026).
+    if not _ABHA_ADDRESS.fullmatch(chosen):
         raise AbdmIdentityError("abha_address_invalid", "Choose a valid ABHA address")
     settings = get_settings()
     body = (

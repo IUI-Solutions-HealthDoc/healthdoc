@@ -36,6 +36,7 @@ export function userFacingApiError(code, payload) {
     enrolment_consent_refused: "ABHA enrolment stops when the patient does not consent.",
     enrolment_consent_language_unavailable: "Hindi enrolment consent is not available until an approved translation is loaded.",
     abha_address_refused: "ABDM did not accept this ABHA address. Choose another suggestion.",
+    abha_address_invalid: "That is not a valid ABHA address. Choose one of the addresses ABDM suggested.",
     otp_rejected: "ABDM did not accept this OTP. It may be wrong, expired or over the attempt limit. Check the code and try again, or request a new OTP.",
     abha_mobile_required: "Enter the patient's 10-digit mobile number. ABDM needs it to create the ABHA.",
     abha_mobile_rejected: "ABDM did not accept this mobile number for the ABHA. Check the 10-digit number and try again.",

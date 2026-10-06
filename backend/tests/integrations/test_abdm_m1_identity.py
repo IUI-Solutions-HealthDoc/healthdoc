@@ -788,6 +788,53 @@ async def test_address_refusal_keeps_the_continuation_session(monkeypatch):
     assert alive.stage == "address_pending"
 
 
+async def _address_pending(monkeypatch, address_answer):
+    gw = _gateway(monkeypatch, [
+        {"txnId": "enrol-txn"},
+        {"ABHAProfile": {"ABHANumber": "91-1234-5678-9012"}, "tokens": {"token": "t"}},
+        {"txnId": "mobile-txn", "message": "OTP sent"},
+        {"txnId": "mobile-txn", "authResult": "success", "accounts": [{"ABHANumber": "91-1"}]},
+        address_answer,
+    ])
+    requested = await service.request_aadhaar_otp(
+        aadhaar=AADHAAR, facility_id=FACILITY_A, started_by=STAFF, consent=CONSENT,
+    )
+    await service.enrol_by_aadhaar_otp(
+        session_id=requested.session_id, otp="123456", mobile="9876543210",
+        facility_id=FACILITY_A, consume_session=False,
+    )
+    await service.request_enrolment_mobile_otp(
+        session_id=requested.session_id, mobile="9876543210", facility_id=FACILITY_A, started_by=STAFF,
+    )
+    await service.verify_enrolment_mobile_otp(
+        session_id=requested.session_id, otp="654321", facility_id=FACILITY_A,
+    )
+    return gw, requested.session_id
+
+
+async def test_a_bare_suggestion_is_sent_bare_and_bound_as_abdm_returns_it(monkeypatch):
+    # enrol/suggestion offered "suprabhakumari1009" with no suffix and the
+    # desk refused it before calling ABDM (live, 6 Oct 2026).
+    gw, session_id = await _address_pending(
+        monkeypatch, {"txnId": "mobile-txn", "preferredAbhaAddress": "suprabhakumari1009@sbx"})
+    bound = await service.submit_enrolment_abha_address(
+        session_id=session_id, abha_address="suprabhakumari1009", facility_id=FACILITY_A,
+    )
+    assert bound == "suprabhakumari1009@sbx"
+    assert gw.calls[-1][1]["abhaAddress"] == "suprabhakumari1009"
+
+
+@pytest.mark.parametrize("address", ["", "two words", "x@", "name@sbx@sbx"])
+async def test_a_malformed_address_never_reaches_abdm(monkeypatch, address):
+    gw, session_id = await _address_pending(monkeypatch, {"preferredAbhaAddress": "unused@sbx"})
+    calls = len(gw.calls)
+    with pytest.raises(service.AbdmIdentityError):
+        await service.submit_enrolment_abha_address(
+            session_id=session_id, abha_address=address, facility_id=FACILITY_A,
+        )
+    assert len(gw.calls) == calls
+
+
 async def test_several_mobile_accounts_are_not_reduced_to_the_first(monkeypatch):
     _gateway(monkeypatch, [
         {"txnId": "enrol-txn"},
