@@ -22,6 +22,7 @@ function form(overrides = {}) {
   const stubs = {
     hprProfile: async () => PROFILE,
     hprProfessional: async () => ({ practitioner: null }),
+    hprContact: async () => ({ mobile_verified: false, mobile_hint: null, email_verified: false, email: null }),
     hprRegistrationOptions: async () => ({
       salutations: [{ code: "1", label: "Dr." }, { code: "2", label: "Mr." }, { code: "3", label: "Ms." }, { code: "0", label: "Do not specify" }],
       categories: [{ code: "1", label: "Doctor" }, { code: "2", label: "Nurse" }, { code: "6", label: "Pharmacist" }],
@@ -53,6 +54,7 @@ function form(overrides = {}) {
     "@/lib/api": { ApiError: TestApiError, newIdempotencyKey: () => "synthetic-key" },
     "./api/hpr": api,
     "./hprDocument": { HPR_DOCUMENT_ACCEPT: "application/pdf", readHprDocument: async () => PDF },
+    "./HprContactVerifier": { HprContactVerifier: (props) => ({ type: "contact-verifier", props, children: [] }) },
   }).HprProfessionalRegistration);
   let props = { signedIn: true };
   const render = (next) => { if (next) props = next; const tree = h.render(props); h.effects(); return tree; };

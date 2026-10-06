@@ -216,6 +216,33 @@ async def test_an_existing_hpid_is_sent_to_hprs_login_and_its_kyc_joins_it(desk)
     assert kept["first_name"] == "Asha" and kept["birth_date"] == "1990-04-07"
 
 
+async def test_an_existing_hpid_already_signed_in_gets_its_kyc_at_once(desk):
+    """Live 6 Oct 2026: signed in through HPR's OTP login first, then verified
+    on NHA's page. The KYC joins the open login; no second OTP."""
+    login = _jwt(hprId="asha.verma@hpr.abdm", hprIdNumber="71-0000-0000-0001", ROLE="DOCTOR",
+                 exp=int(time.time()) + 900)
+    await hpr_login._keep(desk["caller"].facility_id, desk["caller"].id, "asha.verma@hpr.abdm", login)
+    assert await hpr_login.kyc(desk["caller"].facility_id, desk["caller"].id) is None
+    _answers(desk["fake"], exists={**KYC_ANSWER, "hprIdNumber": "71-0000-0000-0001", "hprId": "asha.verma@hpr.abdm"})
+    started = (await desk["http"].post("/abdm/hpr/hpid/link")).json()
+    checked = (await desk["http"].post("/abdm/hpr/hpid/link/check", json={"session_id": started["session_id"]})).json()
+    assert checked["existing"] is True and checked["signed_in"] is True
+    held = await hpr_login.current(desk["caller"].facility_id, desk["caller"].id)
+    assert held is not None and held[1] == login, "the same HPR login, now with its KYC"
+    kept = await hpr_login.kyc(desk["caller"].facility_id, desk["caller"].id)
+    assert kept["first_name"] == "Asha"
+
+
+async def test_an_open_login_of_another_professional_does_not_take_the_kyc(desk):
+    other = _jwt(hprId="ravi@hpr.abdm", hprIdNumber="71-0000-0000-0009", exp=int(time.time()) + 900)
+    await hpr_login._keep(desk["caller"].facility_id, desk["caller"].id, "ravi@hpr.abdm", other)
+    _answers(desk["fake"], exists={**KYC_ANSWER, "hprIdNumber": "71-0000-0000-0001", "hprId": "asha.verma@hpr.abdm"})
+    started = (await desk["http"].post("/abdm/hpr/hpid/link")).json()
+    checked = (await desk["http"].post("/abdm/hpr/hpid/link/check", json={"session_id": started["session_id"]})).json()
+    assert checked["signed_in"] is False
+    assert await hpr_login.kyc(desk["caller"].facility_id, desk["caller"].id) is None
+
+
 async def test_a_held_kyc_never_joins_another_professionals_login(desk):
     _answers(desk["fake"], exists={**KYC_ANSWER, "hprIdNumber": "71-0000-0000-0001", "hprId": "asha.verma@hpr.abdm"})
     started = (await desk["http"].post("/abdm/hpr/hpid/link")).json()

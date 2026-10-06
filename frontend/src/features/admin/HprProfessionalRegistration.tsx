@@ -3,8 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 
 import { ApiError, newIdempotencyKey } from "@/lib/api";
+import { HprContactVerifier } from "./HprContactVerifier";
 import {
   hprColleges,
+  hprContact,
   hprCouncils,
   hprCountries,
   hprCourses,
@@ -23,6 +25,7 @@ import {
   type HprDocument,
   type HprOption,
   type HprProfessionalForm,
+  type HprContact,
   type HprProfile,
   type HprRegistrationOptions,
   type HprSystem,
@@ -151,13 +154,14 @@ function RegistrationForm({ signedIn }: { signedIn: boolean }) {
   const [person, setPerson] = useState({ salutation: "", category: "", subcategory: "", system: "", nationality: "356",
     father_name: "", mother_name: "", spouse_name: "", languages: [] as string[] });
   const [comm, setComm] = useState({ same: true, name: "", address: "", state: "", district: "", sub_district: "", city: "", pincode: "" });
-  const [contact, setContact] = useState({ official_mobile: "", public_mobile: "", public_email: "", landline: "", landline_code: "" });
+  const [contact, setContact] = useState({ official_mobile: "", official_email: "", public_mobile: "", public_email: "", landline: "", landline_code: "" });
   const [reg, setReg] = useState({ council: "", number: "", registered_on: "", certificate: null as HprDocument | null,
     renewable: false, renewal_due: "", name_differs: false, name_change_proof: null as HprDocument | null });
   const [quals, setQuals] = useState<QualificationDraft[]>([emptyQualification()]);
   const [work, setWork] = useState({ working: "", reason: "", other_reason: "", purpose: "", status: "", government_type: "",
     ministry: "", proof: null as HprDocument | null, facility_id: "", department: "", designation: "" });
   const [visibility, setVisibility] = useState({ show_photo: true, public_profile: true });
+  const [verified, setVerified] = useState<HprContact | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -165,6 +169,7 @@ function RegistrationForm({ signedIn }: { signedIn: boolean }) {
       if (!live) return;
       setProfile(kyc);
       setOptions(opts);
+      hprContact().then((c) => { if (live) setVerified(c); }, () => undefined);
     }, (reason: unknown) => {
       if (!live) return;
       // A password or OTP login carries no Aadhaar KYC; HPR hands it over only
@@ -208,7 +213,9 @@ function RegistrationForm({ signedIn }: { signedIn: boolean }) {
   const qualsValid = quals.every((q) => q.degree && q.state && q.college && q.university && /^\d{4}$/.test(q.year)
     && Number(q.year) <= new Date().getFullYear() && q.certificate && (!q.name_differs || q.name_change_proof));
   const valid = !!person.salutation && !!person.category && !!person.subcategory && !!systemId && person.languages.length > 0
-    && (!!profile?.mobile_hint || /^[6-9]\d{9}$/.test(contact.official_mobile))
+    // Where Aadhaar gave no mobile or email, HPR needs them verified by OTP (live 6 Oct 2026).
+    && (!!profile?.mobile_hint || !!verified?.mobile_verified)
+    && (!!profile?.email || !!verified?.email_verified)
     && [person.father_name, person.mother_name, person.spouse_name].every((n) => n === "" || NAME.test(n))
     && (comm.same || (NAME.test(comm.name) && comm.address.trim() && comm.state && comm.district && PIN.test(comm.pincode)))
     && !!reg.council && REG_NUMBER.test(reg.number) && !!reg.registered_on && reg.registered_on <= today() && !!reg.certificate
@@ -352,11 +359,8 @@ function RegistrationForm({ signedIn }: { signedIn: boolean }) {
               onChange={(v) => edit(() => setComm({ ...comm, pincode: v.replace(/\D/g, "") }))} />
           </>
         ) : null}
-        {!profile.mobile_hint ? (
-          <Field name="official_mobile" label="Official mobile (required by HPR)" value={contact.official_mobile}
-            valid={/^[6-9]\d{9}$/.test(contact.official_mobile)} inputMode="tel" maxLength={10}
-            onChange={(v) => edit(() => setContact({ ...contact, official_mobile: v.replace(/\D/g, "") }))} />
-        ) : null}
+        {!profile.mobile_hint ? <HprContactVerifier kind="mobile" contact={verified} onChange={setVerified} /> : null}
+        {!profile.email ? <HprContactVerifier kind="email" contact={verified} onChange={setVerified} /> : null}
         <Field name="public_mobile" label="Public mobile (optional)" value={contact.public_mobile} valid={/^[6-9]\d{9}$/.test(contact.public_mobile)}
           inputMode="tel" maxLength={10} onChange={(v) => edit(() => setContact({ ...contact, public_mobile: v.replace(/\D/g, "") }))} />
         <Field name="public_email" label="Public email (optional)" value={contact.public_email} inputMode="email"

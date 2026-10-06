@@ -37,6 +37,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.common.config import get_settings
+
 SALUTATIONS = {1: "Dr.", 2: "Mr.", 3: "Ms.", 0: "Do not specify"}
 CATEGORIES = {1: "doctor", 2: "nurse", 6: "pharmacist"}
 #: Registration's categoryId for doctors: the system of medicine.
@@ -205,6 +207,10 @@ class Professional(BaseModel):
     communication_address: CommunicationAddress | None = None
     #: officialMobile is mandatory; used when the KYC carried no unmasked mobile.
     official_mobile: str = Field(default="", pattern=r"^$|^[6-9]\d{9}$")
+    #: officialEmail is mandatory too (HPR, live 6 Oct 2026: "officialEmail is
+    #: mandatory"); used when the KYC carried no email, as Aadhaar KYC often does not.
+    official_email: str = Field(default="", max_length=120,
+                                pattern=r"^$|^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
     public_mobile: str = Field(default="", pattern=r"^$|^[6-9]\d{9}$")
     public_email: str = Field(default="", max_length=120,
                               pattern=r"^$|^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
@@ -249,16 +255,23 @@ def practitioner(form: Professional, kyc: dict, iso: dict[str, str]) -> dict:
     official_mobile = kyc.get("mobile") or form.official_mobile
     if not official_mobile:
         raise HprKycMissing("Give the professional's official mobile number")
+    official_email = kyc.get("email") or form.official_email
+    if not official_email:
+        raise HprKycMissing("Give the professional's official email")
     reg, comm, work = form.registration, form.communication_address, form.work
     nurse = form.category == 2
     government = work.working and work.status in ("GOVERNMENT", "BOTH")
     return {
+        # Both in NHA's register-professional-new example and absent before;
+        # HPR answered a generic 500 without them (live 6 Oct 2026).
+        "apiClientId": get_settings().abdm_client_id,
+        "specialities": [],
         "healthProfessionalType": CATEGORIES[form.category],
         "profilePhoto": kyc.get("photo", ""),
         "officialMobileCode": "+91",
         "officialMobile": official_mobile,
         "officialMobileStatus": "",
-        "officialEmail": kyc.get("email", ""),
+        "officialEmail": official_email,
         "officialEmailStatus": "",
         "visibleProfilePicture": _flag(form.show_photo),
         "profileVisibleToPublic": _flag(form.public_profile),

@@ -65,7 +65,12 @@ async def _hfr(call):
         return await call
     except AbdmNotConfigured:
         raise HTTPException(503, {"code": "abdm_unavailable", "message": "ABDM credentials are not configured"}) from None
-    except AbdmUnavailable:
+    except AbdmUnavailable as exc:
+        # Status, error codes and field names only, never values: a 5xx and a
+        # timeout both read "HFR did not respond" on the desk, and only this
+        # line tells them apart (live 6 Oct 2026, HPR registration).
+        log.warning("HFR/HPR unavailable: status=%s codes=%s shape=%s message=%s",
+                    exc.status_code, list(exc.error_codes), exc.body_shape, exc.safe_message)
         raise HTTPException(503, {"code": "abdm_unavailable", "message": "HFR did not respond"}) from None
     except AbdmAuthError:
         raise HTTPException(

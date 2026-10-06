@@ -211,9 +211,9 @@ async def _after_aadhaar(state: dict, verified: object, *, facility_id: uuid.UUI
         # login (no roles or category; registration refuses it), so the
         # professional signs in through HPR's login, and the KYC joins it.
         await get_redis().delete(_key(session_id))
-        await hpr_login.hold_kyc(facility_id, user_id, hpr_id_number=number, kyc=kyc)
+        signed_in = await hpr_login.hold_kyc(facility_id, user_id, hpr_id_number=number, kyc=kyc)
         hpr_id = _text(exists, "hprId") or number
-        return {"existing": True, "hpr_id": hpr_id, "hpr_id_number": number, "signed_in": False,
+        return {"existing": True, "hpr_id": hpr_id, "hpr_id_number": number, "signed_in": signed_in,
                 "kyc": public(kyc)}
 
     suggestions = await _call("suggestion", "POST", "/v1/registration/aadhaar/hpid/suggestion",

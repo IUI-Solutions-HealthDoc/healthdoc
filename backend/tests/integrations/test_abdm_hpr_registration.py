@@ -131,6 +131,17 @@ async def test_the_profile_shows_aadhaars_details_without_the_full_mobile(desk):
     assert all(c[1] != "/v1/account/information" for c in desk["fake"].calls)
 
 
+async def test_a_kyc_without_email_is_not_registered_until_an_email_is_verified(desk):
+    """Live 6 Oct 2026, HPR: "officialEmail is mandatory". Aadhaar KYC often
+    carries no email; a typed one is not enough, it must be verified by OTP
+    (test_abdm_hpr_contact.py covers the verified path)."""
+    await _sign_in(desk, kyc={**KYC, "email": ""})
+    refused = await desk["http"].post("/abdm/hpr/professional", json=_form(official_email="asha.official@example.org"))
+    assert refused.status_code == 409, refused.text
+    assert refused.json()["detail"]["message"] == "Verify the official email by OTP first"
+    assert all(c[1] != REGISTER for c in desk["fake"].calls), "never sent with an unverified email"
+
+
 async def test_registration_follows_nhas_document(desk):
     """HPR-018/027-029/037: token in the body, KYC from the login, NHA's codes."""
     token = await _sign_in(desk)

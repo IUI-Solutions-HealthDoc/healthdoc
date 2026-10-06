@@ -116,7 +116,7 @@ export interface HprProfessionalForm {
   salutation: number; category: number; subcategory: number; nationality: string;
   father_name: string; mother_name: string; spouse_name: string; languages: number[];
   communication_address: { name: string; address: string; country: string; state: string; district: string; sub_district: string; city: string; pincode: string } | null;
-  official_mobile: string; public_mobile: string; public_email: string; landline: string; landline_code: string;
+  official_mobile: string; official_email: string; public_mobile: string; public_email: string; landline: string; landline_code: string;
   registration: {
     council: number; number: string; registered_on: string; certificate: HprDocument; renewable: boolean;
     renewal_due: string | null; name_differs: boolean; name_change_proof: HprDocument | null; qualifications: HprQualification[];
@@ -134,4 +134,29 @@ export function registerHprProfessional(body: HprProfessionalForm, idempotencyKe
 }
 export function updateHprProfessional(body: HprProfessionalForm, idempotencyKey: string) {
   return api<HprSubmitted>("/abdm/hpr/professional/update", { method: "POST", body: JSON.stringify(body), idempotencyKey });
+}
+
+/** The professional's official mobile and email, verified by OTP under their
+ * HPR login before registration (NHA's m4-verification). */
+export interface HprContact {
+  mobile_verified: boolean; mobile_hint: string | null; email_verified: boolean; email: string | null;
+}
+export function hprContact() {
+  return api<HprContact>("/abdm/hpr/contact");
+}
+export function sendHprMobileOtp(mobile: string) {
+  return api<HprContact & { mobile_otp_sent: boolean }>("/abdm/hpr/contact/mobile", {
+    method: "POST", body: JSON.stringify({ mobile }), idempotencyKey: null,
+  });
+}
+export function verifyHprMobileOtp(otp: string) {
+  return api<HprContact>("/abdm/hpr/contact/mobile/verify", { method: "POST", body: JSON.stringify({ otp }), idempotencyKey: null });
+}
+export function sendHprEmailOtp(email: string) {
+  return api<HprContact & { email_otp_sent: boolean }>("/abdm/hpr/contact/email", {
+    method: "POST", body: JSON.stringify({ email }), idempotencyKey: null,
+  });
+}
+export function verifyHprEmailOtp(otp: string) {
+  return api<HprContact>("/abdm/hpr/contact/email/verify", { method: "POST", body: JSON.stringify({ otp }), idempotencyKey: null });
 }
