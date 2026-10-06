@@ -94,8 +94,13 @@ class AbdmError(Exception):
         stage: str | None = None,
         error_codes: tuple[str, ...] = (),
         body_shape: str | None = None,
+        safe_message: str | None = None,
     ):
         self.status_code = status_code
+        #: The gateway's own words, scrubbed by safe_rejection_message: for
+        #: operator logs only. HPR answers a refused registration with a 500
+        #: whose message names the field (live 6 Oct 2026).
+        self.safe_message = safe_message
         self.stage = stage
         self.error_codes = error_codes
         #: Field names of the gateway's error body, never values. Recorded so
@@ -508,12 +513,17 @@ class AbdmClient:
                 body_shape=_body_shape(_safe_body(resp)),
             )
         if resp.status_code >= 500:
+            failure = _safe_body(resp)
+            details = failure.get("details") if isinstance(failure, dict) else None
             raise AbdmUnavailable(
                 "ABDM request unavailable",
                 status_code=resp.status_code,
                 stage="request",
-                error_codes=_safe_error_codes(_safe_body(resp)),
-                body_shape=_body_shape(_safe_body(resp)),
+                error_codes=_safe_error_codes(failure),
+                body_shape=_body_shape(failure),
+                safe_message=safe_rejection_message(
+                    [failure, *(details if isinstance(details, list) else [])]
+                ),
             )
         if resp.status_code >= 400:
             raise AbdmRejected(resp.status_code, _safe_body(resp), rid)
