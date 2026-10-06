@@ -298,8 +298,16 @@ test("creating an ABHA requires consent and does not preselect one of several ad
   assert.equal(enrolment.args[2].granted, true);
   nodes(tree).find((n) => n.props?.autoComplete === "one-time-code").props.onChange({ target: { value: "123456" } });
   tree = d.render();
+  // byAadhaar refuses an enrolment without the communication mobile (live, 6 Oct 2026).
+  assert.equal(button(tree, "Verify and link").props.disabled, true, "no mobile, no verify");
+  assert.match(content(tree), /Mobile number for this ABHA \(required\)/);
+  nodes(tree).find((n) => n.type === "input" && n.props.inputMode === "tel")
+    .props.onChange({ target: { value: "9876543210" } });
+  tree = d.render();
+  assert.equal(button(tree, "Verify and link").props.disabled, false);
   await button(tree, "Verify and link").props.onClick(); await flush();
   tree = d.render();
+  assert.equal(d.calls.find((c) => c.name === "verifyAbhaEnrolmentOtp").args[2], "+919876543210");
   const mobile = nodes(tree).find((n) => n.type === "input" && n.props.inputMode === "tel");
   mobile.props.onChange({ target: { value: "9876543210" } });
   tree = d.render();

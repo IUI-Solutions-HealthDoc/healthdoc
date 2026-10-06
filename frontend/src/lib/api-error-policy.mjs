@@ -36,6 +36,11 @@ export function userFacingApiError(code, payload) {
     enrolment_consent_refused: "ABHA enrolment stops when the patient does not consent.",
     enrolment_consent_language_unavailable: "Hindi enrolment consent is not available until an approved translation is loaded.",
     abha_address_refused: "ABDM did not accept this ABHA address. Choose another suggestion.",
+    otp_rejected: "ABDM did not accept this OTP. It may be wrong, expired or over the attempt limit. Check the code and try again, or request a new OTP.",
+    abha_mobile_required: "Enter the patient's 10-digit mobile number. ABDM needs it to create the ABHA.",
+    abha_mobile_rejected: "ABDM did not accept this mobile number for the ABHA. Check the 10-digit number and try again.",
+    // ABDM-1206: ABDM is up but cannot reach UIDAI, so no Aadhaar OTP can be sent.
+    aadhaar_service_unavailable: "ABDM cannot reach the Aadhaar (UIDAI) service right now, so Aadhaar OTPs cannot be sent. Try again later, or verify with the ABHA-linked mobile instead.",
     abha_profile_unavailable: "The NHA ABHA card is not available until enrolment or login stores a profile credential.",
     abdm_account_selection_required: "ABDM returned more than one account. Do not continue until the patient chooses one.",
     abdm_requester_required: "Ask your facility administrator to verify your name, registration number, identifier type and issuing registry URI before requesting ABDM records.",
