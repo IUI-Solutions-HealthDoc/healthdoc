@@ -1,9 +1,10 @@
 import { api } from "@/lib/api";
 
-// Every type ABDM's M3 cases may ask for, not only the five HealthDoc builds.
+// Every type ABDM's M3 cases may ask for, not only the ones HealthDoc builds,
+// and Invoice, the billing type of NHA's HMIS FAQ.
 export const HI_TYPES = [
   "OPConsultation", "Prescription", "DiagnosticReport", "DischargeSummary",
-  "ImmunizationRecord", "HealthDocumentRecord", "WellnessRecord",
+  "ImmunizationRecord", "HealthDocumentRecord", "WellnessRecord", "Invoice",
 ] as const;
 export type HiType = (typeof HI_TYPES)[number];
 export interface ExternalRecord {

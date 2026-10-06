@@ -6,6 +6,7 @@ from datetime import UTC
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.billing.models import Invoice
 from app.common.patient_scope import facility_timezone
 from app.immunization.models import ImmunizationRecord, VaccineCatalogue
 from app.integrations.abdm.hip.documents import (
@@ -146,6 +147,23 @@ async def publish_immunization(
         visit_id=None,
         actor_id=actor_id,
         display=f"Immunization — {given_on.isoformat()} — {vaccine.code} dose {record.dose_number}",
+    )
+
+
+async def publish_invoice(db: AsyncSession, invoice: Invoice, actor_id: uuid.UUID) -> AbdmCareContext:
+    """Offer an issued bill to the patient's ABHA as an InvoiceRecord, in the
+    same transaction that issues it; nothing is sent until the patient links it."""
+    visit = await db.get(Visit, invoice.visit_id)
+    issued_at = invoice.issued_at
+    if issued_at is None or visit is None:
+        raise DocumentUnavailable("An invoice is shared only once issued")
+    if issued_at.tzinfo is None:
+        issued_at = issued_at.replace(tzinfo=UTC)
+    issued_on = issued_at.astimezone(await facility_timezone(db, invoice.facility_id)).date()
+    # The display carries no amounts or line items; ABDM cuts it at 50 characters.
+    return await publish_document(
+        db, kind="invoice", source_id=invoice.id, visit=visit, actor_id=actor_id,
+        display=f"Invoice — {issued_on.isoformat()} — {invoice.invoice_number}"[:50],
     )
 
 

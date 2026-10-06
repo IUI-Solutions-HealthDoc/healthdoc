@@ -57,7 +57,8 @@ log = logging.getLogger("healthdoc.abdm")
 #: Invoice were removed for exactly that reason; re-add one only once
 #: fhir/builder.py can populate it, and the drift test will hold the three sets
 #: together. ImmunizationRecord came back (migration 0092) with a builder for
-#: one recorded vaccine dose.
+#: one recorded vaccine dose. Invoice came back (migration 0094) with a
+#: builder for one issued bill, the eighth type NHA's HMIS FAQ asks for.
 HI_TYPES: frozenset[str] = frozenset(
     {
         "OPConsultation",
@@ -66,6 +67,7 @@ HI_TYPES: frozenset[str] = frozenset(
         "DischargeSummary",
         "WellnessRecord",
         "ImmunizationRecord",
+        "Invoice",
     }
 )
 
