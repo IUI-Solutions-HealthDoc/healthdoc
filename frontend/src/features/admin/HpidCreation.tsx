@@ -114,7 +114,7 @@ export function HpidCreation({ onSignedIn }: { onSignedIn?: () => void }) {
           <p>HPR ID <span className="font-mono">{stage.hprId}</span>{stage.number !== stage.hprId ? <>, number <span className="font-mono">{stage.number}</span></> : null}. A person has one HPID.</p>
           <p>{stage.signedIn
             ? "They are now signed in to HPR above, with their Aadhaar details. Continue with “Register a professional in HPR” below."
-            : "HPR did not hand over a login for it; sign in with it above."}</p>
+            : "Sign in with it above (OTP on Aadhaar mobile, or the HPR password). Their Aadhaar details are kept for the HPR registration below."}</p>
           <button type="button" className={secondary} onClick={() => setStage({ kind: "idle" })}>Done</button>
         </div>
       ) : null}
