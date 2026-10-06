@@ -97,6 +97,7 @@ test("ABHA enrolment refusals name their cause instead of 'highlighted fields' o
     [422, "abha_mobile_required", /10-digit mobile number/],
     [400, "abha_mobile_rejected", /did not accept this mobile number/],
     [503, "aadhaar_service_unavailable", /Aadhaar \(UIDAI\) service/],
+    [400, "abha_address_invalid", /not a valid ABHA address/],
   ];
   for (const [status, code, expected] of cases) {
     const message = userFacingApiError(status, { code, message: "server text 9876543210" });
