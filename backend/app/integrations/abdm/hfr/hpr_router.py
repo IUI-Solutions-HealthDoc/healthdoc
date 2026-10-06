@@ -22,7 +22,7 @@ from app.integrations.abdm.client import (
     AbdmRejected,
     AbdmUnavailable,
 )
-from app.integrations.abdm.hfr import client, hpid, hpr_login, hpr_registration
+from app.integrations.abdm.hfr import client, hpid, hpr_contact, hpr_login, hpr_registration
 from app.integrations.abdm.hfr.router import _hfr
 
 router = APIRouter(
@@ -342,6 +342,17 @@ async def _submit(path: str, payload: hpr_registration.Professional, current_db_
         districts={comm.district: comm.state} if comm else None,
         sub_districts={comm.sub_district: comm.district} if comm and comm.sub_district else None,
     )
+    # Where Aadhaar gave no mobile or email, only one verified by OTP under
+    # this professional's login is sent (NHA's m4-verification journey).
+    contact = await hpr_contact.state(current_db_user.facility_id, current_db_user.id, session.hpr_id_number)
+    if not kyc.get("mobile"):
+        if not contact.get("mobile_verified"):
+            raise HTTPException(409, {"code": "hpr_contact_unverified", "message": "Verify the official mobile by OTP first"})
+        payload = payload.model_copy(update={"official_mobile": contact["mobile"]})
+    if not kyc.get("email"):
+        if not contact.get("email_verified"):
+            raise HTTPException(409, {"code": "hpr_contact_unverified", "message": "Verify the official email by OTP first"})
+        payload = payload.model_copy(update={"official_email": contact["email"]})
     try:
         practitioner = hpr_registration.practitioner(payload, kyc, iso)
     except hpr_registration.HprKycMissing as exc:
@@ -395,3 +406,56 @@ async def registration_options() -> dict:
         "not_working_reasons": list(hpr_registration.NOT_WORKING_REASONS),
         "months": list(hpr_registration.MONTHS),
     }
+
+
+# ----------------------------------------------------------------- official contact verification (m4-verification)
+
+
+class ContactMobile(BaseModel):
+    mobile: str = Field(pattern=r"^[6-9]\d{9}$")
+
+
+class ContactEmail(BaseModel):
+    email: str = Field(max_length=120, pattern=r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
+
+
+class ContactOtp(BaseModel):
+    otp: str = Field(pattern=r"^\d{6}$")
+
+
+async def _contact(call):
+    try:
+        return await _step(call)
+    except hpr_contact.ContactError as exc:
+        raise HTTPException(409, {"code": exc.code, "message": exc.message}) from None
+
+
+@router.get("/contact")
+async def contact_status(current_db_user: CurrentDbUser) -> dict:
+    session, _ = await _signed_in(current_db_user)
+    return hpr_contact.public(
+        await hpr_contact.state(current_db_user.facility_id, current_db_user.id, session.hpr_id_number))
+
+
+@router.post("/contact/mobile")
+async def contact_mobile(payload: ContactMobile, current_db_user: CurrentDbUser) -> dict:
+    return await _contact(hpr_contact.send_mobile_otp(
+        facility_id=current_db_user.facility_id, user_id=current_db_user.id, mobile=payload.mobile))
+
+
+@router.post("/contact/mobile/verify")
+async def contact_mobile_verify(payload: ContactOtp, current_db_user: CurrentDbUser) -> dict:
+    return await _contact(hpr_contact.verify_mobile_otp(
+        facility_id=current_db_user.facility_id, user_id=current_db_user.id, otp=payload.otp))
+
+
+@router.post("/contact/email")
+async def contact_email(payload: ContactEmail, current_db_user: CurrentDbUser) -> dict:
+    return await _contact(hpr_contact.send_email_otp(
+        facility_id=current_db_user.facility_id, user_id=current_db_user.id, email=payload.email))
+
+
+@router.post("/contact/email/verify")
+async def contact_email_verify(payload: ContactOtp, current_db_user: CurrentDbUser) -> dict:
+    return await _contact(hpr_contact.verify_email_otp(
+        facility_id=current_db_user.facility_id, user_id=current_db_user.id, otp=payload.otp))

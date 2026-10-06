@@ -135,3 +135,28 @@ export function registerHprProfessional(body: HprProfessionalForm, idempotencyKe
 export function updateHprProfessional(body: HprProfessionalForm, idempotencyKey: string) {
   return api<HprSubmitted>("/abdm/hpr/professional/update", { method: "POST", body: JSON.stringify(body), idempotencyKey });
 }
+
+/** The professional's official mobile and email, verified by OTP under their
+ * HPR login before registration (NHA's m4-verification). */
+export interface HprContact {
+  mobile_verified: boolean; mobile_hint: string | null; email_verified: boolean; email: string | null;
+}
+export function hprContact() {
+  return api<HprContact>("/abdm/hpr/contact");
+}
+export function sendHprMobileOtp(mobile: string) {
+  return api<HprContact & { mobile_otp_sent: boolean }>("/abdm/hpr/contact/mobile", {
+    method: "POST", body: JSON.stringify({ mobile }), idempotencyKey: null,
+  });
+}
+export function verifyHprMobileOtp(otp: string) {
+  return api<HprContact>("/abdm/hpr/contact/mobile/verify", { method: "POST", body: JSON.stringify({ otp }), idempotencyKey: null });
+}
+export function sendHprEmailOtp(email: string) {
+  return api<HprContact & { email_otp_sent: boolean }>("/abdm/hpr/contact/email", {
+    method: "POST", body: JSON.stringify({ email }), idempotencyKey: null,
+  });
+}
+export function verifyHprEmailOtp(otp: string) {
+  return api<HprContact>("/abdm/hpr/contact/email/verify", { method: "POST", body: JSON.stringify({ otp }), idempotencyKey: null });
+}
