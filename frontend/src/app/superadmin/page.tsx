@@ -8,6 +8,7 @@ import {
   listPlatformFacilities,
   type PlatformFacility,
 } from "@/features/platform/api";
+import { FacilityOnboarding } from "@/features/platform/FacilityOnboarding";
 
 export default function Page() {
   const { localizeField, t } = useLocale();
@@ -85,6 +86,8 @@ export default function Page() {
           {error}
         </p>
       ) : null}
+
+      <FacilityOnboarding facilities={facilities} onChanged={() => void load(query)} />
 
       <section className="surface-card overflow-hidden">
         <div className="border-b border-border px-5 py-4">
