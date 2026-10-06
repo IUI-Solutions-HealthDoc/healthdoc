@@ -226,9 +226,15 @@ async def _clinical_facts(
     practitioner = await db.get(User, source.author_id)
     if practitioner is None:
         raise TransferError("Document author has no registration number")
-    practitioner_facts = {"id": practitioner.id, "name": practitioner.full_name}
+    practitioner_facts: dict[str, Any] | None = {"id": practitioner.id, "name": practitioner.full_name}
     if (practitioner.registration_number or "").strip():
         practitioner_facts["registration_number"] = practitioner.registration_number
+    elif source.kind == "lab-result":
+        # A laboratory result is entered and verified by laboratory staff, who
+        # hold no medical registration. The report is the laboratory's, so the
+        # facility authors it; nobody is given a licence they do not hold.
+        # Live 6 Oct 2026, every lab report failed transfer here.
+        practitioner_facts = None
     else:
         settings = get_settings()
         # Never turn a missing licence into a plausible licence. This opt-in

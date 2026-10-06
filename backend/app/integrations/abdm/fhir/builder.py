@@ -514,29 +514,45 @@ def _diagnostic_report(
     else:
         pacs_study_uid = str(item.get("pacs_study_uid") or "").strip()
         modality = str(item.get("modality") or "").strip()
-        if not pacs_study_uid or not conclusion or not modality:
-            raise ValueError(
-                "FHIR imaging report requires modality, PACS study UID and signed findings"
-            )
-        # HealthDoc stores a PACS study UID, not the source DICOM bytes.  The
-        # attachment therefore carries an explicit PACS-reference document;
-        # it never labels a UID string as application/dicom or invents image
-        # pixels.  The HIU can use the UID to retrieve the study through the
-        # separately governed PACS channel.
-        pacs_reference = json.dumps(
-            {
-                "pacsStudyUid": pacs_study_uid,
-                "modality": modality,
-                "report": conclusion,
-            },
-            separators=(",", ":"),
-            sort_keys=True,
-        ).encode()
+        if not conclusion or not modality:
+            raise ValueError("FHIR imaging report requires modality and signed findings")
+    if not is_lab:
+        # DiagnosticReportImaging requires at least one media (NRCeS 6.5.0).
+        # With a PACS study, the attachment is an explicit PACS-reference
+        # document: HealthDoc stores the UID, not the DICOM bytes, so it never
+        # labels a UID as application/dicom or invents image pixels. Without
+        # one (no PACS at the facility), the attachment is the signed report
+        # itself as text, titled as the report and never as an image.
+        issued = _iso(item.get("issued") or authored_at)
+        if pacs_study_uid:
+            content = {
+                "contentType": "application/json",
+                "data": base64.b64encode(
+                    json.dumps(
+                        {"pacsStudyUid": pacs_study_uid, "modality": modality, "report": conclusion},
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    ).encode()
+                ).decode(),
+                "title": f"PACS study reference for {item['name']}",
+                "creation": issued,
+            }
+            narrative, link_label = f"PACS study reference: {pacs_study_uid}", "PACS study reference"
+        else:
+            content = {
+                "contentType": "text/plain",
+                "data": base64.b64encode(
+                    f"{item['name']} ({modality})\n\n{conclusion}\n".encode()
+                ).decode(),
+                "title": f"Signed report for {item['name']} (no images stored)",
+                "creation": issued,
+            }
+            narrative, link_label = f"Signed report: {item['name']}", "Signed imaging report"
         media = {
             "resourceType": "Media",
-            "id": _rid("media", item.get("id") or pacs_study_uid),
+            "id": _rid("media", item.get("id") or pacs_study_uid or f"{patient['id']}:{index}"),
             "meta": _meta("Media", authored_at),
-            "text": _narrative(f"PACS study reference: {pacs_study_uid}"),
+            "text": _narrative(narrative),
             "status": "completed",
             "modality": {
                 "coding": [
@@ -549,16 +565,11 @@ def _diagnostic_report(
                 "text": modality,
             },
             "subject": _reference(patient),
-            "createdDateTime": _iso(item.get("issued") or authored_at),
-            "content": {
-                "contentType": "application/json",
-                "data": base64.b64encode(pacs_reference).decode(),
-                "title": f"PACS study reference for {item['name']}",
-                "creation": _iso(item.get("issued") or authored_at),
-            },
+            "createdDateTime": issued,
+            "content": content,
         }
         attachments.append(media)
-        report["media"] = [{"link": _reference(media, "PACS study reference")}]
+        report["media"] = [{"link": _reference(media, link_label)}]
     return report, observations, attachments
 
 
@@ -774,7 +785,11 @@ def build_clinical_bundle(
     # A bill is issued by the facility, not written by a health professional;
     # InvoiceRecord lets the Organization author it. Every other document
     # names its practitioner.
-    if practitioner is None and not invoice_record:
+    # A laboratory report may be the laboratory's own (no registered author).
+    lab_only = record_type == "DiagnosticReport" and bool(diagnostic_reports) and all(
+        item.get("kind") == "lab" for item in diagnostic_reports
+    ) and not any((chief_complaints, diagnoses, allergies, observations, medications))
+    if practitioner is None and not invoice_record and not lab_only:
         raise ValueError(f"{record_type} requires a practitioner")
     profile, document_code, document_title = _DOCUMENTS[record_type]
     # Preserve the registered document label (including explicit test warnings)
@@ -783,6 +798,9 @@ def build_clinical_bundle(
     patient_resource = _patient(patient, authored_at)
     practitioner_resource = _practitioner(practitioner, authored_at) if practitioner is not None else None
     organization_resource = _organization(organization, authored_at)
+    # Who performed and interpreted: the registered practitioner, or for a
+    # laboratory's own report the laboratory (Organization) itself.
+    performer_resource = practitioner_resource or organization_resource
     encounter_resource = (
         _encounter(encounter, patient_resource, authored_at) if encounter is not None else None
     )
@@ -826,7 +844,7 @@ def build_clinical_bundle(
             item,
             patient_resource,
             encounter_resource,
-            practitioner_resource,
+            performer_resource,
             authored_at,
             pos,
         )
@@ -1042,7 +1060,16 @@ def validate_min(bundle: Mapping[str, Any]) -> list[str]:
         str(url).rsplit("/", 1)[-1] for url in (first.get("meta") or {}).get("profile") or []
     }
     required_types = ["Patient", "Organization"]
-    if "InvoiceRecord" not in profile_names:
+    # A document authored by the facility (a bill, a laboratory's own report)
+    # has no Practitioner to carry; any other document must name one.
+    organization_ids = {
+        f"urn:uuid:{entry['resource'].get('id')}"
+        for entry in entries
+        if entry.get("resource", {}).get("resourceType") == "Organization"
+    }
+    authors = {ref.get("reference") for ref in first.get("author") or [] if isinstance(ref, dict)}
+    facility_authored = bool(authors) and authors <= organization_ids
+    if "InvoiceRecord" not in profile_names and not facility_authored:
         required_types.append("Practitioner")
     if profile_names.isdisjoint(_ENCOUNTER_OPTIONAL):
         required_types.append("Encounter")
