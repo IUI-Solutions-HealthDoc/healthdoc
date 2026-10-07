@@ -245,22 +245,77 @@ def test_imaging_never_claims_a_pacs_uid_is_an_image():
     assert media["content"]["contentType"] != "application/dicom"
 
 
-def test_imaging_without_retrievable_study_reference_fails_closed():
-    with pytest.raises(ValueError, match="PACS study UID"):
+def _resources(bundle, kind):
+    return [e["resource"] for e in bundle["entry"] if e["resource"]["resourceType"] == kind]
+
+
+_XRAY = {
+    "id": "radiology-1",
+    "kind": "radiology",
+    "modality": "xray",
+    "name": "Chest radiograph",
+    "conclusion": "No acute finding",
+    "observations": [],
+}
+
+
+def test_imaging_without_a_pacs_study_carries_the_signed_report_not_an_image():
+    # NRCeS DiagnosticReportImaging needs one media; a facility with no PACS
+    # still has a signed report (live, 6 Oct 2026: every X-ray failed here).
+    bundle = build_clinical_bundle("DiagnosticReport", **_facts(), diagnostic_reports=[_XRAY])
+    (media,) = _resources(bundle, "Media")
+    assert media["content"]["contentType"] == "text/plain"
+    assert "no images stored" in media["content"]["title"]
+    assert "PACS" not in media["text"]["div"]
+    (report,) = _resources(bundle, "DiagnosticReport")
+    assert report["media"][0]["link"]["reference"] == f"urn:uuid:{media['id']}"
+
+
+def test_imaging_with_a_pacs_study_still_carries_the_pacs_reference():
+    bundle = build_clinical_bundle(
+        "DiagnosticReport", **_facts(), diagnostic_reports=[{**_XRAY, "pacs_study_uid": "2.25.1"}])
+    (media,) = _resources(bundle, "Media")
+    assert media["content"]["contentType"] == "application/json"
+    assert media["content"]["title"].startswith("PACS study reference")
+
+
+def test_imaging_without_signed_findings_fails_closed():
+    with pytest.raises(ValueError, match="signed findings"):
         build_clinical_bundle(
-            "DiagnosticReport",
-            **_facts(),
-            diagnostic_reports=[
-                {
-                    "id": "radiology-1",
-                    "kind": "radiology",
-                    "modality": "xray",
-                    "name": "Chest radiograph",
-                    "conclusion": "No acute finding",
-                    "observations": [],
-                }
-            ],
-        )
+            "DiagnosticReport", **_facts(), diagnostic_reports=[{**_XRAY, "conclusion": ""}])
+
+
+_CBC = {
+    "id": "lab-1",
+    "kind": "lab",
+    "name": "Complete Blood Count",
+    "observations": [{"id": "o1", "name": "Haemoglobin", "value": 9.4, "unit": "g/dL"}],
+}
+
+
+def test_a_laboratory_report_without_a_registered_author_is_the_facilitys():
+    bundle = build_clinical_bundle(
+        "DiagnosticReport", **{**_facts(), "practitioner": None}, diagnostic_reports=[_CBC])
+    assert _resources(bundle, "Practitioner") == []
+    (organization,) = _resources(bundle, "Organization")
+    organization_ref = f"urn:uuid:{organization['id']}"
+    (composition,) = _resources(bundle, "Composition")
+    assert [a["reference"] for a in composition["author"]] == [organization_ref]
+    (report,) = _resources(bundle, "DiagnosticReport")
+    assert report["resultsInterpreter"][0]["reference"] == organization_ref
+    assert all(o["performer"][0]["reference"] == organization_ref
+               for o in _resources(bundle, "Observation"))
+
+
+@pytest.mark.parametrize(
+    ("record_type", "content"),
+    [("DiagnosticReport", {"diagnostic_reports": [_XRAY]}),
+     ("DiagnosticReport", {"diagnostic_reports": [_CBC, _XRAY]}),
+     ("OPConsultation", {"chief_complaints": [{"text": "Cough"}]})],
+)
+def test_only_a_laboratory_report_may_omit_its_practitioner(record_type, content):
+    with pytest.raises(ValueError, match="requires a practitioner"):
+        build_clinical_bundle(record_type, **{**_facts(), "practitioner": None}, **content)
 
 
 def test_document_graph_uses_resolvable_absolute_uuid_references():
