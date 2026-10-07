@@ -172,6 +172,40 @@ def consented_care_contexts(raw_artefact: dict | None) -> list[str]:
     return references
 
 
+async def withdraw_consent(
+    db: AsyncSession,
+    *,
+    facility_id: uuid.UUID,
+    artefact_id: str,
+    status: str,
+    raw: dict,
+) -> AbdmHipConsentArtefact | None:
+    """Apply a revocation or expiry that names only the consent.
+
+    The stored artefact stops authorising transfers at once (the transfer
+    worker re-reads it before every page). An artefact this HIP never received
+    has nothing to withdraw: the notice is acknowledged and nothing is stored,
+    because the row needs the patient the notice does not name.
+    """
+    if status not in ("revoked", "expired"):
+        raise HipError("unknown_status", f"Unrecognised consent status {status!r}")
+    existing = (
+        await db.execute(
+            select(AbdmHipConsentArtefact).where(
+                AbdmHipConsentArtefact.consent_artefact_id == artefact_id
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is None:
+        return None
+    if existing.facility_id != facility_id:
+        raise HipError("consent_scope_mismatch", "Consent artefact is unavailable")
+    if existing.status not in {"revoked", "expired"}:
+        existing.status = status
+        existing.raw_artefact = raw
+    return existing
+
+
 async def record_consent_notification(
     db: AsyncSession,
     *,

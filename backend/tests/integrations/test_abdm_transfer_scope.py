@@ -403,3 +403,50 @@ async def test_a_transfer_whose_every_document_is_refused_fails(db, transfer_cas
     row = (await db.execute(select(AbdmHipHealthInformationRequest))).scalar_one()
     assert row.status == "failed"
     assert row.failure_reason == "The HIU refused every document"
+
+
+def _revocation(consent_id: str, status: str = "REVOKED"):
+    from app.integrations.abdm.contracts_v3 import HipConsentCallback
+
+    # The shape ABDM sent on 7 Oct 2026: status and consentId, no consentDetail.
+    return HipConsentCallback.model_validate(
+        {"notification": {"status": status, "consentId": consent_id}}
+    )
+
+
+async def _artefact(db):
+    return (await db.execute(select(AbdmHipConsentArtefact))).scalar_one()
+
+
+@pytest.mark.parametrize("status", ["REVOKED", "EXPIRED"])
+async def test_a_revocation_without_consent_detail_stops_sharing(db, transfer_case, status):
+    payload, callback, _, pushes = transfer_case
+    artefact = await _artefact(db)
+    await external_router.hip_consent_notify(
+        _revocation(artefact.consent_artefact_id, status), callback, db)
+    db.expire_all()
+    assert (await _artefact(db)).status == status.lower()
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException):
+        await external_router.hip_health_information_request(
+            payload, BackgroundTasks(), GatewayCallback(str(uuid.uuid4()), datetime.now(UTC), "HIP-TEST"), db)
+    pushes.assert_not_awaited()
+
+
+async def test_a_grant_still_needs_its_consent_detail(db, transfer_case):
+    from fastapi import HTTPException
+
+    _, callback, _, _ = transfer_case
+    with pytest.raises(HTTPException) as caught:
+        await external_router.hip_consent_notify(_revocation(str(uuid.uuid4()), "GRANTED"), callback, db)
+    assert caught.value.status_code == 422
+
+
+async def test_a_revocation_for_an_unknown_consent_is_acknowledged(db, transfer_case):
+    _, callback, _, _ = transfer_case
+    before = (await _artefact(db)).status
+    response = await external_router.hip_consent_notify(_revocation(str(uuid.uuid4())), callback, db)
+    assert response.status_code == 202
+    db.expire_all()
+    assert (await _artefact(db)).status == before == "granted"
