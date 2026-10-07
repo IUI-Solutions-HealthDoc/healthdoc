@@ -906,12 +906,32 @@ async def hip_consent_notify(
     if callback.replayed:
         return _accepted()
     detail = payload.notification.consent_detail
-    if detail is None:
+    status = payload.notification.status.lower()
+    if detail is None and status not in {"revoked", "expired"}:
         raise HTTPException(
             422, {"code": "consent_detail_missing", "message": "Consent detail is required"}
         )
     facility_id = await _facility_id(db, callback.recipient_id, "hip")
-    status = payload.notification.status.lower()
+    if detail is None:
+        # A revocation or expiry names only the consent (live 7 Oct 2026:
+        # {"status": "REVOKED", "consentId": ...}). Refusing it for lack of a
+        # consentDetail left the HIP still sharing under a revoked consent.
+        await hip_service.withdraw_consent(
+            db,
+            facility_id=facility_id,
+            artefact_id=payload.notification.consent_id,
+            status=status,
+            raw=raw_dict(payload),
+        )
+        await callback_replies.schedule(
+            db,
+            facility_id=facility_id,
+            kind="hip_consent",
+            gateway_request_id=callback.request_id,
+            payload=payload,
+            subject_ids=[payload.notification.consent_id],
+        )
+        return _accepted()
     await hip_service.record_consent_notification(
         db,
         facility_id=facility_id,
