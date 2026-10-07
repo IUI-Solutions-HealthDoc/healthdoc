@@ -68,6 +68,12 @@ class TransientTransferError(TransferError):
     """A transport outage; retry the frozen page, not a newly built document."""
 
 
+class PageRefused(TransferError):
+    """The HIU refused this one document for good (a 4xx other than 404, 408,
+    425 or 429). It is reported ERRORED and the remaining pages still go:
+    live 7 Oct 2026, one refused X-ray report held back six other records."""
+
+
 class HiuTransactionUnknown(TransientTransferError):
     """The HIU answered 404: it does not know this transaction yet.
 
@@ -613,6 +619,8 @@ async def _post_page(url: str, payload: dict[str, Any]) -> None:
     reason = str(last_error) if isinstance(last_error, TransferError) else type(last_error).__name__
     if last_status == 404:
         raise HiuTransactionUnknown(f"HIU data push failed ({reason})") from last_error
+    if last_status is not None and 400 <= last_status < 500 and last_status not in {408, 425, 429}:
+        raise PageRefused(f"HIU refused the document ({reason})") from last_error
     raise TransientTransferError(f"HIU data push failed ({reason})") from last_error
 
 
@@ -763,6 +771,7 @@ async def transfer_transaction(transaction_id: str, *, retry_transport: bool = F
                     )
                 db.add_all(pages)
                 await db.commit()
+            refused: list[str] = []
             for page in pages:
                 reference = page.payload["entries"][0]["careContextReference"]
                 if page.delivered_at is not None:
@@ -800,7 +809,18 @@ async def transfer_transaction(transaction_id: str, *, retry_transport: bool = F
                     raise TransferError("Care context is no longer authorised for transfer")
                 await resolve_context_document(db, current_context)
                 _hiu_key_material(row)
-                await _post_page(push_url, page.payload)
+                try:
+                    await _post_page(push_url, page.payload)
+                except PageRefused:
+                    refused.append(reference)
+                    statuses.append(
+                        {
+                            "careContextReference": reference,
+                            "hiStatus": "ERRORED",
+                            "description": "The HIU refused this document",
+                        }
+                    )
+                    continue
                 page.delivered_at = datetime.now(UTC)
                 row.bundles_sent = str(sum(item.delivered_at is not None for item in pages))
                 await db.commit()
@@ -811,9 +831,12 @@ async def transfer_transaction(transaction_id: str, *, retry_transport: bool = F
                         "description": "FHIR document transferred",
                     }
                 )
+            delivered = sum(item.delivered_at is not None for item in pages)
+            if not delivered:
+                raise TransferError("The HIU refused every document")
             row.status = "delivered"
-            row.bundles_sent = str(len(statuses))
-            row.failure_reason = None
+            row.bundles_sent = str(delivered)
+            row.failure_reason = f"HIU refused: {', '.join(refused)}"[:500] if refused else None
             row.completed_at = datetime.now(UTC)
             await enqueue(db, kind="hip_notify", target_id=row.id, facility_id=row.facility_id)
             await db.commit()

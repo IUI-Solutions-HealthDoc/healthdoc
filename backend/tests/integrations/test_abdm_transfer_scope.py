@@ -251,9 +251,12 @@ async def test_a_refused_push_records_the_hius_status_and_code(monkeypatch):
         lambda **kw: real_client(transport=httpx.MockTransport(refuse), **kw),
     )
     monkeypatch.setattr(worker.asyncio, "sleep", AsyncMock())
-    with pytest.raises(worker.TransientTransferError) as caught:
+    # A 4xx is the HIU's verdict on this document; repeating it cannot help
+    # and used to hold back every later page (7 Oct 2026).
+    with pytest.raises(worker.PageRefused) as caught:
         await worker._post_page("https://hiu.example/transfer", {"entries": []})
-    assert str(caught.value) == "HIU data push failed (HIU returned HTTP 400 ABDM-9999)"
+    assert not isinstance(caught.value, worker.TransientTransferError)
+    assert str(caught.value) == "HIU refused the document (HIU returned HTTP 400 ABDM-9999)"
 
 
 async def test_unknown_document_dates_are_not_substituted_with_visit_dates(db, transfer_case):
@@ -362,3 +365,41 @@ async def test_an_hiu_that_does_not_know_the_transaction_yet_is_waited_for(monke
     monkeypatch.setattr(worker.asyncio, "sleep", AsyncMock())
     with pytest.raises(worker.HiuTransactionUnknown):
         await worker._post_page("https://hiu.example/transfer", {"entries": []})
+
+
+def _whole_range(payload):
+    now = datetime.now(UTC)
+    payload.hi_request.date_range.from_ = now - timedelta(days=29)
+    payload.hi_request.date_range.to = now - timedelta(hours=1)
+    return payload
+
+
+async def test_a_refused_document_does_not_hold_back_the_others(db, transfer_case):
+    # 7 Oct 2026: the HIU refused one X-ray report (422, then 409 on every
+    # retry) and the six records after it were never sent.
+    payload, callback, contexts, pushes = transfer_case
+    pushes.side_effect = [worker.PageRefused("HIU refused the document (HIU returned HTTP 422)")] + [
+        None
+    ] * (len(contexts) - 1)
+    tasks = BackgroundTasks()
+    await external_router.hip_health_information_request(_whole_range(payload), tasks, callback, db)
+    await tasks()
+    assert pushes.await_count == len(contexts) > 1
+    refused = pushes.call_args_list[0].args[1]["entries"][0]["careContextReference"]
+    db.expire_all()
+    row = (await db.execute(select(AbdmHipHealthInformationRequest))).scalar_one()
+    assert row.status == "delivered"
+    assert row.bundles_sent == str(len(contexts) - 1)
+    assert refused in row.failure_reason
+
+
+async def test_a_transfer_whose_every_document_is_refused_fails(db, transfer_case):
+    payload, callback, contexts, pushes = transfer_case
+    pushes.side_effect = worker.PageRefused("HIU refused the document (HIU returned HTTP 422)")
+    tasks = BackgroundTasks()
+    await external_router.hip_health_information_request(_whole_range(payload), tasks, callback, db)
+    await tasks()
+    db.expire_all()
+    row = (await db.execute(select(AbdmHipHealthInformationRequest))).scalar_one()
+    assert row.status == "failed"
+    assert row.failure_reason == "The HIU refused every document"

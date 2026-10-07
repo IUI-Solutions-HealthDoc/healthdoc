@@ -76,8 +76,28 @@ PACS_REFERENCE_KEYS = frozenset({"pacsStudyUid", "modality", "report"})
 MAX_PACS_REFERENCE_BYTES = 16 * 1024
 
 
+#: A signed imaging report sent as text where the HIP has no PACS study
+#: (fhir/builder.py; NRCeS needs one media). Kept as text, never rendered as
+#: markup. Live 7 Oct 2026, refusing it discarded a whole X-ray report.
+MAX_TEXT_ATTACHMENT_BYTES = 64 * 1024
+
+
+def _validate_text(value: dict) -> None:
+    encoded = value.get("data")
+    if not isinstance(encoded, str) or len(encoded) > 4 * ((MAX_TEXT_ATTACHMENT_BYTES + 2) // 3):
+        raise RecordRefused("The text attachment exceeds the size limit")
+    try:
+        base64.b64decode(encoded, validate=True).decode("utf-8")
+    except ValueError as exc:
+        raise RecordRefused("The text attachment is not valid UTF-8 text") from exc
+
+
 def _validate_attachment(value: dict) -> None:
-    if value.get("contentType") != "application/json":
+    content_type = str(value.get("contentType") or "").split(";")[0].strip().lower()
+    if content_type == "text/plain":
+        _validate_text(value)
+        return
+    if content_type != "application/json":
         _validate_pdf(value)
         return
     encoded = value.get("data")
