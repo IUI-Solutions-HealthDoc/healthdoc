@@ -233,6 +233,16 @@ async def _post(path: str, payload: dict) -> AbdmResponse:
     return await _call("POST", path, payload)
 
 
+def rejection_codes(detail: object) -> list[str]:
+    """ABDM-NNNN codes in a refusal body, and nothing else from it."""
+    return _rejection_metadata(detail)[0]
+
+
+def rejection_fields(detail: object) -> list[str]:
+    """Contracted request field names a refusal body names, never values."""
+    return _rejection_metadata(detail)[1]
+
+
 def _rejection_metadata(detail: object) -> tuple[list[str], list[str]]:
     codes: set[str] = set()
     fields: set[str] = set()
@@ -248,8 +258,11 @@ def _rejection_metadata(detail: object) -> tuple[list[str], list[str]]:
             for key, child in value.items():
                 if key in allowed_fields:
                     fields.add(key)
-                if key == "code" and isinstance(child, str) and re.fullmatch(r"ABDM-\d{4}", child):
-                    codes.add(child)
+                # ABDM sends a code bare or with a trailing ": " separator.
+                if key == "code" and isinstance(child, str):
+                    matched = re.fullmatch(r"(ABDM-\d{4})(?::\s*)?", child)
+                    if matched:
+                        codes.add(matched.group(1))
                 if key in {"field", "property"} and isinstance(child, str) and child in allowed_fields:
                     fields.add(child)
                 if isinstance(child, dict | list):
