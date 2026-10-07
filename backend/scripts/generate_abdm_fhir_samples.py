@@ -84,6 +84,21 @@ def _samples() -> dict[str, dict]:
                 }
             ],
         ),
+        # A facility without PACS: the signed report is the media (7 Oct 2026).
+        "DiagnosticReportImagingNoPacs": build_clinical_bundle(
+            "DiagnosticReport",
+            **common,
+            diagnostic_reports=[
+                {
+                    "id": "imaging-result-2",
+                    "kind": "radiology",
+                    "name": "Chest radiograph",
+                    "modality": "xray",
+                    "issued": common["authored_at"],
+                    "conclusion": "No acute cardiopulmonary finding.",
+                }
+            ],
+        ),
         "Prescription": build_clinical_bundle(
             "Prescription",
             **common,

@@ -80,6 +80,28 @@ def test_any_other_attachment_is_still_refused(attachment):
         records._validate_attachment(attachment)
 
 
+def _text(data: bytes, content_type: str = "text/plain") -> dict:
+    return {"contentType": content_type, "data": base64.b64encode(data).decode()}
+
+
+@pytest.mark.parametrize("content_type", ["text/plain", "text/plain; charset=utf-8"])
+def test_the_hiu_accepts_a_signed_report_sent_as_text(content_type):
+    # 7 Oct 2026: a DEV001 X-ray report without PACS reached the DEV002 HIU and
+    # was refused, "Only embedded PDF attachments are supported".
+    records._validate_attachment(_text(b"Chest radiograph (xray)\n\nClear lungs.\n", content_type))
+
+
+@pytest.mark.parametrize("attachment", [
+    _text(b"\xff\xfe not utf-8"),
+    _text(b"x" * (records.MAX_TEXT_ATTACHMENT_BYTES + 10)),
+    {"contentType": "text/plain", "data": "not base64 !"},
+    {"contentType": "text/plain"},
+])
+def test_a_text_attachment_must_be_bounded_utf8(attachment):
+    with pytest.raises(records.RecordRefused):
+        records._validate_attachment(attachment)
+
+
 def test_a_binary_resource_stays_pdf_only():
     bundle = copy.deepcopy(_samples()["DiagnosticReportImaging"])
     # A Binary is a document in its own right; only a PDF may be one.
