@@ -21,12 +21,13 @@ from app.departments.models import Department
 from app.opd.models import Visit
 from app.patients.models import Patient
 from app.queue import service
-from app.queue.models import Roster
+from app.queue.models import Queue, QueueToken, Roster
 from app.users.models import Facility, User
+from tests.business_day import business_today
 
 pytestmark = pytest.mark.asyncio
 
-TODAY = date.today()
+TODAY = business_today()
 
 
 async def _token(db, queue, opd_visit, visit_id=None):
@@ -99,7 +100,7 @@ async def test_reception_queue_identifies_the_patient_attached_to_each_token(db,
     assert result["items"][0]["patient_identifier"] == patient.uhid
 
 
-async def test_another_facilitys_queues_are_not_listed(db, seed, queue):
+async def test_another_facilitys_queues_are_not_listed(db, seed, queue, roster_on_duty):
     """Facility scoping, same rule as every other list in this codebase."""
     other_facility = Facility(
         id=uuid.uuid4(), code=f"OT{uuid.uuid4().hex[:3].upper()}",
@@ -118,6 +119,7 @@ async def test_another_facilitys_queues_are_not_listed(db, seed, queue):
     )
     db.add_all([other_dept, other_doctor])
     await db.flush()
+    await roster_on_duty(other_dept.id, other_doctor.id)
 
     await service.create_queue(
         db, department_id=other_dept.id, doctor_user_id=other_doctor.id,
@@ -190,7 +192,57 @@ async def test_opening_options_are_named_facility_scoped_available_roster_rows(d
     assert await service.list_queue_opening_options(db, dept.facility_id, TODAY) == []
 
 
-async def test_shortest_queue_first(db, seed, queue, opd_visit):
+async def test_bookable_providers_follow_the_booking_date_not_open_queues(db, seed):
+    """Appointments are booked ahead. The picker must list the doctor rostered
+    on the booking date even when their queue is already open, and nobody
+    rostered on another date, unavailable, or at another facility."""
+    dept, room, doctor = seed
+    future = TODAY + timedelta(days=3)
+    unavailable = User(
+        id=uuid.uuid4(), keycloak_sub=f"off-{uuid.uuid4()}",
+        username=f"offdoc{uuid.uuid4().hex[:6]}", full_name="Dr. Off",
+        facility_id=dept.facility_id,
+    )
+    other_facility = Facility(
+        id=uuid.uuid4(), code=f"BP{uuid.uuid4().hex[:3].upper()}",
+        name="Elsewhere", state_code="TS",
+    )
+    db.add_all([unavailable, other_facility])
+    await db.flush()
+    other_dept = Department(
+        id=uuid.uuid4(), code="BPD", name="Elsewhere Dept", facility_id=other_facility.id,
+    )
+    db.add(other_dept)
+    await db.flush()
+    db.add_all([
+        Roster(id=uuid.uuid4(), staff_user_id=doctor.id, department_id=dept.id,
+               room_id=room.id, shift="morning", roster_date=future, is_available=True),
+        Roster(id=uuid.uuid4(), staff_user_id=doctor.id, department_id=dept.id,
+               room_id=room.id, shift="evening", roster_date=future, is_available=True),
+        Roster(id=uuid.uuid4(), staff_user_id=doctor.id, department_id=dept.id,
+               room_id=room.id, shift="morning", roster_date=TODAY, is_available=True),
+        Roster(id=uuid.uuid4(), staff_user_id=unavailable.id, department_id=dept.id,
+               room_id=None, shift="morning", roster_date=future, is_available=False),
+        Roster(id=uuid.uuid4(), staff_user_id=doctor.id, department_id=other_dept.id,
+               room_id=None, shift="night", roster_date=future, is_available=True),
+    ])
+    await db.flush()
+    await service.create_queue(db, dept.id, doctor.id, room.id, None, TODAY, dept.facility_id)
+
+    expected = [{
+        "staff_user_id": doctor.id, "staff_name": doctor.full_name, "department_id": dept.id,
+    }]
+    assert await service.list_bookable_providers(db, dept.facility_id, future) == expected
+    assert await service.list_bookable_providers(db, dept.facility_id, TODAY) == expected
+    assert await service.list_bookable_providers(
+        db, dept.facility_id, future, department_id=other_dept.id
+    ) == []
+    assert await service.list_bookable_providers(
+        db, dept.facility_id, TODAY + timedelta(days=1)
+    ) == []
+
+
+async def test_shortest_queue_first(db, seed, queue, opd_visit, roster_on_duty):
     """The order a receptionist reads it in."""
     dept, _room, _doctor = seed
 
@@ -201,6 +253,7 @@ async def test_shortest_queue_first(db, seed, queue, opd_visit):
     )
     db.add(busy_doctor)
     await db.flush()
+    await roster_on_duty(dept.id, busy_doctor.id)
 
     busy_queue = await service.create_queue(
         db, department_id=dept.id, doctor_user_id=busy_doctor.id,
@@ -224,16 +277,34 @@ async def test_the_doctor_worklist_is_todays_only(db, seed, queue, opd_visit):
     _dept, _room, doctor = seed
     today_token = await _token(db, queue, opd_visit)
 
-    yesterday_queue = await service.create_queue(
-        db,
+    # Yesterday's queue and token are history, inserted as rows: neither can be
+    # created through the service any more, which only opens today's queues.
+    yesterday_queue = Queue(
+        id=uuid.uuid4(),
+        facility_id=queue.facility_id,
         department_id=queue.department_id,
         doctor_user_id=doctor.id,
         room_id=queue.room_id,
         display_label="Yesterday",
-        service_date=date.today() - timedelta(days=1),
-        caller_facility_id=queue.facility_id,
+        service_date=business_today() - timedelta(days=1),
     )
-    stale_token = await _token(db, yesterday_queue, opd_visit)
+    stale_visit = await opd_visit()
+    stale_token = QueueToken(
+        id=uuid.uuid4(),
+        facility_id=queue.facility_id,
+        queue_id=yesterday_queue.id,
+        visit_id=stale_visit.id,
+        sequence=1,
+        token_display="TST-900",
+        initial_priority=QueuePriority.NORMAL.value,
+        status="waiting",
+        priority=QueuePriority.NORMAL.value,
+        priority_rank=6,
+    )
+    db.add(yesterday_queue)
+    await db.flush()
+    db.add(stale_token)
+    await db.flush()
 
     rows = await service.get_doctor_worklist(db, doctor.id, queue.facility_id, ["doctor"])
     listed = {row["id"] for row in rows}

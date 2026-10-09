@@ -5,6 +5,10 @@ import type {
   PatientCreate,
   PatientSearchRequest,
   PatientSearchResponse,
+  AbhaDeclaration,
+  ConsentLanguage,
+  ConsentMethod,
+  DrivingLicenceEnrolmentResult,
   AbhaEnrolmentConsent,
   AbhaIdentityLinked,
   AbhaLoginIdentifier,
@@ -21,6 +25,7 @@ import type {
   VisitCreate,
   VisitWithoutToken,
   StaleVisitsReport,
+  StaleVisitsReconcileRequest,
   StaleVisitsReconcileResult,
 } from "./types";
 import {
@@ -53,18 +58,31 @@ export function registerPatient(
 function loginIdentifierBody(identifier: AbhaLoginIdentifier): Record<string, string> {
   if ("aadhaar" in identifier) return { aadhaar: digitsOnly(identifier.aadhaar) };
   if ("mobile" in identifier) return { mobile: digitsOnly(identifier.mobile) };
-  if ("abha_address" in identifier) return { abha_address: identifier.abha_address.trim() };
+  if ("abha_address" in identifier) {
+    // VRFY_ABHA_102: an ABHA address may be proved with an Aadhaar OTP instead.
+    return identifier.address_otp === "aadhaar"
+      ? { abha_address: identifier.abha_address.trim(), address_otp: "aadhaar" }
+      : { abha_address: identifier.abha_address.trim() };
+  }
   return { abha_number: digitsOnly(identifier.abha_number) };
+}
+
+/** M1 VRFY_ABHA_301: a self-hosted image challenge for the mobile lookup. */
+export interface AbhaCaptcha { captcha_id: string; image: string }
+
+export function getAbhaCaptcha(): Promise<AbhaCaptcha> {
+  return api<AbhaCaptcha>("/abdm/abha/captcha");
 }
 
 export function requestAbhaLoginOtp(
   patientId: string,
   identifier: AbhaLoginIdentifier,
   idempotencyKey: string,
+  captcha?: { captcha_id: string; captcha_answer: string },
 ): Promise<AbhaOtpRequested> {
   return api<AbhaOtpRequested>("/abdm/abha/login/request-otp", {
     method: "POST",
-    body: JSON.stringify({ patient_id: patientId, ...loginIdentifierBody(identifier) }),
+    body: JSON.stringify({ patient_id: patientId, ...loginIdentifierBody(identifier), ...(captcha ?? {}) }),
     idempotencyKey,
   });
 }
@@ -109,6 +127,17 @@ export function verifyAbhaLoginOtp(
     body: JSON.stringify({ session_id: sessionId, otp }),
     idempotencyKey,
   });
+}
+
+export async function getAbhaEnrolmentDeclaration(
+  patientId: string,
+  language: ConsentLanguage = "en",
+  method: ConsentMethod = "aadhaar",
+): Promise<AbhaDeclaration> {
+  const result = await api<{ declaration: AbhaDeclaration }>(
+    `/abdm/abha/enrol/consent?patient_id=${encodeURIComponent(patientId)}&language=${language}&method=${method}`,
+  );
+  return result.declaration;
 }
 
 export function requestAbhaEnrolmentOtp(
@@ -166,6 +195,113 @@ export function verifyEnrolmentMobileOtp(
   return api<AbhaIdentityLinked>("/abdm/abha/enrol/mobile/verify-otp", {
     method: "POST",
     body: JSON.stringify({ session_id: sessionId, otp }),
+    idempotencyKey,
+  });
+}
+
+export interface LgdOption { code: string; name: string }
+
+export async function listLgdStates(): Promise<LgdOption[]> {
+  return (await api<{ states: LgdOption[] }>("/abdm/abha/lgd/states")).states;
+}
+
+export async function listLgdDistricts(stateCode: string): Promise<LgdOption[]> {
+  const path = `/abdm/abha/lgd/districts?state_code=${encodeURIComponent(stateCode)}`;
+  return (await api<{ districts: LgdOption[] }>(path)).districts;
+}
+
+/** M1 CRT_ABHA_301-309: details exactly as on the Aadhaar card. */
+export interface DemographicEnrolment {
+  patient_id: string;
+  aadhaar: string;
+  name: string;
+  date_of_birth: string;
+  gender: "M" | "F" | "O";
+  mobile: string;
+  address: string;
+  pincode: string;
+  state_code: string;
+  district_code: string;
+  consent: AbhaEnrolmentConsent;
+}
+
+export function enrolAbhaByDemographics(
+  body: DemographicEnrolment,
+  idempotencyKey: string,
+): Promise<AbhaIdentityLinked> {
+  return api<AbhaIdentityLinked>("/abdm/abha/enrol/demographic", {
+    method: "POST",
+    body: JSON.stringify({ ...body, aadhaar: digitsOnly(body.aadhaar) }),
+    idempotencyKey,
+  });
+}
+
+export function requestLicenceEnrolmentOtp(
+  patientId: string,
+  mobile: string,
+  consent: AbhaEnrolmentConsent,
+  idempotencyKey: string,
+): Promise<AbhaOtpRequested> {
+  return api<AbhaOtpRequested>("/abdm/abha/enrol/driving-licence/request-otp", {
+    method: "POST",
+    body: JSON.stringify({ patient_id: patientId, mobile, consent }),
+    idempotencyKey,
+  });
+}
+
+export function resendLicenceEnrolmentOtp(
+  patientId: string,
+  sessionId: string,
+  mobile: string,
+  idempotencyKey: string,
+): Promise<AbhaOtpRequested> {
+  return api<AbhaOtpRequested>("/abdm/abha/enrol/driving-licence/resend-otp", {
+    method: "POST",
+    body: JSON.stringify({ patient_id: patientId, session_id: sessionId, mobile }),
+    idempotencyKey,
+  });
+}
+
+export function verifyLicenceEnrolmentOtp(
+  patientId: string,
+  sessionId: string,
+  otp: string,
+  idempotencyKey: string,
+): Promise<void> {
+  return api<void>("/abdm/abha/enrol/driving-licence/verify-otp", {
+    method: "POST",
+    body: JSON.stringify({ patient_id: patientId, session_id: sessionId, otp }),
+    idempotencyKey,
+  });
+}
+
+/** M1 CRT_ABHA_405/406: the licence as printed and both sides photographed. */
+export interface DrivingLicenceEnrolment {
+  session_id: string;
+  patient_id: string;
+  licence_number: string;
+  first_name: string;
+  middle_name: string;
+  last_name: string;
+  date_of_birth: string;
+  gender: "M" | "F" | "O";
+  address: string;
+  pincode: string;
+  state_code: string;
+  district_code: string;
+  front_photo: string;
+  back_photo: string;
+  /** CRT_ABHA_407: the operator checked the licence against the person. */
+  operator_verified: true;
+}
+
+export function enrolByDrivingLicence(
+  body: DrivingLicenceEnrolment,
+  idempotencyKey: string,
+): Promise<DrivingLicenceEnrolmentResult> {
+  return api<DrivingLicenceEnrolmentResult>("/abdm/abha/enrol/driving-licence", {
+    method: "POST",
+    body: JSON.stringify(body),
     idempotencyKey,
   });
 }
@@ -253,6 +389,10 @@ export function createVisit(
   });
 }
 
+export function getVisit(visitId: string): Promise<Visit> {
+  return api<Visit>(`/visits/${visitId}`);
+}
+
 /** Today's queues at the caller's facility, shortest first. */
 export function listQueues(): Promise<QueueSummary[]> {
   return api<QueueSummary[]>("/queue/queues");
@@ -284,10 +424,12 @@ export function listQueueTokens(queueId: string): Promise<QueueTokenList> {
 export function updateTokenPriority(
   tokenId: string,
   payload: TokenPriorityUpdate,
+  idempotencyKey: string,
 ): Promise<QueueToken> {
   return api<QueueToken>(`/queue/tokens/${tokenId}/priority`, {
     method: "PATCH",
     body: JSON.stringify(payload),
+    idempotencyKey,
   });
 }
 
@@ -312,11 +454,13 @@ export function listVisitsWithoutTokens(limit = 50): Promise<VisitWithoutToken[]
 export async function uploadPatientPhoto(
   patientId: string,
   file: File,
+  idempotencyKey: string,
 ): Promise<{ photo_file_id: string; status: string }> {
   const formData = new FormData();
   formData.append("upload", file);
   return api<{ photo_file_id: string; status: string }>(`/patients/${patientId}/photo`, {
     method: "POST",
+    idempotencyKey,
     body: formData,
   });
 }
@@ -331,9 +475,13 @@ export function getPatientPhoto(
 }
 
 /** Remove patient photograph. */
-export function deletePatientPhoto(patientId: string): Promise<{ status: string }> {
+export function deletePatientPhoto(
+  patientId: string,
+  idempotencyKey: string,
+): Promise<{ status: string }> {
   return api<{ status: string }>(`/patients/${patientId}/photo`, {
     method: "DELETE",
+    idempotencyKey,
   });
 }
 
@@ -341,9 +489,11 @@ export function deletePatientPhoto(patientId: string): Promise<{ status: string 
 export function updatePatientDemographics(
   patientId: string,
   payload: Partial<PatientCreate> & { reason?: string },
+  idempotencyKey: string,
 ): Promise<Patient> {
   return api<Patient>(`/patients/${patientId}`, {
     method: "PATCH",
+    idempotencyKey,
     body: JSON.stringify(payload),
   });
 }
@@ -355,16 +505,13 @@ export function getStaleVisits(): Promise<StaleVisitsReport> {
 
 /** HD-12: Reconcile stale visits (e.g. mark LWBS/closed). */
 export function reconcileStaleVisits(
-  visitIds?: string[],
-  reason?: string,
+  request: StaleVisitsReconcileRequest,
+  idempotencyKey: string,
 ): Promise<StaleVisitsReconcileResult> {
   return api<StaleVisitsReconcileResult>("/queue/reconcile-stale-visits", {
     method: "POST",
-    idempotencyKey: crypto.randomUUID(),
-    body: JSON.stringify({
-      visit_ids: visitIds && visitIds.length > 0 ? visitIds : null,
-      reason: reason || "Authorized end-of-day stale visit reconciliation (LWBS / no-show)",
-    }),
+    idempotencyKey,
+    body: JSON.stringify(request),
   });
 }
 
@@ -417,12 +564,14 @@ export function getScanShareTicket(reference: string): Promise<ScanShareTicketIt
 export function checkInScanShareTicket(
   ticketId: string,
   counter: string,
+  idempotencyKey: string,
 ): Promise<ScanShareCheckInResponse> {
   return api<ScanShareCheckInResponse>(
     `/abdm/scan-share/tickets/${encodeURIComponent(ticketId)}/check-in`,
     {
       method: "POST",
       // Server locks the ticket; identical retries preserve the original check-in.
+      idempotencyKey,
       body: JSON.stringify({ counter: counter.trim() }),
     },
   );

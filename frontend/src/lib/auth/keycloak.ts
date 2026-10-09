@@ -1,7 +1,7 @@
 import Keycloak from "keycloak-js";
 import type { Role } from "@/config/roles";
 import { ROLES } from "@/config/roles";
-import { setAccessToken } from "@/lib/api";
+import { setAccessToken, setTokenRefresher } from "@/lib/api";
 import { safeReturnUrl } from "@/lib/auth/return-url";
 
 /**
@@ -169,6 +169,9 @@ export async function initKeycloak(): Promise<boolean> {
       .then(async (authenticated) => {
         if (authenticated) {
           syncAccessToken(kc);
+          setTokenRefresher(async () => {
+            if (await kc.updateToken(30)) syncAccessToken(kc);
+          });
           kc.onTokenExpired = () => {
             void kc
               .updateToken(30)
@@ -177,6 +180,7 @@ export async function initKeycloak(): Promise<boolean> {
               })
               .catch(() => {
                 setAccessToken(null);
+                setTokenRefresher(null);
                 notifySessionExpired();
               });
           };
@@ -234,6 +238,7 @@ export async function stepUpWithKeycloak(redirectUri?: string): Promise<void> {
 export async function logoutFromKeycloak(redirectUri?: string): Promise<void> {
   const kc = getKeycloak();
   setAccessToken(null);
+  setTokenRefresher(null);
   clearStoredRefreshToken();
   if (kc.authenticated) {
     await kc.logout({

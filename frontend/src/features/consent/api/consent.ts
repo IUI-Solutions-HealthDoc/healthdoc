@@ -19,6 +19,7 @@ import type {
   ConsentRecord,
   ConsentRecordCreate,
   ConsentStatusTransitionIn,
+  ConsentWithdrawal,
   ConsentWithdrawalCreate,
   DataAccessFilters,
   DataAccessLog,
@@ -97,9 +98,11 @@ export function createConsentRecord(
 export function transitionConsentStatus(
   consentId: string,
   body: ConsentStatusTransitionIn,
+  idempotencyKey: string,
 ): Promise<ConsentRecord> {
   return api<ConsentRecord>(`/consent/records/${consentId}/status`, {
     method: "PATCH",
+    idempotencyKey,
     body: JSON.stringify(body),
   });
 }
@@ -111,14 +114,18 @@ export function transitionConsentStatus(
  * having consented, and then having withdrawn, is the DPDP artefact. Erasing
  * the original would destroy the evidence that processing was lawful while it
  * lasted.
+ *
+ * The response is the withdrawal row, not the consent; read the consent back
+ * to see its new status.
  */
 export function withdrawConsent(
   consentId: string,
   body: ConsentWithdrawalCreate,
-): Promise<ConsentRecord> {
-  return api<ConsentRecord>(`/consent/records/${consentId}/withdraw`, {
+  idempotencyKey: string,
+): Promise<ConsentWithdrawal> {
+  return api<ConsentWithdrawal>(`/consent/records/${consentId}/withdraw`, {
     method: "POST",
-    idempotencyKey: null,
+    idempotencyKey,
     body: JSON.stringify(body),
   });
 }

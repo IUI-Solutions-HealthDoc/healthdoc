@@ -35,7 +35,10 @@ PROFILES = {
     "PrescriptionRecord": "Prescription",
     "DiagnosticReportRecord": "DiagnosticReport",
     "DischargeSummaryRecord": "DischargeSummary",
+    "ImmunizationRecord": "ImmunizationRecord",
+    "HealthDocumentRecord": "HealthDocumentRecord",
     "WellnessRecord": "WellnessRecord",
+    "InvoiceRecord": "Invoice",
 }
 ABHA_SYSTEMS = {"https://healthid.abdm.gov.in", "https://healthid.ndhm.gov.in"}
 
@@ -64,6 +67,52 @@ def _validate_pdf(value: dict) -> None:
         digest = base64.b64encode(hashlib.sha1(data, usedforsecurity=False).digest()).decode()
         if value["hash"] != digest:
             raise RecordRefused("The PDF attachment hash does not match")
+
+
+#: The one non-PDF attachment accepted: the PACS study reference an imaging
+#: DiagnosticReport carries in place of DICOM bytes (fhir/builder.py, the
+#: HealthDoc HIP's own shape). It is data, never rendered as a document.
+PACS_REFERENCE_KEYS = frozenset({"pacsStudyUid", "modality", "report"})
+MAX_PACS_REFERENCE_BYTES = 16 * 1024
+
+
+#: A signed imaging report sent as text where the HIP has no PACS study
+#: (fhir/builder.py; NRCeS needs one media). Kept as text, never rendered as
+#: markup. Live 7 Oct 2026, refusing it discarded a whole X-ray report.
+MAX_TEXT_ATTACHMENT_BYTES = 64 * 1024
+
+
+def _validate_text(value: dict) -> None:
+    encoded = value.get("data")
+    if not isinstance(encoded, str) or len(encoded) > 4 * ((MAX_TEXT_ATTACHMENT_BYTES + 2) // 3):
+        raise RecordRefused("The text attachment exceeds the size limit")
+    try:
+        base64.b64decode(encoded, validate=True).decode("utf-8")
+    except ValueError as exc:
+        raise RecordRefused("The text attachment is not valid UTF-8 text") from exc
+
+
+def _validate_attachment(value: dict) -> None:
+    content_type = str(value.get("contentType") or "").split(";")[0].strip().lower()
+    if content_type == "text/plain":
+        _validate_text(value)
+        return
+    if content_type != "application/json":
+        _validate_pdf(value)
+        return
+    encoded = value.get("data")
+    if not isinstance(encoded, str) or len(encoded) > 4 * ((MAX_PACS_REFERENCE_BYTES + 2) // 3):
+        raise RecordRefused("The study reference attachment exceeds the size limit")
+    try:
+        reference = json.loads(base64.b64decode(encoded, validate=True))
+    except ValueError as exc:
+        raise RecordRefused("The study reference attachment is not valid JSON") from exc
+    if (
+        not isinstance(reference, dict)
+        or set(reference) != PACS_REFERENCE_KEYS
+        or not all(isinstance(v, str) and v.strip() for v in reference.values())
+    ):
+        raise RecordRefused("Only embedded PDF attachments or a PACS study reference are supported")
 
 
 def _reachable_resources(composition: dict, refs: dict) -> set[int]:
@@ -281,7 +330,7 @@ def validate_document(bundle: dict, grant: Grant, reference: str | None) -> tupl
             if "contentType" in node and "data" in node:
                 if id(node) not in reachable:
                     raise RecordRefused("An attachment is not referenced by the consented document")
-                _validate_pdf(node)
+                _validate_attachment(node)
             for name, value in node.items():
                 if name in {"subject", "patient"}:
                     if not is_patient_reference(value):

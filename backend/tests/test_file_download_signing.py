@@ -88,7 +88,7 @@ async def test_download_service_uses_public_signer_after_authorization_and_logs_
     )
     calls, logs = [], []
 
-    async def get_record(db, file_id, *, facility_id):
+    async def get_record(db, file_id, *, facility_id, reader_roles=None):
         calls.append(("authorized", file_id, facility_id))
         return record
 

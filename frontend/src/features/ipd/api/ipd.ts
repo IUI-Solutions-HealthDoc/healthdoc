@@ -50,10 +50,19 @@ export interface DischargeSummary {
   movements: Movement[];
 }
 
+/** A datetime-local value ("2026-10-09T14:33") is wall-clock time with no
+ * zone. The browser reads it in the user's zone; sending it bare made the
+ * server read it as UTC, 5½ hours off in India (live, 9 Oct 2026). */
+export function localDateTimeToIso(value: string | null | undefined): string | undefined {
+  if (!value) return undefined;
+  const instant = new Date(value);
+  return Number.isNaN(instant.getTime()) ? undefined : instant.toISOString();
+}
+
 export async function admitPatient(data: AddAdmissionSchema) {
   return api<Admission>("/admissions", {
     method: "POST",
-    body: JSON.stringify(data),
+    body: JSON.stringify({ ...data, admitted_at: localDateTimeToIso(data.admitted_at) }),
     idempotencyKey: newIdempotencyKey(),
   });
 }
@@ -69,6 +78,7 @@ export async function dischargePatient(data: AddDischargeSchema) {
     // absent. The server answered 422 to every discharge until this, and the
     // screen surfaced no reason.
     follow_up_date: follow_up_date ? follow_up_date.slice(0, 10) : undefined,
+    discharged_at: localDateTimeToIso(rest.discharged_at),
   };
   return api<Discharge>(`/admissions/${admission_id}/discharge`, {
     method: "POST",

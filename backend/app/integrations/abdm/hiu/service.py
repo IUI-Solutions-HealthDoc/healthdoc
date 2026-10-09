@@ -102,10 +102,10 @@ async def create_consent_request(
         raise HiuError("no_hi_types", "At least one health-information type is required")
     if date_range_to < date_range_from:
         raise HiuError("invalid_range", "The requested period ends before it starts")
-    from app.integrations.abdm.fhir.builder import RECORD_TYPES
+    from app.integrations.abdm.hiu.gateway import REQUESTABLE_HI_TYPES
     from app.patients.models import Patient
 
-    if not set(hi_types).issubset(RECORD_TYPES):
+    if not set(hi_types).issubset(REQUESTABLE_HI_TYPES):
         raise HiuError("unsupported_hi_type", "This record type is not supported")
     if _aware(requested_expiry) <= datetime.now(UTC):
         raise HiuError("invalid_expiry", "Consent expiry must be in the future")
@@ -432,9 +432,15 @@ async def receive_bundle(
 
     digest_bytes = hashlib.sha256(plaintext.encode()).digest()
     digest_hex = digest_bytes.hex()
+    # ABDM's data-flow specification makes entries[].checksum the MD5 of the
+    # content before encryption; SHA-256 is still accepted from senders that
+    # used it. Either is an integrity check only: AES-GCM authenticated it.
+    md5_bytes = hashlib.md5(plaintext.encode(), usedforsecurity=False).digest()
     if declared_checksum and declared_checksum not in {
         digest_hex,
         base64.b64encode(digest_bytes).decode(),
+        md5_bytes.hex(),
+        base64.b64encode(md5_bytes).decode(),
     }:
         await _record_rejection(
             db,

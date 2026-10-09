@@ -255,6 +255,13 @@ const ROLE_DASHBOARDS = [
         expectCalls: true,
         requiredRequests: [{ method: "GET", path: "/api/v1/abdm/operations/jobs" }],
       },
+      {
+        path: "/admin/hfr",
+        // HFR lists load only when name search is opened; nothing calls HFR on
+        // arrival. The facility manager's HPR login state is HealthDoc's own.
+        expectCalls: true,
+        requiredRequests: [{ method: "GET", path: "/api/v1/abdm/hfr/hpr-login" }],
+      },
       { path: "/audit-viewer", expectCalls: true },
       {
         path: "/admin/data-protection",

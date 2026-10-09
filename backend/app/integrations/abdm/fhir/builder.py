@@ -15,6 +15,7 @@ rather than a generic generator that silently invents data.
 from __future__ import annotations
 
 import base64
+import hashlib
 import html
 import json
 import uuid
@@ -34,6 +35,9 @@ RECORD_TYPES = (
     "Prescription",
     "DischargeSummary",
     "WellnessRecord",
+    "ImmunizationRecord",
+    "Invoice",
+    "HealthDocumentRecord",
 )
 
 _DOCUMENTS: dict[str, tuple[str, str | None, str]] = {
@@ -44,7 +48,34 @@ _DOCUMENTS: dict[str, tuple[str, str | None, str]] = {
     # WellnessRecord fixes Composition.type.text to this label; unlike the
     # other four document profiles it does not fix a SNOMED document code.
     "WellnessRecord": ("WellnessRecord", None, "Wellness Record"),
+    "ImmunizationRecord": ("ImmunizationRecord", "41000179103", "Immunization record"),
+    # InvoiceRecord, like WellnessRecord, fixes only Composition.type.text.
+    "Invoice": ("InvoiceRecord", None, "Invoice Record"),
+    "HealthDocumentRecord": ("HealthDocumentRecord", "419891008", "Record artifact"),
 }
+
+#: Every other document is written within a consultation, admission or order.
+#: A vaccine dose is recorded on its own, and a visit's bill may have no
+#: consultation; these two profiles leave Composition.encounter optional.
+_ENCOUNTER_OPTIONAL = frozenset({"ImmunizationRecord", "InvoiceRecord", "HealthDocumentRecord"})
+
+BILLING_CODES = "https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-billing-codes"
+PRICE_COMPONENTS = "https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-price-components"
+#: ndhm-billing-codes (ndhm.in 6.5.0). An invoice is typed by its visit
+#: (ndhm-invoice-types allows 00 to 03 and 99), a line by what it charges for.
+_BILLING = {
+    "00": "Consultation", "01": "Pharmacy", "02": "IPD", "03": "OPD", "04": "Pathology",
+    "05": "Medicines", "06": "Nursing Charges", "07": "Handling Charges", "08": "Delivery Charges",
+    "99": "Others",
+}
+_INVOICE_TYPES = frozenset({"00", "01", "02", "03", "99"})
+#: HealthDoc's charge categories, mapped only where NRCeS has the concept.
+_LINE_CODES = {
+    "consultation": "00", "pharmacy": "05", "lab": "04", "ipd_stay": "02",
+    "registration": "99", "radiology": "99", "procedure": "99", "blood": "99", "other": "99",
+}
+#: FHIR Invoice.status from HealthDoc's; a draft or cancelled bill is never shared.
+_INVOICE_STATUS = {"issued": "issued", "partially_paid": "issued", "paid": "balanced", "waived": "balanced"}
 
 _SECTION_CODES = {
     "chief_complaints": ("422843007", "Chief complaint section"),
@@ -55,6 +86,10 @@ _SECTION_CODES = {
     "prescription": ("440545006", "Prescription record"),
     "diagnostic_reports": ("721981007", "Diagnostic studies report"),
     "care_plan": ("734163000", "Care plan"),
+    # ImmunizationRecord fixes its single section's code to the document code.
+    "immunizations": ("41000179103", "Immunization record"),
+    # HealthDocumentRecord fixes its single section's code to the document code.
+    "health_document": ("419891008", "Record artifact"),
 }
 
 
@@ -484,29 +519,45 @@ def _diagnostic_report(
     else:
         pacs_study_uid = str(item.get("pacs_study_uid") or "").strip()
         modality = str(item.get("modality") or "").strip()
-        if not pacs_study_uid or not conclusion or not modality:
-            raise ValueError(
-                "FHIR imaging report requires modality, PACS study UID and signed findings"
-            )
-        # HealthDoc stores a PACS study UID, not the source DICOM bytes.  The
-        # attachment therefore carries an explicit PACS-reference document;
-        # it never labels a UID string as application/dicom or invents image
-        # pixels.  The HIU can use the UID to retrieve the study through the
-        # separately governed PACS channel.
-        pacs_reference = json.dumps(
-            {
-                "pacsStudyUid": pacs_study_uid,
-                "modality": modality,
-                "report": conclusion,
-            },
-            separators=(",", ":"),
-            sort_keys=True,
-        ).encode()
+        if not conclusion or not modality:
+            raise ValueError("FHIR imaging report requires modality and signed findings")
+    if not is_lab:
+        # DiagnosticReportImaging requires at least one media (NRCeS 6.5.0).
+        # With a PACS study, the attachment is an explicit PACS-reference
+        # document: HealthDoc stores the UID, not the DICOM bytes, so it never
+        # labels a UID as application/dicom or invents image pixels. Without
+        # one (no PACS at the facility), the attachment is the signed report
+        # itself as text, titled as the report and never as an image.
+        issued = _iso(item.get("issued") or authored_at)
+        if pacs_study_uid:
+            content = {
+                "contentType": "application/json",
+                "data": base64.b64encode(
+                    json.dumps(
+                        {"pacsStudyUid": pacs_study_uid, "modality": modality, "report": conclusion},
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    ).encode()
+                ).decode(),
+                "title": f"PACS study reference for {item['name']}",
+                "creation": issued,
+            }
+            narrative, link_label = f"PACS study reference: {pacs_study_uid}", "PACS study reference"
+        else:
+            content = {
+                "contentType": "text/plain",
+                "data": base64.b64encode(
+                    f"{item['name']} ({modality})\n\n{conclusion}\n".encode()
+                ).decode(),
+                "title": f"Signed report for {item['name']} (no images stored)",
+                "creation": issued,
+            }
+            narrative, link_label = f"Signed report: {item['name']}", "Signed imaging report"
         media = {
             "resourceType": "Media",
-            "id": _rid("media", item.get("id") or pacs_study_uid),
+            "id": _rid("media", item.get("id") or pacs_study_uid or f"{patient['id']}:{index}"),
             "meta": _meta("Media", authored_at),
-            "text": _narrative(f"PACS study reference: {pacs_study_uid}"),
+            "text": _narrative(narrative),
             "status": "completed",
             "modality": {
                 "coding": [
@@ -519,17 +570,209 @@ def _diagnostic_report(
                 "text": modality,
             },
             "subject": _reference(patient),
-            "createdDateTime": _iso(item.get("issued") or authored_at),
-            "content": {
-                "contentType": "application/json",
-                "data": base64.b64encode(pacs_reference).decode(),
-                "title": f"PACS study reference for {item['name']}",
-                "creation": _iso(item.get("issued") or authored_at),
-            },
+            "createdDateTime": issued,
+            "content": content,
         }
         attachments.append(media)
-        report["media"] = [{"link": _reference(media, "PACS study reference")}]
+        report["media"] = [{"link": _reference(media, link_label)}]
     return report, observations, attachments
+
+
+def _immunization(
+    item: Mapping[str, Any],
+    patient: Mapping[str, Any],
+    practitioner: Mapping[str, Any],
+    authored_at: datetime,
+    index: int,
+) -> dict[str, Any]:
+    for required in ("vaccine", "occurred_at", "dose_number"):
+        if not item.get(required):
+            raise ValueError(f"FHIR immunization requires {required}")
+    vaccine = str(item["vaccine"])
+    dose = int(item["dose_number"])
+    if dose < 1:
+        raise ValueError("FHIR immunization dose number must be positive")
+    protocol: dict[str, Any] = {"doseNumberPositiveInt": dose}
+    if item.get("target_disease"):
+        protocol["targetDisease"] = [{"text": str(item["target_disease"])}]
+    resource: dict[str, Any] = {
+        "resourceType": "Immunization",
+        "id": _rid("immunization", item.get("id") or f"{patient['id']}:{index}:{vaccine}"),
+        "meta": _meta("Immunization", authored_at),
+        "text": _narrative(f"Immunization: {vaccine}, dose {dose}"),
+        "status": "completed",
+        # The catalogue holds HealthDoc's own codes (BCG, PENTAVALENT-1), not
+        # SNOMED vaccine products. The NRCeS binding is only preferred, so the
+        # vaccine travels as its catalogue name rather than a guessed concept.
+        "vaccineCode": {"text": vaccine},
+        "patient": _reference(patient),
+        "occurrenceDateTime": _iso(item["occurred_at"]),
+        "performer": [{"actor": _reference(practitioner)}],
+        "protocolApplied": [protocol],
+    }
+    if item.get("lot_number"):
+        resource["lotNumber"] = str(item["lot_number"])
+    if item.get("expiration_date"):
+        resource["expirationDate"] = _iso(item["expiration_date"])
+    if item.get("manufacturer"):
+        # Recorded as a name only; there is no Organization to point at.
+        resource["manufacturer"] = {"display": str(item["manufacturer"])}
+    # Site and route are stored as words (left_upper_arm, intramuscular). The
+    # profile fixes route.coding to SNOMED, so neither is sent as a coding.
+    for field in ("site", "route"):
+        if item.get(field):
+            resource[field] = {"text": str(item[field]).replace("_", " ")}
+    notes = []
+    if item.get("adverse_reaction"):
+        # reaction.detail must reference an Observation that was never
+        # recorded; the nurse's words are kept as an annotation instead.
+        notes.append({"text": f"Adverse reaction: {item['adverse_reaction']}"})
+    if item.get("notes"):
+        notes.append({"text": str(item["notes"])})
+    if notes:
+        resource["note"] = notes
+    return resource
+
+
+def _money(value: Any) -> dict[str, Any]:
+    return {"value": _json_value(Decimal(str(value))), "currency": "INR"}
+
+
+def _price(kind: str, code: str, display: str, amount: Any) -> dict[str, Any]:
+    return {
+        "type": kind,
+        "code": {"coding": [{"system": PRICE_COMPONENTS, "code": code, "display": display}]},
+        "amount": _money(amount),
+    }
+
+
+def _invoice(
+    data: Mapping[str, Any],
+    patient: Mapping[str, Any],
+    organization: Mapping[str, Any],
+    authored_at: datetime,
+) -> list[dict[str, Any]]:
+    """The Invoice, then one ChargeItem per line (NRCeS Invoice, ChargeItem).
+
+    HealthDoc charges no tax and discounts the whole bill, so each line
+    carries its charged amount as the base price ("01 Rate") and the bill's
+    discount and scheme adjustment travel as total price components. With no
+    tax, FHIR's totalNet (tax excluded) and totalGross (tax included) are both
+    the amount payable; HealthDoc's own "gross" is the pre-discount sum,
+    which is not FHIR's gross.
+    """
+    for required in ("id", "number", "status", "type_code", "issued_at", "lines", "net_amount"):
+        if data.get(required) in (None, "", []):
+            raise ValueError(f"FHIR invoice requires {required}")
+    status = _INVOICE_STATUS.get(str(data["status"]))
+    if status is None:
+        raise ValueError(f"A {data['status']} invoice is not shared")
+    type_code = str(data["type_code"])
+    if type_code not in _INVOICE_TYPES:
+        raise ValueError(f"Unknown invoice type {type_code!r}")
+    charge_items: list[dict[str, Any]] = []
+    line_items: list[dict[str, Any]] = []
+    for pos, line in enumerate(data["lines"]):
+        code = _LINE_CODES.get(str(line.get("category")), "99")
+        quantity = Decimal(str(line["quantity"]))
+        if quantity <= 0 or not str(line.get("description") or "").strip():
+            raise ValueError("FHIR charge item requires a description and a positive quantity")
+        item = {
+            "resourceType": "ChargeItem",
+            "id": _rid("charge-item", line.get("id") or f"{data['id']}:{pos}"),
+            "meta": _meta("ChargeItem", authored_at),
+            "text": _narrative(f"{line['description']} x {quantity.normalize()}"),
+            "status": "billed",
+            "code": {"coding": [{"system": BILLING_CODES, "code": code, "display": _BILLING[code]}]},
+            "subject": _reference(patient),
+            "performer": [{"actor": _reference(organization)}],
+            "quantity": {"value": _json_value(quantity)},
+            # The line is a tariff entry, not a stocked product: named, not referenced.
+            "productCodeableConcept": {"text": str(line["description"])},
+        }
+        charge_items.append(item)
+        line_items.append({
+            "sequence": pos + 1,
+            "chargeItemReference": _reference(item),
+            "priceComponent": [_price("base", "01", "Rate", line["amount"])],
+        })
+    totals = [
+        _price("discount", "02", "Discount", value)
+        for value in (data.get("discount_amount"), data.get("scheme_adjustment"))
+        if value is not None and Decimal(str(value)) > 0
+    ]
+    resource: dict[str, Any] = {
+        "resourceType": "Invoice",
+        "id": _rid("invoice", data["id"]),
+        "meta": _meta("Invoice", authored_at),
+        "text": _narrative(f"Invoice {data['number']}"),
+        "identifier": [{"value": str(data["number"])}],
+        "status": status,
+        "type": {"coding": [{"system": BILLING_CODES, "code": type_code, "display": _BILLING[type_code]}]},
+        "subject": _reference(patient),
+        "date": _iso(data["issued_at"]),
+        "participant": [{"actor": _reference(organization)}],
+        "issuer": _reference(organization),
+        "lineItem": line_items,
+        "totalNet": _money(data["net_amount"]),
+        "totalGross": _money(data["net_amount"]),
+    }
+    if totals:
+        resource["totalPriceComponent"] = totals
+    return [resource, *charge_items]
+
+
+#: What a released document may be. HealthDoc's own HIU embeds and renders
+#: only PDFs (hiu/records.py), so that is all it shares; an image is released
+#: after converting it to PDF.
+DOCUMENT_CONTENT_TYPES = frozenset({"application/pdf"})
+MAX_DOCUMENT_ATTACHMENT_BYTES = 1024 * 1024
+
+
+def _document_reference(
+    data: Mapping[str, Any],
+    patient: Mapping[str, Any],
+    organization: Mapping[str, Any],
+    authored_at: datetime,
+) -> dict[str, Any]:
+    """One released file as an NRCeS DocumentReference with the bytes embedded."""
+    content: bytes = data["content"]
+    if data["content_type"] not in DOCUMENT_CONTENT_TYPES:
+        raise ValueError("A released document must be a PDF")
+    if not 0 < len(content) <= MAX_DOCUMENT_ATTACHMENT_BYTES:
+        raise ValueError("A released document must be between 1 byte and 1 MB")
+    title = str(data["title"])
+    return {
+        "resourceType": "DocumentReference",
+        "id": _rid("document", data["id"]),
+        "meta": _meta("DocumentReference", authored_at),
+        "text": _narrative(title),
+        "status": "current",
+        "docStatus": "final",
+        "type": {
+            "coding": [{"system": SNOMED, "code": "419891008", "display": "Record artifact"}],
+            "text": title,
+        },
+        "subject": _reference(patient),
+        "date": _iso(authored_at),
+        "author": [_reference(organization)],
+        "custodian": _reference(organization),
+        "content": [
+            {
+                "attachment": {
+                    "contentType": data["content_type"],
+                    "data": base64.b64encode(content).decode(),
+                    "size": len(content),
+                    # FHIR Attachment.hash is the base64 SHA-1 of the data.
+                    "hash": base64.b64encode(
+                        hashlib.sha1(content, usedforsecurity=False).digest()
+                    ).decode(),
+                    "title": title,
+                    "creation": _iso(data["document_date"]),
+                }
+            }
+        ],
+    }
 
 
 def _section(
@@ -558,9 +801,9 @@ def build_clinical_bundle(
     record_type: str,
     *,
     patient: Mapping[str, Any],
-    practitioner: Mapping[str, Any],
+    practitioner: Mapping[str, Any] | None,
     organization: Mapping[str, Any],
-    encounter: Mapping[str, Any],
+    encounter: Mapping[str, Any] | None,
     authored_at: datetime,
     care_context_reference: str,
     document_label: str | None = None,
@@ -571,18 +814,69 @@ def build_clinical_bundle(
     medications: Sequence[Mapping[str, Any]] = (),
     diagnostic_reports: Sequence[Mapping[str, Any]] = (),
     care_plan: str | None = None,
+    immunizations: Sequence[Mapping[str, Any]] = (),
+    invoice: Mapping[str, Any] | None = None,
+    document: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build one transfer-ready FHIR document from explicit clinical facts."""
     if record_type not in _DOCUMENTS:
         raise ValueError(f"Unknown ABDM record type: {record_type!r}")
+    if encounter is None and _DOCUMENTS[record_type][0] not in _ENCOUNTER_OPTIONAL:
+        raise ValueError(f"{record_type} requires an encounter")
+    immunization_record = record_type == "ImmunizationRecord"
+    other_content = (
+        chief_complaints, diagnoses, allergies, observations, medications, diagnostic_reports
+    )
+    # The ImmunizationRecord section is closed to anything but immunizations,
+    # and immunizations belong to no other document type.
+    if immunization_record and (any(other_content) or care_plan):
+        raise ValueError("ImmunizationRecord carries immunizations only")
+    if immunizations and not immunization_record:
+        raise ValueError(f"{record_type} cannot carry immunizations")
+    invoice_record = record_type == "Invoice"
+    # InvoiceRecord has exactly one section, holding the Invoice.
+    if invoice_record and (any(other_content) or care_plan or immunizations):
+        raise ValueError("Invoice carries the invoice only")
+    if invoice_record and not invoice:
+        raise ValueError("Invoice has no invoice to transfer")
+    if invoice and not invoice_record:
+        raise ValueError(f"{record_type} cannot carry an invoice")
+    document_record = record_type == "HealthDocumentRecord"
+    # HealthDocumentRecord has exactly one section, holding the released file.
+    if document_record and (any(other_content) or care_plan or immunizations or invoice):
+        raise ValueError("HealthDocumentRecord carries the released document only")
+    if document_record and not document:
+        raise ValueError("HealthDocumentRecord has no document to transfer")
+    if document and not document_record:
+        raise ValueError(f"{record_type} cannot carry a released document")
+    # A bill is issued by the facility, not written by a health professional;
+    # InvoiceRecord lets the Organization author it. Every other document
+    # names its practitioner.
+    # A laboratory report may be the laboratory's own (no registered author).
+    lab_only = record_type == "DiagnosticReport" and bool(diagnostic_reports) and all(
+        item.get("kind") == "lab" for item in diagnostic_reports
+    ) and not any((chief_complaints, diagnoses, allergies, observations, medications))
+    # A released document was written elsewhere or earlier; the facility that
+    # holds and shares it authors the record, as with a bill.
+    if practitioner is None and not invoice_record and not lab_only and not document_record:
+        raise ValueError(f"{record_type} requires a practitioner")
     profile, document_code, document_title = _DOCUMENTS[record_type]
     # Preserve the registered document label (including explicit test warnings)
     # without changing the profile's fixed/coded Composition.type vocabulary.
     composition_title = (document_label or "").strip() or document_title
     patient_resource = _patient(patient, authored_at)
-    practitioner_resource = _practitioner(practitioner, authored_at)
+    practitioner_resource = _practitioner(practitioner, authored_at) if practitioner is not None else None
     organization_resource = _organization(organization, authored_at)
-    encounter_resource = _encounter(encounter, patient_resource, authored_at)
+    # Who performed and interpreted: the registered practitioner, or for a
+    # laboratory's own report the laboratory (Organization) itself.
+    performer_resource = practitioner_resource or organization_resource
+    encounter_resource = (
+        _encounter(encounter, patient_resource, authored_at) if encounter is not None else None
+    )
+    immunization_resources = [
+        _immunization(item, patient_resource, practitioner_resource, authored_at, pos)
+        for pos, item in enumerate(immunizations)
+    ]
 
     complaints = [
         _condition(item, patient_resource, pos) for pos, item in enumerate(chief_complaints)
@@ -619,7 +913,7 @@ def build_clinical_bundle(
             item,
             patient_resource,
             encounter_resource,
-            practitioner_resource,
+            performer_resource,
             authored_at,
             pos,
         )
@@ -627,7 +921,25 @@ def build_clinical_bundle(
         report_observations.extend(result_observations)
         report_attachments.extend(attachments)
 
+    invoice_resources: list[dict[str, Any]] = (
+        _invoice(invoice, patient_resource, organization_resource, authored_at)
+        if invoice_record and invoice
+        else []
+    )
+
+    document_resources: list[dict[str, Any]] = (
+        [_document_reference(document, patient_resource, organization_resource, authored_at)]
+        if document_record and document
+        else []
+    )
+
     sections: list[dict[str, Any]] = []
+    if document_resources:
+        sections.append(
+            _section("health_document", document_resources, title=str(document["title"]))
+        )
+    if invoice_resources:
+        sections.append({"title": "Invoice details", "entry": [_reference(invoice_resources[0])]})
     candidates = (
         ("chief_complaints", complaints),
         ("diagnoses", conditions),
@@ -635,6 +947,7 @@ def build_clinical_bundle(
         ("allergies", allergy_resources),
         ("medications", medication_resources),
         ("diagnostic_reports", report_resources),
+        ("immunizations", immunization_resources),
     )
     for key, resources in candidates:
         if resources:
@@ -673,19 +986,27 @@ def build_clinical_bundle(
         "status": "final",
         "type": composition_type,
         "subject": _reference(patient_resource, str(patient["name"])),
-        "encounter": _reference(encounter_resource),
         "date": _iso(authored_at),
-        "author": [_reference(practitioner_resource, str(practitioner["name"]))],
+        "author": [
+            _reference(practitioner_resource, str(practitioner["name"]))
+            if practitioner_resource is not None and practitioner is not None
+            else _reference(organization_resource, str(organization["name"]))
+        ],
         "title": composition_title,
         "custodian": _reference(organization_resource, str(organization["name"])),
         "section": sections,
     }
+    if encounter_resource is not None:
+        composition["encounter"] = _reference(encounter_resource)
     resources = [
         composition,
-        practitioner_resource,
+        *([practitioner_resource] if practitioner_resource is not None else []),
         organization_resource,
         patient_resource,
-        encounter_resource,
+        *([encounter_resource] if encounter_resource is not None else []),
+        *immunization_resources,
+        *invoice_resources,
+        *document_resources,
         *complaints,
         *conditions,
         *observation_resources,
@@ -739,6 +1060,38 @@ def build_bundle(
 ) -> dict[str, Any]:
     """Compatibility helper for shape tests; production uses the fact mapper."""
     now = datetime.now(UTC)
+    content: dict[str, Any] = (
+        {
+            "encounter": None,
+            "immunizations": [
+                {"vaccine": "FHIR bundle shape test", "occurred_at": now, "dose_number": 1}
+            ],
+        }
+        if record_type == "ImmunizationRecord"
+        else {
+            "encounter": None,
+            "invoice": {
+                "id": "shape-test", "number": "SHAPE-TEST-1", "status": "issued", "type_code": "03",
+                "issued_at": now, "net_amount": Decimal("100.00"),
+                "lines": [{"category": "consultation", "description": "FHIR bundle shape test",
+                           "quantity": Decimal("1"), "amount": Decimal("100.00")}],
+            },
+        }
+        if record_type == "Invoice"
+        else {
+            "encounter": None,
+            "document": {
+                "id": "shape-test", "title": "FHIR bundle shape test",
+                "content_type": "application/pdf", "document_date": now.date(),
+                "content": b"%PDF-1.4\n%%EOF\n",
+            },
+        }
+        if record_type == "HealthDocumentRecord"
+        else {
+            "encounter": {"id": care_context_id or "shape-test", "status": "closed"},
+            "care_plan": "FHIR bundle shape test",
+        }
+    )
     return build_clinical_bundle(
         record_type,
         patient={
@@ -747,7 +1100,9 @@ def build_bundle(
             "identifier": patient_id,
             "gender": "unknown",
         },
-        practitioner={
+        practitioner=None
+        if record_type in {"Invoice", "HealthDocumentRecord"}
+        else {
             "id": author_hpr_id,
             "name": author_hpr_id,
             "registration_number": author_hpr_id,
@@ -757,10 +1112,9 @@ def build_bundle(
             "name": "HealthDoc",
             "hfr_id": "test-only",
         },
-        encounter={"id": care_context_id or "shape-test", "status": "closed"},
         authored_at=now,
         care_context_reference=care_context_id or "shape-test",
-        care_plan="FHIR bundle shape test",
+        **content,
     )
 
 
@@ -791,7 +1145,24 @@ def validate_min(bundle: Mapping[str, Any]) -> list[str]:
         errors.append("first entry must be a Composition")
     if not first.get("section"):
         errors.append("Composition must contain clinical sections")
-    for required in ("Patient", "Practitioner", "Organization", "Encounter"):
+    profile_names = {
+        str(url).rsplit("/", 1)[-1] for url in (first.get("meta") or {}).get("profile") or []
+    }
+    required_types = ["Patient", "Organization"]
+    # A document authored by the facility (a bill, a laboratory's own report)
+    # has no Practitioner to carry; any other document must name one.
+    organization_ids = {
+        f"urn:uuid:{entry['resource'].get('id')}"
+        for entry in entries
+        if entry.get("resource", {}).get("resourceType") == "Organization"
+    }
+    authors = {ref.get("reference") for ref in first.get("author") or [] if isinstance(ref, dict)}
+    facility_authored = bool(authors) and authors <= organization_ids
+    if "InvoiceRecord" not in profile_names and not facility_authored:
+        required_types.append("Practitioner")
+    if profile_names.isdisjoint(_ENCOUNTER_OPTIONAL):
+        required_types.append("Encounter")
+    for required in required_types:
         if not any(entry.get("resource", {}).get("resourceType") == required for entry in entries):
             errors.append(f"bundle must contain a {required}")
     return errors

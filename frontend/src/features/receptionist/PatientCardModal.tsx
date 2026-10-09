@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useRef } from "react";
 import QRCode from "react-qr-code";
 import Barcode from "react-barcode";
 import { Printer, AlertTriangle } from "lucide-react";
@@ -32,25 +31,18 @@ interface PatientCardModalProps {
 
 export function PatientCardModal({ open, onClose, patient }: PatientCardModalProps) {
   const { user: currentUser } = useCurrentUser();
-  const { localizeField } = useLocale();
-  const printButtonRef = useRef<HTMLButtonElement>(null);
+  const { localizeField, t } = useLocale();
 
   const identifier = patient.uhid || patient.thid || "";
   const isEmergencyThid = Boolean(patient.thid && !patient.uhid);
-  const facilityName = localizeField(
-    currentUser?.facility?.name || "HealthDoc Hospital",
-    currentUser?.facility?.name_hi,
-  );
+  // A card printed with an invented hospital name is a false identity
+  // document; say the name is missing so the desk fixes the facility profile.
+  const facilityName = currentUser?.facility?.name
+    ? localizeField(currentUser.facility.name, currentUser.facility.name_hi)
+    : t("receptionist.card.facilityUnavailable");
 
   const derivedAge = patient.dob ? deriveAgeFromDob(patient.dob)?.displayText : null;
   const ageDisplay = derivedAge || (patient.age_years !== null && patient.age_years !== undefined ? `${patient.age_years}y` : "");
-
-  useEffect(() => {
-    if (open) {
-      // Focus the print button for rapid keyboard operation
-      setTimeout(() => printButtonRef.current?.focus(), 100);
-    }
-  }, [open]);
 
   const handlePrint = () => {
     window.print();
@@ -72,7 +64,9 @@ export function PatientCardModal({ open, onClose, patient }: PatientCardModalPro
             Close
           </button>
           <button
-            ref={printButtonRef}
+            // The dialog's focus trap keeps focus that is already inside it,
+            // so this lands on Print without a timer racing the open animation.
+            autoFocus
             type="button"
             onClick={handlePrint}
             className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-white shadow hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary/20"

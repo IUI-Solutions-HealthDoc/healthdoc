@@ -38,6 +38,11 @@ const LINKS: { href: string; titleKey: MessageKey; subtitleKey: MessageKey }[] =
     subtitleKey: "admin.hub.abdmSubtitle",
   },
   {
+    href: "/admin/hfr",
+    titleKey: "admin.hub.hfrTitle",
+    subtitleKey: "admin.hub.hfrSubtitle",
+  },
+  {
     href: "/admin/data-protection",
     titleKey: "admin.hub.dataProtectionTitle",
     subtitleKey: "admin.hub.dataProtectionSubtitle",

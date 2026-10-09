@@ -1,6 +1,7 @@
 """Central settings — every module reads config from here, never os.environ directly."""
 
 from functools import lru_cache
+from typing import Literal
 from uuid import UUID
 
 from pydantic import Field
@@ -78,6 +79,11 @@ class Settings(BaseSettings):
     abdm_hiu_id: str = "change-me"
     abdm_client_secret: str = Field(default="change-me", repr=False)
     abdm_hfr_facility_id: str = "change-me"
+    #: More facilities of this deployment linked to the same bridge, as HFR
+    #: facility ids separated by commas. Each is its own HIP and HIU at NHA,
+    #: addressed by that id (X-HIP-ID / X-HIU-ID), the way abdm_hfr_facility_id
+    #: is for the first; see integrations/abdm/facilities.py. Empty serves one.
+    abdm_additional_hfr_facility_ids: str = ""
     # Consent-manager id sent as X-CM-ID on every gateway call. 'sbx' is the
     # sandbox; production is 'abdm'. Wrong value returns a 400 the gateway
     # does not explain, so it is configuration rather than a constant.
@@ -90,6 +96,14 @@ class Settings(BaseSettings):
     #: gateway/CM, author facility/activity and the synthetic document label.
     #: Empty by default; never copy the local opt-in into deployment config.
     abdm_sandbox_local_author_context_ids: tuple[UUID, ...] = ()
+
+    #: Explicit development-only dev.* account UUIDs that may ask for consent
+    #: as NHA's published M3 sample requester. The sandbox does not check the
+    #: requester against HPR, and M3 cannot be exercised without one; real
+    #: deployments use each doctor's own registration. The requester module
+    #: additionally checks environment and the exact sandbox gateway/CM.
+    #: Empty by default; never copy the local opt-in into deployment config.
+    abdm_sandbox_test_requester_user_ids: tuple[UUID, ...] = ()
 
     #: ABDM's PUBLIC certificate, used to encrypt Aadhaar numbers, mobile
     #: numbers and OTPs before transmission (see abdm/identity/crypto.py).
@@ -122,11 +136,39 @@ class Settings(BaseSettings):
     abdm_path_enrol_auth_by_abdm: str = "/v3/enrollment/auth/byAbdm"
     abdm_path_enrol_suggestion: str = "/v3/enrollment/enrol/suggestion"
     abdm_path_enrol_abha_address: str = "/v3/enrollment/enrol/abha-address"
+    #: Driving-licence enrolment (M1 CRT_ABHA_401-411); returns a provisional
+    #: enrolment number, not an ABHA number.
+    abdm_path_enrol_by_document: str = "/v3/enrollment/enrol/byDocument"
     abdm_path_profile_account: str = "/v3/profile/account"
     abdm_path_profile_abha_card: str = "/v3/profile/account/abha-card"
     abdm_path_login_request_otp: str = "/v3/profile/login/request/otp"
     abdm_path_login_verify: str = "/v3/profile/login/verify"
     abdm_path_login_verify_user: str = "/v3/profile/login/verify/user"
+    #: ABHA-address (PHR) login is a separate family with its own scope and
+    #: token (M1 collection, "ABHA Address Verification via Mobile OTP").
+    abdm_path_phr_login_request_otp: str = "/v3/phr/web/login/abha/request/otp"
+    abdm_path_phr_login_verify: str = "/v3/phr/web/login/abha/verify"
+    abdm_path_phr_profile: str = "/v3/phr/web/login/profile/abha-profile"
+    abdm_path_phr_card: str = "/v3/phr/web/login/profile/abha/phr-card"
+
+    #: Aadhaar demographic ABHA creation (M1 CRT_ABHA_301-309, mandatory for
+    #: government). Posted to abdm_path_enrol_by_aadhaar with authMethods
+    #: ["demo_auth"]. NHA must first grant the client id the
+    #: HidIntegratedProgram role and configure a benefit name for the
+    #: government programme (requested through the state ABDM nodal officer);
+    #: that name is sent as the Benefit-Name header. Unset means the route
+    #: refuses rather than calling ABDM without it.
+    abdm_benefit_name: str | None = None
+    #: JSON file of LGD state and district codes the desk chooses from, written
+    #: by scripts/import_lgd_districts.py from HFR (--from-hfr) or the official
+    #: LGD directory export.
+    #: Demographic creation needs LGD codes and refuses until this is loaded;
+    #: codes are never typed in or guessed.
+    abdm_lgd_reference_path: str | None = None
+    #: Health Facility Registry (M4, HFR). NHA moved the sandbox HFR API to
+    #: apihspsbx (v4); the facilitysbx host in the 2024 test-case workbook now
+    #: refuses connections. Same gateway session token as every other call.
+    abdm_hfr_base_url: str = "https://apihspsbx.abdm.gov.in/v4/int"
 
     # ------------------------------------------------------------------
     # M2 (HIP) and M3 (HIU) gateway paths, relative to abdm_gateway_base_url.
@@ -172,6 +214,9 @@ class Settings(BaseSettings):
     abdm_path_hip_link_add_contexts: str = "/api/hiecm/hip/v3/link/carecontext"
     #: HIP -> gateway. Notify the CM that a care context was added.
     abdm_path_hip_context_notify: str = "/api/hiecm/hip/v3/link/context/notify"
+    #: HIP -> gateway. Ask ABDM to text a deep link to a patient who gave a
+    #: mobile but no ABHA address (M2 HIP_INIT_NOTIFY_HIECM, "SMS Notify").
+    abdm_path_hip_sms_notify: str = "/api/hiecm/hip/v3/link/patient/links/sms/notify2"
     #: HIP -> gateway. Answer a discovery request the gateway sent us.
     abdm_path_hip_on_discover: str = (
         "/api/hiecm/user-initiated-linking/v3/patient/care-context/on-discover"
@@ -259,6 +304,14 @@ class Settings(BaseSettings):
     #: fails closed; accepting an unverified confirmation is never a fallback.
     abdm_link_otp_delivery_url: str | None = None
     abdm_link_otp_delivery_token: str | None = Field(default=None, repr=False)
+    #: Who sends that OTP: the relay above, or MSG91 directly with the
+    #: deployment's DLT-registered template (##OTP## and ##min##).
+    abdm_link_otp_sender: Literal["relay", "msg91"] = "relay"
+    msg91_auth_key: str | None = Field(default=None, repr=False)
+    msg91_otp_template_id: str | None = None
+    #: The MSG91 API the template was created under: Flow (SMS templates) or OTP.
+    msg91_api: Literal["flow", "otp"] = "flow"
+    msg91_base_url: str = "https://control.msg91.com"
 
     aadhaar_hmac_key: str = "change-me-in-env"
     aadhaar_encryption_key: str = "change-me-in-env"

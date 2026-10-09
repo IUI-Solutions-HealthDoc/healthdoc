@@ -82,6 +82,9 @@ _DEFAULT_TIMEOUT = httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0)
 
 _PLACEHOLDER = "change-me"
 
+#: Pause before the single retry of a session request ABDM answered with a 5xx.
+SESSION_RETRY_DELAY_SECONDS = 1.0
+
 
 class AbdmError(Exception):
     """Base for every ABDM failure. Catch this to treat them alike."""
@@ -93,10 +96,20 @@ class AbdmError(Exception):
         status_code: int | None = None,
         stage: str | None = None,
         error_codes: tuple[str, ...] = (),
+        body_shape: str | None = None,
+        safe_message: str | None = None,
     ):
         self.status_code = status_code
+        #: The gateway's own words, scrubbed by safe_rejection_message: for
+        #: operator logs only. HPR answers a refused registration with a 500
+        #: whose message names the field (live 6 Oct 2026).
+        self.safe_message = safe_message
         self.stage = stage
         self.error_codes = error_codes
+        #: Field names of the gateway's error body, never values. Recorded so
+        #: an undocumented refusal (no ABDM-NNNN or 9009xx code) still says
+        #: what NHA actually sent back.
+        self.body_shape = body_shape
         super().__init__(message)
 
 
@@ -184,6 +197,72 @@ def _safe_error_codes(body: Any) -> tuple[str, ...]:
     return tuple(sorted(codes)[:3])
 
 
+_SHAPE_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,30}")
+
+
+_SCRUB = (
+    # Order matters: quoted echoes first, then identifiers, then long opaque strings.
+    (re.compile(r"(['\"])(?:(?!\1).){1,200}\1"), "<value>"),
+    (re.compile(r"\S+@\S+"), "<address>"),
+    (re.compile(r"\beyJ[\w-]+(?:\.[\w-]+)*"), "<token>"),
+    (re.compile(r"[A-Za-z0-9+/=_-]{24,}"), "<token>"),
+    (re.compile(r"\d[\d-]{3,}"), "<number>"),
+)
+
+
+def safe_rejection_message(detail: Any) -> str | None:
+    """The gateway's own words for a refused request, identifiers scrubbed.
+
+    ABDM-9999 only says "invalid"; the message says which field. Messages can
+    echo submitted values, so quoted values, addresses, numbers and token-like
+    strings are replaced before the text leaves this function. For operator
+    logs only: never persisted to the database or shown in the admin screen.
+    """
+    nodes = detail if isinstance(detail, list) else [detail]
+    texts: list[str] = []
+    for node in nodes[:5]:
+        if not isinstance(node, dict):
+            continue
+        nested = node.get("error")
+        for item in (node, nested if isinstance(nested, dict) else None):
+            if not isinstance(item, dict):
+                continue
+            for key in ("message", "description", "errorMessage"):
+                value = item.get(key)
+                if isinstance(value, str) and value.strip():
+                    texts.append(value.strip())
+    if not texts:
+        return None
+    text = " | ".join(dict.fromkeys(texts))
+    for pattern, replacement in _SCRUB:
+        text = pattern.sub(replacement, text)
+    return text[:200]
+
+
+def _body_shape(body: Any) -> str:
+    """Structure of an error body: field names only, never values.
+
+    `{"error": {"code": "X", "message": "Y"}}` becomes `json{error{code,message}}`.
+    Names that do not look like schema field names are dropped, since a body
+    keyed by data (an address, a number) must not leak that data here.
+    """
+    def fields(node: dict, depth: int) -> str:
+        parts = []
+        for key in sorted(k for k in node if isinstance(k, str) and _SHAPE_KEY.fullmatch(k))[:8]:
+            value = node[key]
+            parts.append(f"{key}{{{fields(value, depth + 1)}}}" if isinstance(value, dict) and depth < 1 else key)
+        return ",".join(parts)
+
+    if body is None or body in ("", b""):
+        return "empty"
+    if isinstance(body, dict):
+        return f"json{{{fields(body, 0)}}}"
+    if isinstance(body, list):
+        first = body[0] if body else None
+        return f"list[{fields(first, 0) if isinstance(first, dict) else ''}]"
+    return "text"
+
+
 def safe_failure_summary(exc: Exception) -> str:
     """Bounded operational evidence, never arbitrary gateway messages/values."""
     parts = [type(exc).__name__]
@@ -197,7 +276,11 @@ def safe_failure_summary(exc: Exception) -> str:
             if isinstance(exc, AbdmRejected)
             else [{"code": code} for code in exc.error_codes[:3]]
         )
-        parts.extend(_safe_error_codes(body))
+        codes = _safe_error_codes(body)
+        parts.extend(codes)
+        shape = _body_shape(exc.detail) if isinstance(exc, AbdmRejected) else exc.body_shape
+        if not codes and shape:
+            parts.append(f"shape={shape}")
     return ":".join(parts)[:100]
 
 
@@ -212,6 +295,8 @@ class AbdmResponse:
     status_code: int
     body: Any
     request_id: str
+    #: Content-Type as sent, for binary downloads (the PHR card).
+    media_type: str | None = None
 
 
 class _TokenCache:
@@ -327,6 +412,7 @@ class AbdmClient:
                 status_code=resp.status_code,
                 stage="session",
                 error_codes=_safe_error_codes(_safe_body(resp)),
+                body_shape=_body_shape(_safe_body(resp)),
             )
         if resp.status_code >= 500:
             log.warning("ABDM session %s returned %s", request_id, resp.status_code)
@@ -335,6 +421,7 @@ class AbdmClient:
                 status_code=resp.status_code,
                 stage="session",
                 error_codes=_safe_error_codes(_safe_body(resp)),
+                body_shape=_body_shape(_safe_body(resp)),
             )
         if resp.status_code >= 400:
             raise AbdmRejected(resp.status_code, _safe_body(resp), request_id, stage="session")
@@ -377,7 +464,21 @@ class AbdmClient:
                 cached = self._tokens.get_if_fresh()
                 if cached:
                     return cached
-            token, ttl = await self._fetch_token()
+            try:
+                token, ttl = await self._fetch_token()
+            except AbdmUnavailable as exc:
+                # The sandbox session endpoint answers an occasional 500 and
+                # then 200s straight after (live, 6 Oct 2026). Asking for a
+                # session is safe to repeat; one paced retry, never a loop.
+                # Credential refusals are AbdmAuthError and a malformed answer
+                # is not transient, so neither is retried.
+                transient = (exc.status_code or 0) >= 500 or isinstance(
+                    exc.__cause__, httpx.TimeoutException | httpx.TransportError
+                )
+                if not transient:
+                    raise
+                await asyncio.sleep(SESSION_RETRY_DELAY_SECONDS)
+                token, ttl = await self._fetch_token()
             self._tokens.set(token, ttl)
             return token
 
@@ -417,6 +518,7 @@ class AbdmClient:
                     status_code=401,
                     stage="request",
                     error_codes=_safe_error_codes(_safe_body(resp)),
+                    body_shape=_body_shape(_safe_body(resp)),
                 )
 
         if resp.status_code == 403:
@@ -425,13 +527,20 @@ class AbdmClient:
                 status_code=403,
                 stage="request",
                 error_codes=_safe_error_codes(_safe_body(resp)),
+                body_shape=_body_shape(_safe_body(resp)),
             )
         if resp.status_code >= 500:
+            failure = _safe_body(resp)
+            details = failure.get("details") if isinstance(failure, dict) else None
             raise AbdmUnavailable(
                 "ABDM request unavailable",
                 status_code=resp.status_code,
                 stage="request",
-                error_codes=_safe_error_codes(_safe_body(resp)),
+                error_codes=_safe_error_codes(failure),
+                body_shape=_body_shape(failure),
+                safe_message=safe_rejection_message(
+                    [failure, *(details if isinstance(details, list) else [])]
+                ),
             )
         if resp.status_code >= 400:
             raise AbdmRejected(resp.status_code, _safe_body(resp), rid)
@@ -439,7 +548,7 @@ class AbdmClient:
             raise AbdmProtocolError(resp.status_code)
 
         body: Any = resp.content if not parse_json else _safe_body(resp)
-        return AbdmResponse(resp.status_code, body, rid)
+        return AbdmResponse(resp.status_code, body, rid, resp.headers.get("content-type"))
 
     async def _send(
         self,

@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 from datetime import UTC, date, datetime
+from decimal import Decimal
 from pathlib import Path
 
 from app.integrations.abdm.fhir.builder import build_clinical_bundle
@@ -83,6 +84,21 @@ def _samples() -> dict[str, dict]:
                 }
             ],
         ),
+        # A facility without PACS: the signed report is the media (7 Oct 2026).
+        "DiagnosticReportImagingNoPacs": build_clinical_bundle(
+            "DiagnosticReport",
+            **common,
+            diagnostic_reports=[
+                {
+                    "id": "imaging-result-2",
+                    "kind": "radiology",
+                    "name": "Chest radiograph",
+                    "modality": "xray",
+                    "issued": common["authored_at"],
+                    "conclusion": "No acute cardiopulmonary finding.",
+                }
+            ],
+        ),
         "Prescription": build_clinical_bundle(
             "Prescription",
             **common,
@@ -100,10 +116,33 @@ def _samples() -> dict[str, dict]:
             **common,
             care_plan="Patient discharged with follow-up instructions.",
         ),
+        "ImmunizationRecord": build_clinical_bundle(
+            "ImmunizationRecord",
+            **{**common, "encounter": None},
+            immunizations=[{
+                "id": "validation-dose", "vaccine": "Validation vaccine", "occurred_at": common["authored_at"],
+                "dose_number": 1, "target_disease": "Validation disease", "lot_number": "VALIDATION-LOT",
+            }],
+        ),
         "WellnessRecord": build_clinical_bundle(
             "WellnessRecord",
             **common,
             observations=[{"name": "Pulse rate", "value": 72, "unit": "/min"}],
+        ),
+        "Invoice": build_clinical_bundle(
+            "Invoice",
+            **{**common, "encounter": None, "practitioner": None},
+            invoice={
+                "id": "validation-invoice", "number": "VALIDATION-INV-1", "status": "paid",
+                "type_code": "03", "issued_at": common["authored_at"], "net_amount": Decimal("450.00"),
+                "discount_amount": Decimal("50.00"),
+                "lines": [
+                    {"id": "validation-line-1", "category": "consultation", "description": "OPD consultation",
+                     "quantity": Decimal("1"), "amount": Decimal("400.00")},
+                    {"id": "validation-line-2", "category": "pharmacy", "description": "Paracetamol 500 mg",
+                     "quantity": Decimal("10"), "amount": Decimal("100.00")},
+                ],
+            },
         ),
     }
 

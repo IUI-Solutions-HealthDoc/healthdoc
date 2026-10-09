@@ -47,6 +47,7 @@ import asyncio
 import hashlib
 import io
 import uuid
+from collections.abc import Collection
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException, UploadFile
@@ -201,11 +202,46 @@ async def upload_file(
     return record
 
 
-async def get_file_record(db: AsyncSession, file_id: uuid.UUID, *, facility_id: uuid.UUID) -> FileRecord:
+#: Upload values the API accepts. `sensitive` is clinical material (external
+#: result reports); `normal` is everything else a desk may handle, such as a
+#: registration photo.
+UPLOAD_SENSITIVITIES = frozenset({"normal", "sensitive"})
+
+#: Roles that may read a file at each sensitivity. A sensitivity missing from
+#: this map is readable by nobody: an unrecognised label on a legacy row fails
+#: closed instead of falling back to the widest audience.
+_READERS_BY_SENSITIVITY: dict[str, frozenset[str]] = {
+    "normal": frozenset(
+        {"receptionist", "nurse", "doctor", "lab_tech", "radiology_tech", "pharmacist", "admin"}
+    ),
+    "sensitive": frozenset({"nurse", "doctor", "lab_tech", "radiology_tech", "admin"}),
+}
+
+
+def may_read_sensitivity(sensitivity: str, roles: Collection[str]) -> bool:
+    return bool(_READERS_BY_SENSITIVITY.get(sensitivity, frozenset()) & set(roles))
+
+
+async def get_file_record(
+    db: AsyncSession,
+    file_id: uuid.UUID,
+    *,
+    facility_id: uuid.UUID,
+    reader_roles: Collection[str] | None = None,
+) -> FileRecord:
+    """One file row in the caller's facility.
+
+    `reader_roles` is the caller's roles when the read is on their behalf;
+    internal callers that already gate by route (erasure, patient photo) pass
+    None. A file the caller may not read answers 404 like a missing one, so
+    the sensitivity of a file id cannot be probed.
+    """
     record = await db.get(FileRecord, file_id)
     if record is None or record.facility_id != facility_id:
         # Same "don't leak a different facility's row exists" shape as
         # consent's get_consent_record -- 404 either way.
+        raise HTTPException(404, "File not found")
+    if reader_roles is not None and not may_read_sensitivity(record.sensitivity, reader_roles):
         raise HTTPException(404, "File not found")
     return record
 
@@ -218,9 +254,15 @@ async def record_view_access(
 
 
 async def get_download_url(
-    db: AsyncSession, file_id: uuid.UUID, *, facility_id: uuid.UUID, user_id: uuid.UUID, ip_address: str | None
+    db: AsyncSession,
+    file_id: uuid.UUID,
+    *,
+    facility_id: uuid.UUID,
+    user_id: uuid.UUID,
+    ip_address: str | None,
+    reader_roles: Collection[str] | None = None,
 ) -> str:
-    record = await get_file_record(db, file_id, facility_id=facility_id)
+    record = await get_file_record(db, file_id, facility_id=facility_id, reader_roles=reader_roles)
 
     # 410, not 404. The file existed and was lawfully destroyed, and the caller
     # is already authorised to know that — GET /files/{id} returns the tombstone
@@ -248,6 +290,36 @@ async def get_download_url(
 
     return url
 
+
+
+class FileContentUnavailable(Exception):
+    """The stored bytes are missing, oversized, or no longer match the upload."""
+
+
+async def read_file_bytes(record: FileRecord, *, max_bytes: int) -> bytes:
+    """The exact bytes uploaded, or FileContentUnavailable.
+
+    For sending a file onward (ABDM transfer), never for display. The SHA-256
+    taken at upload is checked, so a replaced or corrupted object is refused
+    rather than shared; the size cap is checked before the object is read."""
+    if record.is_erased or not record.object_key or not record.sha256:
+        raise FileContentUnavailable("The file has been erased")
+    if record.size_bytes is None or not 0 < record.size_bytes <= max_bytes:
+        raise FileContentUnavailable("The file exceeds the size allowed for sharing")
+
+    def _get() -> bytes:
+        response = get_minio_client().get_object(record.bucket, record.object_key)
+        try:
+            return response.read(max_bytes + 1)
+        finally:
+            response.close()
+            response.release_conn()
+
+    # Blocking MinIO SDK call -- off the event loop, as on upload.
+    data = await asyncio.to_thread(_get)
+    if len(data) > max_bytes or hashlib.sha256(data).hexdigest() != record.sha256:
+        raise FileContentUnavailable("The stored file no longer matches its upload")
+    return data
 
 class FileAlreadyErased(Exception):
     """Erasure is idempotent in intent but not silently repeatable.

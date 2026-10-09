@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import QRCode from "react-qr-code";
 import { Modal } from "@/components/ui/Modal";
-import { formatDateTime } from "@/lib/api";
+import { formatDateTime, newIdempotencyKey } from "@/lib/api";
 import { useLocale } from "@/lib/i18n";
 import { StartVisit } from "./StartVisit";
 import {
@@ -37,6 +37,9 @@ function ReceptionTicketDesk({ onClose }: { onClose: () => void }) {
   const reads = useRef(0);
   const selection = useRef(0);
   const writing = useRef(false);
+  // Kept while the ticket and counter are unchanged, so retrying after a lost
+  // response repeats the same request rather than issuing a new one.
+  const checkInAttempt = useRef<{ ticketId: string; counter: string; key: string } | null>(null);
 
   useEffect(() => {
     mounted.current = true;
@@ -97,9 +100,13 @@ function ReceptionTicketDesk({ onClose }: { onClose: () => void }) {
     setSaving(true);
     setError("");
     setNotice("");
+    const attempt = checkInAttempt.current;
+    if (!attempt || attempt.ticketId !== ticketId || attempt.counter !== actualCounter) {
+      checkInAttempt.current = { ticketId, counter: actualCounter, key: newIdempotencyKey() };
+    }
     let accepted = false;
     try {
-      const result = await checkInScanShareTicket(ticketId, actualCounter);
+      const result = await checkInScanShareTicket(ticketId, actualCounter, checkInAttempt.current!.key);
       if (result.ticket_id !== ticketId) throw new Error(t("receptionist.scanShare.errWrongTicket"));
       accepted = true;
       const refreshed = await getScanShareTicket(ticketId);

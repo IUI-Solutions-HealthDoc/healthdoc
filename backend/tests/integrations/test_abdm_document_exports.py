@@ -451,3 +451,28 @@ async def test_discharge_uses_its_own_summary_without_requiring_an_opd_encounter
     assert facts["care_plan"] == discharge.discharge_summary
     assert facts["diagnoses"] == facts["medications"] == facts["diagnostic_reports"] == []
     assert build_clinical_bundle(selected.hi_type, **facts)["type"] == "document"
+
+
+async def test_an_unregistered_lab_author_makes_the_laboratory_the_author(db, documents, seed):
+    # Laboratory staff hold no medical registration; every lab report failed
+    # transfer on "Document author has no registration number" (6 Oct 2026).
+    facility, _, _, results, context = documents
+    _, _, author = seed
+    author.registration_number = None
+    await db.flush()
+    selected = context("lab-result", results["lab-result"][0].id, "DiagnosticReport")
+    facts = await _clinical_facts(db, selected, facility=facility)
+    assert facts["practitioner"] is None
+    bundle = build_clinical_bundle(selected.hi_type, **facts)
+    kinds = [entry["resource"]["resourceType"] for entry in bundle["entry"]]
+    assert "Practitioner" not in kinds and "Organization" in kinds
+
+
+async def test_an_unregistered_imaging_author_still_blocks_the_report(db, documents, seed):
+    facility, _, _, results, context = documents
+    _, _, author = seed
+    author.registration_number = None
+    await db.flush()
+    selected = context("radiology-report", results["radiology-report"][0].id, "DiagnosticReport")
+    with pytest.raises(TransferError, match="no registration number"):
+        await _clinical_facts(db, selected, facility=facility)

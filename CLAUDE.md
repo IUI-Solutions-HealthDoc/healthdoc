@@ -4,6 +4,84 @@ Hospital management system for Indian facilities. FastAPI + PostgreSQL backend,
 Next.js 16 + Electron frontend, Keycloak OIDC, all behind nginx in Docker
 Compose. Targeting ABDM certification and a CERT-In WASA audit.
 
+## Current operator setup — 26 September 2026
+
+**This section supersedes older branch/runtime/sender-ID status below.**
+Merged-main baseline `30a6176c4c453d0271707163cde21d726380894e` (#600).
+Current work is on `work/next-phase-20260926` in
+`.local-archive/worktrees/next-phase-20260926`; this setup tranche is locally
+uncommitted. Preserve the separate dirty primary checkout and its private
+`.env`. Backend now mounts this worktree; frontend still mounts the preceding
+cutover worktree with the same baseline application UI. No frontend rebuild
+or participant transaction is claimed for this tranche.
+
+### M1/M2 now, M3 requester details later
+
+- User will perform clinical flows in browser/PHR and use Postman to inspect
+  responses. Do not request OTPs, consent, clinical sharing or token generation
+  merely as setup checks. Do not fabricate clinician identifiers.
+- M1 existing-ABHA verification/card can proceed with participant consent.
+  HIP-initiated M2 linking does not require the missing M3 requester fields.
+  Transfer still requires legitimate finalized-document authorship and PHR
+  authorization. One previously approved synthetic Wellness context is
+  specifically allowlisted; do not expand this exception automatically.
+- M2 PHR-initiated mediated OTP still has no SMS provider/relay. No full M2
+  acceptance/certification claim until assigned linking, delivery/rendering
+  and other required cases pass. Unsupported HI types remain separate gaps.
+- Current `dev.doctor` profile was checked: registration number, identifier
+  type and issuer URI are missing. M3 request initiation waits for a genuine
+  authorized or documented NHA-approved sandbox requester profile. A masked
+  manager HPID/facility name is not a substitute. Registration completeness
+  alone will not establish M3 interoperability or certification.
+
+### Runtime and evidence
+
+- Local health200; schema0088. HFR/HIP/HIU all **IN0910034387**. Bridge
+  **SBXID_053401**, CM `sbx`, gateway `https://dev.abdm.gov.in`, callback base
+  `https://abdm.healthdoc.world`. Never switch callback delivery to a public
+  third-party capture service.
+- Owner-approved cutover froze **22 historical jobs** (21 context_notify,
+  1 link_context); payloads preserved. One pending other-facility job is
+  untouched. New `run_abdm_test_session` is dry-run by default; `--execute`
+  processes only this facility's work created since the session cutoff.
+  Atomic claim supports facility/cutoff; existing lease/retry rules remain.
+  Dry-run verified live. **No execute-mode session worker was started by
+  setup.** Start before the participant action and reuse the printed cutoff
+  on restart. Do not start global delivery/cleanup casually.
+- All16 public callback GET probes returned405+receipt; token GET refreshed
+  in desktop Postman too. These are synthetic reachability checks, not NHA
+  delivery evidence. Snapshot: zero stored link tokens, transfer keys and
+  received content; recheck before claiming results.
+- New `scripts/abdm_webhook_console.py` binds127.0.0.1:8766 only, uses existing
+  privacy-minimized receipt reader, strips IP claims, refuses writes/CORS,
+  checks Host/Origin/custom header, and has no arbitrary command execution.
+  Keep it private. HTTP status in a receipt is HealthDoc's callback response,
+  not the earlier upstream NHA status. No cache; no credential values.
+- Postman inspector collection imported; receipt-list/status requests both
+  returned200. Existing readiness collection uses Local Vault and one-shot
+  session arming. Do not export raw session responses, HARs or populated envs.
+- Browser inbox rendering remains unverified: Chrome automation returned
+  `ERR_BLOCKED_BY_CLIENT`; user can open it manually. Postman/API path works.
+- Focused backend tests27 passed/1 skipped (PG-only case not exercised),
+  console tests8 passed, offline readiness21 requests/42 scripts and
+  inspector4 requests passed, Ruff/JS syntax/diff checks passed. These are
+  setup regression results, **not** full suite/live milestone passes.
+
+Operator handoff: [M1/M2 execution guide](docs/abdm-postman-browser-m1-m2-execution-2026-09-26.md),
+[Postman setup](docs/postman/README.md),
+[full M1–M3 reference](docs/abdm-self-service-webhooks-m1-m2-m3-2026-09-24.md).
+
+**Operator-login/startup follow-up:** execution guide sections2A–2C now list
+the required local accounts/screens, seeded `devpass` password, safe existing-
+container restart and exact reception→consent→doctor→PHR→admin sequence.
+Live Keycloak readback confirms receptionist/doctor/admin enabled; no passwords
+were reset. Fresh browser login was blocked at the expected local certificate
+warning (`ERR_CERT_AUTHORITY_INVALID`), so default passwords were not newly
+proven by a browser sign-in. Local health200, callback GET405 and viewer200
+were rechecked. Distinguish local test accounts from the participant's PHR
+account and Postman Local Vault. Do not recreate Keycloak, rerun seeding or
+delete the still-mounted older frontend/nginx worktrees to start a test session.
+
 ## Current project status — ten-suite acceptance and safety fixes, 20–21 September 2026
 
 **This section supersedes the dated 18 September review below. Implementation
@@ -388,14 +466,17 @@ queried in this review. The dated local consent renewed through 14 September
 | **M2 — HIP linking/sharing** | Official v3 callbacks/outbound calls, finalized-document contexts, grouped linking, durable jobs, FHIR export and encrypted transfer exist. An earlier token callback succeeded but its link failed/expired. A later request's controlled same-ID retry returned 202; no confirmed link is evidenced. | Resolve the missing genuine callback/link confirmation, then real PHR discovery/link visibility, approved consent, record sharing/notifications and required negative cases. HTTP 202 and synthetic receiver probes are not completed linkage. The alternative MEDIATE user-initiated route needs an approved SMS/HTTPS OTP relay, which the owner has not provisioned. |
 | **M3 — HIU consent/exchange** | Consent request/artefact/data APIs, requester snapshots/admin fields, durable transfer handling, encrypted received storage and protected document/PDF viewer exist. Local crypto interoperability and sample bundle validation are recorded. | Genuine or NHA-approved clinician requester details, actual PHR approval/denial, authorized counterparty data, encrypted receive/decrypt/validate/display/receipt, revocation/expiry and evidence. No complete live HIU consent/data exchange is recorded. A synthetic local viewer test is not M3. |
 
-**Supported content is five HI types**, with both lab and imaging represented
+**Supported content is six HI types**, with both lab and imaging represented
 under DiagnosticReport: Prescription, DiagnosticReport, OPConsultation,
-DischargeSummary and WellnessRecord (`hip/gateway.py::HI_TYPES`). Historical
+DischargeSummary, WellnessRecord and ImmunizationRecord
+(`hip/gateway.py::HI_TYPES`). ImmunizationRecord (2 October, migration 0092)
+is one recorded vaccine dose, a care context with no visit; vaccine, site and
+route travel as text because the catalogue holds no SNOMED concepts. Historical
 samples validated against NRCeS 6.5.0 with HL7 validator 6.9.12; that does not
 validate every future clinical document or settle current assigned case scope.
 The supplied FAQ/workbook conflict on required types remains: confirm with NHA.
-ImmunizationRecord, HealthDocumentRecord and InvoiceRecord must have legitimate
-source workflows and mappings if in scope; do not generate dummy content.
+HealthDocumentRecord and InvoiceRecord must have legitimate source workflows and
+mappings if in scope; do not generate dummy content.
 
 **Callback diagnostics are built and merged, not a cure proven against NHA.**
 Migration 0073 adds durable encrypted/redacted receipts; nginx persists bounded

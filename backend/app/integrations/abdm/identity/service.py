@@ -46,7 +46,15 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from app.common.config import get_settings
-from app.integrations.abdm.client import AbdmRejected, AbdmResponse, get_abdm_client
+from app.common.enums import AbhaProfileTokenKind
+from app.integrations.abdm.client import (
+    AbdmRejected,
+    AbdmResponse,
+    AbdmUnavailable,
+    _body_shape,
+    get_abdm_client,
+    safe_rejection_message,
+)
 
 from . import otp_session
 from .crypto import encrypt_for_abdm
@@ -94,8 +102,9 @@ class OtpRequested:
 _LOGIN_SCOPES: dict[str, list[str]] = {
     "abha-number": ["abha-login", "mobile-verify"],
     "aadhaar": ["abha-login", "aadhaar-verify"],
-    # Official collection: address and communication-mobile both OTP through ABDM.
-    "abha-address": ["abha-login", "mobile-verify"],
+    # ABHA address is its own login family (/v3/phr/web/login/abha/*) with its
+    # own scope: "ABHA Address Verification via Mobile OTP" in the M1 collection.
+    "abha-address": ["abha-address-login", "mobile-verify"],
     "mobile": ["abha-login", "mobile-verify"],
 }
 _LOGIN_OTP_SYSTEMS: dict[str, str] = {
@@ -104,10 +113,22 @@ _LOGIN_OTP_SYSTEMS: dict[str, str] = {
     "abha-address": "abdm",
     "mobile": "abdm",
 }
+#: An ABHA address can also be proved with an Aadhaar OTP ("ABHA Address Login,
+#: Aadhaar OTP" in the M1 collection, workbook VRFY_ABHA_102): same endpoints,
+#: aadhaar-verify scope and the aadhaar OTP system.
+ADDRESS_OTP_SYSTEMS = ("abdm", "aadhaar")
+
+
+def _login_scope(login_hint: str, otp_system: str | None) -> list[str]:
+    if login_hint == "abha-address" and otp_system == "aadhaar":
+        return ["abha-address-login", "aadhaar-verify"]
+    return _LOGIN_SCOPES[login_hint]
 
 
 @dataclass(frozen=True)
 class AbhaIssued:
+    #: Empty when an ABHA-address login did not disclose the full number
+    #: (ABDM may return it masked). A masked number is never stored.
     abha_number: str
     #: The ABHA address (PHR), e.g. "name@abdm". Distinct from the number.
     abha_address: str | None
@@ -122,6 +143,8 @@ class AbhaIssued:
     suggested_addresses: tuple[str, ...] = ()
     #: (ABHA number, display name) when the desk must choose. Never a guess.
     account_choices: tuple[tuple[str, str | None], ...] = ()
+    #: Which login family issued `linking_token`; it only opens that family.
+    token_kind: str = AbhaProfileTokenKind.ABHA.value
 
 
 def _txn_id(body: object) -> str:
@@ -167,18 +190,67 @@ async def _call(
             parse_json=parse_json,
         )
     except AbdmRejected as exc:
-        # Error bodies can echo the identifier or OTP. Retain only contracted
-        # field names and error-code syntax, never values or free-form messages.
+        # Error bodies can echo the identifier or OTP. Retain contracted field
+        # names, error-code syntax, the body's shape and ABDM's own message with
+        # identifiers scrubbed: a licence refusal (3 Oct 2026) carried no ABDM
+        # code at all, so without the message the reason was lost.
         codes, fields = _rejection_metadata(exc.detail)
         log.warning(
-            "ABDM identity rejected (status=%s request=%s codes=%s fields=%s)",
+            "ABDM identity rejected (status=%s request=%s codes=%s fields=%s shape=%s reason=%s)",
             exc.status_code, exc.request_id, codes, fields,
+            _body_shape(exc.detail), _refusal_reason(exc.detail),
+        )
+        raise
+    except AbdmUnavailable as exc:
+        # A 5xx or timeout reached the desk as "temporarily unavailable" with
+        # nothing logged (live, 6 Oct 2026). Keep status, codes, shape and the
+        # scrubbed message so the cause can be told from a sandbox outage.
+        log.warning(
+            "ABDM identity unavailable (%s %s status=%s stage=%s codes=%s shape=%s reason=%s)",
+            method, path, exc.status_code, exc.stage, exc.error_codes, exc.body_shape, exc.safe_message,
         )
         raise
 
 
+#: Licence-document fields whose ABDM refusal text describes the check, not the
+#: person ("Invalid DOB", "...size less than 150KB"). Names, numbers and other
+#: identifiers stay out: ABHA error text can echo them.
+_LOGGED_FIELD_REFUSALS = frozenset(
+    {"Dob", "FrontSidePhoto", "BackSidePhoto", "Gender", "PinCode", "State", "District",
+     # byAadhaar refuses the communication mobile under this key (live, 6 Oct 2026).
+     "mobile"}
+)
+
+
+def _refusal_reason(detail: object) -> str | None:
+    """ABDM's words for a rejected licence field, numbers scrubbed.
+
+    A validation refusal keys each message by the field it rejects
+    ({"Dob": "...", "FrontSidePhoto": "...", "timestamp": ...}; live, 3 Oct
+    2026). ABDM's general free-text message is never logged; its code is.
+    """
+    if not isinstance(detail, dict):
+        return None
+    per_field = [
+        f"{key}: {safe_rejection_message({'message': value})}"
+        for key, value in sorted(detail.items())
+        if key in _LOGGED_FIELD_REFUSALS and isinstance(value, str) and value.strip()
+    ]
+    return "; ".join(per_field)[:400] or None
+
+
 async def _post(path: str, payload: dict) -> AbdmResponse:
     return await _call("POST", path, payload)
+
+
+def rejection_codes(detail: object) -> list[str]:
+    """ABDM-NNNN codes in a refusal body, and nothing else from it."""
+    return _rejection_metadata(detail)[0]
+
+
+def rejection_fields(detail: object) -> list[str]:
+    """Contracted request field names a refusal body names, never values."""
+    return _rejection_metadata(detail)[1]
 
 
 def _rejection_metadata(detail: object) -> tuple[list[str], list[str]]:
@@ -196,8 +268,11 @@ def _rejection_metadata(detail: object) -> tuple[list[str], list[str]]:
             for key, child in value.items():
                 if key in allowed_fields:
                     fields.add(key)
-                if key == "code" and isinstance(child, str) and re.fullmatch(r"ABDM-\d{4}", child):
-                    codes.add(child)
+                # ABDM sends a code bare or with a trailing ": " separator.
+                if key == "code" and isinstance(child, str):
+                    matched = re.fullmatch(r"(ABDM-\d{4})(?::\s*)?", child)
+                    if matched:
+                        codes.add(matched.group(1))
                 if key in {"field", "property"} and isinstance(child, str) and child in allowed_fields:
                     fields.add(child)
                 if isinstance(child, dict | list):
@@ -436,6 +511,295 @@ async def enrol_by_aadhaar_otp(
     )
 
 
+# ------------------------------------------------- enrol by demographics
+
+
+def demographic_date(value) -> str:
+    """dd-mm-yyyy. NHA's M1 Postman leaves dateOfBirth as a placeholder; this is
+    the one place to change if the sandbox refuses the format."""
+    return value.strftime("%d-%m-%Y")
+
+
+async def enrol_by_demographics(
+    *,
+    aadhaar: str,
+    name: str,
+    date_of_birth,
+    gender: str,
+    mobile: str,
+    address: str,
+    pincode: str,
+    state_code: str,
+    district_code: str,
+    consent: EnrolmentConsent | None,
+) -> AbhaIssued:
+    """M1 CRT_ABHA_301-309: create or fetch an ABHA from Aadhaar demographics.
+
+    One call, no OTP: UIDAI checks the name, date of birth and gender against
+    the Aadhaar number, and ABHA returns the new or existing number with its
+    default address and a profile token (M1 Postman, "DemoAuth API"). The
+    mobile is not re-verified by ABHA; the desk takes it from the patient.
+    `aadhaar` is encrypted here and referenced nowhere afterwards.
+    """
+    granted = _require_enrolment_consent(consent)
+    benefit = get_settings().abdm_benefit_name
+    if not benefit or not benefit.strip():
+        raise AbdmIdentityError(
+            "abdm_demographic_not_enabled",
+            "Demographic ABHA creation needs NHA's HidIntegratedProgram role and benefit name",
+        )
+    response = await _call(
+        "POST",
+        get_settings().abdm_path_enrol_by_aadhaar,
+        {
+            "authData": {
+                "authMethods": ["demo_auth"],
+                "demo_auth": {
+                    "aadhaarNumber": encrypt_for_abdm(aadhaar),
+                    "districtCode": district_code,
+                    "stateCode": state_code,
+                    "dateOfBirth": demographic_date(date_of_birth),
+                    "gender": gender,
+                    "name": name,
+                    "mobile": mobile,
+                    "address": address,
+                    "pincode": pincode,
+                },
+            },
+            "consent": {"code": granted.code, "version": granted.version},
+        },
+        extra_headers={"Benefit-Name": benefit.strip()},
+    )
+    body = response.body
+    if not isinstance(body, dict):
+        raise AbdmIdentityError("abdm_bad_response", "gateway returned a non-object body")
+    abha_number = body.get("healthIdNumber") or body.get("ABHANumber")
+    if not isinstance(abha_number, str) or not abha_number.strip():
+        raise AbdmIdentityError(
+            "abdm_no_abha_returned", "demographic enrolment completed without an ABHA number"
+        )
+    address_value = body.get("healthId") or body.get("preferredAbhaAddress")
+    year, month, day = (body.get(k) for k in ("yearOfBirth", "monthOfBirth", "dayOfBirth"))
+    born = (
+        f"{int(day):02d}-{int(month):02d}-{year}"
+        if all(isinstance(part, str) and part.isdigit() for part in (year, month, day))
+        else None
+    )
+    return AbhaIssued(
+        abha_number=abha_number.strip(),
+        abha_address=address_value.strip() if isinstance(address_value, str) and address_value.strip() else None,
+        linking_token=_profile_token(body),
+        name=_name(body),
+        gender=body.get("gender"),
+        date_of_birth=born,
+    )
+
+
+# --------------------------------------------- enrol by driving licence
+
+STAGE_DOCUMENT_OTP = "document_otp"
+STAGE_DOCUMENT_DETAILS = "document_details"
+#: NHA's M1 Postman "ABHA Enrolment via DL": both OTP legs carry dl-flow.
+_DOCUMENT_SCOPE = ["abha-enrol", "mobile-verify", "dl-flow"]
+
+
+@dataclass(frozen=True)
+class DocumentEnrolment:
+    """What a driving-licence enrolment returns: an enrolment number, not an ABHA.
+
+    NHA issues the ABHA number only after a participating facility verifies the
+    licence against the person (sandbox docs, "Using Driving License"), so this
+    is never written to a chart as a verified identity.
+    """
+
+    enrolment_number: str
+    enrolment_state: str | None
+    abha_address: str | None
+    is_new: bool | None
+
+
+async def _document_session(session_id: str, facility_id: str) -> OtpSession:
+    return await otp_session.load(
+        session_id, facility_id=facility_id, purpose=OtpPurpose.ENROL_BY_DOCUMENT
+    )
+
+
+async def _send_document_otp(mobile: str) -> tuple[str, str | None]:
+    body = (
+        await _post(
+            get_settings().abdm_path_enrol_request_otp,
+            {
+                "scope": _DOCUMENT_SCOPE,
+                "loginHint": "mobile",
+                "loginId": encrypt_for_abdm(mobile),
+                "otpSystem": "abdm",
+            },
+        )
+    ).body
+    return _txn_id(body), (body.get("message") if isinstance(body, dict) else None)
+
+
+async def request_document_mobile_otp(
+    *,
+    mobile: str,
+    facility_id: str,
+    started_by: str,
+    patient_id: str,
+    consent: EnrolmentConsent | None,
+) -> OtpRequested:
+    """CRT_ABHA_403/404: OTP the communication mobile for a licence enrolment.
+
+    Consent must already be granted; the mobile is encrypted here and stored
+    nowhere. The session remembers the grant so the enrolment leg quotes it.
+    """
+    granted = _require_enrolment_consent(consent)
+    txn_id, message = await _send_document_otp(mobile)
+    session = await otp_session.start(
+        abdm_txn_id=txn_id,
+        purpose=OtpPurpose.ENROL_BY_DOCUMENT,
+        facility_id=facility_id,
+        started_by=started_by,
+        patient_id=patient_id,
+        login_hint="mobile",
+        consent_code=granted.code,
+        consent_version=granted.version,
+        consent_language=granted.language,
+        consent_granted_at=datetime.now(UTC).isoformat(),
+        stage=STAGE_DOCUMENT_OTP,
+    )
+    return OtpRequested(
+        session_id=session.session_id,
+        masked_mobile=message,
+        resends_remaining=otp_session.MAX_RESENDS,
+    )
+
+
+async def resend_document_mobile_otp(
+    *, session_id: str, mobile: str, facility_id: str, started_by: str
+) -> OtpRequested:
+    """A fresh OTP for the same desk attempt, inside the resend limits."""
+    session = await _document_session(session_id, facility_id)
+    if session.started_by != str(started_by):
+        raise otp_session.OtpSessionMismatch
+    _require_stage(session, STAGE_DOCUMENT_OTP)
+    session.resend_allowed()
+    txn_id, message = await _send_document_otp(mobile)
+    resends = session.resends + 1
+    await otp_session.save(otp_session.with_updates(
+        session, abdm_txn_id=txn_id, resends=resends, created_at=datetime.now(UTC).isoformat()
+    ))
+    return OtpRequested(
+        session_id=session.session_id,
+        masked_mobile=message,
+        resends_remaining=otp_session.MAX_RESENDS - resends,
+    )
+
+
+async def verify_document_mobile_otp(*, session_id: str, otp: str, facility_id: str) -> None:
+    """Verify the mobile OTP; the session then waits for the licence details."""
+    session = await _document_session(session_id, facility_id)
+    _require_stage(session, STAGE_DOCUMENT_OTP)
+    body = (
+        await _post(
+            get_settings().abdm_path_enrol_auth_by_abdm,
+            {
+                "scope": _DOCUMENT_SCOPE,
+                "authData": {
+                    "authMethods": ["otp"],
+                    "otp": {
+                        "timeStamp": _abdm_timestamp(),
+                        "txnId": session.abdm_txn_id,
+                        "otpValue": encrypt_for_abdm(otp),
+                    },
+                },
+            },
+        )
+    ).body
+    if not isinstance(body, dict):
+        raise AbdmIdentityError("abdm_bad_response", "gateway returned a non-object body")
+    if body.get("authResult") not in (None, "success"):
+        raise AbdmIdentityError("abdm_auth_failed", "ABDM did not verify this OTP")
+    next_txn = body.get("txnId")
+    await otp_session.save(otp_session.with_updates(
+        session,
+        abdm_txn_id=next_txn if isinstance(next_txn, str) and next_txn else session.abdm_txn_id,
+        stage=STAGE_DOCUMENT_DETAILS,
+    ))
+
+
+async def enrol_by_driving_licence(
+    *,
+    session_id: str,
+    facility_id: str,
+    licence_number: str,
+    first_name: str,
+    middle_name: str,
+    last_name: str,
+    date_of_birth,
+    gender: str,
+    front_photo: str,
+    back_photo: str,
+    address: str,
+    state: str,
+    district: str,
+    pincode: str,
+) -> DocumentEnrolment:
+    """CRT_ABHA_405/406: submit the licence and its photos for an enrolment number.
+
+    The photos are base64 and travel to ABDM only; nothing here keeps them.
+    State and district go as names: NHA's Postman leaves them as placeholders
+    and the swagger's examples are names ("Delhi", "Pune").
+    """
+    session = await _document_session(session_id, facility_id)
+    _require_stage(session, STAGE_DOCUMENT_DETAILS)
+    body = (
+        await _post(
+            get_settings().abdm_path_enrol_by_document,
+            {
+                "txnId": session.abdm_txn_id,
+                "documentType": "DRIVING_LICENCE",
+                "documentId": licence_number,
+                "firstName": first_name,
+                "middleName": middle_name,
+                "lastName": last_name,
+                # yyyy-mm-dd: ABDM answered "Invalid DOB" to dd-mm-yyyy here
+                # (live, 3 Oct 2026); NHA's M1 document shows 1996-07-15.
+                "dob": date_of_birth.isoformat(),
+                "gender": gender,
+                "frontSidePhoto": front_photo,
+                "backSidePhoto": back_photo,
+                "address": address,
+                "state": state,
+                "district": district,
+                "pinCode": pincode,
+                "consent": _consent_from_session(session),
+            },
+        )
+    ).body
+    profile = body.get("enrolProfile") if isinstance(body, dict) else None
+    number = profile.get("enrolmentNumber") if isinstance(profile, dict) else None
+    if not isinstance(number, str) or not number.strip():
+        # Field names only: the reply carries the person's identity.
+        log.warning("ABDM licence enrolment reply had no enrolment number (shape=%s)", _body_shape(body))
+        raise AbdmIdentityError(
+            "abdm_no_enrolment_returned", "ABDM returned no enrolment number for this licence"
+        )
+    addresses = [
+        value.strip()
+        for value in (profile.get("phrAddress") or [])
+        if isinstance(value, str) and value.strip()
+    ]
+    await otp_session.finish(session_id)
+    is_new = body.get("isNew")
+    state_value = profile.get("enrolmentState")
+    return DocumentEnrolment(
+        enrolment_number=number.strip(),
+        enrolment_state=state_value if isinstance(state_value, str) else None,
+        abha_address=addresses[0] if addresses else None,
+        is_new=is_new if isinstance(is_new, bool) else None,
+    )
+
+
 # ---------------------------------------------------------- login by ABHA
 
 
@@ -461,6 +825,7 @@ async def request_login_otp(
     aadhaar: str | None = None,
     abha_address: str | None = None,
     mobile: str | None = None,
+    address_otp_system: str = "abdm",
     facility_id: str,
     started_by: str,
     patient_id: str | None = None,
@@ -485,15 +850,24 @@ async def request_login_otp(
             "exactly one of ABHA number, Aadhaar, ABHA address or mobile is required",
         )
     login_hint = present[0]
+    if address_otp_system not in ADDRESS_OTP_SYSTEMS:
+        raise AbdmIdentityError("abdm_otp_system_invalid", "unsupported OTP system")
+    if address_otp_system != "abdm" and login_hint != "abha-address":
+        raise AbdmIdentityError(
+            "abdm_otp_system_invalid", "only an ABHA address can choose its OTP system"
+        )
+    otp_system = address_otp_system if login_hint == "abha-address" else _LOGIN_OTP_SYSTEMS[login_hint]
     login_id = _login_id_for(login_hint, supplied[login_hint] or "")
     settings = get_settings()
     body = (
         await _post(
-            settings.abdm_path_login_request_otp,
+            settings.abdm_path_phr_login_request_otp
+            if login_hint == "abha-address"
+            else settings.abdm_path_login_request_otp,
             {
-                "scope": _LOGIN_SCOPES[login_hint],
+                "scope": _login_scope(login_hint, otp_system),
                 "loginHint": login_hint,
-                "otpSystem": _LOGIN_OTP_SYSTEMS[login_hint],
+                "otpSystem": otp_system,
                 "loginId": encrypt_for_abdm(login_id),
             },
         )
@@ -506,6 +880,7 @@ async def request_login_otp(
         started_by=started_by,
         patient_id=patient_id,
         login_hint=login_hint,
+        otp_system=otp_system,
         resends=resends,
     )
     return OtpRequested(
@@ -576,12 +951,57 @@ async def resend_otp(
             aadhaar=aadhaar,
             abha_address=abha_address,
             mobile=mobile,
+            # A resend keeps the OTP system the desk chose; an older session
+            # without one was a mobile OTP.
+            address_otp_system=(
+                session.otp_system
+                if session.login_hint == "abha-address" and session.otp_system
+                else "abdm"
+            ),
             **common,
         )
     else:
         raise AbdmIdentityError("abdm_resend_unsupported", "this exchange cannot be resent")
     await otp_session.finish(session_id)
     return requested
+
+
+def _full_abha_number(value: object) -> str | None:
+    """A complete 14-digit ABHA number, hyphenated; None if absent or masked."""
+    if not isinstance(value, str):
+        return None
+    digits = value.replace("-", "").strip()
+    return hyphenate_abha(digits) if re.fullmatch(r"\d{14}", digits) else None
+
+
+def _issued_from_address_login(body: dict) -> AbhaIssued:
+    """Parse /v3/phr/web/login/abha/verify, which answers with users[], not accounts[].
+
+    One ABHA address is one account, so anything other than exactly one active
+    user is refused rather than guessed. The number is kept only when ABDM sent
+    it in full; the collection's own example masks it.
+    """
+    users = [user for user in body.get("users") or [] if isinstance(user, dict)]
+    if len(users) != 1:
+        raise AbdmIdentityError(
+            "abdm_account_selection_required", "ABDM did not return one verified ABHA address"
+        )
+    user = users[0]
+    address = user.get("abhaAddress")
+    if not isinstance(address, str) or "@" not in address or " " in address.strip():
+        raise AbdmIdentityError("abdm_bad_response", "ABDM did not return the verified ABHA address")
+    if user.get("status") not in (None, "ACTIVE"):
+        raise AbdmIdentityError("abdm_account_inactive", "This ABHA account is not active")
+    full_name = user.get("fullName")
+    return AbhaIssued(
+        abha_number=_full_abha_number(user.get("abhaNumber")) or "",
+        abha_address=address.strip(),
+        linking_token=_profile_token(body),
+        name=full_name.strip() if isinstance(full_name, str) and full_name.strip() else _name(user),
+        gender=user.get("gender") if isinstance(user.get("gender"), str) else None,
+        date_of_birth=user.get("dateOfBirth") if isinstance(user.get("dateOfBirth"), str) else None,
+        token_kind=AbhaProfileTokenKind.PHR.value,
+    )
 
 
 async def verify_login_otp(
@@ -591,14 +1011,16 @@ async def verify_login_otp(
     session = await otp_session.load(
         session_id, facility_id=facility_id, purpose=OtpPurpose.LOGIN_BY_ABHA
     )
+    address_login = session.login_hint == "abha-address"
+    settings = get_settings()
 
     body = (
         await _post(
-            get_settings().abdm_path_login_verify,
+            settings.abdm_path_phr_login_verify if address_login else settings.abdm_path_login_verify,
             {
                 # Same scope as the request leg; a session from before
                 # login_hint existed was necessarily an ABHA-number login.
-                "scope": _LOGIN_SCOPES.get(session.login_hint or "abha-number", _LOGIN_SCOPES["abha-number"]),
+                "scope": _login_scope(session.login_hint or "abha-number", session.otp_system),
                 "authData": {
                     "authMethods": ["otp"],
                     "otp": {
@@ -617,8 +1039,24 @@ async def verify_login_otp(
     # profile or guess between accounts when the login result is ambiguous.
     if body.get("authResult") != "success":
         raise AbdmIdentityError("abdm_auth_failed", "ABDM did not verify this OTP")
+    if address_login:
+        issued = _issued_from_address_login(body)
+        if consume_session:
+            await otp_session.finish(session_id)
+        return issued
     accounts = body.get("accounts")
     if not isinstance(accounts, list) or not accounts:
+        # NHA's expected wording for an identifier with no ABHA behind it.
+        if session.login_hint == "mobile":
+            raise AbdmIdentityError(
+                "abha_not_found_for_mobile",
+                "ABHA Number not found. We did not find any ABHA number linked to this "
+                "mobile number. Please use ABHA linked mobile number",
+            )  # VRFY_ABHA_302
+        if session.login_hint == "aadhaar":
+            raise AbdmIdentityError(
+                "abha_not_found_for_aadhaar", "NO ABHA user registered with this Aadhaar Number"
+            )  # VRFY_ABHA_403
         raise AbdmIdentityError("abdm_account_selection_required", "ABDM did not return a verified account")
     choices: list[tuple[str, str | None]] = []
     for account in accounts:
@@ -872,6 +1310,11 @@ async def list_enrolment_address_suggestions(
     return suggestions
 
 
+#: An ABHA address as the desk may submit it: the bare name enrol/suggestion
+#: returns, or a full address with its CM suffix.
+_ABHA_ADDRESS = re.compile(r"[A-Za-z0-9._]{3,40}(@[a-z]{2,10})?")
+
+
 async def submit_enrolment_abha_address(
     *,
     session_id: str,
@@ -884,7 +1327,11 @@ async def submit_enrolment_abha_address(
     )
     _require_stage(session, STAGE_ADDRESS_PENDING)
     chosen = abha_address.strip()
-    if not chosen or "@" not in chosen:
+    # enrol/suggestion offers bare names ("suprabhakumari1009") and
+    # enrol/abha-address takes them bare, answering with the full address in
+    # preferredAbhaAddress. Requiring "@" refused every suggestion ABDM made
+    # (live, 6 Oct 2026).
+    if not _ABHA_ADDRESS.fullmatch(chosen):
         raise AbdmIdentityError("abha_address_invalid", "Choose a valid ABHA address")
     settings = get_settings()
     body = (
@@ -900,17 +1347,32 @@ async def submit_enrolment_abha_address(
     return bound
 
 
-async def fetch_abha_profile(*, profile_token: str) -> AbhaProfileView:
+async def fetch_abha_profile(
+    *, profile_token: str, token_kind: str = AbhaProfileTokenKind.ABHA.value
+) -> AbhaProfileView:
     settings = get_settings()
+    phr = token_kind == AbhaProfileTokenKind.PHR.value
     body = (
         await _call(
             "GET",
-            settings.abdm_path_profile_account,
+            settings.abdm_path_phr_profile if phr else settings.abdm_path_profile_account,
             extra_headers={"X-token": _bearer(profile_token)},
         )
     ).body
     if not isinstance(body, dict):
         raise AbdmIdentityError("abdm_bad_response", "gateway returned a non-object body")
+    if phr:
+        # PHR profile: abhaAddress/fullName/abhaNumber (possibly masked)/kycStatus.
+        address = body.get("abhaAddress")
+        full_name = body.get("fullName")
+        return AbhaProfileView(
+            abha_number=_full_abha_number(body.get("abhaNumber")),
+            abha_address=address.strip() if isinstance(address, str) and address.strip() else None,
+            name=full_name.strip() if isinstance(full_name, str) and full_name.strip() else _name(body),
+            gender=body.get("gender") if isinstance(body.get("gender"), str) else None,
+            status=body.get("status") if isinstance(body.get("status"), str) else None,
+            kyc_verified=(body["kycStatus"] == "VERIFIED") if isinstance(body.get("kycStatus"), str) else None,
+        )
     kyc = body.get("kycVerified")
     return AbhaProfileView(
         abha_number=body.get("ABHANumber") if isinstance(body.get("ABHANumber"), str) else None,
@@ -926,15 +1388,28 @@ async def fetch_abha_profile(*, profile_token: str) -> AbhaProfileView:
     )
 
 
-async def fetch_abha_card(*, profile_token: str) -> AbhaCard:
+_CARD_ACCEPT = "image/png, image/jpeg, application/pdf, */*;q=0.5"
+
+
+async def fetch_abha_card(
+    *, profile_token: str, token_kind: str = AbhaProfileTokenKind.ABHA.value
+) -> AbhaCard:
     settings = get_settings()
+    phr = token_kind == AbhaProfileTokenKind.PHR.value
     response = await _call(
         "GET",
-        settings.abdm_path_profile_abha_card,
-        extra_headers={"X-Token": _bearer(profile_token)},
+        settings.abdm_path_phr_card if phr else settings.abdm_path_profile_abha_card,
+        # The client defaults to Accept: application/json. The card is an image,
+        # so NHA answers that with 406 "Could not find acceptable representation"
+        # (surfaced as 400 on the PHR card, 29 Sep 2026). Ask for what it sends.
+        extra_headers={"X-Token": _bearer(profile_token), "Accept": _CARD_ACCEPT},
         parse_json=False,
     )
     content = response.body if isinstance(response.body, bytes | bytearray) else b""
     if not content:
         raise AbdmIdentityError("abdm_no_abha_card", "ABDM returned an empty ABHA card")
-    return AbhaCard(content=bytes(content), media_type="image/png")
+    media_type = "image/png"
+    declared = (response.media_type or "").split(";")[0].strip().lower()
+    if phr and (declared.startswith("image/") or declared == "application/pdf"):
+        media_type = declared
+    return AbhaCard(content=bytes(content), media_type=media_type)

@@ -19,6 +19,7 @@ from app.notifications.models import NotificationHistory
 from app.queue import service
 from app.queue.models import QueueTokenPriorityChange
 from app.users.models import Facility, User
+from tests.business_day import business_today
 
 pytestmark = pytest.mark.asyncio
 
@@ -79,10 +80,11 @@ async def other_doctor(db, seed):
 # FACILITY SCOPING (Blocker 1)
 # --------------------------------------------------------------------------- #
 
-async def test_create_queue_derives_facility_from_department(db, seed):
+async def test_create_queue_derives_facility_from_department(db, seed, roster_on_duty):
     dept, room, doctor = seed
     from datetime import date
-    queue = await service.create_queue(db, dept.id, doctor.id, room.id, "label", date.today(), dept.facility_id)
+    await roster_on_duty(dept.id, doctor.id)
+    queue = await service.create_queue(db, dept.id, doctor.id, room.id, "label", business_today(), dept.facility_id)
     assert queue.facility_id == dept.facility_id
 
 async def test_create_queue_wrong_caller_facility_404(db, seed):
@@ -92,7 +94,7 @@ async def test_create_queue_wrong_caller_facility_404(db, seed):
     from datetime import date
     other_facility_id = uuid.uuid4()
     with pytest.raises(HTTPException) as exc:
-        await service.create_queue(db, dept.id, doctor.id, room.id, "label", date.today(), other_facility_id)
+        await service.create_queue(db, dept.id, doctor.id, room.id, "label", business_today(), other_facility_id)
     assert exc.value.status_code == 404
 
 async def test_create_token_wrong_facility_404(db, queue, seed, opd_visit):
@@ -189,7 +191,7 @@ async def test_token_display_sequence_within_one_queue(db, queue, opd_visit):
     assert t2.token_display.endswith("-002")
 
 
-async def test_two_doctors_same_department_share_counter_no_collision(db, seed, opd_visit):
+async def test_two_doctors_same_department_share_counter_no_collision(db, seed, opd_visit, roster_on_duty):
     """THE core Blocker 3 test. Two different doctors, same department,
     same day -- their tokens must NOT both be "-001"."""
     from datetime import date
@@ -201,9 +203,11 @@ async def test_two_doctors_same_department_share_counter_no_collision(db, seed, 
     )
     db.add(doctor_b)
     await db.flush()
+    await roster_on_duty(dept.id, doctor_a.id)
+    await roster_on_duty(dept.id, doctor_b.id)
 
-    queue_a = await service.create_queue(db, dept.id, doctor_a.id, room.id, "Queue A", date.today(), dept.facility_id)
-    queue_b = await service.create_queue(db, dept.id, doctor_b.id, room.id, "Queue B", date.today(), dept.facility_id)
+    queue_a = await service.create_queue(db, dept.id, doctor_a.id, room.id, "Queue A", business_today(), dept.facility_id)
+    queue_b = await service.create_queue(db, dept.id, doctor_b.id, room.id, "Queue B", business_today(), dept.facility_id)
  
     tok_a = await service.create_token(db, queue_a.id, (await opd_visit()).id, "normal", queue_a.facility_id)
     tok_b = await service.create_token(db, queue_b.id, (await opd_visit()).id, "normal", queue_b.facility_id)

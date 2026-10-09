@@ -277,6 +277,20 @@ async def test_official_hip_callback_requires_the_documented_headers(gateway_set
     assert caught.value.detail["code"] == "missing_abdm_headers"
 
 
+#: Acknowledgement-only routes use the check that also tolerates a missing
+#: REQUEST-ID (see the tests at the end of this file).
+_ACK_ROUTES = {"/api/v3/links/context/on-notify", "/api/v3/patients/sms/on-notify"}
+
+
+def _route_check(family, path):
+    if path in _ACK_ROUTES:
+        return callback_auth.verify_hip_ack_callback, callback_auth.hip_ack_callback
+    return (
+        getattr(callback_auth, f"verify_{family}_gateway_callback"),
+        getattr(callback_auth, f"{family}_gateway_callback"),
+    )
+
+
 # Independently transcribed from the supplied M2/M3 v2.8 header tables.
 # Do not derive this expectation from the implementation's allowlist.
 DOCUMENTED_CM_OPTIONAL = [
@@ -286,6 +300,8 @@ DOCUMENTED_CM_OPTIONAL = [
     ("hip", "/api/v3/hip/link/care-context/confirm"),
     ("hip", "/api/v3/consent/request/hip/notify"),
     ("hip", "/api/v3/hip/health-information/request"),
+    # Live sandbox, 3 Oct 2026 (receipt f3a72f0a): on-init came without X-CM-ID.
+    ("hiu", "/api/v3/hiu/consent/request/on-init"),
     ("hiu", "/api/v3/hiu/consent/request/notify"),
     ("hiu", "/api/v3/hiu/consent/request/on-status"),
     ("hiu", "/api/v3/hiu/consent/on-fetch"),
@@ -306,21 +322,19 @@ def _event_request(family, path, **extra):
 async def test_documented_event_callback_accepts_no_cm_header(gateway_settings, family, path):
     from app.integrations.abdm.external_router import router
 
-    verify = getattr(callback_auth, f"verify_{family}_gateway_callback")
+    verify, dependency_call = _route_check(family, path)
     verified = await verify(_event_request(family, path))
     assert verified.recipient_id == f"SBXID_TEST_{family.upper()}"
     assert not verified.replayed
     # Hold the real route's dependency to the policy under test.
     route = next(route for route in router.routes if route.path == path)
-    assert getattr(callback_auth, f"{family}_gateway_callback") in {
-        dependency.call for dependency in route.dependant.dependencies
-    }
+    assert dependency_call in {dependency.call for dependency in route.dependant.dependencies}
 
 
 @pytest.mark.parametrize(("family", "path"), DOCUMENTED_CM_OPTIONAL)
 @pytest.mark.parametrize("cm", ["", "other-cm"])
 async def test_optional_cm_still_rejects_wrong_value(gateway_settings, family, path, cm):
-    verify = getattr(callback_auth, f"verify_{family}_gateway_callback")
+    verify, _ = _route_check(family, path)
     with pytest.raises(HTTPException) as caught:
         await verify(_event_request(family, path, **{"X-CM-ID": cm}))
     assert caught.value.status_code == 401
@@ -339,17 +353,15 @@ async def test_event_callback_still_requires_exact_recipient_and_freshness(
     with pytest.raises(HTTPException) as caught:
         await verify(
             _event_request(
-                family, path, TIMESTAMP=(datetime.now(UTC) - timedelta(minutes=11)).isoformat()
+                family, path, TIMESTAMP=(datetime.now(UTC) - timedelta(minutes=61)).isoformat()
             )
         )
     assert caught.value.detail["code"] == "stale_callback"
     assert not gateway_settings.keys
 
 
-@pytest.mark.parametrize(
-    "path", ["/api/v3/hiu/consent/request/on-init", "/api/v3/hiu/unknown-callback"]
-)
-async def test_hiu_init_and_unknown_routes_still_require_cm(gateway_settings, path):
+@pytest.mark.parametrize("path", ["/api/v3/hiu/unknown-callback"])
+async def test_unknown_hiu_routes_still_require_cm(gateway_settings, path):
     with pytest.raises(HTTPException) as caught:
         await callback_auth.verify_hiu_gateway_callback(_event_request("hiu", path))
     assert caught.value.detail["code"] == "missing_abdm_headers"
@@ -385,7 +397,6 @@ async def test_hip_link_callback_accepts_documented_headers_without_cm(gateway_s
         ("REQUEST-ID", "invalid", 400, "invalid_request_id"),
         ("TIMESTAMP", "", 400, "missing_abdm_headers"),
         ("TIMESTAMP", "invalid", 400, "invalid_timestamp"),
-        ("TIMESTAMP", "2026-09-11T00:00:00", 400, "invalid_timestamp"),
         ("X-CM-ID", "other-cm", 401, "invalid_cm_id"),
         ("X-CM-ID", "", 401, "invalid_cm_id"),
     ],
@@ -400,9 +411,26 @@ async def test_link_callback_preserves_routing_guards(gateway_settings, name, va
     assert not gateway_settings.keys
 
 
+async def test_link_result_with_a_zoneless_timestamp_is_read_as_utc(gateway_settings):
+    """NHA sent link/on_carecontext with TIMESTAMP "2026-09-30T17:53:23.379539"
+    on 30 September 2026. Refusing it discarded a genuine link result."""
+    headers = _gateway_headers(cm=False)
+    headers["TIMESTAMP"] = datetime.now(UTC).replace(tzinfo=None).isoformat()
+    verified = await callback_auth.verify_hip_link_gateway_callback(_request(**headers))
+    assert verified.replayed is False
+
+
+async def test_a_zoneless_timestamp_still_has_to_be_fresh(gateway_settings):
+    headers = _gateway_headers(cm=False)
+    headers["TIMESTAMP"] = "2026-09-11T00:00:00"
+    with pytest.raises(HTTPException) as caught:
+        await callback_auth.verify_hip_link_gateway_callback(_request(**headers))
+    assert caught.value.detail["code"] == "stale_callback"
+
+
 async def test_link_callback_preserves_freshness(gateway_settings):
     headers = _gateway_headers(cm=False)
-    headers["TIMESTAMP"] = (datetime.now(UTC) - timedelta(minutes=11)).isoformat()
+    headers["TIMESTAMP"] = (datetime.now(UTC) - timedelta(minutes=61)).isoformat()
     with pytest.raises(HTTPException) as caught:
         await callback_auth.verify_hip_link_gateway_callback(_request(**headers))
     assert caught.value.detail["code"] == "stale_callback"
@@ -503,3 +531,137 @@ async def test_a_successful_handler_keeps_the_lock_to_coalesce_a_retry(gateway_s
     retry = await retry_gen.__anext__()
     assert retry.replayed is True
     await retry_gen.aclose()
+
+
+# ------------------------------------------------ Scan-and-Share: the live header set
+# 29 Sep 2026: the sandbox's real profile share carried X-HIP-ID and no X-CM-ID
+# (receipt f2ce31a9, REQUEST-ID 1119f666-...), the reverse of the published
+# collection, and was refused 400 missing_abdm_headers.
+async def test_profile_share_accepts_the_live_sandbox_header_set(gateway_settings):
+    verified = await callback_auth.verify_profile_gateway_callback(
+        _request(**_gateway_headers(hip=True, cm=False))
+    )
+    assert verified.replayed is False
+    assert verified.recipient_id == "SBXID_TEST_HIP"
+
+
+async def test_profile_share_with_someone_elses_hip_is_refused(gateway_settings):
+    headers = _gateway_headers(hip=True, cm=False)
+    headers["X-HIP-ID"] = "SOMEONE_ELSES_HIP"
+    with pytest.raises(HTTPException) as caught:
+        await callback_auth.verify_profile_gateway_callback(_request(**headers))
+    assert caught.value.status_code == 404
+
+
+async def test_profile_share_needs_one_routing_header(gateway_settings):
+    with pytest.raises(HTTPException) as caught:
+        await callback_auth.verify_profile_gateway_callback(
+            _request(**_gateway_headers(hip=False, cm=False))
+        )
+    assert caught.value.status_code == 400
+
+
+async def test_profile_share_with_both_headers_still_checks_the_cm(gateway_settings):
+    headers = _gateway_headers(hip=True, cm=True)
+    headers["X-CM-ID"] = "not-sbx"
+    with pytest.raises(HTTPException) as caught:
+        await callback_auth.verify_profile_gateway_callback(_request(**headers))
+    assert caught.value.status_code == 401
+
+
+async def test_profile_share_redelivery_in_the_other_shape_is_a_replay(gateway_settings):
+    published = _gateway_headers(hip=False, cm=True)
+    live = {**_gateway_headers(hip=True, cm=False), "REQUEST-ID": published["REQUEST-ID"]}
+    assert (await callback_auth.verify_profile_gateway_callback(_request(**published))).replayed is False
+    assert (await callback_auth.verify_profile_gateway_callback(_request(**live))).replayed is True
+
+
+
+# ------------------------------------------------ freshness: late delivery vs stale
+# 29 Sep 2026: NHA stamped on-generate-token at 12:31:19 and delivered it at
+# 12:47:21. The old symmetric 10-minute window answered 400 stale_callback and the
+# link token was lost. Late delivery is accepted; very old or future stamps are not.
+async def test_link_callback_delivered_sixteen_minutes_late_is_accepted(gateway_settings):
+    headers = _gateway_headers(cm=False)
+    headers["TIMESTAMP"] = (datetime.now(UTC) - timedelta(minutes=16)).isoformat()
+    verified = await callback_auth.verify_hip_link_gateway_callback(_request(**headers))
+    assert verified.replayed is False
+
+
+@pytest.mark.parametrize(
+    ("offset", "accepted"),
+    [
+        (timedelta(minutes=-59), True),
+        (timedelta(minutes=-61), False),
+        (timedelta(minutes=4), True),
+        (timedelta(minutes=6), False),
+    ],
+)
+async def test_callback_age_and_future_skew_bounds(gateway_settings, offset, accepted):
+    headers = _gateway_headers()
+    headers["TIMESTAMP"] = (datetime.now(UTC) + offset).isoformat()
+    if accepted:
+        assert (await callback_auth.verify_hip_gateway_callback(_request(**headers))).replayed is False
+    else:
+        with pytest.raises(HTTPException) as caught:
+            await callback_auth.verify_hip_gateway_callback(_request(**headers))
+        assert caught.value.detail["code"] == "stale_callback"
+
+
+# --------------------------------------------- acknowledgements without REQUEST-ID
+# NHA acknowledged a care-context notification on 30 September 2026 with only
+# X-HIP-ID and TIMESTAMP (receipt 2ca67b4a). Requiring REQUEST-ID answered a
+# genuine acknowledgement with 400.
+
+
+def _nha_ack_headers():
+    return {"TIMESTAMP": datetime.now(UTC).isoformat(), "X-HIP-ID": "SBXID_TEST_HIP"}
+
+
+async def test_acknowledgement_without_request_id_is_accepted(gateway_settings):
+    verified = await callback_auth.verify_hip_ack_callback(_request(**_nha_ack_headers()))
+    assert verified.request_id == ""
+    assert verified.recipient_id == "SBXID_TEST_HIP"
+    assert verified.replayed is False
+    assert not gateway_settings.keys
+
+
+@pytest.mark.parametrize(
+    ("name", "value", "status", "code"),
+    [
+        ("X-HIP-ID", "", 400, "missing_abdm_headers"),
+        ("X-HIP-ID", "OTHER_HIP", 404, "unknown_service"),
+        ("TIMESTAMP", "", 400, "missing_abdm_headers"),
+        ("TIMESTAMP", "2026-09-11T00:00:00", 400, "stale_callback"),
+        ("REQUEST-ID", "invalid", 400, "invalid_request_id"),
+        ("X-CM-ID", "other-cm", 401, "invalid_cm_id"),
+    ],
+)
+async def test_acknowledgement_keeps_every_other_guard(gateway_settings, name, value, status, code):
+    headers = _nha_ack_headers()
+    headers[name] = value
+    with pytest.raises(HTTPException) as caught:
+        await callback_auth.verify_hip_ack_callback(_request(**headers))
+    assert caught.value.status_code == status
+    assert caught.value.detail["code"] == code
+
+
+async def test_acknowledgement_with_request_id_still_coalesces_replays(gateway_settings):
+    headers = {**_nha_ack_headers(), "REQUEST-ID": str(uuid.uuid4())}
+    first = await callback_auth.verify_hip_ack_callback(_request(**headers))
+    second = await callback_auth.verify_hip_ack_callback(_request(**headers))
+    assert (first.replayed, second.replayed) == (False, True)
+
+
+def test_only_acknowledgement_routes_accept_a_missing_request_id():
+    from app.integrations.abdm import external_router
+
+    relaxed = {
+        route.path
+        for route in external_router.router.routes
+        if any(
+            dep.call is callback_auth.hip_ack_callback
+            for dep in getattr(route, "dependant", None).dependencies
+        )
+    }
+    assert relaxed == {"/api/v3/links/context/on-notify", "/api/v3/patients/sms/on-notify"}

@@ -27,7 +27,9 @@ class VisitCreate(BaseModel):
     visit_type: str = Field(
         ..., description="opd | ipd | day_care | emergency | teleconsult | direct_service"
     )
-    visit_date: datetime
+    #: Ignored; the server stamps the visit with its own clock. Accepted so
+    #: existing callers that still send it keep validating.
+    visit_date: datetime | None = None
 
 
 class VisitTypeUpdate(BaseModel):
@@ -59,7 +61,8 @@ class VisitOut(BaseModel):
 
 
 class VisitStatusUpdate(BaseModel):
-    updated_by: UUID
+    # The actor comes from the token. A required `updated_by` here forced every
+    # client to invent a user id that the server then discarded.
     status: str = Field(
         ...,
         description=(

@@ -9,8 +9,9 @@ export function getAbhaLink(patientId: string): Promise<AbhaLink> {
   return api<AbhaLink>(`/abdm/abha/patients/${patientId}/abha`);
 }
 
-export function unlinkAbha(patientId: string): Promise<AbhaLink> {
+export function unlinkAbha(patientId: string, reason: string): Promise<AbhaLink> {
   return api<AbhaLink>(`/abdm/abha/patients/${patientId}/abha`, {
     method: "DELETE",
+    body: JSON.stringify({ reason }),
   });
 }

@@ -207,6 +207,14 @@ do not merge out of order.**
 | 0086 | catalogue_hindi_labels | ALTER facilities: name_hi; ALTER departments: name_hi; ALTER wards: name_hi; ALTER charge_master: description_hi | Optional Hindi catalogue labels; English remains the fallback. Widens the existing profile-token kind to varchar(50) for local schema parity. |
 | 0087 | appointment_service_hindi | ALTER appointment_services: name_hi | Optional Hindi appointment-service label; English remains the fallback. |
 | 0088 | abdm_frozen_delivery_jobs | abdm_jobs | Widens the status CHECK with `frozen` for historical jobs held during a service-ID cutover; the delivery worker and operator retry must not dispatch them. |
+| 0089 | uuid_pk_defaults_visit_status | ALTER appointment_services: id; ALTER appointments: id; ALTER clinical_dispositions: id; ALTER admission_checklist_tasks: id; ALTER emergency_triages: id; ALTER emergency_triage_logs: id; ALTER lab_analytes: id; ALTER visits: status | Restores the `uuid_generate_v4()` id default 0074–0076 omitted (every insert failed on PostgreSQL) and widens the visit status CHECK with `in_consultation` and `closed`, which the OPD state machine writes. |
+| 0090 | facility_ownership | ALTER facilities: ownership | Government or private, CHECK-constrained, NULL until recorded; selects NHA's published ABHA consent wording (CRT_ABHA_102). |
+| 0091 | abdm_discovery_matches | abdm_discovery_matches | A PHR discovery matched by mobile and demographics (USER_INIT_LINK_603): transaction, asking ABHA address, chart and care contexts, kept until the link-init quotes them or they expire. |
+| 0092 | abdm_care_context_immunization | ALTER abdm_care_contexts: hi_type CHECK adds ImmunizationRecord | One NRCeS ImmunizationRecord per recorded vaccine dose, a context with no visit. Downgrade refuses while any immunization context exists rather than withdrawing a possibly linked record. |
+| 0093 | abdm_hfr_registrations | abdm_hfr_registrations | What HealthDoc sent HFR for each facility it registered (M4), image content excluded, so an edit (HFR-064 to 114) reopens it: HFR returns no saved details. Purely additive. |
+| 0094 | abdm_invoice_record | ALTER abdm_care_contexts: hi_type CHECK adds Invoice; ALTER invoices: issued_at | An issued invoice is shared as an NRCeS InvoiceRecord, the eighth HI type. `issued_at` is its document date, set on issue and frozen by `trg_invoices_freeze` so a payment never moves it; invoices issued earlier stay NULL and are not offered. Downgrade refuses while any invoice context exists. |
+| 0095 | abha_unique_per_facility | ALTER patients: abha_number, abha_address | One ABHA per chart per facility, not per installation: each facility is its own HIP and one person may hold a linked chart at each. Downgrade refuses while an ABHA is linked at two facilities. |
+| 0096 | abdm_health_document_record | ALTER abdm_care_contexts: hi_type CHECK adds HealthDocumentRecord; CREATE abdm_released_documents | A doctor releases one uploaded PDF on a chart as an NRCeS HealthDocumentRecord, the last of the eight HMIS HI types. The upload alone shares nothing; one file is released at most once. Downgrade refuses while any HealthDocumentRecord context exists. |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -308,6 +316,7 @@ state_code      varchar(5) NOT NULL              -- e.g. RJ
 district        text
 facility_type   varchar(50)                      -- phc | chc | district_hospital | medical_college
 hfr_facility_id varchar(50)                      -- ABDM Health Facility Registry id
+ownership       varchar(20) NULL                 -- government | private (0090); selects ABDM ABHA consent wording
 timezone        varchar(50) NOT NULL DEFAULT 'Asia/Kolkata'  -- IANA tz; drives ALL business dates
                                                  -- NOT created by 0002 despite being specified
                                                  -- here since v3.0 — added by 0003a. Every
@@ -539,8 +548,8 @@ guardian_relationship varchar(50)
 mobile          varchar(20)                      -- contact only, NEVER identity
 address_line    text · village_town text · district text · state_code varchar(5) · pincode varchar(6)
 photo_file_id   UUID NULL                        -- MinIO ref via files (FK added 0019); photo mandatory per ADR 0001
-abha_number     varchar(17) UNIQUE NULL
-abha_address    varchar(120) NULL                  -- verified M2/M3 address, added by 0057
+abha_number     varchar(17) NULL                   -- UNIQUE (facility_id, abha_number) from 0095
+abha_address    varchar(120) NULL                  -- verified M2/M3 address, added by 0057; UNIQUE (facility_id, abha_address) from 0095
 abha_linking_token_encrypted bytea NULL          -- AES-256-GCM, added by 0030. NEVER plaintext
 abha_linking_key_version smallint NULL           -- added by 0030; which key encrypted the token
 abha_linked_at  timestamptz NULL                 -- added by 0030; when ABHA was linked to a care context
@@ -1069,7 +1078,7 @@ adjustment_type varchar(50) NOT NULL            -- 0024. NOT mapped by the ORM �
 line; departments append lines as chargeable work completes. CRITICAL sync sensitivity.
 An **immutability trigger** (`trg_invoices_freeze`) applies once `status != 'draft'`:
 **frozen columns** = `invoice_number, visit_id, patient_id, facility_id, gross_amount,
-discount_amount, scheme_adjustment, net_amount, scheme_code`.
+discount_amount, scheme_adjustment, net_amount, scheme_code, issued_at` (`issued_at` from 0094).
 **Always mutable** = `status, updated_at, updated_by` — payment posting MUST be able to
 move `issued → partially_paid → paid`; the trigger checks column changes, not row
 updates. Corrections happen by `cancelled` + new invoice, never edits. B7: unit-test
@@ -1086,6 +1095,7 @@ scheme_adjustment numeric(12,2) NOT NULL DEFAULT 0
 net_amount numeric(12,2) NOT NULL DEFAULT 0 CHECK (>= 0)
 scheme_code varchar(30) NULL                     -- PM-JAY etc.; full waiver ⇒ status 'waived'
 sensitivity varchar(30) NOT NULL DEFAULT 'critical'
+issued_at timestamptz NULL                       -- 0094: when it left draft; its ABHA document date
 INDEX ix_invoices_visit_id (visit_id)
 ```
 
@@ -2086,6 +2096,34 @@ expires_at timestamptz NOT NULL
 checked_in_at timestamptz NULL                    -- 0082: original successful check-in; no invented legacy backfill
 ```
 
+**abdm_discovery_matches** (0091) — a demographic discovery a link-init may quote
+```
+facility_id UUID NOT NULL → facilities
+patient_id UUID NOT NULL → patients              -- the chart matched; it held no ABHA address
+transaction_id varchar(120) NOT NULL             -- UNIQUE (facility_id, transaction_id)
+abha_address varchar(120) NOT NULL               -- the PHR user's address that asked
+abha_number varchar(17) NULL                     -- ABHA number the CM verified, if sent; bound only after a confirmed link
+care_context_references jsonb NOT NULL           -- what discovery answered; a link-init may select only from these
+matched_by jsonb NOT NULL                        -- ["MOBILE"] or ["MOBILE","MR"]
+expires_at timestamptz NOT NULL                  -- 30 minutes after discovery
+```
+The chart is found by this row only while it still holds no ABHA address, or
+holds the asking one. A confirmed, OTP-verified link then records the address
+(and verified number) on the chart unless another chart already holds them.
+
+**abdm_hfr_registrations** (0093) — what HealthDoc sent HFR, to edit a registered facility
+```
+facility_id UUID NOT NULL → facilities           -- the HealthDoc facility that registered it
+tracking_id varchar(20) NOT NULL                 -- HFR's key; UNIQUE (facility_id, tracking_id); every edit continues it
+hfr_facility_id varchar(12) NULL                 -- from submit-facility, IN + 10 characters
+status varchar(50) NULL                          -- HFR's own status for the last step (Draft, Submitted...)
+basic jsonb NULL                                 -- the basic-information form, without board/building/address-proof images
+additional jsonb NULL                            -- the additional-information form
+detailed jsonb NULL                              -- the detailed-information form
+submitted_at timestamptz NULL
+created_at, updated_at, created_by → users, updated_by → users
+```
+
 **abdm_callback_replies** (0067) — committed reply intent, not a clinical inbox
 ```
 facility_id UUID NOT NULL → facilities
@@ -2131,21 +2169,34 @@ checksum, context identity and page count. A crash after remote acceptance but
 before local acknowledgement can replay a page: the receiver must deduplicate
 transaction/page/entry. The payload is excluded from the append-only audit log.
 
-**abdm_care_contexts** (0055, 0062) — one finalized document that can be offered to an ABHA
+**abdm_care_contexts** (0055, 0062, 0092, 0094, 0096) — one finalized document that can be offered to an ABHA
 ```
-patient_id UUID NOT NULL → patients · visit_id UUID → visits
+patient_id UUID NOT NULL → patients · visit_id UUID → visits (NULL for an immunization or a released document)
 reference varchar(100) NOT NULL                   -- quoted back by ABDM forever; never recomputed
 display varchar(200) NOT NULL
-hi_type varchar(50) NOT NULL                      -- OPConsultation|Prescription|DiagnosticReport|DischargeSummary|WellnessRecord (narrowed in 0059)
+hi_type varchar(50) NOT NULL                      -- OPConsultation|Prescription|DiagnosticReport|DischargeSummary|WellnessRecord|ImmunizationRecord|Invoice|HealthDocumentRecord (narrowed in 0059, ImmunizationRecord back in 0092, Invoice in 0094, HealthDocumentRecord in 0096)
 document_at timestamptz                          -- finalized source time; NULL legacy rows cannot be shared
 facility_id UUID NOT NULL → facilities
 UNIQUE (patient_id, reference)                    -- two facilities may both hold a context for one person
 ```
 References are canonical `encounter/UUID`, `prescription/UUID`, `lab-result/UUID`,
-`radiology-report/UUID`, `discharge/UUID` or `wellness/UUID`. The source must
+`radiology-report/UUID`, `discharge/UUID`, `wellness/UUID`, `immunization/UUID`, `invoice/UUID` or `document/UUID` (an abdm_released_documents row). The source must
 resolve to this patient/facility/visit and its finalized date must match
 `document_at`. Migration 0062 does not infer document identities or dates from
 old visit-level contexts. Discovery and transfer exclude unresolved records.
+
+**abdm_released_documents** (0096) — one uploaded PDF a doctor released for sharing
+```
+facility_id UUID NOT NULL → facilities · patient_id UUID NOT NULL → patients
+file_id UUID NOT NULL → files UNIQUE              -- one release per file; its reference never changes
+title varchar(100) NOT NULL CHECK (trim(title) <> '')
+document_date date NOT NULL                       -- the date printed on the document, not the release
+released_by UUID NOT NULL → users · released_at timestamptz NOT NULL DEFAULT now()
+```
+Releasing publishes `document/UUID` as a HealthDocumentRecord in the same
+transaction. Only PDFs of 1 MB or less (HealthDoc's HIU renders only PDFs).
+The facility authors the record; transfer embeds the exact uploaded bytes and
+refuses an object whose SHA-256 no longer matches. Erasing the file withdraws it.
 
 **abdm_care_context_links** (0055) — an ABHA address's claim on those contexts
 ```

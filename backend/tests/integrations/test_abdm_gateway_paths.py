@@ -37,10 +37,14 @@ GATEWAY_PATH_FIELDS = sorted(
         # M1 lives on abhasbx.abdm.gov.in, not the gateway — different base.
         "abdm_path_enrol_request_otp", "abdm_path_enrol_by_aadhaar",
         "abdm_path_enrol_auth_by_abdm", "abdm_path_enrol_suggestion",
-        "abdm_path_enrol_abha_address", "abdm_path_profile_account",
+        "abdm_path_enrol_abha_address", "abdm_path_enrol_by_document",
+        "abdm_path_profile_account",
         "abdm_path_profile_abha_card",
         "abdm_path_login_request_otp", "abdm_path_login_verify",
         "abdm_path_login_verify_user",
+        # ABHA-address (PHR) login: also abhasbx.abdm.gov.in (M1 collection).
+        "abdm_path_phr_login_request_otp", "abdm_path_phr_login_verify",
+        "abdm_path_phr_profile", "abdm_path_phr_card",
     }
 )
 

@@ -4,9 +4,10 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.common.enums import Sex
+from app.patients.schemas import _normalise_mobile
 
 
 class EmergencyPatientCreate(BaseModel):
@@ -17,6 +18,11 @@ class EmergencyPatientCreate(BaseModel):
     # facility_id removed from payload (blocker 3 equivalent) — sourced from
     # current_db_user.facility_id in the router so a nurse at facility A
     # cannot register an emergency patient into facility B.
+
+    # The same rule as desk registration: an emergency contact number is the
+    # one most likely to be needed in a hurry, so it is the worst one to store
+    # unreachable.
+    _validate_mobile = field_validator("mobile")(_normalise_mobile)
 
     @model_validator(mode="after")
     def _age_estimate_required(self) -> "EmergencyPatientCreate":

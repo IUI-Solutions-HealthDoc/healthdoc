@@ -21,6 +21,30 @@ export function setAccessToken(token: string | null): void {
   accessToken = token;
 }
 
+
+/**
+ * Keycloak refreshed the token only from a timer at expiry, and browsers
+ * throttle timers in background tabs and during sleep. A desk returning to a
+ * long form sent an expired token and was signed out mid-flow (3 Oct 2026,
+ * three times in one ABHA enrolment). Each request now first asks for a token
+ * valid for 30 more seconds; while the token is fresh this does no network.
+ */
+let ensureFreshToken: (() => Promise<void>) | null = null;
+
+export function setTokenRefresher(refresh: (() => Promise<void>) | null): void {
+  ensureFreshToken = refresh;
+}
+
+async function freshToken(): Promise<void> {
+  if (!ensureFreshToken) return;
+  try {
+    await ensureFreshToken();
+  } catch {
+    // A refresh that fails leaves the old token; the server's 401 then signs
+    // the user out through the one existing path.
+  }
+}
+
 export function getAccessToken(): string | null {
   return accessToken;
 }
@@ -85,6 +109,7 @@ export async function api<T>(path: string, init: ApiOptions = {}): Promise<T> {
     console.warn(`[api] POST ${path} without an Idempotency-Key (schema §4A.1)`);
   }
 
+  await freshToken();
   const res = await fetch(`${API_BASE_URL}${path}`, {
     ...rest,
     headers: {
@@ -187,6 +212,7 @@ export function newIdempotencyKey(): string {
 
 /** Authenticated file download helper returning a Blob. */
 export async function downloadBlob(path: string): Promise<Blob> {
+  await freshToken();
   const res = await fetch(`${API_BASE_URL}${path}`, {
     headers: {
       ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),

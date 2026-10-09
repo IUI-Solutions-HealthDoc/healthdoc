@@ -18,6 +18,7 @@ from app.forms import models as forms_models  # noqa: E402, F401
 from app.immunization import models as immunization_models  # noqa: E402, F401
 from app.integrations.abdm import callback_evidence as abdm_receipt_models  # noqa: E402, F401
 from app.integrations.abdm import jobs as abdm_jobs_models  # noqa: E402, F401
+from app.integrations.abdm.hfr import models as abdm_hfr_models  # noqa: E402, F401
 from app.integrations.abdm.hip import models as abdm_hip_models  # noqa: E402, F401
 from app.integrations.abdm.hiu import models as abdm_hiu_models  # noqa: E402, F401
 from app.inventory import models as inventory_models  # noqa: F401, E402

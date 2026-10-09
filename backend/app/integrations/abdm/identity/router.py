@@ -9,22 +9,25 @@ Follows the same graceful-degradation pattern as integrations/icd11/client.py:
 a rural facility going offline must not break registration.
 """
 
+import base64
 import logging
 import uuid
-from datetime import UTC, datetime
-from typing import Annotated
+from datetime import UTC, date, datetime
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import Response
-from pydantic import BaseModel, Field, model_validator
+from fastapi.responses import JSONResponse, Response
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.actions import AuditAction
 from app.audit.service import write_audit_log
 from app.auth.deps import CurrentDbUser, require_roles
+from app.common import captcha
 from app.common.config import get_settings
 from app.common.db import get_db
+from app.common.enums import AbhaProfileTokenKind, IdentityStatus
 from app.common.security import current_aes_key_version, decrypt_pii, encrypt_pii
 from app.integrations.abdm.client import (
     AbdmAuthError,
@@ -32,11 +35,18 @@ from app.integrations.abdm.client import (
     AbdmRejected,
     AbdmUnavailable,
     get_abdm_client,
+    safe_failure_summary,
 )
-from app.integrations.abdm.identity import otp_session
+from app.integrations.abdm.identity import lgd, otp_session
 from app.integrations.abdm.identity import service as identity_service
 from app.integrations.abdm.identity.crypto import AbdmPublicKeyMissing
-from app.integrations.abdm.identity.enrolment_consent import EnrolmentConsent, consent_metadata
+from app.integrations.abdm.identity.enrolment_consent import (
+    DeclarationRefused,
+    EnrolmentConsent,
+    accept_declaration,
+    consent_metadata,
+    declaration,
+)
 from app.integrations.abdm.identity.formatting import hyphenate_abha
 from app.integrations.abdm.identity.otp_session import (
     OtpPurpose,
@@ -45,6 +55,7 @@ from app.integrations.abdm.identity.otp_session import (
 )
 from app.outbox.service import enqueue
 from app.patients.models import Patient
+from app.users.models import Facility, User
 
 log = logging.getLogger("healthdoc.abdm")
 router = APIRouter(prefix="/abdm/abha", tags=["abdm"])
@@ -207,6 +218,18 @@ async def get_abha(
     return AbhaOut(patient_id=patient.id, abha_number=patient.abha_number)
 
 
+class AbhaUnlinkRequest(BaseModel):
+    reason: str = Field(min_length=10, max_length=500)
+
+    @field_validator("reason")
+    @classmethod
+    def _reason_has_content(cls, value: str) -> str:
+        value = value.strip()
+        if len(value) < 10:
+            raise ValueError("reason must be at least 10 characters")
+        return value
+
+
 @router.delete(
     "/patients/{patient_id}/abha",
     response_model=AbhaOut,
@@ -214,6 +237,7 @@ async def get_abha(
 )
 async def unlink_abha(
     patient_id: uuid.UUID,
+    payload: AbhaUnlinkRequest,
     current_db_user: CurrentDbUser,
     db: DbSession,
 ) -> AbhaOut:
@@ -225,27 +249,59 @@ async def unlink_abha(
     half-record state 0030's both-or-neither CHECK exists to prevent, and a
     DPDP problem besides: we would be retaining an identity credential after
     the relationship it belonged to was severed.
-    """
-    patient = await _get_patient_or_404(db, patient_id, current_db_user.facility_id)
 
-    if patient.abha_number is None:
+    "verified" came from that ABHA's OTP proof, so it goes with the link. The
+    audit row records who unlinked and why, but not the ABHA number: audit_logs
+    is append-only, and an identifier copied there could never be erased.
+    """
+    patient = (
+        await db.execute(
+            select(Patient)
+            .where(
+                Patient.id == patient_id,
+                Patient.facility_id == current_db_user.facility_id,
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if patient is None:
+        raise HTTPException(404, {"code": "patient_not_found"})
+
+    if patient.abha_number is None and patient.abha_address is None:
         raise HTTPException(
             409,
             {
                 "code": "no_abha_linked",
-                "message": "Patient has no ABHA number linked",
+                "message": "Patient has no ABHA linked",
             },
         )
 
+    old_identity_status = patient.identity_status
     patient.abha_number = None
     patient.abha_address = None
     patient.abha_linking_token_encrypted = None
     patient.abha_linking_key_version = None
     patient.abha_profile_token_encrypted = None
     patient.abha_profile_token_key_version = None
+    patient.abha_profile_token_kind = AbhaProfileTokenKind.ABHA.value
     patient.abha_linked_at = None
+    if patient.identity_status == IdentityStatus.VERIFIED.value:
+        patient.identity_status = IdentityStatus.IDENTITY_UNVERIFIED.value
     patient.updated_by = current_db_user.id
     await db.flush()
+
+    await write_audit_log(
+        db,
+        facility_id=current_db_user.facility_id,
+        action=AuditAction.UPDATE,
+        resource_type="patients",
+        user_id=current_db_user.id,
+        resource_id=patient.id,
+        patient_id=patient.id,
+        old_value={"abha_linked": True, "identity_status": old_identity_status},
+        new_value={"abha_linked": False, "identity_status": patient.identity_status},
+        reason=f"ABHA unlinked: {payload.reason}",
+    )
 
     await enqueue(
         db,
@@ -277,6 +333,12 @@ class EnrolmentConsentIn(BaseModel):
     code: str
     version: str
     language: str = "en"
+    #: The desk's tick on each of NHA's published statements, by id.
+    statements: dict[str, bool]
+    #: Digest of the declaration the desk displayed, from GET /enrol/consent.
+    #: A different digest means the text changed (staff or patient name,
+    #: facility ownership) after it was shown, so the ticks are not recorded.
+    declaration_sha256: str = Field(min_length=64, max_length=64)
 
 
 class AadhaarOtpRequest(BaseModel):
@@ -294,13 +356,22 @@ class AbhaLoginOtpRequest(BaseModel):
     aadhaar: str | None = Field(default=None, min_length=12, max_length=12, pattern=r"^\d{12}$")
     abha_address: str | None = Field(default=None, min_length=3, max_length=120)
     mobile: str | None = Field(default=None, pattern=r"^\d{10}$")
+    #: With `abha_address` only: prove it with the ABHA mobile OTP or an
+    #: Aadhaar OTP (workbook VRFY_ABHA_202 / VRFY_ABHA_102).
+    address_otp: Literal["mobile", "aadhaar"] = "mobile"
     patient_id: uuid.UUID
+    #: Required with `mobile` (M1 VRFY_ABHA_301 "Captcha preferred"): the
+    #: challenge from GET /captcha and the characters the desk read from it.
+    captcha_id: str | None = Field(default=None, max_length=64)
+    captcha_answer: str | None = Field(default=None, max_length=16)
 
     @model_validator(mode="after")
     def _exactly_one_identifier(self) -> "AbhaLoginOtpRequest":
         present = [value for value in (self.abha_number, self.aadhaar, self.abha_address, self.mobile) if value is not None]
         if len(present) != 1:
             raise ValueError("provide exactly one of abha_number, aadhaar, abha_address or mobile")
+        if self.address_otp != "mobile" and self.abha_address is None:
+            raise ValueError("address_otp applies only to an ABHA address")
         return self
 
 
@@ -366,8 +437,17 @@ class AbhaIssuedOut(BaseModel):
     #: stored encrypted server-side, and a browser has no use for it.
 
 
+# ABDM answers an Aadhaar number that fails UIDAI validation with 422
+# ABDM-1204 (live, 7 Oct 2026; workbook CRT_ABHA_104). The desk mistyped it;
+# a 502 "declined" sent them to support instead of back to the field.
+_AADHAAR_INVALID_CODE = "ABDM-1204"
+_NO_ABHA_CODE = "ABDM-1115"
+
 _CLIENT_IDENTITY_CODES = {
     "abdm_identifier_required",
+    # ABDM answers a wrong OTP with HTTP 200 and authResult "failed" (live,
+    # 7 Oct 2026). That is the desk's to correct, not a gateway outage.
+    "abdm_auth_failed",
     "enrolment_consent_required",
     "enrolment_consent_refused",
     "enrolment_consent_mismatch",
@@ -377,7 +457,38 @@ _CLIENT_IDENTITY_CODES = {
     "abdm_account_selection_required",
     "abdm_no_address_suggestions",
     "abha_account_not_in_selection",
+    "abdm_demographic_not_enabled",
+    "abha_not_found_for_mobile",
+    "abha_not_found_for_aadhaar",
 }
+
+
+async def _declaration_for(
+    db: AsyncSession,
+    actor: CurrentDbUser,
+    patient: Patient,
+    language: str = "en",
+    method: str = "aadhaar",
+) -> dict:
+    """NHA's ABHA consent as this desk must show it for this patient."""
+    facility = await db.get(Facility, actor.facility_id)
+    staff = await db.get(User, actor.id)
+    try:
+        return declaration(
+            ownership=facility.ownership if facility else None,
+            health_worker=staff.full_name if staff else "",
+            beneficiary=patient.full_name or "",
+            language=language.strip().lower(),
+            method=method,
+        )
+    except DeclarationRefused as exc:
+        raise _declaration_refused(exc) from None
+
+
+def _declaration_refused(exc: DeclarationRefused) -> HTTPException:
+    # Ownership is facility setup, not something the desk can correct.
+    status = 409 if exc.code == "facility_ownership_unset" else 400
+    return HTTPException(status, {"code": exc.code, "message": exc.message})
 
 
 def _identity_error(exc: identity_service.AbdmIdentityError) -> HTTPException:
@@ -393,6 +504,17 @@ def _otp_rejected(exc: AbdmRejected, leg: str) -> HTTPException:
     session stays alive so the desk can retry or request a fresh OTP. Status
     only is logged: the body can echo the OTP or identifier just sent."""
     log.warning("ABDM declined a %s verification (%s)", leg, exc.status_code)
+    if isinstance(exc.detail, dict) and "mobile" in exc.detail:
+        # byAadhaar refuses the communication mobile under its own key, not
+        # the OTP (live, 6 Oct 2026). Calling that a wrong OTP sends the desk
+        # to re-type a code that was right.
+        return HTTPException(
+            400,
+            {
+                "code": "abha_mobile_rejected",
+                "message": "ABDM did not accept the mobile number for this ABHA.",
+            },
+        )
     return HTTPException(
         400,
         {
@@ -401,6 +523,61 @@ def _otp_rejected(exc: AbdmRejected, leg: str) -> HTTPException:
             "over the attempt limit. Check the code and try again, or request a new OTP.",
         },
     )
+
+
+def _login_hint(payload: AbhaLoginOtpRequest) -> str:
+    """Which identifier a login OTP request carried; exactly one is present."""
+    if payload.aadhaar is not None:
+        return "aadhaar"
+    if payload.mobile is not None:
+        return "mobile"
+    if payload.abha_address is not None:
+        return "abha-address"
+    return "abha-number"
+
+
+def _otp_request_rejected(exc: AbdmRejected, leg: str, *, login_hint: str) -> HTTPException:
+    """A refusal to send an OTP. An Aadhaar number ABDM rejects is the desk's
+    to correct; anything else stays a gateway decline. Status only is logged:
+    the body can echo the identifier just sent."""
+    log.warning("ABDM declined %s OTP request (%s)", leg, exc.status_code)
+    # Two live shapes for one mistake (7 Oct 2026): 422 ABDM-1204, and a 400
+    # keyed by loginId with no code at all.
+    aadhaar_refused = _AADHAAR_INVALID_CODE in identity_service.rejection_codes(exc.detail) or (
+        login_hint in {"aadhaar", "enrol-aadhaar"}
+        and "loginId" in identity_service.rejection_fields(exc.detail)
+    )
+    # ABDM refuses the OTP request outright, 404 ABDM-1115, when no ABHA stands
+    # behind the identifier (live, 7 Oct 2026; VRFY_ABHA_302/403). That is a
+    # real answer, not a decline, and no OTP was sent.
+    if _NO_ABHA_CODE in identity_service.rejection_codes(exc.detail) or exc.status_code == 404:
+        if login_hint == "mobile":
+            return HTTPException(
+                404,
+                {
+                    "code": "abha_not_found_for_mobile",
+                    "message": "ABHA Number not found. We did not find any ABHA number linked "
+                    "to this mobile number. Please use ABHA linked mobile number",
+                },
+            )
+        if login_hint == "aadhaar":
+            return HTTPException(
+                404,
+                {
+                    "code": "abha_not_found_for_aadhaar",
+                    "message": "NO ABHA user registered with this Aadhaar Number",
+                },
+            )
+    if aadhaar_refused:
+        return HTTPException(
+            400,
+            {
+                "code": "aadhaar_invalid",
+                "message": "ABDM did not accept this Aadhaar number. "
+                "Check the 12 digits and try again.",
+            },
+        )
+    return HTTPException(502, {"code": "abdm_rejected", "message": "ABDM declined the request"})
 
 
 async def _resend(
@@ -453,8 +630,8 @@ async def _resend(
         raise _unavailable("ABDM credentials are not configured on this server") from None
     except AbdmPublicKeyMissing:
         raise _unavailable("ABDM public certificate is not configured on this server") from None
-    except AbdmUnavailable:
-        raise _unavailable("ABDM did not respond") from None
+    except AbdmUnavailable as exc:
+        raise _abdm_down(exc) from None
     except AbdmRejected as exc:
         log.warning("ABDM declined an OTP resend (%s)", exc.status_code)
         raise HTTPException(502, {"code": "abdm_rejected", "message": "ABDM declined the request"}) from exc
@@ -471,6 +648,53 @@ def _unavailable(reason: str) -> HTTPException:
     return HTTPException(503, {"code": "abdm_unavailable", "message": reason})
 
 
+def _abdm_down(exc: AbdmUnavailable) -> HTTPException:
+    """Tell the desk which service is down, not only that one is.
+
+    ABDM answers 504 ABDM-1206 "Aadhaar Gateway is unavailable" when it cannot
+    reach UIDAI (live, 6 Oct 2026). That outage stops every Aadhaar OTP while
+    mobile and ABHA-address OTPs keep working, so the desk needs to know it was
+    Aadhaar and not ABDM as a whole.
+    """
+    codes = exc.error_codes or ()
+    if any(str(code).startswith("ABDM-1206") for code in codes):
+        return HTTPException(
+            503,
+            {"code": "aadhaar_service_unavailable", "message": "ABDM could not reach the Aadhaar service"},
+        )
+    return _unavailable("ABDM did not respond")
+
+
+async def _refuse_identity_clash(
+    db: AsyncSession, patient: Patient, column, value: str, duplicate_code: str, label: str
+) -> None:
+    """Refuse an ABHA number or address another chart at this facility holds.
+
+    Both are unique per facility (0095): a second chart here is a duplicate the
+    desk resolves. A chart at another facility is no clash at all. Each
+    facility is its own HIP, and ABDM links one ABHA to every provider that
+    treats the person; whether another facility does is not this desk's to
+    learn, and this check never asks.
+    """
+    clash = (
+        await db.execute(
+            select(Patient.id).where(
+                column == value,
+                Patient.id != patient.id,
+                Patient.facility_id == patient.facility_id,
+            )
+        )
+    ).first()
+    if clash is not None:
+        raise HTTPException(
+            409,
+            {
+                "code": duplicate_code,
+                "message": f"This {label} is already linked to another patient",
+            },
+        )
+
+
 async def _persist_verified_identity(
     *,
     db: AsyncSession,
@@ -485,26 +709,53 @@ async def _persist_verified_identity(
 
     patient_id = uuid.UUID(session.patient_id)
     patient = await _get_patient_or_404(db, patient_id, current_db_user.facility_id)
-    normalised = _normalise_abha(issued.abha_number)
-    clash = (
-        await db.execute(
-            select(Patient.id).where(
-                Patient.abha_number == normalised,
-                Patient.id != patient.id,
-            )
-        )
-    ).scalar_one_or_none()
-    if clash is not None:
+    await _bind_issued_identity(db, current_db_user, patient, issued)
+    # Consume proof only after the identity and its event are durable. A failed
+    # database commit must not destroy the patient's successful OTP session.
+    await db.commit()
+    if consume_session:
+        try:
+            await otp_session.finish(session_id)
+        except Exception:
+            # Redis still expires this session; do not tell the desk a committed
+            # identity write failed. Never log the credential or transaction id.
+            log.error("ABHA identity committed; OTP session cleanup failed")
+    return patient.id
+
+
+async def _bind_issued_identity(
+    db: AsyncSession,
+    current_db_user: CurrentDbUser,
+    patient: Patient,
+    issued: identity_service.AbhaIssued,
+) -> None:
+    """Write an ABDM-verified ABHA onto this chart, refusing a clash. Flushes only."""
+    # An ABHA-address login can verify the address without disclosing the full
+    # number. Never store an empty or masked number: abha_number is unique, and
+    # a placeholder would collide with the next address-only patient.
+    normalised = _normalise_abha(issued.abha_number) if issued.abha_number else None
+    if normalised is None and not issued.abha_address:
         raise HTTPException(
-            409,
-            {
-                "code": "duplicate_abha",
-                "message": "This ABHA number is already linked to another patient",
-            },
+            502,
+            {"code": "abdm_bad_response", "message": "ABDM verified no ABHA number or address"},
+        )
+    if normalised is not None:
+        await _refuse_identity_clash(
+            db, patient, Patient.abha_number, normalised, "duplicate_abha", "ABHA number"
+        )
+    if issued.abha_address:
+        await _refuse_identity_clash(
+            db,
+            patient,
+            Patient.abha_address,
+            issued.abha_address,
+            "duplicate_abha_address",
+            "ABHA address",
         )
 
     key_version = current_aes_key_version()
-    patient.abha_number = normalised
+    if normalised is not None:
+        patient.abha_number = normalised
     if issued.abha_address:
         patient.abha_address = issued.abha_address
     # Enrolment/login X-token is a profile credential, not a HIP linking token.
@@ -513,6 +764,7 @@ async def _persist_verified_identity(
             issued.linking_token, key_version=key_version
         )
         patient.abha_profile_token_key_version = key_version
+        patient.abha_profile_token_kind = issued.token_kind
     patient.abha_linked_at = datetime.now(UTC)
     patient.identity_status = "verified"
     patient.updated_by = current_db_user.id
@@ -525,17 +777,6 @@ async def _persist_verified_identity(
         payload={"abha_number": normalised},
         sensitivity="important",
     )
-    # Consume proof only after the identity and its event are durable. A failed
-    # database commit must not destroy the patient's successful OTP session.
-    await db.commit()
-    if consume_session:
-        try:
-            await otp_session.finish(session_id)
-        except Exception:
-            # Redis still expires this session; do not tell the desk a committed
-            # identity write failed. Never log the credential or transaction id.
-            log.error("ABHA identity committed; OTP session cleanup failed")
-    return patient.id
 
 
 async def _bound_otp_session(
@@ -593,7 +834,20 @@ async def enrol_request_otp(
     it — not in the OTP session, not in an audit row, not in a log line.
     Consent is required before the gateway is contacted.
     """
-    await _get_patient_or_404(db, payload.patient_id, current_db_user.facility_id)
+    patient = await _get_patient_or_404(db, payload.patient_id, current_db_user.facility_id)
+    shown = await _declaration_for(db, current_db_user, patient, payload.consent.language)
+    if payload.consent.declaration_sha256 != shown["sha256"]:
+        raise HTTPException(
+            409,
+            {
+                "code": "enrolment_declaration_changed",
+                "message": "The consent text changed after it was shown; show it again",
+            },
+        )
+    try:
+        statements = accept_declaration(shown, payload.consent.statements)
+    except DeclarationRefused as exc:
+        raise _declaration_refused(exc) from None
     try:
         result = await identity_service.request_aadhaar_otp(
             aadhaar=payload.aadhaar,
@@ -611,18 +865,10 @@ async def enrol_request_otp(
         raise _unavailable("ABDM credentials are not configured on this server") from None
     except AbdmPublicKeyMissing:
         raise _unavailable("ABDM public certificate is not configured on this server") from None
-    except AbdmUnavailable:
-        raise _unavailable("ABDM did not respond") from None
+    except AbdmUnavailable as exc:
+        raise _abdm_down(exc) from None
     except AbdmRejected as exc:
-        # Status only. The gateway's body can echo the identifier we just sent.
-        log.warning("ABDM declined an enrolment OTP request (%s)", exc.status_code)
-        raise HTTPException(
-            502,
-            {
-                "code": "abdm_rejected",
-                "message": "ABDM declined the request",
-            },
-        ) from exc
+        raise _otp_request_rejected(exc, "an enrolment", login_hint="enrol-aadhaar") from exc
     except identity_service.AbdmIdentityError as exc:
         raise _identity_error(exc) from exc
 
@@ -638,6 +884,13 @@ async def enrol_request_otp(
             "version": payload.consent.version,
             "language": payload.consent.language,
             "granted": True,
+            # What was shown and what was ticked, for the Health Data
+            # Management Policy record CRT_ABHA_102 asks for. Names live in
+            # the text, which the digest pins; they are not copied here.
+            "declaration_version": shown["version"],
+            "declaration_sha256": shown["sha256"],
+            "ownership": shown["ownership"],
+            "statements": statements,
         },
     )
     return OtpRequestedOut(
@@ -685,6 +938,13 @@ async def enrol_verify_otp(
         await _bound_otp_session(
             db, current_db_user, payload.session_id, OtpPurpose.ENROL_BY_AADHAAR
         )
+        if not payload.mobile:
+            # byAadhaar requires the communication mobile and refuses a request
+            # without it (live, 6 Oct 2026). Refuse here, before the OTP is spent.
+            raise HTTPException(
+                422,
+                {"code": "abha_mobile_required", "message": "Enter the mobile number for this ABHA"},
+            )
         issued = await identity_service.enrol_by_aadhaar_otp(
             session_id=payload.session_id,
             otp=payload.otp,
@@ -708,8 +968,8 @@ async def enrol_verify_otp(
         raise _unavailable("ABDM credentials are not configured on this server") from None
     except AbdmPublicKeyMissing:
         raise _unavailable("ABDM public certificate is not configured on this server") from None
-    except AbdmUnavailable:
-        raise _unavailable("ABDM did not respond") from None
+    except AbdmUnavailable as exc:
+        raise _abdm_down(exc) from None
     except AbdmRejected as exc:
         raise _otp_rejected(exc, "enrolment") from exc
     except identity_service.AbdmIdentityError as exc:
@@ -736,13 +996,549 @@ async def enrol_verify_otp(
     )
 
 
+class DemographicEnrolRequest(BaseModel):
+    """M1 CRT_ABHA_305: the beneficiary's details exactly as on the Aadhaar card."""
+
+    patient_id: uuid.UUID
+    #: Twelve digits (CRT_ABHA_304). Encrypted before transmission, never stored.
+    aadhaar: str = Field(min_length=12, max_length=12, pattern=r"^\d{12}$")
+    name: str = Field(min_length=1, max_length=200)
+    date_of_birth: date
+    gender: Literal["M", "F", "O"]
+    #: Not re-verified by ABHA; the desk takes it from the patient.
+    mobile: str = Field(pattern=r"^[6-9]\d{9}$")
+    address: str = Field(min_length=1, max_length=500)
+    pincode: str = Field(pattern=r"^[1-9]\d{5}$")
+    #: LGD codes chosen from GET /lgd/states and /lgd/districts.
+    state_code: str = Field(pattern=r"^\d{1,4}$")
+    district_code: str = Field(pattern=r"^\d{1,4}$")
+    consent: EnrolmentConsentIn
+
+
+def _lgd_unavailable(exc: Exception) -> HTTPException:
+    return HTTPException(409, {"code": "lgd_reference_unavailable", "message": str(exc)})
+
+
+@router.get("/lgd/states", dependencies=[Depends(require_roles("receptionist", "doctor"))])
+async def lgd_states() -> dict:
+    """LGD states the desk may choose for demographic ABHA creation."""
+    try:
+        return {"states": lgd.states()}
+    except lgd.LgdUnavailable as exc:
+        raise _lgd_unavailable(exc) from None
+
+
+@router.get("/lgd/districts", dependencies=[Depends(require_roles("receptionist", "doctor"))])
+async def lgd_districts(state_code: Annotated[str, Query(pattern=r"^\d{1,4}$")]) -> dict:
+    try:
+        return {"districts": lgd.districts(state_code)}
+    except lgd.LgdUnavailable as exc:
+        raise _lgd_unavailable(exc) from None
+    except lgd.LgdUnknown:
+        raise HTTPException(404, {"code": "lgd_state_unknown", "message": "Unknown LGD state"}) from None
+
+
+@router.post(
+    "/enrol/demographic",
+    response_model=AbhaIssuedOut,
+    dependencies=[Depends(require_roles("receptionist", "doctor"))],
+)
+async def enrol_by_demographics(
+    payload: DemographicEnrolRequest,
+    current_db_user: CurrentDbUser,
+    db: DbSession,
+) -> AbhaIssuedOut:
+    """Create (or fetch) an ABHA from Aadhaar demographics and bind it here.
+
+    M1 CRT_ABHA_301-309, mandatory for government. One ABDM call: UIDAI checks
+    the details against the Aadhaar number and ABHA returns the new or existing
+    number with its default address (Case 1 and Case 3 of CRT_ABHA_305).
+    """
+    patient = await _get_patient_or_404(db, payload.patient_id, current_db_user.facility_id)
+    shown = await _declaration_for(db, current_db_user, patient, payload.consent.language)
+    if payload.consent.declaration_sha256 != shown["sha256"]:
+        raise HTTPException(
+            409,
+            {
+                "code": "enrolment_declaration_changed",
+                "message": "The consent text changed after it was shown; show it again",
+            },
+        )
+    try:
+        statements = accept_declaration(shown, payload.consent.statements)
+    except DeclarationRefused as exc:
+        raise _declaration_refused(exc) from None
+    try:
+        lgd.require(payload.state_code, payload.district_code)
+    except lgd.LgdUnavailable as exc:
+        raise _lgd_unavailable(exc) from None
+    except lgd.LgdUnknown as exc:
+        raise HTTPException(400, {"code": "lgd_code_unknown", "message": str(exc)}) from None
+    try:
+        issued = await identity_service.enrol_by_demographics(
+            aadhaar=payload.aadhaar,
+            name=payload.name.strip(),
+            date_of_birth=payload.date_of_birth,
+            gender=payload.gender,
+            mobile=payload.mobile,
+            address=payload.address.strip(),
+            pincode=payload.pincode,
+            state_code=payload.state_code,
+            district_code=payload.district_code,
+            consent=EnrolmentConsent(
+                granted=payload.consent.granted,
+                code=payload.consent.code,
+                version=payload.consent.version,
+                language=payload.consent.language,
+            ),
+        )
+    except AbdmNotConfigured:
+        raise _unavailable("ABDM credentials are not configured on this server") from None
+    except AbdmPublicKeyMissing:
+        raise _unavailable("ABDM public certificate is not configured on this server") from None
+    except AbdmUnavailable as exc:
+        raise _abdm_down(exc) from None
+    except AbdmRejected as exc:
+        # Status only: the body can echo what was just sent.
+        log.warning("ABDM declined a demographic enrolment (%s)", exc.status_code)
+        if exc.status_code in {401, 403}:
+            raise HTTPException(
+                502,
+                {
+                    "code": "abdm_demographic_not_permitted",
+                    "message": "ABDM refused demographic creation for this client",
+                },
+            ) from exc
+        # CRT_ABHA_305: details that do not match Aadhaar create nothing.
+        raise HTTPException(
+            400,
+            {
+                "code": "abha_demographics_rejected",
+                "message": "ABDM did not accept these details for this Aadhaar number. "
+                "Check name, date of birth and gender against the Aadhaar card.",
+            },
+        ) from exc
+    except identity_service.AbdmIdentityError as exc:
+        raise _identity_error(exc) from exc
+
+    await write_audit_log(
+        db,
+        facility_id=current_db_user.facility_id,
+        action=AuditAction.CREATE,
+        resource_type="abha_enrolment_consent",
+        user_id=current_db_user.id,
+        patient_id=patient.id,
+        new_value={
+            "code": payload.consent.code,
+            "version": payload.consent.version,
+            "language": payload.consent.language,
+            "granted": True,
+            "method": "aadhaar_demographic",
+            "declaration_version": shown["version"],
+            "declaration_sha256": shown["sha256"],
+            "ownership": shown["ownership"],
+            "statements": statements,
+        },
+    )
+    await _bind_issued_identity(db, current_db_user, patient, issued)
+    await db.commit()
+    return AbhaIssuedOut(
+        abha_number=issued.abha_number,
+        abha_address=issued.abha_address,
+        name=issued.name,
+        gender=issued.gender,
+        date_of_birth=issued.date_of_birth,
+        linked_patient_id=patient.id,
+        has_nha_card=bool(issued.linking_token),
+    )
+
+
+@router.get("/captcha", dependencies=[Depends(require_roles("receptionist", "doctor"))])
+async def new_captcha() -> JSONResponse:
+    """A fresh challenge for the mobile ABHA lookup. Never cached."""
+    captcha_id, png = await captcha.issue()
+    return JSONResponse(
+        {"captcha_id": captcha_id, "image": "data:image/png;base64," + base64.b64encode(png).decode()},
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+# ------------------------------------------------ driving-licence enrolment
+#
+# M1 CRT_ABHA_401-411. Mobile OTP with the dl-flow scope, then the licence
+# details and both photos. ABDM answers with an enrolment number in PROVISIONAL
+# state: NHA issues the ABHA only after a participating facility verifies the
+# licence against the person, so nothing here is bound to the chart. Once the
+# ABHA exists, the desk verifies it like any other existing ABHA.
+
+#: ABDM refuses a licence photo of 150 KB or more (live, 3 Oct 2026: "Please
+#: upload a document of size less than 150KB"). The desk shrinks camera photos
+#: under 140 KB first; this refuses anything ABDM would, before it is sent.
+_PHOTO_MAX_BYTES = 150_000
+_PHOTO_MAX_CHARS = 64 + (_PHOTO_MAX_BYTES * 4) // 3 + 4
+_PHOTO_SIGNATURES = (b"\xff\xd8\xff", b"\x89PNG\r\n\x1a\n")
+
+
+def _licence_photo(value: str) -> str:
+    """Plain base64 of a JPEG or PNG within the size limit; never stored."""
+    encoded = value.split(",", 1)[1] if value.startswith("data:") else value
+    try:
+        decoded = base64.b64decode(encoded, validate=True)
+    except ValueError as exc:
+        raise ValueError("the licence photo must be base64") from exc
+    if not decoded.startswith(_PHOTO_SIGNATURES):
+        raise ValueError("the licence photo must be a JPEG or PNG image")
+    if len(decoded) >= _PHOTO_MAX_BYTES:
+        raise ValueError("the licence photo must be under 150 KB, ABDM's limit")
+    return encoded
+
+
+class DrivingLicenceOtpRequest(BaseModel):
+    patient_id: uuid.UUID
+    #: The communication mobile (CRT_ABHA_403). Encrypted, never stored.
+    mobile: str = Field(pattern=r"^[6-9]\d{9}$")
+    consent: EnrolmentConsentIn
+
+
+class DrivingLicenceOtpResend(BaseModel):
+    session_id: str
+    patient_id: uuid.UUID
+    mobile: str = Field(pattern=r"^[6-9]\d{9}$")
+
+
+class DrivingLicenceOtpVerify(BaseModel):
+    session_id: str
+    patient_id: uuid.UUID
+    otp: str = Field(pattern=r"^\d{6}$")
+
+
+class DrivingLicenceEnrolRequest(BaseModel):
+    """CRT_ABHA_405/406: the licence as printed, and both sides photographed."""
+
+    session_id: str
+    patient_id: uuid.UUID
+    #: NHA's driving-licence pattern: letters/digits with at most one - or space.
+    licence_number: str = Field(
+        min_length=5, max_length=20, pattern=r"^[A-Za-z0-9]+[- ]?[A-Za-z0-9]+$"
+    )
+    first_name: str = Field(min_length=1, max_length=100)
+    middle_name: str = Field(default="", max_length=100)
+    last_name: str = Field(default="", max_length=100)
+    date_of_birth: date
+    gender: Literal["M", "F", "O"]
+    address: str = Field(min_length=1, max_length=500)
+    pincode: str = Field(pattern=r"^[1-9]\d{5}$")
+    state_code: str = Field(pattern=r"^\d{1,4}$")
+    district_code: str = Field(pattern=r"^\d{1,4}$")
+    front_photo: str = Field(max_length=_PHOTO_MAX_CHARS)
+    back_photo: str = Field(max_length=_PHOTO_MAX_CHARS)
+    #: CRT_ABHA_407: the operator compared the licence, its photo and these
+    #: details with the person at the desk. A rejected licence is never sent.
+    operator_verified: Literal[True]
+
+    @field_validator("front_photo", "back_photo")
+    @classmethod
+    def _photo(cls, value: str) -> str:
+        return _licence_photo(value)
+
+
+class DrivingLicenceEnrolmentOut(BaseModel):
+    enrolment_number: str
+    enrolment_state: str | None = None
+    abha_address: str | None = None
+    is_new: bool | None = None
+    #: Always false: a provisional enrolment is not written to the chart.
+    linked: bool = False
+
+
+def _licence_flow_refusal(exc: Exception) -> HTTPException:
+    """The refusals every driving-licence leg shares."""
+    # Every outcome other than success is logged: a 502 and a 503 on the live
+    # enrolment (3 Oct 2026) left no trace of which refusal they were.
+    detail = exc.code if isinstance(exc, identity_service.AbdmIdentityError) else None
+    log.warning(
+        "Driving-licence leg refused (%s%s)",
+        safe_failure_summary(exc), f":{detail}" if detail else "",
+    )
+    if isinstance(exc, OtpSessionNotFound | OtpSessionMismatch):
+        return HTTPException(
+            404,
+            {"code": "otp_session_not_found", "message": "This OTP session has expired or does not exist"},
+        )
+    if isinstance(exc, otp_session.OtpResendTooSoon):
+        return HTTPException(
+            429,
+            {
+                "code": "otp_resend_too_soon",
+                "message": f"Wait {exc.retry_after_seconds} seconds before requesting another OTP",
+                "retry_after_seconds": exc.retry_after_seconds,
+            },
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        )
+    if isinstance(exc, otp_session.OtpResendExhausted):
+        return HTTPException(
+            429,
+            {
+                "code": "otp_resend_exhausted",
+                "message": "No more OTP resends for this attempt. Start the enrolment again.",
+            },
+        )
+    if isinstance(exc, AbdmNotConfigured):
+        return _unavailable("ABDM credentials are not configured on this server")
+    if isinstance(exc, AbdmPublicKeyMissing):
+        return _unavailable("ABDM public certificate is not configured on this server")
+    if isinstance(exc, AbdmUnavailable):
+        return _abdm_down(exc)
+    if isinstance(exc, identity_service.AbdmIdentityError):
+        return _identity_error(exc)
+    raise exc
+
+
+_LICENCE_FLOW_ERRORS = (
+    OtpSessionNotFound,
+    OtpSessionMismatch,
+    otp_session.OtpResendTooSoon,
+    otp_session.OtpResendExhausted,
+    AbdmNotConfigured,
+    AbdmPublicKeyMissing,
+    AbdmUnavailable,
+    identity_service.AbdmIdentityError,
+)
+
+
+async def _licence_session(
+    db: AsyncSession, actor: CurrentDbUser, session_id: str, patient_id: uuid.UUID
+) -> otp_session.OtpSession:
+    session = await _bound_otp_session(db, actor, session_id, OtpPurpose.ENROL_BY_DOCUMENT)
+    if session.patient_id != str(patient_id):
+        raise HTTPException(
+            404,
+            {"code": "otp_session_not_found", "message": "This OTP session has expired or does not exist"},
+        )
+    return session
+
+
+@router.post(
+    "/enrol/driving-licence/request-otp",
+    response_model=OtpRequestedOut,
+    dependencies=[Depends(require_roles("receptionist", "doctor"))],
+)
+async def enrol_licence_request_otp(
+    payload: DrivingLicenceOtpRequest,
+    current_db_user: CurrentDbUser,
+    db: DbSession,
+) -> OtpRequestedOut:
+    """CRT_ABHA_402-404: consent for a non-Aadhaar ABHA, then the mobile OTP."""
+    patient = await _get_patient_or_404(db, payload.patient_id, current_db_user.facility_id)
+    shown = await _declaration_for(
+        db, current_db_user, patient, payload.consent.language, "document"
+    )
+    if payload.consent.declaration_sha256 != shown["sha256"]:
+        raise HTTPException(
+            409,
+            {
+                "code": "enrolment_declaration_changed",
+                "message": "The consent text changed after it was shown; show it again",
+            },
+        )
+    try:
+        statements = accept_declaration(shown, payload.consent.statements)
+    except DeclarationRefused as exc:
+        raise _declaration_refused(exc) from None
+    try:
+        result = await identity_service.request_document_mobile_otp(
+            mobile=payload.mobile,
+            facility_id=str(current_db_user.facility_id),
+            started_by=str(current_db_user.id),
+            patient_id=str(patient.id),
+            consent=EnrolmentConsent(
+                granted=payload.consent.granted,
+                code=payload.consent.code,
+                version=payload.consent.version,
+                language=payload.consent.language,
+            ),
+        )
+    except _LICENCE_FLOW_ERRORS as exc:
+        raise _licence_flow_refusal(exc) from None
+    except AbdmRejected as exc:
+        # Status only: the body can echo the mobile just sent.
+        log.warning("ABDM declined a driving-licence OTP request (%s)", exc.status_code)
+        raise HTTPException(502, {"code": "abdm_rejected", "message": "ABDM declined the request"}) from exc
+    await write_audit_log(
+        db,
+        facility_id=current_db_user.facility_id,
+        action=AuditAction.CREATE,
+        resource_type="abha_enrolment_consent",
+        user_id=current_db_user.id,
+        patient_id=patient.id,
+        new_value={
+            "code": payload.consent.code,
+            "version": payload.consent.version,
+            "language": payload.consent.language,
+            "granted": True,
+            "method": "driving_licence",
+            "declaration_version": shown["version"],
+            "declaration_sha256": shown["sha256"],
+            "ownership": shown["ownership"],
+            "statements": statements,
+        },
+    )
+    return OtpRequestedOut(
+        session_id=result.session_id,
+        masked_mobile=result.masked_mobile,
+        resends_remaining=result.resends_remaining,
+    )
+
+
+@router.post(
+    "/enrol/driving-licence/resend-otp",
+    response_model=OtpRequestedOut,
+    dependencies=[Depends(require_roles("receptionist", "doctor"))],
+)
+async def enrol_licence_resend_otp(
+    payload: DrivingLicenceOtpResend,
+    current_db_user: CurrentDbUser,
+    db: DbSession,
+) -> OtpRequestedOut:
+    await _licence_session(db, current_db_user, payload.session_id, payload.patient_id)
+    try:
+        result = await identity_service.resend_document_mobile_otp(
+            session_id=payload.session_id,
+            mobile=payload.mobile,
+            facility_id=str(current_db_user.facility_id),
+            started_by=str(current_db_user.id),
+        )
+    except _LICENCE_FLOW_ERRORS as exc:
+        raise _licence_flow_refusal(exc) from None
+    except AbdmRejected as exc:
+        log.warning("ABDM declined a driving-licence OTP resend (%s)", exc.status_code)
+        raise HTTPException(502, {"code": "abdm_rejected", "message": "ABDM declined the request"}) from exc
+    return OtpRequestedOut(
+        session_id=result.session_id,
+        masked_mobile=result.masked_mobile,
+        resends_remaining=result.resends_remaining,
+    )
+
+
+@router.post(
+    "/enrol/driving-licence/verify-otp",
+    status_code=204,
+    dependencies=[Depends(require_roles("receptionist", "doctor"))],
+)
+async def enrol_licence_verify_otp(
+    payload: DrivingLicenceOtpVerify,
+    current_db_user: CurrentDbUser,
+    db: DbSession,
+) -> Response:
+    """CRT_ABHA_404: a wrong OTP is an error the desk can correct and retry."""
+    await _licence_session(db, current_db_user, payload.session_id, payload.patient_id)
+    try:
+        await identity_service.verify_document_mobile_otp(
+            session_id=payload.session_id,
+            otp=payload.otp,
+            facility_id=str(current_db_user.facility_id),
+        )
+    except _LICENCE_FLOW_ERRORS as exc:
+        raise _licence_flow_refusal(exc) from None
+    except AbdmRejected as exc:
+        raise _otp_rejected(exc, "driving-licence mobile") from exc
+    return Response(status_code=204)
+
+
+@router.post(
+    "/enrol/driving-licence",
+    response_model=DrivingLicenceEnrolmentOut,
+    dependencies=[Depends(require_roles("receptionist", "doctor"))],
+)
+async def enrol_by_driving_licence(
+    payload: DrivingLicenceEnrolRequest,
+    current_db_user: CurrentDbUser,
+    db: DbSession,
+) -> DrivingLicenceEnrolmentOut:
+    """CRT_ABHA_405-408: submit the checked licence; show the enrolment number."""
+    await _licence_session(db, current_db_user, payload.session_id, payload.patient_id)
+    try:
+        state, district = lgd.require(payload.state_code, payload.district_code)
+    except lgd.LgdUnavailable as exc:
+        raise _lgd_unavailable(exc) from None
+    except lgd.LgdUnknown as exc:
+        raise HTTPException(400, {"code": "lgd_code_unknown", "message": str(exc)}) from None
+    try:
+        enrolled = await identity_service.enrol_by_driving_licence(
+            session_id=payload.session_id,
+            facility_id=str(current_db_user.facility_id),
+            licence_number=payload.licence_number.strip(),
+            first_name=payload.first_name.strip(),
+            middle_name=payload.middle_name.strip(),
+            last_name=payload.last_name.strip(),
+            date_of_birth=payload.date_of_birth,
+            gender=payload.gender,
+            front_photo=payload.front_photo,
+            back_photo=payload.back_photo,
+            address=payload.address.strip(),
+            state=state,
+            district=district,
+            pincode=payload.pincode,
+        )
+    except _LICENCE_FLOW_ERRORS as exc:
+        raise _licence_flow_refusal(exc) from None
+    except AbdmRejected as exc:
+        log.warning("ABDM declined a driving-licence enrolment (%s)", exc.status_code)
+        if exc.status_code == 422:
+            # ABDM-1203: the details do not match the licence (Sarathi).
+            raise HTTPException(
+                400,
+                {
+                    "code": "abha_licence_rejected",
+                    "message": "ABDM did not match these details to the driving licence. "
+                    "Check the number, name, date of birth and gender as printed on it.",
+                },
+            ) from exc
+        raise HTTPException(502, {"code": "abdm_rejected", "message": "ABDM declined the request"}) from exc
+    await write_audit_log(
+        db,
+        facility_id=current_db_user.facility_id,
+        action=AuditAction.CREATE,
+        resource_type="abha_document_enrolment",
+        user_id=current_db_user.id,
+        patient_id=payload.patient_id,
+        new_value={
+            "document_type": "DRIVING_LICENCE",
+            "enrolment_number": enrolled.enrolment_number,
+            "enrolment_state": enrolled.enrolment_state,
+            "is_new": enrolled.is_new,
+            "operator_verified": True,
+        },
+    )
+    await db.commit()
+    return DrivingLicenceEnrolmentOut(
+        enrolment_number=enrolled.enrolment_number,
+        enrolment_state=enrolled.enrolment_state,
+        abha_address=enrolled.abha_address,
+        is_new=enrolled.is_new,
+    )
+
+
 @router.get(
     "/enrol/consent",
     dependencies=[Depends(require_roles("receptionist", "doctor"))],
 )
-async def enrol_consent_copy() -> dict:
-    """Approved enrolment grant identifiers and English desk copy. No PHI."""
-    return consent_metadata()
+async def enrol_consent_copy(
+    patient_id: Annotated[uuid.UUID, Query()],
+    current_db_user: CurrentDbUser,
+    db: DbSession,
+    language: Annotated[str, Query(pattern=r"^(en|hi)$")] = "en",
+    method: Annotated[str, Query(pattern=r"^(aadhaar|document)$")] = "aadhaar",
+) -> dict:
+    """NHA's published ABHA consent for this patient, as the desk must show it.
+
+    Carries the patient's and the signed-in staff member's names, so it is
+    scoped like any patient read: another facility's patient is a 404.
+    """
+    patient = await _get_patient_or_404(db, patient_id, current_db_user.facility_id)
+    return consent_metadata(
+        await _declaration_for(db, current_db_user, patient, language, method)
+    )
 
 
 async def _enrolment_continuation_session(
@@ -787,8 +1583,8 @@ async def enrol_mobile_request_otp(
         raise _unavailable("ABDM credentials are not configured on this server") from None
     except AbdmPublicKeyMissing:
         raise _unavailable("ABDM public certificate is not configured on this server") from None
-    except AbdmUnavailable:
-        raise _unavailable("ABDM did not respond") from None
+    except AbdmUnavailable as exc:
+        raise _abdm_down(exc) from None
     except AbdmRejected as exc:
         log.warning("ABDM declined an enrolment mobile OTP request (%s)", exc.status_code)
         raise HTTPException(502, {"code": "abdm_rejected", "message": "ABDM declined the request"}) from exc
@@ -849,8 +1645,8 @@ async def enrol_mobile_resend_otp(
         raise _unavailable("ABDM credentials are not configured on this server") from None
     except AbdmPublicKeyMissing:
         raise _unavailable("ABDM public certificate is not configured on this server") from None
-    except AbdmUnavailable:
-        raise _unavailable("ABDM did not respond") from None
+    except AbdmUnavailable as exc:
+        raise _abdm_down(exc) from None
     except AbdmRejected as exc:
         log.warning("ABDM declined an enrolment mobile OTP resend (%s)", exc.status_code)
         raise HTTPException(502, {"code": "abdm_rejected", "message": "ABDM declined the request"}) from exc
@@ -903,8 +1699,8 @@ async def enrol_mobile_verify_otp(
         raise _unavailable("ABDM credentials are not configured on this server") from None
     except AbdmPublicKeyMissing:
         raise _unavailable("ABDM public certificate is not configured on this server") from None
-    except AbdmUnavailable:
-        raise _unavailable("ABDM did not respond") from None
+    except AbdmUnavailable as exc:
+        raise _abdm_down(exc) from None
     except AbdmRejected as exc:
         raise _otp_rejected(exc, "enrolment mobile") from exc
     except identity_service.AbdmIdentityError as exc:
@@ -944,8 +1740,8 @@ async def enrol_address_suggestions(
         ) from None
     except AbdmNotConfigured:
         raise _unavailable("ABDM credentials are not configured on this server") from None
-    except AbdmUnavailable:
-        raise _unavailable("ABDM did not respond") from None
+    except AbdmUnavailable as exc:
+        raise _abdm_down(exc) from None
     except AbdmRejected as exc:
         log.warning("ABDM declined ABHA address suggestions (%s)", exc.status_code)
         raise HTTPException(502, {"code": "abdm_rejected", "message": "ABDM declined the request"}) from exc
@@ -983,15 +1779,18 @@ async def enrol_submit_abha_address(
         ) from None
     except AbdmNotConfigured:
         raise _unavailable("ABDM credentials are not configured on this server") from None
-    except AbdmUnavailable:
-        raise _unavailable("ABDM did not respond") from None
+    except AbdmUnavailable as exc:
+        raise _abdm_down(exc) from None
     except AbdmRejected as exc:
         log.warning("ABDM declined an ABHA address submission (%s)", exc.status_code)
         raise HTTPException(
             400,
             {
                 "code": "abha_address_refused",
-                "message": "ABDM did not accept this ABHA address. Choose another suggestion or try again.",
+                # CRT_ABHA_112 expects an "already exists" refusal; ABDM's status
+                # alone does not prove that was the reason, so both are said.
+                "message": "ABDM did not accept this ABHA address; it may already exist. "
+                "Choose another suggestion or try again.",
             },
         ) from exc
     except identity_service.AbdmIdentityError as exc:
@@ -1039,11 +1838,13 @@ async def get_nha_abha_profile(
     patient = await _get_patient_or_404(db, patient_id, current_db_user.facility_id)
     token = _profile_token_for(patient)
     try:
-        view = await identity_service.fetch_abha_profile(profile_token=token)
+        view = await identity_service.fetch_abha_profile(
+            profile_token=token, token_kind=patient.abha_profile_token_kind
+        )
     except AbdmNotConfigured:
         raise _unavailable("ABDM credentials are not configured on this server") from None
-    except AbdmUnavailable:
-        raise _unavailable("ABDM did not respond") from None
+    except AbdmUnavailable as exc:
+        raise _abdm_down(exc) from None
     except AbdmRejected as exc:
         log.warning("ABDM declined an ABHA profile read (%s)", exc.status_code)
         raise HTTPException(502, {"code": "abdm_rejected", "message": "ABDM declined the request"}) from exc
@@ -1083,11 +1884,13 @@ async def download_nha_abha_card(
     patient = await _get_patient_or_404(db, patient_id, current_db_user.facility_id)
     token = _profile_token_for(patient)
     try:
-        card = await identity_service.fetch_abha_card(profile_token=token)
+        card = await identity_service.fetch_abha_card(
+            profile_token=token, token_kind=patient.abha_profile_token_kind
+        )
     except AbdmNotConfigured:
         raise _unavailable("ABDM credentials are not configured on this server") from None
-    except AbdmUnavailable:
-        raise _unavailable("ABDM did not respond") from None
+    except AbdmUnavailable as exc:
+        raise _abdm_down(exc) from None
     except AbdmRejected as exc:
         log.warning("ABDM declined an ABHA card download (%s)", exc.status_code)
         raise HTTPException(502, {"code": "abdm_rejected", "message": "ABDM declined the request"}) from exc
@@ -1127,12 +1930,26 @@ async def login_request_otp(
     """Send an OTP for an ABHA the patient says they hold — to its linked
     mobile (ABHA number) or through Aadhaar (Aadhaar number)."""
     await _get_patient_or_404(db, payload.patient_id, current_db_user.facility_id)
+    # A mobile number finds every ABHA linked to it, so this lookup carries a
+    # second check before any OTP is sent (VRFY_ABHA_301). Resends reuse the
+    # session this request opened and need no new challenge.
+    if payload.mobile is not None and not await captcha.check(
+        payload.captcha_id, payload.captcha_answer
+    ):
+        raise HTTPException(
+            400,
+            {
+                "code": "captcha_invalid",
+                "message": "The characters did not match the image. Enter the characters from the new image.",
+            },
+        )
     try:
         result = await identity_service.request_login_otp(
             abha_number=_normalise_abha(payload.abha_number) if payload.abha_number else None,
             aadhaar=payload.aadhaar,
             abha_address=payload.abha_address,
             mobile=payload.mobile,
+            address_otp_system="aadhaar" if payload.address_otp == "aadhaar" else "abdm",
             facility_id=str(current_db_user.facility_id),
             started_by=str(current_db_user.id),
             patient_id=str(payload.patient_id),
@@ -1141,17 +1958,10 @@ async def login_request_otp(
         raise _unavailable("ABDM credentials are not configured on this server") from None
     except AbdmPublicKeyMissing:
         raise _unavailable("ABDM public certificate is not configured on this server") from None
-    except AbdmUnavailable:
-        raise _unavailable("ABDM did not respond") from None
+    except AbdmUnavailable as exc:
+        raise _abdm_down(exc) from None
     except AbdmRejected as exc:
-        log.warning("ABDM declined a login OTP request (%s)", exc.status_code)
-        raise HTTPException(
-            502,
-            {
-                "code": "abdm_rejected",
-                "message": "ABDM declined the request",
-            },
-        ) from exc
+        raise _otp_request_rejected(exc, "a login", login_hint=_login_hint(payload)) from exc
     except identity_service.AbdmIdentityError as exc:
         raise _identity_error(exc) from exc
 
@@ -1208,8 +2018,8 @@ async def login_verify_otp(
         raise _unavailable("ABDM credentials are not configured on this server") from None
     except AbdmPublicKeyMissing:
         raise _unavailable("ABDM public certificate is not configured on this server") from None
-    except AbdmUnavailable:
-        raise _unavailable("ABDM did not respond") from None
+    except AbdmUnavailable as exc:
+        raise _abdm_down(exc) from None
     except AbdmRejected as exc:
         raise _otp_rejected(exc, "login") from exc
     except identity_service.AbdmIdentityError as exc:
@@ -1277,8 +2087,8 @@ async def login_select_account(
         ) from None
     except AbdmNotConfigured:
         raise _unavailable("ABDM credentials are not configured on this server") from None
-    except AbdmUnavailable:
-        raise _unavailable("ABDM did not respond") from None
+    except AbdmUnavailable as exc:
+        raise _abdm_down(exc) from None
     except AbdmRejected as exc:
         log.warning("ABDM declined an account selection (%s)", exc.status_code)
         raise HTTPException(400, {"code": "abha_account_not_in_selection", "message": "ABDM did not accept this account. Choose another one."}) from exc

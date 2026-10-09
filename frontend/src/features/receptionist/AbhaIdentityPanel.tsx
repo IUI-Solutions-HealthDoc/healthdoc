@@ -7,6 +7,8 @@ import { useLocale } from "@/lib/i18n";
 
 import {
   downloadNhaAbhaCard,
+  getAbhaCaptcha,
+  getAbhaEnrolmentDeclaration,
   requestAbhaEnrolmentOtp,
   requestAbhaLoginOtp,
   requestEnrolmentMobileOtp,
@@ -16,21 +18,27 @@ import {
   selectAbhaLoginAccount,
   verifyAbhaLoginOtp,
   verifyEnrolmentMobileOtp,
+  type AbhaCaptcha,
 } from "./api";
+import { AbhaConsentDeclaration, declarationAccepted, defaultTicks } from "./AbhaConsentDeclaration";
+import { DemographicAbhaEnrolment } from "./DemographicAbhaEnrolment";
+import { DrivingLicenceAbhaEnrolment } from "./DrivingLicenceAbhaEnrolment";
 import { digitsOnly, isValidAbhaInput, normaliseIndianMobileInput } from "./patientValidation";
-import type { AbhaIdentityLinked, AbhaLoginIdentifier } from "./types";
+import type { AbhaDeclaration, AbhaIdentityLinked, AbhaLoginIdentifier, ConsentLanguage } from "./types";
 
-/** Official M1 collection grant. Hindi legal text is not shipped until NHA-approved copy exists. */
+/** Official M1 collection grant. The statements shown beside it are NHA's
+ *  published consent (or HealthDoc's labelled Hindi translation), rendered by
+ *  the server for this patient and facility. */
 const ENROLMENT_CONSENT = {
   granted: true,
   code: "abha-enrollment",
   version: "1.4",
-  language: "en" as const,
 };
-const ENROLMENT_CONSENT_TEXT =
-  "I confirm the patient agrees to share Aadhaar demographic information with the National Health Authority for the sole purpose of creating an ABHA. Consent code abha-enrollment, version 1.4.";
 
-type Flow = "existing" | "new";
+
+/** "demographic": M1 CRT_ABHA_301-309, Aadhaar demographics without an OTP.
+ *  "licence": M1 CRT_ABHA_401-411, a driving licence; yields an enrolment number. */
+type Flow = "existing" | "new" | "demographic" | "licence";
 /** How an existing ABHA is proven: OTP to its linked mobile, or through Aadhaar. */
 type Method = "abha-number" | "aadhaar" | "abha-address" | "mobile";
 
@@ -39,7 +47,12 @@ type Method = "abha-number" | "aadhaar" | "abha-address" | "mobile";
 const RESEND_COOLDOWN_SECONDS = 30;
 
 interface Props {
-  patient: { id: string; full_name: string; abha_number?: string | null };
+  /** The optional fields prefill demographic ABHA creation; the desk confirms them. */
+  patient: {
+    id: string; full_name: string; abha_number?: string | null;
+    sex?: string | null; dob?: string | null; mobile?: string | null;
+    address_line?: string | null; pincode?: string | null;
+  };
 }
 
 function refusalCode(reason: unknown): string | null {
@@ -66,10 +79,17 @@ function PatientAbhaIdentity({ patient }: Props) {
   const [otp, setOtp] = useState("");
   const [mobile, setMobile] = useState("");
   const [linked, setLinked] = useState<AbhaIdentityLinked | null>(null);
-  const [consentGranted, setConsentGranted] = useState(false);
+  const [declaration, setDeclaration] = useState<AbhaDeclaration | null>(null);
+  const [declarationError, setDeclarationError] = useState<string | null>(null);
+  const [ticks, setTicks] = useState<Record<string, boolean>>({});
+  const [consentLanguage, setConsentLanguage] = useState<ConsentLanguage>("en");
+  const [captcha, setCaptcha] = useState<AbhaCaptcha | null>(null);
+  const [captchaAnswer, setCaptchaAnswer] = useState("");
+  const [captchaError, setCaptchaError] = useState<string | null>(null);
   const [enrolPhase, setEnrolPhase] = useState<"aadhaar" | "mobile" | "address">("aadhaar");
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [selectedAddress, setSelectedAddress] = useState("");
+  const [addressOtp, setAddressOtp] = useState<"mobile" | "aadhaar">("mobile");
   const communicationMobile = useRef<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -99,6 +119,48 @@ function PatientAbhaIdentity({ patient }: Props) {
     return () => clearInterval(timer);
   }, [resendAvailableAt]);
 
+  const needsDeclaration = flow === "new" && !sessionId && !declaration && !declarationError;
+  useEffect(() => {
+    if (!needsDeclaration) return;
+    let disposed = false;
+    getAbhaEnrolmentDeclaration(patient.id, consentLanguage).then(
+      (shown) => {
+        if (disposed) return;
+        setDeclaration(shown);
+        // NHA's published form shows statements 1, 3, 4 and 5 ticked; the
+        // patient may untick the optional ones, and both confirmations start empty.
+        setTicks(defaultTicks(shown));
+      },
+      (reason: unknown) => {
+        if (!disposed) {
+          setDeclarationError(reason instanceof ApiError ? reason.message : "The ABHA consent could not be loaded.");
+        }
+      },
+    );
+    return () => { disposed = true; };
+  }, [needsDeclaration, patient.id, consentLanguage]);
+
+  // The mobile lookup finds every ABHA on a number, so it carries an image
+  // check first (VRFY_ABHA_301). A challenge is spent by one request.
+  const needsCaptcha = flow === "existing" && method === "mobile" && !sessionId && !captcha && !captchaError;
+  useEffect(() => {
+    if (!needsCaptcha) return;
+    let disposed = false;
+    getAbhaCaptcha().then(
+      (issued) => { if (!disposed) setCaptcha(issued); },
+      (reason: unknown) => {
+        if (!disposed) setCaptchaError(reason instanceof ApiError ? reason.message : "The image check could not be loaded.");
+      },
+    );
+    return () => { disposed = true; };
+  }, [needsCaptcha]);
+
+  function newCaptcha() {
+    setCaptcha(null);
+    setCaptchaAnswer("");
+    setCaptchaError(null);
+  }
+
   function beginRequest(): number | null {
     if (!lifecycle.current.active || lifecycle.current.pending) return null;
     lifecycle.current.pending = true;
@@ -125,7 +187,12 @@ function PatientAbhaIdentity({ patient }: Props) {
     setEnrolPhase("aadhaar");
     setSuggestions([]);
     setSelectedAddress("");
-    setConsentGranted(false);
+    setDeclaration(null);
+    setDeclarationError(null);
+    setTicks({});
+    setCaptcha(null);
+    setCaptchaAnswer("");
+    setCaptchaError(null);
     setAccounts([]);
     setSelectedAccount("");
     communicationMobile.current = null;
@@ -147,6 +214,9 @@ function PatientAbhaIdentity({ patient }: Props) {
   const otpValid = /^\d{4,8}$/.test(otp);
   const mobileNormalised = mobile.trim() ? normaliseIndianMobileInput(mobile) : null;
   const mobileValid = !mobile.trim() || mobileNormalised !== null;
+  // ABDM's byAadhaar refuses an enrolment without the communication mobile
+  // (live, 6 Oct 2026), so a new ABHA cannot be verified without one.
+  const enrolMobileMissing = flow === "new" && mobileNormalised === null;
   const resendWaitSeconds = resendAvailableAt === null ? 0 : Math.max(0, Math.ceil((resendAvailableAt - now) / 1000));
   const canResend = sessionId !== null && (resendsRemaining ?? 0) > 0 && resendWaitSeconds === 0 && !busy;
 
@@ -173,14 +243,26 @@ function PatientAbhaIdentity({ patient }: Props) {
   }
 
   async function requestOtp() {
-    if (flow === "new" && !consentGranted) {
-      setError("Confirm the patient's enrolment consent before creating an ABHA.");
+    const enrolmentConsent = flow === "new" && declaration && declarationAccepted(declaration, ticks)
+      ? { ...ENROLMENT_CONSENT, language: declaration.language, statements: ticks, declaration_sha256: declaration.sha256 }
+      : null;
+    if (flow === "new" && !enrolmentConsent) {
+      setError("Complete the patient's ABHA consent before creating an ABHA.");
       return;
     }
     if (!identifierValid) {
-      setError(usesAadhaar ? "Enter a valid 12-digit Aadhaar number." : usesMobile ? "Enter a 10-digit communication mobile." : usesAddress ? "Enter the ABHA address." : "Enter a valid 14-digit ABHA number.");
+      // NHA's expected wording: CRT_ABHA_104/204/304 and VRFY_ABHA_401 for
+      // Aadhaar, VRFY_ABHA_301 for the communication mobile.
+      setError(usesAadhaar ? "Aadhaar Number is not valid" : usesMobile ? "Please enter a valid mobile number" : usesAddress ? "Enter the ABHA address." : "Enter a valid 14-digit ABHA number.");
       return;
     }
+    if (usesMobile && (!captcha || !captchaAnswer.trim())) {
+      setError("Enter the characters shown in the image.");
+      return;
+    }
+    const challenge = usesMobile && captcha
+      ? { captcha_id: captcha.captcha_id, captcha_answer: captchaAnswer.trim() }
+      : undefined;
     const generation = beginRequest();
     if (generation === null) return;
     setBusy(true);
@@ -190,12 +272,15 @@ function PatientAbhaIdentity({ patient }: Props) {
       : usesMobile
         ? { mobile: digits }
         : usesAddress
-          ? { abha_address: identifier.trim() }
+          ? { abha_address: identifier.trim(), address_otp: addressOtp }
           : { abha_number: identifier };
     try {
-      const result = flow === "existing"
-        ? await requestAbhaLoginOtp(patient.id, loginIdentifier, newIdempotencyKey())
-        : await requestAbhaEnrolmentOtp(patient.id, identifier, ENROLMENT_CONSENT, newIdempotencyKey());
+      // A consent exists only in the new flow, and the new flow cannot reach here without one.
+      const result = enrolmentConsent
+        ? await requestAbhaEnrolmentOtp(patient.id, identifier, enrolmentConsent, newIdempotencyKey())
+        : challenge
+          ? await requestAbhaLoginOtp(patient.id, loginIdentifier, newIdempotencyKey(), challenge)
+          : await requestAbhaLoginOtp(patient.id, loginIdentifier, newIdempotencyKey());
       if (!isCurrent(generation)) return;
       requestedIdentifier.current = loginIdentifier;
       applyRequested(result);
@@ -207,13 +292,15 @@ function PatientAbhaIdentity({ patient }: Props) {
       if (isCurrent(generation)) {
         lifecycle.current.pending = false;
         setBusy(false);
+        if (challenge) newCaptcha();
       }
     }
   }
 
   async function resendOtp() {
     const current = requestedIdentifier.current;
-    if (!sessionId || !current || !canResend) return;
+    // The demographic and licence flows own their sessions, so never reach this resend.
+    if (!sessionId || !current || !canResend || flow === "demographic" || flow === "licence") return;
     const generation = beginRequest();
     if (generation === null) return;
     setBusy(true);
@@ -246,6 +333,10 @@ function PatientAbhaIdentity({ patient }: Props) {
   async function verifyOtp() {
     if (!sessionId || !otpValid || !mobileValid) {
       setError("Enter the OTP sent to the patient before continuing.");
+      return;
+    }
+    if (enrolMobileMissing) {
+      setError("Enter the patient's 10-digit mobile number. ABDM needs it to create the ABHA.");
       return;
     }
     const generation = beginRequest();
@@ -456,7 +547,14 @@ function PatientAbhaIdentity({ patient }: Props) {
       <div className="flex flex-wrap gap-2" role="group" aria-label="ABHA identity flow">
         <button type="button" onClick={() => changeFlow("existing")} aria-pressed={flow === "existing"} className={`rounded-md border px-3 py-2 text-sm ${flow === "existing" ? "border-primary bg-primary/10" : "border-border"}`}>{t("receptionist.abha.useExisting")}</button>
         <button type="button" onClick={() => changeFlow("new")} aria-pressed={flow === "new"} className={`rounded-md border px-3 py-2 text-sm ${flow === "new" ? "border-primary bg-primary/10" : "border-border"}`}>{t("receptionist.abha.create")}</button>
+        <button type="button" onClick={() => changeFlow("demographic")} aria-pressed={flow === "demographic"} className={`rounded-md border px-3 py-2 text-sm ${flow === "demographic" ? "border-primary bg-primary/10" : "border-border"}`}>{t("receptionist.abha.createDemographic")}</button>
+        <button type="button" onClick={() => changeFlow("licence")} aria-pressed={flow === "licence"} className={`rounded-md border px-3 py-2 text-sm ${flow === "licence" ? "border-primary bg-primary/10" : "border-border"}`}>{t("receptionist.abha.createLicence")}</button>
       </div>
+
+      {flow === "demographic" ? (
+        <DemographicAbhaEnrolment patient={patient} onLinked={setLinked} />
+      ) : null}
+      {flow === "licence" ? <DrivingLicenceAbhaEnrolment patient={patient} /> : null}
 
       {flow === "existing" && !sessionId ? (
         <div className="flex flex-wrap gap-2" role="group" aria-label="Verification method">
@@ -467,7 +565,7 @@ function PatientAbhaIdentity({ patient }: Props) {
         </div>
       ) : null}
 
-      {accounts.length > 0 ? (
+      {flow === "demographic" || flow === "licence" ? null : accounts.length > 0 ? (
         <fieldset className="space-y-3">
           <legend className="text-sm text-muted-foreground">ABDM returned more than one account. Choose the one that belongs to this patient.</legend>
           {accounts.map((account) => (
@@ -500,13 +598,46 @@ function PatientAbhaIdentity({ patient }: Props) {
               className={`w-full rounded-md border px-3 py-2 ${identifier && !identifierValid ? "border-danger" : "border-border"}`}
             />
           </label>
-          {flow === "new" ? (
-            <label className="flex items-start gap-2 text-sm">
-              <input type="checkbox" checked={consentGranted} onChange={(event) => setConsentGranted(event.target.checked)} />
-              <span>{ENROLMENT_CONSENT_TEXT}</span>
-            </label>
+          {usesAddress ? (
+            <div className="flex flex-wrap gap-2" role="group" aria-label="ABHA address OTP">
+              <button type="button" onClick={() => setAddressOtp("mobile")} aria-pressed={addressOtp === "mobile"} className={`rounded-md border px-3 py-1.5 text-xs ${addressOtp === "mobile" ? "border-primary bg-primary/10" : "border-border"}`}>{t("receptionist.abha.methodAbhaMobile")}</button>
+              <button type="button" onClick={() => setAddressOtp("aadhaar")} aria-pressed={addressOtp === "aadhaar"} className={`rounded-md border px-3 py-1.5 text-xs ${addressOtp === "aadhaar" ? "border-primary bg-primary/10" : "border-border"}`}>{t("receptionist.abha.methodAadhaar")}</button>
+            </div>
           ) : null}
-          <button type="button" disabled={busy || !identifierValid || (flow === "new" && !consentGranted)} onClick={() => void requestOtp()} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{busy ? t("receptionist.abha.requestingOtp") : t("receptionist.abha.sendOtp")}</button>
+          {usesMobile ? (
+            <div className="space-y-2 text-sm" aria-label="Image check">
+              {captchaError ? (
+                <p role="alert" className="text-danger">{captchaError}</p>
+              ) : captcha ? (
+                // eslint-disable-next-line @next/next/no-img-element -- a one-use data URI, not an optimisable asset
+                <img src={captcha.image} alt="Type the characters shown in this image" width={170} height={56} className="rounded border border-border" />
+              ) : (
+                <p role="status" className="text-muted-foreground">Loading the image check…</p>
+              )}
+              <div className="flex gap-2">
+                <input name="captcha_answer" value={captchaAnswer} onChange={(event) => setCaptchaAnswer(event.target.value.toUpperCase())}
+                  autoComplete="off" maxLength={8} placeholder="Characters in the image" className="w-full rounded-md border border-border px-3 py-2" />
+                <button type="button" onClick={newCaptcha} className="rounded-md border border-border px-3 py-2">New image</button>
+              </div>
+            </div>
+          ) : null}
+          {flow === "new" ? (
+            <AbhaConsentDeclaration
+              declaration={declaration}
+              error={declarationError}
+              ticks={ticks}
+              onTick={(id, checked) => setTicks((current) => ({ ...current, [id]: checked }))}
+              language={consentLanguage}
+              onLanguage={(next) => {
+                if (next === consentLanguage) return;
+                setConsentLanguage(next);
+                setDeclaration(null);
+                setDeclarationError(null);
+                setTicks({});
+              }}
+            />
+          ) : null}
+          <button type="button" disabled={busy || !identifierValid || (usesMobile && !captchaAnswer.trim()) || (flow === "new" && !declarationAccepted(declaration, ticks))} onClick={() => void requestOtp()} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{busy ? t("receptionist.abha.requestingOtp") : t("receptionist.abha.sendOtp")}</button>
         </div>
       ) : enrolPhase === "mobile" ? (
         <div className="space-y-3">
@@ -554,12 +685,12 @@ function PatientAbhaIdentity({ patient }: Props) {
           </p>
           {flow === "new" ? (
             <label className="block space-y-1 text-sm">
-              <span className="text-muted-foreground">Mobile override (only if ABDM asks for it)</span>
+              <span className="text-muted-foreground">Mobile number for this ABHA (required)</span>
               <input value={mobile} onChange={(event) => setMobile(event.target.value)} inputMode="tel" autoComplete="tel" aria-invalid={!mobileValid} className={`w-full rounded-md border px-3 py-2 ${mobileValid ? "border-border" : "border-danger"}`} />
             </label>
           ) : null}
           <div className="flex gap-3">
-            <button type="button" disabled={busy || !otpValid || !mobileValid} onClick={() => void verifyOtp()} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{busy ? t("receptionist.abha.verifying") : t("receptionist.abha.verifyAndLink")}</button>
+            <button type="button" disabled={busy || !otpValid || !mobileValid || enrolMobileMissing} onClick={() => void verifyOtp()} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{busy ? t("receptionist.abha.verifying") : t("receptionist.abha.verifyAndLink")}</button>
             <button type="button" disabled={busy} onClick={() => changeFlow(flow)} className="text-sm underline">{t("receptionist.abha.startAgain")}</button>
           </div>
         </div>

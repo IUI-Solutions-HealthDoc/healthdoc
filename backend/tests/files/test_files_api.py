@@ -101,6 +101,16 @@ class TestSniffContentType:
         assert service.sniff_content_type(b"") is None
 
 
+class TestSensitivityReaders:
+    def test_desk_reads_normal_but_not_sensitive(self):
+        assert service.may_read_sensitivity("normal", ["receptionist"])
+        assert not service.may_read_sensitivity("sensitive", ["receptionist"])
+        assert service.may_read_sensitivity("sensitive", ["doctor"])
+
+    def test_unrecognised_label_fails_closed_for_every_role(self):
+        assert not service.may_read_sensitivity("important", ["admin", "doctor"])
+
+
 class TestUploadFile:
     pytestmark = pytest.mark.asyncio
     async def test_valid_upload_creates_record_logs_and_lands_in_minio(
@@ -313,9 +323,64 @@ class TestFilesRouterHTTP:
             response = await client.post(
                 "/files/upload",
                 files={"upload": ("test.jpg", _JPEG_BYTES, "image/jpeg")},
-                data={"patient_id": str(uuid.uuid4())},  # doesn't exist
+                data={"owner_module": "patients", "patient_id": str(uuid.uuid4())},  # doesn't exist
             )
         assert response.status_code == 404
+
+    @pytest.mark.parametrize(
+        "form, code",
+        [
+            ({}, "invalid_owner_module"),
+            ({"owner_module": "../other-facility"}, "invalid_owner_module"),
+            ({"owner_module": "patients", "sensitivity": "top-secret"}, "invalid_sensitivity"),
+        ],
+    )
+    async def test_upload_endpoint_refuses_unlisted_owner_module_and_sensitivity(
+        self, session_factory, engine: AsyncEngine, user_id, form, code
+    ):
+        sub = await _keycloak_sub_for(engine, user_id)
+        async with _client_for(sub, ["doctor"], session_factory) as client:
+            response = await client.post(
+                "/files/upload", files={"upload": ("test.jpg", _JPEG_BYTES, "image/jpeg")}, data=form,
+            )
+        assert response.status_code == 422
+        assert response.json()["detail"]["code"] == code
+
+    async def test_receptionist_cannot_upload_a_sensitive_file(
+        self, session_factory, engine: AsyncEngine, user_id
+    ):
+        sub = await _keycloak_sub_for(engine, user_id)
+        async with _client_for(sub, ["receptionist"], session_factory) as client:
+            response = await client.post(
+                "/files/upload",
+                files={"upload": ("test.jpg", _JPEG_BYTES, "image/jpeg")},
+                data={"owner_module": "orders", "sensitivity": "sensitive"},
+            )
+        assert response.status_code == 403
+        assert response.json()["detail"]["code"] == "sensitivity_not_permitted"
+
+    async def test_sensitive_file_reads_as_absent_to_receptionist_without_logging(
+        self, session_factory, engine: AsyncEngine, facility_id, user_id
+    ):
+        async with session_factory() as db:
+            record = await service.upload_file(
+                db, upload=_upload_file(_JPEG_BYTES), facility_id=facility_id, uploaded_by=user_id,
+                owner_module="orders", patient_id=None, sensitivity="sensitive", ip_address=None,
+            )
+            await db.commit()
+
+        sub = await _keycloak_sub_for(engine, user_id)
+        async with _client_for(sub, ["receptionist"], session_factory) as client:
+            metadata = await client.get(f"/files/{record.id}")
+            download = await client.get(f"/files/{record.id}/download-url")
+        assert metadata.status_code == 404
+        assert download.status_code == 404
+        assert await _access_log_rows(engine, file_id=record.id) == ["upload"]
+
+        async with _client_for(sub, ["doctor"], session_factory) as client:
+            allowed = await client.get(f"/files/{record.id}")
+        assert allowed.status_code == 200
+        assert await _access_log_rows(engine, file_id=record.id) == ["upload", "view"]
 
     async def test_get_file_endpoint_returns_metadata_and_logs_view(
         self, session_factory, engine: AsyncEngine, facility_id, user_id

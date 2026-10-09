@@ -13,6 +13,7 @@ import Typography from "@mui/material/Typography";
 
 import { StatusChip } from "@/components/ui/StatusChip";
 import { toast } from "@/components/ui/toast";
+import { newIdempotencyKey } from "@/lib/api";
 import { useLocale } from "@/lib/i18n";
 import { meridian } from "@/styles/theme";
 import { transitionConsentStatus, withdrawConsent } from "../api/consent";
@@ -37,38 +38,64 @@ export function ConsentRecordDetail({
   const [withdrawReason, setWithdrawReason] = useState("");
   const [busy, setBusy] = useState(false);
   const mounted = useRef(true);
+  const busyRef = useRef(false);
+  // One key per exact request: a retry after a lost response replays the
+  // original write, while a changed reason or decision is a new request.
+  const retryKeys = useRef(new Map<string, string>());
   useEffect(() => {
     mounted.current = true;
     return () => { mounted.current = false; };
   }, []);
 
+  const keyFor = useCallback((scope: string) => {
+    let key = retryKeys.current.get(scope);
+    if (!key) {
+      key = newIdempotencyKey();
+      retryKeys.current.set(scope, key);
+    }
+    return key;
+  }, []);
+
   const handleWithdraw = useCallback(async () => {
-    if (!record || !mounted.current) return;
+    if (!record || !mounted.current || busyRef.current) return;
+    const reason = withdrawReason.trim() || null;
+    const scope = `withdraw|${record.id}|${reason ?? ""}`;
+    busyRef.current = true;
     setBusy(true);
     try {
-      const next = await withdrawConsent(record.id, {
-        withdrawn_by_type: "patient",
-        reason: withdrawReason || null,
-      });
+      const withdrawal = await withdrawConsent(
+        record.id,
+        { withdrawn_by_type: "patient", reason },
+        keyFor(scope),
+      );
+      retryKeys.current.delete(scope);
       if (!mounted.current) return;
       toast.success(t("consent.withdrawnToast"));
       setWithdrawOpen(false);
       setWithdrawReason("");
-      onRecordUpdated?.(next);
+      onRecordUpdated?.({
+        ...record,
+        status: "revoked",
+        status_changed_at: withdrawal.withdrawn_at,
+      });
     } catch (e) {
       if (!mounted.current) return;
       toast.error(e instanceof Error ? e.message : "Withdrawal failed");
     } finally {
+      busyRef.current = false;
       if (mounted.current) setBusy(false);
     }
-  }, [record, withdrawReason, onRecordUpdated]);
+  }, [record, withdrawReason, onRecordUpdated, t, keyFor]);
 
   const handleTransition = useCallback(
     async (status: "granted" | "denied") => {
-      if (!record || !mounted.current) return;
+      if (!record || !mounted.current || busyRef.current) return;
+      const scope = `status|${record.id}|${status}`;
+      busyRef.current = true;
       setBusy(true);
       try {
-        const next = await transitionConsentStatus(record.id, { status });
+        const next = await transitionConsentStatus(record.id, { status }, keyFor(scope));
+        retryKeys.current.delete(scope);
         if (!mounted.current) return;
         toast.success(`Consent ${status}`);
         onRecordUpdated?.(next);
@@ -76,10 +103,11 @@ export function ConsentRecordDetail({
         if (!mounted.current) return;
         toast.error(e instanceof Error ? e.message : "Transition failed");
       } finally {
+        busyRef.current = false;
         if (mounted.current) setBusy(false);
       }
     },
-    [record, onRecordUpdated],
+    [record, onRecordUpdated, keyFor],
   );
   if (loading) {
     return (

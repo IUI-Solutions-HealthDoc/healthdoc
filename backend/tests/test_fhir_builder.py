@@ -1,4 +1,5 @@
 from datetime import UTC, date, datetime
+from decimal import Decimal
 from xml.etree import ElementTree
 
 import pytest
@@ -12,10 +13,10 @@ from app.integrations.abdm.fhir.builder import (
 )
 
 
-def test_all_five_record_types_valid():
+def test_all_eight_record_types_valid():
     bundles = build_all("patient-123", "HPR-9999")
     assert set(bundles) == set(RECORD_TYPES)
-    assert len(RECORD_TYPES) == 5
+    assert len(RECORD_TYPES) == 8
     for rt, b in bundles.items():
         assert validate_min(b) == [], (rt, validate_min(b))
 
@@ -148,9 +149,27 @@ def test_sandbox_identifier_cannot_impersonate_a_different_account():
         build_clinical_bundle("WellnessRecord", **facts)
 
 
+def _dose(**changes):
+    return {
+        "id": "dose-1",
+        "vaccine": "Test vaccine",
+        "occurred_at": datetime(2026, 1, 2, tzinfo=UTC),
+        "dose_number": 1,
+        **changes,
+    }
+
+
 @pytest.mark.parametrize("record_type", RECORD_TYPES)
 def test_document_label_survives_export_without_changing_the_profile_type(record_type):
-    facts = {**_facts(), "care_plan": "Synthetic test content"}
+    facts = (
+        {**_facts(), "encounter": None, "immunizations": [_dose()]}
+        if record_type == "ImmunizationRecord"
+        else {**_facts(), "encounter": None, "practitioner": None, "invoice": _bill()}
+        if record_type == "Invoice"
+        else {**_facts(), "encounter": None, "practitioner": None, "document": _released()}
+        if record_type == "HealthDocumentRecord"
+        else {**_facts(), "care_plan": "Synthetic test content"}
+    )
     original = build_clinical_bundle(record_type, **facts)["entry"][0]["resource"]
     label = "ABDM SANDBOX TEST — SYNTHETIC <not clinical advice> & test only"
     composition = build_clinical_bundle(record_type, **facts, document_label=label)["entry"][0][
@@ -228,22 +247,77 @@ def test_imaging_never_claims_a_pacs_uid_is_an_image():
     assert media["content"]["contentType"] != "application/dicom"
 
 
-def test_imaging_without_retrievable_study_reference_fails_closed():
-    with pytest.raises(ValueError, match="PACS study UID"):
+def _resources(bundle, kind):
+    return [e["resource"] for e in bundle["entry"] if e["resource"]["resourceType"] == kind]
+
+
+_XRAY = {
+    "id": "radiology-1",
+    "kind": "radiology",
+    "modality": "xray",
+    "name": "Chest radiograph",
+    "conclusion": "No acute finding",
+    "observations": [],
+}
+
+
+def test_imaging_without_a_pacs_study_carries_the_signed_report_not_an_image():
+    # NRCeS DiagnosticReportImaging needs one media; a facility with no PACS
+    # still has a signed report (live, 6 Oct 2026: every X-ray failed here).
+    bundle = build_clinical_bundle("DiagnosticReport", **_facts(), diagnostic_reports=[_XRAY])
+    (media,) = _resources(bundle, "Media")
+    assert media["content"]["contentType"] == "text/plain"
+    assert "no images stored" in media["content"]["title"]
+    assert "PACS" not in media["text"]["div"]
+    (report,) = _resources(bundle, "DiagnosticReport")
+    assert report["media"][0]["link"]["reference"] == f"urn:uuid:{media['id']}"
+
+
+def test_imaging_with_a_pacs_study_still_carries_the_pacs_reference():
+    bundle = build_clinical_bundle(
+        "DiagnosticReport", **_facts(), diagnostic_reports=[{**_XRAY, "pacs_study_uid": "2.25.1"}])
+    (media,) = _resources(bundle, "Media")
+    assert media["content"]["contentType"] == "application/json"
+    assert media["content"]["title"].startswith("PACS study reference")
+
+
+def test_imaging_without_signed_findings_fails_closed():
+    with pytest.raises(ValueError, match="signed findings"):
         build_clinical_bundle(
-            "DiagnosticReport",
-            **_facts(),
-            diagnostic_reports=[
-                {
-                    "id": "radiology-1",
-                    "kind": "radiology",
-                    "modality": "xray",
-                    "name": "Chest radiograph",
-                    "conclusion": "No acute finding",
-                    "observations": [],
-                }
-            ],
-        )
+            "DiagnosticReport", **_facts(), diagnostic_reports=[{**_XRAY, "conclusion": ""}])
+
+
+_CBC = {
+    "id": "lab-1",
+    "kind": "lab",
+    "name": "Complete Blood Count",
+    "observations": [{"id": "o1", "name": "Haemoglobin", "value": 9.4, "unit": "g/dL"}],
+}
+
+
+def test_a_laboratory_report_without_a_registered_author_is_the_facilitys():
+    bundle = build_clinical_bundle(
+        "DiagnosticReport", **{**_facts(), "practitioner": None}, diagnostic_reports=[_CBC])
+    assert _resources(bundle, "Practitioner") == []
+    (organization,) = _resources(bundle, "Organization")
+    organization_ref = f"urn:uuid:{organization['id']}"
+    (composition,) = _resources(bundle, "Composition")
+    assert [a["reference"] for a in composition["author"]] == [organization_ref]
+    (report,) = _resources(bundle, "DiagnosticReport")
+    assert report["resultsInterpreter"][0]["reference"] == organization_ref
+    assert all(o["performer"][0]["reference"] == organization_ref
+               for o in _resources(bundle, "Observation"))
+
+
+@pytest.mark.parametrize(
+    ("record_type", "content"),
+    [("DiagnosticReport", {"diagnostic_reports": [_XRAY]}),
+     ("DiagnosticReport", {"diagnostic_reports": [_CBC, _XRAY]}),
+     ("OPConsultation", {"chief_complaints": [{"text": "Cough"}]})],
+)
+def test_only_a_laboratory_report_may_omit_its_practitioner(record_type, content):
+    with pytest.raises(ValueError, match="requires a practitioner"):
+        build_clinical_bundle(record_type, **{**_facts(), "practitioner": None}, **content)
 
 
 def test_document_graph_uses_resolvable_absolute_uuid_references():
@@ -271,3 +345,146 @@ def test_a_text_only_diagnosis_does_not_emit_an_empty_coding_array():
         if entry["resource"]["resourceType"] == "Condition"
     )
     assert condition["code"] == {"text": "Viral fever"}
+
+
+def test_an_immunization_record_needs_no_encounter_and_holds_one_coded_section():
+    bundle = build_clinical_bundle(
+        "ImmunizationRecord", **{**_facts(), "encounter": None}, immunizations=[_dose()]
+    )
+    assert validate_min(bundle) == []
+    kinds = [entry["resource"]["resourceType"] for entry in bundle["entry"]]
+    assert "Encounter" not in kinds and kinds.count("Immunization") == 1
+    composition = bundle["entry"][0]["resource"]
+    assert composition["meta"]["profile"] == [
+        "https://nrces.in/ndhm/fhir/r4/StructureDefinition/ImmunizationRecord"
+    ]
+    assert "encounter" not in composition
+    coding = {"system": "http://snomed.info/sct", "code": "41000179103",
+              "display": "Immunization record"}
+    assert composition["type"]["coding"] == [coding]
+    assert [section["code"]["coding"] for section in composition["section"]] == [[coding]]
+
+
+def test_vaccine_site_and_route_travel_as_text_not_as_guessed_codes():
+    bundle = build_clinical_bundle(
+        "ImmunizationRecord", **{**_facts(), "encounter": None},
+        immunizations=[_dose(site="left_upper_arm", route="intradermal")],
+    )
+    immunization = bundle["entry"][-1]["resource"]
+    assert immunization["vaccineCode"] == {"text": "Test vaccine"}
+    assert immunization["site"] == {"text": "left upper arm"}
+    assert immunization["route"] == {"text": "intradermal"}
+    assert "note" not in immunization and "lotNumber" not in immunization
+
+
+@pytest.mark.parametrize("missing", ["vaccine", "occurred_at", "dose_number"])
+def test_an_immunization_without_its_required_facts_is_refused(missing):
+    with pytest.raises(ValueError, match=missing):
+        build_clinical_bundle(
+            "ImmunizationRecord", **{**_facts(), "encounter": None},
+            immunizations=[_dose(**{missing: None})],
+        )
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [{"care_plan": "Plan"}, {"diagnoses": [{"text": "Fever"}]},
+     {"observations": [{"name": "Pulse rate", "value": 72, "unit": "/min"}]}],
+)
+def test_an_immunization_record_carries_nothing_but_immunizations(extra):
+    with pytest.raises(ValueError, match="immunizations only"):
+        build_clinical_bundle(
+            "ImmunizationRecord", **{**_facts(), "encounter": None},
+            immunizations=[_dose()], **extra,
+        )
+
+
+@pytest.mark.parametrize(
+    "record_type",
+    [t for t in RECORD_TYPES if t not in {"ImmunizationRecord", "Invoice", "HealthDocumentRecord"}],
+)
+def test_every_other_document_still_requires_an_encounter_and_refuses_doses(record_type):
+    with pytest.raises(ValueError, match="requires an encounter"):
+        build_clinical_bundle(
+            record_type, **{**_facts(), "encounter": None}, care_plan="Synthetic test content"
+        )
+    with pytest.raises(ValueError, match="cannot carry immunizations"):
+        build_clinical_bundle(record_type, **_facts(), immunizations=[_dose()])
+
+
+def test_the_minimum_check_still_demands_an_encounter_outside_immunization_records():
+    bundle = build_clinical_bundle("WellnessRecord", **_facts(), care_plan="Synthetic")
+    bundle["entry"] = [
+        entry for entry in bundle["entry"] if entry["resource"]["resourceType"] != "Encounter"
+    ]
+    assert validate_min(bundle) == ["bundle must contain a Encounter"]
+
+def _released() -> dict:
+    return {
+        "id": "doc-1", "title": "Synthetic released document", "content_type": "application/pdf",
+        "document_date": date(2026, 10, 1), "content": b"%PDF-1.4\n%%EOF\n",
+    }
+
+
+def test_a_health_document_record_carries_the_released_pdf_only():
+    facts = {**_facts(), "encounter": None, "practitioner": None}
+    bundle = build_clinical_bundle("HealthDocumentRecord", **facts, document=_released())
+    kinds = [entry["resource"]["resourceType"] for entry in bundle["entry"]]
+    assert kinds == ["Composition", "Organization", "Patient", "DocumentReference"]
+    with pytest.raises(ValueError, match="released document only"):
+        build_clinical_bundle(
+            "HealthDocumentRecord", **facts, document=_released(), care_plan="Synthetic"
+        )
+    with pytest.raises(ValueError, match="must be a PDF"):
+        build_clinical_bundle(
+            "HealthDocumentRecord", **facts,
+            document={**_released(), "content_type": "image/jpeg"},
+        )
+    with pytest.raises(ValueError, match="cannot carry a released document"):
+        build_clinical_bundle("WellnessRecord", **_facts(), document=_released())
+
+
+def _bill() -> dict:
+    return {
+        "id": "bill-1", "number": "INV-TEST-1", "status": "paid", "type_code": "03",
+        "issued_at": datetime(2026, 10, 5, 9, 0, tzinfo=UTC), "net_amount": Decimal("450.00"),
+        "discount_amount": Decimal("50.00"), "scheme_adjustment": Decimal("0"),
+        "lines": [
+            {"id": "l1", "category": "consultation", "description": "OPD consultation",
+             "quantity": Decimal("1"), "amount": Decimal("400.00")},
+            {"id": "l2", "category": "pharmacy", "description": "Paracetamol 500 mg",
+             "quantity": Decimal("10"), "amount": Decimal("100.00")},
+        ],
+    }
+
+
+def test_an_invoice_record_is_authored_by_the_facility_and_carries_only_the_bill():
+    bundle = build_clinical_bundle("Invoice", **{**_facts(), "encounter": None, "practitioner": None},
+                                   invoice=_bill())
+    assert validate_min(bundle) == []
+    kinds = [e["resource"]["resourceType"] for e in bundle["entry"]]
+    assert kinds == ["Composition", "Organization", "Patient", "Invoice", "ChargeItem", "ChargeItem"]
+    invoice = bundle["entry"][3]["resource"]
+    assert invoice["status"] == "balanced"
+    assert invoice["totalNet"] == invoice["totalGross"] == {"value": 450.0, "currency": "INR"}
+    assert invoice["totalPriceComponent"][0]["type"] == "discount"
+    assert invoice["totalPriceComponent"][0]["amount"]["value"] == 50.0
+    medicines = bundle["entry"][5]["resource"]
+    assert medicines["code"]["coding"][0]["code"] == "05" and medicines["quantity"] == {"value": 10.0}
+
+
+@pytest.mark.parametrize("status", ["draft", "cancelled"])
+def test_a_draft_or_cancelled_bill_is_never_built(status):
+    with pytest.raises(ValueError, match="not shared"):
+        build_clinical_bundle("Invoice", **{**_facts(), "encounter": None, "practitioner": None},
+                              invoice={**_bill(), "status": status})
+
+
+def test_an_invoice_carries_no_clinical_content_and_others_carry_no_invoice():
+    with pytest.raises(ValueError, match="invoice only"):
+        build_clinical_bundle("Invoice", **{**_facts(), "practitioner": None}, invoice=_bill(),
+                              care_plan="Synthetic")
+    with pytest.raises(ValueError, match="cannot carry an invoice"):
+        build_clinical_bundle("OPConsultation", **_facts(), invoice=_bill(), care_plan="Synthetic")
+    with pytest.raises(ValueError, match="requires a practitioner"):
+        build_clinical_bundle("OPConsultation", **{**_facts(), "practitioner": None}, care_plan="Synthetic")

@@ -24,21 +24,18 @@ from app.integrations.abdm.hip.models import (
     AbdmHipConsentArtefact,
     AbdmHipHealthInformationRequest,
 )
-from app.integrations.abdm.hiu import worker as hiu_worker
 from app.opd.models import Encounter, Visit
 from app.users.models import Facility
+from tests.integrations.abdm_serving import serve
 
 
 @pytest.fixture
 async def transfer_case(db, seed, opd_visit, monkeypatch):
     dept, _, doctor = seed
-    from types import SimpleNamespace
 
     facility = await db.get(Facility, dept.facility_id)
     facility.hfr_facility_id = "TEST-HFR"
-    monkeypatch.setattr(
-        hiu_worker, "get_settings", lambda: SimpleNamespace(abdm_hfr_facility_id="TEST-HFR")
-    )
+    serve(monkeypatch, "TEST-HFR")
     monkeypatch.setattr(
         callback_replies, "SessionLocal", async_sessionmaker(db.bind, expire_on_commit=False)
     )
@@ -189,6 +186,79 @@ async def test_worker_refuses_an_old_request_with_unknown_scope(db, transfer_cas
     assert row.failure_reason == "Original transfer scope is unavailable; request data again"
 
 
+async def _refused_before_any_page(db, transfer_case):
+    payload, callback, _, _ = transfer_case
+    tasks = BackgroundTasks()
+    await external_router.hip_health_information_request(payload, tasks, callback, db)
+    row = (await db.execute(select(AbdmHipHealthInformationRequest))).scalar_one()
+    row.requested_from = row.requested_to = row.requested_hi_types = None
+    await db.commit()
+    await tasks()
+    db.expire_all()
+    row = (await db.execute(select(AbdmHipHealthInformationRequest))).scalar_one()
+    assert row.status == "failed"
+    worker._notify_gateway.reset_mock()
+    return row
+
+
+async def test_failure_notice_names_the_consented_care_contexts(db, transfer_case):
+    """30 September 2026: a transfer refused before any page was built was
+    reported with careContextReference "", and NHA refused that notice."""
+    references = [c.reference for c in transfer_case[2]]
+    row = await _refused_before_any_page(db, transfer_case)
+    await worker.notify_transaction(row.id)
+    worker._notify_gateway.assert_awaited_once()
+    sent = worker._notify_gateway.await_args.kwargs
+    assert sent["session_status"] == "FAILED"
+    assert [s["careContextReference"] for s in sent["statuses"]] == references
+    assert {s["hiStatus"] for s in sent["statuses"]} == {"ERRORED"}
+
+
+async def test_failure_notice_without_a_care_context_is_not_sent(db, transfer_case):
+    row = await _refused_before_any_page(db, transfer_case)
+    artefact = (
+        await db.execute(
+            select(AbdmHipConsentArtefact).where(
+                AbdmHipConsentArtefact.consent_artefact_id == row.consent_artefact_id
+            )
+        )
+    ).scalar_one()
+    artefact.raw_artefact = {"consentDetail": {"careContexts": []}}
+    await db.commit()
+    with pytest.raises(worker.TransferError):
+        await worker.notify_transaction(row.id)
+    worker._notify_gateway.assert_not_awaited()
+
+
+async def test_a_refused_push_records_the_hius_status_and_code(monkeypatch):
+    """1 October 2026: ABDM's PHR refused a page with 400 ABDM-9999 and the
+    worker kept only "failed after bounded retries"."""
+    import httpx
+
+    def refuse(request):
+        return httpx.Response(
+            400,
+            json={
+                "code": "ABDM-9999: ",
+                "message": "Could not read encrypted content from input encoded key spec",
+            },
+        )
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        worker.httpx,
+        "AsyncClient",
+        lambda **kw: real_client(transport=httpx.MockTransport(refuse), **kw),
+    )
+    monkeypatch.setattr(worker.asyncio, "sleep", AsyncMock())
+    # A 4xx is the HIU's verdict on this document; repeating it cannot help
+    # and used to hold back every later page (7 Oct 2026).
+    with pytest.raises(worker.PageRefused) as caught:
+        await worker._post_page("https://hiu.example/transfer", {"entries": []})
+    assert not isinstance(caught.value, worker.TransientTransferError)
+    assert str(caught.value) == "HIU refused the document (HIU returned HTTP 400 ABDM-9999)"
+
+
 async def test_unknown_document_dates_are_not_substituted_with_visit_dates(db, transfer_case):
     payload, callback, contexts, pushes = transfer_case
     contexts[1].document_at = None
@@ -277,3 +347,106 @@ async def test_authorisation_is_rechecked_between_pages(db, transfer_case, chang
     row = (await db.execute(select(AbdmHipHealthInformationRequest))).scalar_one()
     assert row.status == "failed"
     assert row.bundles_sent == "1"
+
+
+async def test_an_hiu_that_does_not_know_the_transaction_yet_is_waited_for(monkeypatch):
+    """Live, 3 Oct 2026: our push reached our own HIU before NHA's on-request
+    told it the transaction, and every page attempt got 404."""
+    import httpx
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        worker.httpx,
+        "AsyncClient",
+        lambda **kw: real_client(
+            transport=httpx.MockTransport(lambda request: httpx.Response(404, json={})), **kw
+        ),
+    )
+    monkeypatch.setattr(worker.asyncio, "sleep", AsyncMock())
+    with pytest.raises(worker.HiuTransactionUnknown):
+        await worker._post_page("https://hiu.example/transfer", {"entries": []})
+
+
+def _whole_range(payload):
+    now = datetime.now(UTC)
+    payload.hi_request.date_range.from_ = now - timedelta(days=29)
+    payload.hi_request.date_range.to = now - timedelta(hours=1)
+    return payload
+
+
+async def test_a_refused_document_does_not_hold_back_the_others(db, transfer_case):
+    # 7 Oct 2026: the HIU refused one X-ray report (422, then 409 on every
+    # retry) and the six records after it were never sent.
+    payload, callback, contexts, pushes = transfer_case
+    pushes.side_effect = [worker.PageRefused("HIU refused the document (HIU returned HTTP 422)")] + [
+        None
+    ] * (len(contexts) - 1)
+    tasks = BackgroundTasks()
+    await external_router.hip_health_information_request(_whole_range(payload), tasks, callback, db)
+    await tasks()
+    assert pushes.await_count == len(contexts) > 1
+    refused = pushes.call_args_list[0].args[1]["entries"][0]["careContextReference"]
+    db.expire_all()
+    row = (await db.execute(select(AbdmHipHealthInformationRequest))).scalar_one()
+    assert row.status == "delivered"
+    assert row.bundles_sent == str(len(contexts) - 1)
+    assert refused in row.failure_reason
+
+
+async def test_a_transfer_whose_every_document_is_refused_fails(db, transfer_case):
+    payload, callback, contexts, pushes = transfer_case
+    pushes.side_effect = worker.PageRefused("HIU refused the document (HIU returned HTTP 422)")
+    tasks = BackgroundTasks()
+    await external_router.hip_health_information_request(_whole_range(payload), tasks, callback, db)
+    await tasks()
+    db.expire_all()
+    row = (await db.execute(select(AbdmHipHealthInformationRequest))).scalar_one()
+    assert row.status == "failed"
+    assert row.failure_reason == "The HIU refused every document"
+
+
+def _revocation(consent_id: str, status: str = "REVOKED"):
+    from app.integrations.abdm.contracts_v3 import HipConsentCallback
+
+    # The shape ABDM sent on 7 Oct 2026: status and consentId, no consentDetail.
+    return HipConsentCallback.model_validate(
+        {"notification": {"status": status, "consentId": consent_id}}
+    )
+
+
+async def _artefact(db):
+    return (await db.execute(select(AbdmHipConsentArtefact))).scalar_one()
+
+
+@pytest.mark.parametrize("status", ["REVOKED", "EXPIRED"])
+async def test_a_revocation_without_consent_detail_stops_sharing(db, transfer_case, status):
+    payload, callback, _, pushes = transfer_case
+    artefact = await _artefact(db)
+    await external_router.hip_consent_notify(
+        _revocation(artefact.consent_artefact_id, status), callback, db)
+    db.expire_all()
+    assert (await _artefact(db)).status == status.lower()
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException):
+        await external_router.hip_health_information_request(
+            payload, BackgroundTasks(), GatewayCallback(str(uuid.uuid4()), datetime.now(UTC), "HIP-TEST"), db)
+    pushes.assert_not_awaited()
+
+
+async def test_a_grant_still_needs_its_consent_detail(db, transfer_case):
+    from fastapi import HTTPException
+
+    _, callback, _, _ = transfer_case
+    with pytest.raises(HTTPException) as caught:
+        await external_router.hip_consent_notify(_revocation(str(uuid.uuid4()), "GRANTED"), callback, db)
+    assert caught.value.status_code == 422
+
+
+async def test_a_revocation_for_an_unknown_consent_is_acknowledged(db, transfer_case):
+    _, callback, _, _ = transfer_case
+    before = (await _artefact(db)).status
+    response = await external_router.hip_consent_notify(_revocation(str(uuid.uuid4())), callback, db)
+    assert response.status_code == 202
+    db.expire_all()
+    assert (await _artefact(db)).status == before == "granted"

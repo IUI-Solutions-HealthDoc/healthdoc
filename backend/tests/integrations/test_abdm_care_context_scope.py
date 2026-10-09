@@ -5,9 +5,16 @@ from datetime import UTC, datetime
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import func, select
 
 from app.auth.deps import DbUser
-from app.integrations.abdm.hip.router import CareContextIn, create_care_context
+from app.integrations.abdm.hip import gateway as hip_gateway
+from app.integrations.abdm.hip.models import AbdmCareContext, AbdmCareContextLink
+from app.integrations.abdm.hip.router import (
+    CareContextIn,
+    create_care_context,
+    notify_care_context,
+)
 from app.opd.models import Encounter, Visit
 from app.patients.models import Patient
 from app.users.models import Facility, User
@@ -148,3 +155,79 @@ async def test_care_context_rejects_unknown_abdm_hi_type_before_insert(db):
         )
     assert caught.value.status_code == 422
     assert caught.value.detail["code"] == "invalid_hi_type"
+
+
+async def _published_context(db):
+    caller, patient_a, _patient_b, visit_a, _visit_b = await _seed_scope(db)
+    encounter = Encounter(
+        id=uuid.uuid4(),
+        visit_id=visit_a.id,
+        facility_id=caller.facility_id,
+        provider_user_id=caller.id,
+        started_at=visit_a.visit_date,
+        ended_at=datetime.now(UTC),
+        created_by=caller.id,
+    )
+    db.add(encounter)
+    await db.flush()
+    payload = CareContextIn(
+        patient_id=patient_a.id,
+        visit_id=visit_a.id,
+        reference=f"encounter/{encounter.id}",
+        display="OP consultation",
+        hi_type="OPConsultation",
+    )
+    return caller, patient_a, payload
+
+
+@pytest.mark.asyncio
+async def test_care_context_retry_replays_the_first_answer(db):
+    caller, _patient, payload = await _published_context(db)
+
+    first = await create_care_context(payload, current_db_user=caller, idempotency_key="cc-retry", db=db)
+    again = await create_care_context(payload, current_db_user=caller, idempotency_key="cc-retry", db=db)
+
+    assert again == first
+    count = await db.scalar(select(func.count()).select_from(AbdmCareContext))
+    assert count == 1
+
+
+@pytest.mark.asyncio
+async def test_care_context_key_reused_for_another_body_is_refused(db):
+    caller, _patient, payload = await _published_context(db)
+    await create_care_context(payload, current_db_user=caller, idempotency_key="cc-reuse", db=db)
+
+    with pytest.raises(HTTPException) as caught:
+        await create_care_context(
+            payload.model_copy(update={"display": "Different label"}),
+            current_db_user=caller,
+            idempotency_key="cc-reuse",
+            db=db,
+        )
+    assert caught.value.status_code == 409
+    assert caught.value.detail["code"] == "idempotency_key_reuse"
+
+
+@pytest.mark.asyncio
+async def test_notify_retry_does_not_call_the_gateway_twice(db, monkeypatch):
+    caller, patient, payload = await _published_context(db)
+    context = await create_care_context(payload, current_db_user=caller, idempotency_key="cc-n", db=db)
+    db.add(AbdmCareContextLink(
+        id=uuid.uuid4(), facility_id=caller.facility_id, patient_id=patient.id,
+        abha_address="synthetic@sbx", status="confirmed",
+    ))
+    await db.flush()
+
+    calls = []
+
+    async def fake_notify(**kwargs):
+        calls.append(kwargs["care_context_reference"])
+        return "synthetic-request-id", None
+
+    monkeypatch.setattr(hip_gateway, "notify_care_context", fake_notify)
+
+    first = await notify_care_context(context.id, current_db_user=caller, idempotency_key="n-1", db=db)
+    again = await notify_care_context(context.id, current_db_user=caller, idempotency_key="n-1", db=db)
+
+    assert first == again == {"notified": context.reference, "request_id": "synthetic-request-id"}
+    assert calls == [context.reference]

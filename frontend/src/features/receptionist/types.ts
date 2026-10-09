@@ -110,7 +110,7 @@ export interface AbhaOtpRequested {
 export type AbhaLoginIdentifier =
   | { abha_number: string }
   | { aadhaar: string }
-  | { abha_address: string }
+  | { abha_address: string; address_otp?: "mobile" | "aadhaar" }
   | { mobile: string };
 
 export interface AbhaIdentityLinked {
@@ -130,11 +130,34 @@ export interface AbhaIdentityLinked {
   accounts?: { abha_number: string; name?: string | null }[];
 }
 
+/** English is NHA's published text; Hindi is HealthDoc's labelled translation. */
+export type ConsentLanguage = "en" | "hi";
+
 export interface AbhaEnrolmentConsent {
   granted: boolean;
   code: string;
   version: string;
-  language: "en";
+  language: ConsentLanguage;
+  /** The desk's tick on each of NHA's published statements, by id. */
+  statements: Record<string, boolean>;
+  /** Digest of the declaration shown; the server refuses ticks on other text. */
+  declaration_sha256: string;
+}
+
+/** NHA's published ABHA consent as the server rendered it for this patient. */
+/** How the ABHA is created; a document flips NHA's first two statements. */
+export type ConsentMethod = "aadhaar" | "document";
+
+export interface AbhaDeclaration {
+  version: string;
+  ownership: "government" | "private";
+  language: ConsentLanguage;
+  method: ConsentMethod;
+  /** Set for a translation: says it is HealthDoc's, not NHA's, wording. */
+  notice: string | null;
+  intro: string;
+  statements: { id: string; text: string; ticked: boolean; required: boolean | null }[];
+  sha256: string;
 }
 
 /**
@@ -189,10 +212,10 @@ export const VISIT_TYPE_LABELS: Record<VisitType, string> = {
   direct_service: "Direct Service — Walk-in Lab / Pharmacy",
 };
 
+/** The server stamps `visit_date` itself; none is sent. */
 export interface VisitCreate {
   patient_id: string;
   visit_type: VisitType;
-  visit_date: string;
   department_id?: string | null;
 }
 
@@ -321,6 +344,11 @@ export interface StaleVisitsReport {
   candidates: StaleVisitCandidate[];
 }
 
+/** The reviewed visit ids, or an explicit `all`; the server refuses neither. */
+export type StaleVisitsReconcileRequest =
+  | { visit_ids: string[]; reason: string }
+  | { all: true; reason: string };
+
 export interface StaleVisitsReconcileResult {
   reconciled_count: number;
   skipped_count: number;
@@ -328,3 +356,16 @@ export interface StaleVisitsReconcileResult {
   skipped_details: Array<{ visit_id?: string; reason?: string }>;
 }
 
+
+/**
+ * M1 CRT_ABHA_405-408: a driving-licence enrolment. The number is provisional
+ * until a participating facility verifies the licence; it is never linked to
+ * the chart as an ABHA.
+ */
+export interface DrivingLicenceEnrolmentResult {
+  enrolment_number: string;
+  enrolment_state: string | null;
+  abha_address: string | null;
+  is_new: boolean | null;
+  linked: false;
+}

@@ -64,6 +64,11 @@ class AdmissionNotFound(Exception):
         self.admission_id = admission_id
 
 
+class DischargeBeforeAdmission(Exception):
+    """A discharge dated before its admission: the stay it describes cannot
+    have happened, and its discharge summary would be shared with that period."""
+
+
 class AdmissionNotActive(Exception):
     """Raised on transfer of an admission whose status is already
     something other than 'admitted' -- discharged, transferred out,
@@ -314,6 +319,11 @@ async def discharge_patient(
         raise AdmissionNotActive(admission.id, admission.status)
     if discharge_type == "transferred" and not (destination_facility_id or destination_facility_name):
         raise TransferDestinationRequired()
+    admitted_at = admission.admitted_at
+    if admitted_at is not None and admitted_at.tzinfo is None:
+        admitted_at = admitted_at.replace(tzinfo=UTC)
+    if discharged_at is not None and admitted_at is not None and discharged_at < admitted_at:
+        raise DischargeBeforeAdmission()
 
     discharge = Discharge(
         id=uuid.uuid4(), admission_id=admission.id, discharged_at=discharged_at or datetime.now(UTC),

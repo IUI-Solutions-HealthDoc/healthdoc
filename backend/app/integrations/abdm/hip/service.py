@@ -24,7 +24,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import select, tuple_
+from sqlalchemy import and_, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.integrations.abdm import hi_crypto
@@ -156,6 +156,56 @@ async def authorise_hi_request(
     )
 
 
+def consented_care_contexts(raw_artefact: dict | None) -> list[str]:
+    """The care-context references a stored consent artefact names, in order.
+
+    Stored artefacts are the gateway's notification (``notification.
+    consentDetail``); older rows hold the detail at the top level.
+    """
+    raw = raw_artefact or {}
+    detail = raw.get("notification", {}).get("consentDetail") or raw.get("consentDetail") or {}
+    references: list[str] = []
+    for item in detail.get("careContexts") or []:
+        reference = item.get("careContextReference")
+        if reference and str(reference) not in references:
+            references.append(str(reference))
+    return references
+
+
+async def withdraw_consent(
+    db: AsyncSession,
+    *,
+    facility_id: uuid.UUID,
+    artefact_id: str,
+    status: str,
+    raw: dict,
+) -> AbdmHipConsentArtefact | None:
+    """Apply a revocation or expiry that names only the consent.
+
+    The stored artefact stops authorising transfers at once (the transfer
+    worker re-reads it before every page). An artefact this HIP never received
+    has nothing to withdraw: the notice is acknowledged and nothing is stored,
+    because the row needs the patient the notice does not name.
+    """
+    if status not in ("revoked", "expired"):
+        raise HipError("unknown_status", f"Unrecognised consent status {status!r}")
+    existing = (
+        await db.execute(
+            select(AbdmHipConsentArtefact).where(
+                AbdmHipConsentArtefact.consent_artefact_id == artefact_id
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is None:
+        return None
+    if existing.facility_id != facility_id:
+        raise HipError("consent_scope_mismatch", "Consent artefact is unavailable")
+    if existing.status not in {"revoked", "expired"}:
+        existing.status = status
+        existing.raw_artefact = raw
+    return existing
+
+
 async def record_consent_notification(
     db: AsyncSession,
     *,
@@ -218,6 +268,10 @@ async def record_consent_notification(
     return artefact
 
 
+# HI types whose care context belongs to no visit.
+VISITLESS_HI_TYPES = ("ImmunizationRecord", "HealthDocumentRecord")
+
+
 async def list_care_contexts_for_transfer(
     db: AsyncSession,
     *,
@@ -251,13 +305,7 @@ async def list_care_contexts_for_transfer(
     # The artefact names the exact care contexts the patient authorised. A
     # valid consent for one consultation is not authority for every linked
     # consultation at this facility.
-    raw = authorisation.artefact.raw_artefact or {}
-    detail = raw.get("notification", {}).get("consentDetail") or raw.get("consentDetail") or {}
-    consented_references = {
-        str(item.get("careContextReference"))
-        for item in (detail.get("careContexts") or [])
-        if item.get("careContextReference")
-    }
+    consented_references = set(consented_care_contexts(authorisation.artefact.raw_artefact))
     # References are unique per patient, not per facility. Keep the verified
     # patient binding when intersecting references so a collision cannot share
     # a different patient's record.
@@ -272,11 +320,22 @@ async def list_care_contexts_for_transfer(
 
     stmt = (
         select(AbdmCareContext)
-        .join(Visit, Visit.id == AbdmCareContext.visit_id)
+        .outerjoin(Visit, Visit.id == AbdmCareContext.visit_id)
         .where(
             AbdmCareContext.facility_id == facility_id,
-            Visit.facility_id == facility_id,
-            Visit.patient_id == AbdmCareContext.patient_id,
+            # A vaccine dose and a released document are recorded outside any
+            # visit; the confirmed link above binds them to the patient. Every
+            # other document must still sit in this patient's visit here.
+            or_(
+                and_(
+                    AbdmCareContext.visit_id.is_(None),
+                    AbdmCareContext.hi_type.in_(VISITLESS_HI_TYPES),
+                ),
+                and_(
+                    Visit.facility_id == facility_id,
+                    Visit.patient_id == AbdmCareContext.patient_id,
+                ),
+            ),
             tuple_(AbdmCareContext.patient_id, AbdmCareContext.reference).in_(permitted_contexts),
             AbdmCareContext.hi_type.in_(authorisation.hi_types),
             AbdmCareContext.document_at.is_not(None),
@@ -299,7 +358,9 @@ def encrypt_bundle_for_hiu(
 ) -> tuple[str, dict, str]:
     """Encrypt one FHIR bundle for the requesting HIU.
 
-    Returns (ciphertext_b64, our_key_material_wire, sha256_of_plaintext).
+    Returns (ciphertext_b64, our_key_material_wire, md5_of_plaintext). The
+    checksum is MD5 of the content before encryption, as ABDM's data-flow
+    specification requires of `entries[].checksum`.
 
     A fresh keypair PER BUNDLE. Reusing one across a transfer would mean a
     single compromised ephemeral key opens every record in it, and the cost of
@@ -314,10 +375,12 @@ def encrypt_bundle_for_hiu(
         peer_nonce_b64=hiu_nonce_b64,
     )
     ciphertext = hi_crypto.encrypt(plaintext, aes_key=aes_key, iv=iv)
-    digest = hashlib.sha256(plaintext.encode()).hexdigest()
+    # An integrity checksum ABDM names, not a security control: the content is
+    # already authenticated by AES-GCM.
+    digest = hashlib.md5(plaintext.encode(), usedforsecurity=False).hexdigest()
     # `ours.private_key` goes out of scope here and is never returned, stored
     # or logged. The HIP side of the exchange is genuinely ephemeral.
-    return ciphertext, ours.to_wire(), digest
+    return ciphertext, ours.to_wire(x509=True), digest
 
 
 async def record_hi_request(

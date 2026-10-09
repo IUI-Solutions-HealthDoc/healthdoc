@@ -6,17 +6,25 @@ is what recovers accepted work after an API process dies or reloads.
 
 import argparse
 import asyncio
+import json
 import logging
 import uuid
+from collections.abc import Callable
 from contextlib import suppress
 from datetime import UTC, datetime
 
 from sqlalchemy import or_, select
 
-from app.common.config import get_settings
 from app.common.db import SessionLocal
 from app.integrations.abdm import jobs
-from app.integrations.abdm.client import AbdmAuthError, AbdmProtocolError, safe_failure_summary
+from app.integrations.abdm.client import (
+    AbdmAuthError,
+    AbdmProtocolError,
+    AbdmRejected,
+    safe_failure_summary,
+    safe_rejection_message,
+)
+from app.integrations.abdm.facilities import FacilityNotServed, service_id_for
 from app.integrations.abdm.hip import gateway, linking, worker
 from app.integrations.abdm.hip.documents import DocumentUnavailable, resolve_context_document
 from app.integrations.abdm.hip.models import (
@@ -35,6 +43,19 @@ class DeferredJob(RuntimeError):
     """Waiting for verified patient linkage, not an exhausted transport retry."""
 
 
+def _deep_link_applies(patient) -> bool:
+    """A live chart with a usable mobile and no ABHA address bound here."""
+    from app.integrations.abdm.hip.discovery import national_mobile
+
+    return (
+        patient is not None
+        and patient.deleted_at is None
+        and patient.merged_into_patient_id is None
+        and not patient.abha_address
+        and national_mobile(patient.mobile) is not None
+    )
+
+
 async def notify_context(job: jobs.AbdmJob) -> None:
     async with SessionLocal() as db:
         context = await db.get(AbdmCareContext, job.target_id)
@@ -42,8 +63,10 @@ async def notify_context(job: jobs.AbdmJob) -> None:
             raise DocumentUnavailable("Context unavailable")
         await resolve_context_document(db, context)
         facility = await db.get(Facility, context.facility_id)
-        if facility is None or facility.hfr_facility_id != get_settings().abdm_hfr_facility_id:
-            raise DeferredJob("Facility is not configured for this bridge")
+        try:
+            service_id = await service_id_for(db, context.facility_id, "hip")
+        except FacilityNotServed as exc:
+            raise DeferredJob("Facility is not configured for this bridge") from exc
         links = (
             (
                 await db.execute(
@@ -61,11 +84,26 @@ async def notify_context(job: jobs.AbdmJob) -> None:
             link for link in links if context.reference in (link.care_context_references or [])
         ]
         if not links:
+            from app.patients.models import Patient
+
+            patient = await db.get(Patient, context.patient_id)
+            if _deep_link_applies(patient):
+                # HIP_INIT_NOTIFY_HIECM: the patient gave a mobile and no ABHA
+                # address, so ABDM texts them a deep link instead. One request
+                # id per record, so a retry is the same notification.
+                await gateway.notify_patient_sms(
+                    service_id=service_id,
+                    mobile=patient.mobile,
+                    hip_name=facility.name,
+                    request_id=str(uuid.uuid5(job.id, "sms-notify")),
+                )
+                return
             # A previous link for this patient does NOT implicitly link new
             # documents. G4 must obtain each context's own acknowledgement.
             raise DeferredJob("Document is awaiting confirmed linkage")
         for address in sorted({link.abha_address for link in links}):
             await gateway.notify_care_context(
+                service_id=service_id,
                 abha_address=address,
                 care_context_reference=context.reference,
                 hi_types=[context.hi_type],
@@ -89,9 +127,10 @@ async def _dispatch(job: jobs.AbdmJob) -> None:
                 raise DocumentUnavailable("Link unavailable")
             if link.status != "pending":
                 return
-            facility = await db.get(Facility, link.facility_id)
-            if facility is None or facility.hfr_facility_id != get_settings().abdm_hfr_facility_id:
-                raise DeferredJob("Facility is not configured for this bridge")
+            try:
+                service_id = await service_id_for(db, link.facility_id, "hip")
+            except FacilityNotServed as exc:
+                raise DeferredJob("Facility is not configured for this bridge") from exc
             if job.kind == "link_context":
                 await linking.send_link(db, link)
             else:
@@ -105,7 +144,9 @@ async def _dispatch(job: jobs.AbdmJob) -> None:
                 if patient is None or patient.abha_address != link.abha_address:
                     raise DocumentUnavailable("Patient identity changed during linking")
                 await gateway.generate_link_token(
-                    **linking.demographics(patient), request_id=link.token_request_id
+                    service_id=service_id,
+                    **linking.demographics(patient),
+                    request_id=link.token_request_id,
                 )
     elif job.kind == "context_notify":
         await notify_context(job)
@@ -117,7 +158,12 @@ async def _dispatch(job: jobs.AbdmJob) -> None:
             if row is None or row.facility_id != job.facility_id:
                 raise worker.TransferError("Transfer unavailable")
             transaction_id = row.transaction_id
-        await worker.transfer_transaction(transaction_id, retry_transport=True)
+        try:
+            await worker.transfer_transaction(transaction_id, retry_transport=True)
+        except worker.HiuTransactionUnknown as exc:
+            # Spend no attempt: the HIU is waiting for NHA's on-request, and the
+            # HIU key's expiry ends the wait as a definite failure.
+            raise DeferredJob("HIU does not know this transaction yet") from exc
     else:
         raise ValueError("Unsupported ABDM job kind")
 
@@ -130,9 +176,17 @@ async def _heartbeat(ident: uuid.UUID, token: uuid.UUID) -> None:
                 raise RuntimeError("ABDM job lease lost")
 
 
-async def run_once(ident: uuid.UUID | None = None) -> bool:
+async def run_once(
+    ident: uuid.UUID | None = None,
+    *,
+    facility_id: uuid.UUID | None = None,
+    created_since: datetime | None = None,
+) -> bool:
     async with SessionLocal() as db:
-        job = await jobs.claim(db, ident=ident)
+        scope = {}
+        if facility_id is not None or created_since is not None:
+            scope = {"facility_id": facility_id, "created_since": created_since}
+        job = await jobs.claim(db, ident=ident, **scope)
     if job is None:
         return False
     task = asyncio.create_task(_dispatch(job))
@@ -140,6 +194,7 @@ async def run_once(ident: uuid.UUID | None = None) -> bool:
     error = None
     deferred = False
     terminal = False
+    refused = False
     try:
         done, _ = await asyncio.wait({task, heartbeat}, return_when=asyncio.FIRST_COMPLETED)
         if heartbeat in done:
@@ -155,7 +210,14 @@ async def run_once(ident: uuid.UUID | None = None) -> bool:
         # link token, and must not consume the token-generation quota.
         # An unexpected response is not evidence that repeating the operation
         # is safe either. Preserve the diagnostic for deliberate reconciliation.
-        terminal = isinstance(exc, AbdmAuthError | AbdmProtocolError)
+        terminal = isinstance(exc, AbdmAuthError | AbdmProtocolError) or (
+            # A link token is single-use at the gateway: a refused link request
+            # has spent it, so a retry can only earn a 401 (29 Sep 2026).
+            job.kind == "link_context" and isinstance(exc, AbdmRejected)
+        )
+        refused = job.kind == "link_context" and isinstance(exc, AbdmRejected | AbdmAuthError)
+        if isinstance(exc, AbdmRejected):
+            _report_refusal(job, exc, error)
         log.warning("ABDM job failed (%s)", error)
     finally:
         for pending in (task, heartbeat):
@@ -163,9 +225,49 @@ async def run_once(ident: uuid.UUID | None = None) -> bool:
             with suppress(asyncio.CancelledError, Exception):
                 await pending
     async with SessionLocal() as db:
-        await jobs.finish(db, job, error=error, deferred=deferred, terminal=terminal)
+        finished = await jobs.finish(db, job, error=error, deferred=deferred, terminal=terminal)
+        if finished and refused:
+            await linking.release_refused_link(db, link_id=job.target_id, reason=error or "")
+        dead = (
+            finished
+            and error is not None
+            and not deferred
+            and await db.scalar(select(jobs.AbdmJob.status).where(jobs.AbdmJob.id == job.id))
+            == "dead"
+        )
+        exhausted = dead and job.kind == "hip_transfer"
+        unacknowledged = None
+        if dead and job.kind == "callback_ack":
+            reply = await db.get(jobs.AbdmCallbackReply, job.target_id)
+            if reply is not None and reply.kind == "hip_request":
+                unacknowledged = reply.target_id
+    if exhausted:
+        await worker.abandon_transfer(job.target_id)
+    if unacknowledged is not None:
+        await worker.close_unacknowledged_request(unacknowledged, error or "")
     return True
 
+
+
+#: Where scrubbed gateway refusals are reported. The session runner prints them,
+#: because it disables logging (library logs can carry request parameters);
+#: without a listener they go to the log. Never written to the database.
+refusal_listener: Callable[[dict], None] | None = None
+
+
+def _report_refusal(job, exc: AbdmRejected, summary: str) -> None:
+    detail = {
+        "job_kind": job.kind,
+        "job_id": str(job.id),
+        "request_id": exc.request_id,
+        "http_status": exc.status_code,
+        "summary": summary,
+        "message": safe_rejection_message(exc.detail),
+    }
+    if refusal_listener is not None:
+        refusal_listener(detail)
+    else:
+        log.warning("ABDM refused a request %s", json.dumps(detail))
 
 async def cleanup_expired_keys() -> int:
     """Run even without new callbacks. Lock the same request rows as reception."""
@@ -222,17 +324,26 @@ async def cleanup_expired_keys() -> int:
             if link.status == "pending":
                 link.status = "expired"
                 link.failure_reason = "Link credential use window expired; start linking again"
-        replies = list((await db.execute(
-            select(jobs.AbdmCallbackReply).where(
-                jobs.AbdmCallbackReply.response_encrypted.is_not(None),
-                or_(
-                    jobs.AbdmCallbackReply.response_expires_at <= now,
-                    jobs.AbdmCallbackReply.id.in_(select(jobs.AbdmJob.target_id).where(
-                        jobs.AbdmJob.kind == "callback_ack", jobs.AbdmJob.status == "done",
-                    )),
-                ),
-            ).with_for_update(skip_locked=True)
-        )).scalars())
+        replies = list(
+            (
+                await db.execute(
+                    select(jobs.AbdmCallbackReply)
+                    .where(
+                        jobs.AbdmCallbackReply.response_encrypted.is_not(None),
+                        or_(
+                            jobs.AbdmCallbackReply.response_expires_at <= now,
+                            jobs.AbdmCallbackReply.id.in_(
+                                select(jobs.AbdmJob.target_id).where(
+                                    jobs.AbdmJob.kind == "callback_ack",
+                                    jobs.AbdmJob.status == "done",
+                                )
+                            ),
+                        ),
+                    )
+                    .with_for_update(skip_locked=True)
+                )
+            ).scalars()
+        )
         for reply in replies:
             reply.response_encrypted = None
         from app.integrations.abdm.callback_evidence import expire_receipts
@@ -293,7 +404,9 @@ async def _poll_jobs() -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode", choices=["all", "cleanup"], default="all")
-    parser.add_argument("--once", action="store_true", help="Run cleanup once; fail nonzero on errors")
+    parser.add_argument(
+        "--once", action="store_true", help="Run cleanup once; fail nonzero on errors"
+    )
     options = parser.parse_args()
     if options.once and options.mode != "cleanup":
         parser.error("--once requires --mode cleanup")

@@ -112,19 +112,26 @@ FORMULA_INJECTION_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 
 
 async def ensure_defaults_seeded(db: AsyncSession, admin_id: uuid.UUID) -> None:
-    try:
-        f_res = await db.execute(select(FormDefinition).limit(1))
-        if f_res.scalars().first() is None:
-            for f in DEFAULT_FORMS:
-                db.add(FormDefinition(id=uuid.uuid4(), **f, created_by=admin_id))
+    """Insert any default form or order set whose code is missing.
 
-        o_res = await db.execute(select(ClinicalOrderSet).limit(1))
-        if o_res.scalars().first() is None:
-            for o in DEFAULT_ORDER_SETS:
-                db.add(ClinicalOrderSet(id=uuid.uuid4(), **o))
-        await db.commit()
-    except Exception:
-        await db.rollback()
+    Run by the seed script, never by a request: a GET that writes turns a
+    read-only role into a writer, and its old bare `except` hid every failure.
+    Flushes only; the caller owns the transaction.
+    """
+    existing_forms = set(
+        (await db.execute(select(FormDefinition.code))).scalars().all()
+    )
+    for form in DEFAULT_FORMS:
+        if form["code"] not in existing_forms:
+            db.add(FormDefinition(id=uuid.uuid4(), **form, created_by=admin_id))
+
+    existing_sets = set(
+        (await db.execute(select(ClinicalOrderSet.code))).scalars().all()
+    )
+    for order_set in DEFAULT_ORDER_SETS:
+        if order_set["code"] not in existing_sets:
+            db.add(ClinicalOrderSet(id=uuid.uuid4(), **order_set))
+    await db.flush()
 
 
 async def list_form_definitions(

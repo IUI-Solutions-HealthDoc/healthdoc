@@ -78,6 +78,10 @@ def _abdm_public_key(monkeypatch, rsa_key):
         abdm_path_profile_abha_card = "/v3/profile/account/abha-card"
         abdm_path_login_request_otp = "/v3/profile/login/request/otp"
         abdm_path_login_verify = "/v3/profile/login/verify"
+        abdm_path_phr_login_request_otp = "/v3/phr/web/login/abha/request/otp"
+        abdm_path_phr_login_verify = "/v3/phr/web/login/abha/verify"
+        abdm_path_phr_profile = "/v3/phr/web/login/profile/abha-profile"
+        abdm_path_phr_card = "/v3/phr/web/login/profile/abha/phr-card"
         abdm_path_login_verify_user = "/v3/profile/login/verify/user"
 
     monkeypatch.setattr(crypto, "get_settings", lambda: _S())
@@ -225,6 +229,9 @@ _ALLOWED_SESSION_FIELDS = {
     # Admitted 21 September for resend/Aadhaar-verify: a category label
     # ("abha-number"/"aadhaar", never the identifier) and a resend counter.
     "login_hint",
+    # Admitted 9 October for VRFY_ABHA_102: ABDM's OTP system label
+    # ("abdm"/"aadhaar"), never an identifier or OTP.
+    "otp_system",
     "resends",
     "consent_code",
     "consent_version",
@@ -669,10 +676,11 @@ async def test_enrolment_without_a_grant_never_reaches_the_gateway(monkeypatch):
     assert gw.calls == []
 
 
-async def test_a_declined_or_unapproved_consent_is_refused(monkeypatch):
+async def test_a_declined_or_untranslated_consent_is_refused(monkeypatch):
     gw = _gateway(monkeypatch, [{"txnId": "must-not-be-used"}])
     declined = EnrolmentConsent(False, ENROLMENT_CONSENT_CODE, ENROLMENT_CONSENT_VERSION, "en")
-    hindi = EnrolmentConsent(True, ENROLMENT_CONSENT_CODE, ENROLMENT_CONSENT_VERSION, "hi")
+    # English and Hindi are offered; any other language has no consent text.
+    hindi = EnrolmentConsent(True, ENROLMENT_CONSENT_CODE, ENROLMENT_CONSENT_VERSION, "ta")
     with pytest.raises(service.AbdmIdentityError) as declined_exc:
         await service.request_aadhaar_otp(
             aadhaar=AADHAAR, facility_id=FACILITY_A, started_by=STAFF, consent=declined,
@@ -783,6 +791,53 @@ async def test_address_refusal_keeps_the_continuation_session(monkeypatch):
     assert alive.stage == "address_pending"
 
 
+async def _address_pending(monkeypatch, address_answer):
+    gw = _gateway(monkeypatch, [
+        {"txnId": "enrol-txn"},
+        {"ABHAProfile": {"ABHANumber": "91-1234-5678-9012"}, "tokens": {"token": "t"}},
+        {"txnId": "mobile-txn", "message": "OTP sent"},
+        {"txnId": "mobile-txn", "authResult": "success", "accounts": [{"ABHANumber": "91-1"}]},
+        address_answer,
+    ])
+    requested = await service.request_aadhaar_otp(
+        aadhaar=AADHAAR, facility_id=FACILITY_A, started_by=STAFF, consent=CONSENT,
+    )
+    await service.enrol_by_aadhaar_otp(
+        session_id=requested.session_id, otp="123456", mobile="9876543210",
+        facility_id=FACILITY_A, consume_session=False,
+    )
+    await service.request_enrolment_mobile_otp(
+        session_id=requested.session_id, mobile="9876543210", facility_id=FACILITY_A, started_by=STAFF,
+    )
+    await service.verify_enrolment_mobile_otp(
+        session_id=requested.session_id, otp="654321", facility_id=FACILITY_A,
+    )
+    return gw, requested.session_id
+
+
+async def test_a_bare_suggestion_is_sent_bare_and_bound_as_abdm_returns_it(monkeypatch):
+    # enrol/suggestion offered "suprabhakumari1009" with no suffix and the
+    # desk refused it before calling ABDM (live, 6 Oct 2026).
+    gw, session_id = await _address_pending(
+        monkeypatch, {"txnId": "mobile-txn", "preferredAbhaAddress": "suprabhakumari1009@sbx"})
+    bound = await service.submit_enrolment_abha_address(
+        session_id=session_id, abha_address="suprabhakumari1009", facility_id=FACILITY_A,
+    )
+    assert bound == "suprabhakumari1009@sbx"
+    assert gw.calls[-1][1]["abhaAddress"] == "suprabhakumari1009"
+
+
+@pytest.mark.parametrize("address", ["", "two words", "x@", "name@sbx@sbx"])
+async def test_a_malformed_address_never_reaches_abdm(monkeypatch, address):
+    gw, session_id = await _address_pending(monkeypatch, {"preferredAbhaAddress": "unused@sbx"})
+    calls = len(gw.calls)
+    with pytest.raises(service.AbdmIdentityError):
+        await service.submit_enrolment_abha_address(
+            session_id=session_id, abha_address=address, facility_id=FACILITY_A,
+        )
+    assert len(gw.calls) == calls
+
+
 async def test_several_mobile_accounts_are_not_reduced_to_the_first(monkeypatch):
     _gateway(monkeypatch, [
         {"txnId": "enrol-txn"},
@@ -863,3 +918,176 @@ async def test_several_login_accounts_are_not_reduced_to_the_first(monkeypatch, 
     assert gw.calls[2][1]["ABHANumber"] == "91-4444-5555-6666"
     assert gw.headers[2]["T-token"] == "Bearer selection-token"
     assert "selection-token" not in json.dumps(issued.account_choices)
+
+
+# ------------------------------------------ ABHA-address (PHR) login — M1 collection
+# "ABHA Address Verification via Mobile OTP" is its own family: /v3/phr/web/login/abha/*
+# with scope abha-address-login, answering users[] + tokens, not accounts[]. It was
+# previously sent to /v3/profile/login/* with the ABHA-number scope.
+_PHR_VERIFIED = {
+    "message": "OTP verified successfully",
+    "authResult": "success",
+    "users": [{
+        "abhaAddress": "singh128@sbx", "fullName": "Deepak Kumar Singh",
+        "abhaNumber": "91-6167-8028-XXXX", "status": "ACTIVE", "kycStatus": "VERIFIED",
+    }],
+    "tokens": {"token": "phr-x-token", "expiresIn": 1800, "refreshToken": "phr-refresh", "refreshExpiresIn": 1296000},
+}
+
+
+async def test_abha_address_login_uses_the_phr_family_and_its_own_scope(monkeypatch, rsa_key):
+    gw = _gateway(monkeypatch, [{"txnId": "phr-txn", "message": "OTP sent"}, _PHR_VERIFIED])
+    requested = await service.request_login_otp(
+        abha_address="singh128@sbx", facility_id=FACILITY_A, started_by=STAFF,
+    )
+    path, body = gw.calls[0]
+    assert path == "https://abha.test/abha/api/v3/phr/web/login/abha/request/otp"
+    assert body["scope"] == ["abha-address-login", "mobile-verify"]
+    assert body["loginHint"] == "abha-address" and body["otpSystem"] == "abdm"
+    assert _decrypt(rsa_key, body["loginId"]) == "singh128@sbx"
+
+    issued = await service.verify_login_otp(
+        session_id=requested.session_id, otp="123456", facility_id=FACILITY_A,
+    )
+    path, body = gw.calls[1]
+    assert path == "https://abha.test/abha/api/v3/phr/web/login/abha/verify"
+    assert body["scope"] == ["abha-address-login", "mobile-verify"]
+    assert body["authData"]["otp"]["txnId"] == "phr-txn"
+    assert issued.abha_address == "singh128@sbx"
+    assert issued.abha_number == "", "a masked number must never be kept"
+    assert issued.linking_token == "phr-x-token", "the refresh token is not the profile credential"
+    assert issued.token_kind == "phr"
+    assert issued.name == "Deepak Kumar Singh"
+
+
+async def test_abha_address_can_be_proved_with_an_aadhaar_otp(monkeypatch, rsa_key, fake_redis):
+    """Workbook VRFY_ABHA_102, "ABHA Address Login, Aadhaar OTP": same PHR family,
+    aadhaar-verify scope and the aadhaar OTP system on every leg, resend included."""
+    gw = _gateway(
+        monkeypatch,
+        [{"txnId": "phr-txn-1"}, {"txnId": "phr-txn-2"}, _PHR_VERIFIED],
+    )
+    first = await service.request_login_otp(
+        abha_address="singh128@sbx", address_otp_system="aadhaar",
+        facility_id=FACILITY_A, started_by=STAFF, patient_id="p1",
+    )
+    scope = ["abha-address-login", "aadhaar-verify"]
+    assert gw.calls[0][1]["scope"] == scope and gw.calls[0][1]["otpSystem"] == "aadhaar"
+    aged = json.loads(fake_redis.store[f"abdm:otp:{first.session_id}"])
+    aged["created_at"] = "2026-09-20T00:00:00+00:00"  # cooldown elapsed
+    fake_redis.store[f"abdm:otp:{first.session_id}"] = json.dumps(aged)
+    second = await service.resend_otp(
+        session_id=first.session_id, purpose=OtpPurpose.LOGIN_BY_ABHA,
+        facility_id=FACILITY_A, started_by=STAFF, abha_address="singh128@sbx",
+    )
+    assert gw.calls[1][1]["scope"] == scope and gw.calls[1][1]["otpSystem"] == "aadhaar"
+    issued = await service.verify_login_otp(
+        session_id=second.session_id, otp="123456", facility_id=FACILITY_A,
+    )
+    path, body = gw.calls[2]
+    assert path == "https://abha.test/abha/api/v3/phr/web/login/abha/verify"
+    assert body["scope"] == scope and body["authData"]["otp"]["txnId"] == "phr-txn-2"
+    assert issued.abha_address == "singh128@sbx"
+
+
+async def test_only_an_abha_address_chooses_its_otp_system(monkeypatch, rsa_key):
+    gw = _gateway(monkeypatch, [])
+    with pytest.raises(service.AbdmIdentityError) as exc:
+        await service.request_login_otp(
+            abha_number="91-1111-2222-3333", address_otp_system="aadhaar",
+            facility_id=FACILITY_A, started_by=STAFF,
+        )
+    assert exc.value.code == "abdm_otp_system_invalid"
+    assert gw.calls == []
+
+
+async def test_abha_address_login_keeps_a_fully_disclosed_number(monkeypatch, rsa_key):
+    verified = json.loads(json.dumps(_PHR_VERIFIED))
+    verified["users"][0]["abhaNumber"] = "91-6167-8028-0882"
+    _gateway(monkeypatch, [{"txnId": "phr-txn"}, verified])
+    requested = await service.request_login_otp(abha_address="singh128@sbx", facility_id=FACILITY_A, started_by=STAFF)
+    issued = await service.verify_login_otp(session_id=requested.session_id, otp="123456", facility_id=FACILITY_A)
+    assert issued.abha_number == "91-6167-8028-0882"
+
+
+@pytest.mark.parametrize(
+    ("users", "code"),
+    [
+        ([], "abdm_account_selection_required"),
+        ([{"abhaAddress": "a@sbx"}, {"abhaAddress": "b@sbx"}], "abdm_account_selection_required"),
+        ([{"abhaAddress": "singh128@sbx", "status": "DEACTIVATED"}], "abdm_account_inactive"),
+        ([{"fullName": "No Address"}], "abdm_bad_response"),
+    ],
+)
+async def test_abha_address_login_refuses_rather_than_guesses(monkeypatch, rsa_key, users, code):
+    _gateway(monkeypatch, [{"txnId": "phr-txn"}, {"authResult": "success", "users": users, "tokens": {"token": "t"}}])
+    requested = await service.request_login_otp(abha_address="singh128@sbx", facility_id=FACILITY_A, started_by=STAFF)
+    with pytest.raises(service.AbdmIdentityError) as exc:
+        await service.verify_login_otp(session_id=requested.session_id, otp="123456", facility_id=FACILITY_A)
+    assert exc.value.code == code
+
+
+async def test_abha_number_login_still_uses_the_profile_family(monkeypatch, rsa_key):
+    gw = _gateway(monkeypatch, [{"txnId": "n-txn"}])
+    await service.request_login_otp(abha_number="91-1111-2222-3333", facility_id=FACILITY_A, started_by=STAFF)
+    assert gw.calls[0][0] == "https://abha.test/abha/api/v3/profile/login/request/otp"
+    assert gw.calls[0][1]["scope"] == ["abha-login", "mobile-verify"]
+
+
+async def test_phr_profile_and_card_use_the_phr_endpoints(monkeypatch, rsa_key):
+    class _Card:
+        def __init__(self):
+            self.calls = []
+
+        async def request(self, method, path, *, json=None, extra_headers=None, parse_json=True, **kw):
+            self.calls.append((method, path, extra_headers))
+            if path.endswith("phr-card"):
+                return AbdmResponse(200, b"\x89card", "rid", "image/jpeg; charset=binary")
+            return AbdmResponse(200, {
+                "abhaAddress": "singh128@sbx", "fullName": "Deepak Kumar Singh",
+                "abhaNumber": "91-3837-7464-XXXX", "gender": "M", "status": "ACTIVE", "kycStatus": "VERIFIED",
+            }, "rid")
+
+    gw = _Card()
+    monkeypatch.setattr(service, "get_abdm_client", lambda: gw)
+    profile = await service.fetch_abha_profile(profile_token="phr-x-token", token_kind="phr")
+    assert gw.calls[0][:2] == ("GET", "https://abha.test/abha/api/v3/phr/web/login/profile/abha-profile")
+    assert gw.calls[0][2]["X-token"] == "Bearer phr-x-token"
+    assert profile.abha_address == "singh128@sbx" and profile.name == "Deepak Kumar Singh"
+    assert profile.abha_number is None and profile.kyc_verified is True
+    card = await service.fetch_abha_card(profile_token="phr-x-token", token_kind="phr")
+    assert gw.calls[1][:2] == ("GET", "https://abha.test/abha/api/v3/phr/web/login/profile/abha/phr-card")
+    # 29 Sep 2026: with the client's default Accept: application/json, NHA answered
+    # the card with 406 "Could not find acceptable representation".
+    assert "image/png" in gw.calls[1][2]["Accept"]
+    assert card.media_type == "image/jpeg" and card.content == b"\x89card"
+
+
+
+async def test_abha_number_card_asks_for_an_image_not_json(monkeypatch, rsa_key):
+    gw = _gateway(monkeypatch, [b"\x89PNG-card"])
+    card = await service.fetch_abha_card(profile_token="abha-x-token")
+    assert gw.calls[0][0] == "https://abha.test/abha/api/v3/profile/account/abha-card"
+    accept = gw.headers[0]["Accept"]
+    assert "image/png" in accept and not accept.startswith("application/json")
+    assert card.content == b"\x89PNG-card"
+
+
+@pytest.mark.parametrize(
+    ("identifier", "code", "wording"),
+    [
+        ({"mobile": "9876543210"}, "abha_not_found_for_mobile",
+         "We did not find any ABHA number linked to this mobile number"),
+        ({"aadhaar": AADHAAR}, "abha_not_found_for_aadhaar",
+         "NO ABHA user registered with this Aadhaar Number"),
+    ],
+)
+async def test_an_identifier_with_no_abha_uses_nhas_wording(monkeypatch, rsa_key, identifier, code, wording):
+    """VRFY_ABHA_302 (mobile) and VRFY_ABHA_403 (Aadhaar) name the message the
+    tester looks for when ABDM verifies the OTP but finds no account."""
+    _gateway(monkeypatch, [{"txnId": "login-txn"}, {"authResult": "success", "accounts": []}])
+    requested = await service.request_login_otp(**identifier, facility_id=FACILITY_A, started_by=STAFF)
+    with pytest.raises(service.AbdmIdentityError) as exc:
+        await service.verify_login_otp(session_id=requested.session_id, otp="123456", facility_id=FACILITY_A)
+    assert exc.value.code == code
+    assert wording in exc.value.message

@@ -90,13 +90,24 @@ class KeyMaterial:
     private_key: curve25519.PrivateKey = field(repr=False)
     public_key_b64: str
     nonce_b64: str
+    #: The same public key as X.509 SubjectPublicKeyInfo. ABDM's PHR refused a
+    #: HIP data push carrying the raw point ("encoded key spec not recognized",
+    #: 1 October 2026), though it sends its own HIU key raw.
+    public_key_x509_b64: str = ""
 
-    def to_wire(self) -> dict:
-        """The half that is safe to send. The private key is not in here."""
+    def to_wire(self, *, x509: bool = False) -> dict:
+        """The half that is safe to send. The private key is not in here.
+
+        `x509` sends the public key as SubjectPublicKeyInfo: for a HIP's data
+        push. A HIU's request keeps the raw point, as ABDM's own PHR sends it.
+        """
+        if x509 and not self.public_key_x509_b64:
+            raise HiCryptoError("Key material has no X.509 public key")
+        key = self.public_key_x509_b64 if x509 else self.public_key_b64
         return {
             "cryptoAlg": CRYPTO_ALG,
             "curve": CURVE,
-            "dhPublicKey": {"parameters": f"{CURVE}/32byte random key", "keyValue": self.public_key_b64},
+            "dhPublicKey": {"parameters": f"{CURVE}/32byte random key", "keyValue": key},
             "nonce": self.nonce_b64,
         }
 
@@ -104,13 +115,14 @@ class KeyMaterial:
 def generate_key_material() -> KeyMaterial:
     """A fresh ephemeral keypair and nonce. Never reuse one across transfers."""
     try:
-        private_key, public_bytes = curve25519.generate()
+        private_key, public_bytes, x509_bytes = curve25519.generate()
     except curve25519.CurveError as exc:
         raise HiCryptoError(str(exc)) from exc
     return KeyMaterial(
         private_key=private_key,
         public_key_b64=base64.b64encode(public_bytes).decode(),
         nonce_b64=base64.b64encode(os.urandom(_NONCE_BYTES)).decode(),
+        public_key_x509_b64=base64.b64encode(x509_bytes).decode(),
     )
 
 

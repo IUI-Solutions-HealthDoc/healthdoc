@@ -31,6 +31,8 @@ response to something the gateway asked us; the rest are requests we start.
 from __future__ import annotations
 
 import logging
+import string
+import unicodedata
 import uuid
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
@@ -38,6 +40,7 @@ from typing import Any
 
 from app.common.config import get_settings
 from app.integrations.abdm.client import AbdmProtocolError, AbdmResponse, get_abdm_client
+from app.integrations.abdm.facilities import FacilityNotServed, require_served
 
 log = logging.getLogger("healthdoc.abdm")
 
@@ -54,7 +57,10 @@ log = logging.getLogger("healthdoc.abdm")
 #: empty-shell failure mode. ImmunizationRecord, HealthDocumentRecord and
 #: Invoice were removed for exactly that reason; re-add one only once
 #: fhir/builder.py can populate it, and the drift test will hold the three sets
-#: together.
+#: together. ImmunizationRecord came back (migration 0092) with a builder for
+#: one recorded vaccine dose. Invoice came back (migration 0094) with a
+#: builder for one issued bill. HealthDocumentRecord came back (migration 0096)
+#: for one PDF a clinician released, completing the eight NHA's HMIS FAQ asks for.
 HI_TYPES: frozenset[str] = frozenset(
     {
         "OPConsultation",
@@ -62,6 +68,9 @@ HI_TYPES: frozenset[str] = frozenset(
         "DiagnosticReport",
         "DischargeSummary",
         "WellnessRecord",
+        "ImmunizationRecord",
+        "Invoice",
+        "HealthDocumentRecord",
     }
 )
 
@@ -77,14 +86,21 @@ class HipIdentityNotConfigured(RuntimeError):
     """
 
 
-def hip_id() -> str:
-    value = get_settings().abdm_hip_id
-    if not value or value == _PLACEHOLDER:
+def hip_id(service_id: str) -> str:
+    """The facility speaking: one of this bridge's services, never a default.
+
+    Every call names its facility (integrations/abdm/facilities.py). An id
+    this bridge does not serve is refused rather than sent, because a call
+    that claims another HIP's identity either fails confusingly or, worse,
+    succeeds against somebody else's registration.
+    """
+    try:
+        return require_served("hip", service_id)
+    except FacilityNotServed as exc:
         raise HipIdentityNotConfigured(
-            "ABDM_HIP_ID is not set. Register a service with "
-            "PUT /api/hiecm/gateway/v3/bridge-service and set the id it returns."
-        )
-    return value
+            "This facility is not an ABDM service of this bridge. Link its HFR id to the "
+            "bridge and list it in ABDM_HFR_FACILITY_ID or ABDM_ADDITIONAL_HFR_FACILITY_IDS."
+        ) from exc
 
 
 def _now_iso() -> str:
@@ -118,6 +134,64 @@ def validate_hi_types(hi_types: Sequence[str]) -> list[str]:
     return list(hi_types)
 
 
+#: Dash look-alikes become "-" instead of being dropped, so
+#: "OPConsultation \u2014 2026-09-29" still reads as a label and a date.
+_DASHES = dict.fromkeys(map(ord, "\u2010\u2011\u2012\u2013\u2014\u2015\u2212"), "-")
+
+#: Characters seen in displays NHA accepted: other integrators' linked labels
+#: such as "OP Consultation - 5/6/2026" and "Discharge Summary - 2026-07-18 -
+#: Rehabilitation Centre (V)", and NHA's own mock HIP ("Sugar Test").
+_ACCEPTED = frozenset(string.ascii_letters + string.digits + " -()/")
+
+#: The longest display seen accepted is 58 characters; stay inside it.
+_MAX_DISPLAY = 50
+
+
+def wire_display(text: str) -> str:
+    """The `display` text to send, limited to what NHA is known to accept.
+
+    `link/carecontext` answered 400 ABDM-9999 "Invalid display" twice on
+    30 September 2026: first for a label carrying an em dash (REQUEST-ID
+    b796a8e9-ffc9-5099-b93c-3b18a250663a), then, with the dash replaced, for
+    the same 89-character label still carrying ";" and "," (REQUEST-ID
+    8c96dd5b-cc3a-563e-89df-dee1a932ca0d). NHA does not publish the rule, so
+    the wire copy keeps only characters and lengths seen accepted: accents
+    fold ("Jos\u00e9" -> "Jose"), dashes become "-", anything else becomes a
+    space, and a longer label is cut at a word boundary. Stored labels keep
+    their text.
+
+    A label with nothing left, such as a name written only in Devanagari, is
+    refused rather than replaced with an invented one.
+    """
+    folded = unicodedata.normalize("NFKD", text.translate(_DASHES))
+    kept = "".join(ch if ch in _ACCEPTED else " " for ch in folded if not unicodedata.combining(ch))
+    words = kept.split()
+    if not words:
+        raise ValueError("Display has no characters ABDM accepts")
+    cleaned = words[0][:_MAX_DISPLAY]
+    for word in words[1:]:
+        if len(cleaned) + 1 + len(word) > _MAX_DISPLAY:
+            break
+        cleaned += " " + word
+    return cleaned
+
+
+def _wire_group(group: Mapping[str, Any]) -> dict[str, Any]:
+    """A stored `patient[]` group with its displays made sendable.
+
+    Stored discovery and link-confirm replies are compared with a fresh
+    recomputation before replay, so they keep the original text and are
+    cleaned only here, on the way out.
+    """
+    return {
+        **group,
+        "display": wire_display(group["display"]),
+        "careContexts": [
+            {**c, "display": wire_display(c["display"])} for c in group["careContexts"]
+        ],
+    }
+
+
 def care_context_payload(
     *,
     abha_address: str,
@@ -133,11 +207,12 @@ def care_context_payload(
     empty link.
     """
     contexts = [
-        {"referenceNumber": c["referenceNumber"], "display": c["display"]} for c in care_contexts
+        {"referenceNumber": c["referenceNumber"], "display": wire_display(c["display"])}
+        for c in care_contexts
     ]
     return {
         "referenceNumber": abha_address,
-        "display": display,
+        "display": wire_display(display),
         "careContexts": contexts,
         "hiType": hi_type,
         "count": len(contexts),
@@ -179,6 +254,7 @@ async def _post(
 
 async def generate_link_token(
     *,
+    service_id: str,
     abha_address: str,
     name: str,
     gender: str,
@@ -205,7 +281,7 @@ async def generate_link_token(
             "gender": gender,
             "yearOfBirth": year_of_birth,
         },
-        extra_headers={"X-HIP-ID": hip_id()},
+        extra_headers={"X-HIP-ID": hip_id(service_id)},
         request_id=request_id,
         expected_status=202,
     )
@@ -213,6 +289,7 @@ async def generate_link_token(
 
 async def link_care_contexts(
     *,
+    service_id: str,
     abha_address: str,
     link_token: str,
     display: str,
@@ -263,7 +340,7 @@ async def link_care_contexts(
             "abhaAddress": abha_address,
             "patient": patient_groups,
         },
-        extra_headers={"X-HIP-ID": hip_id(), "X-LINK-TOKEN": link_token},
+        extra_headers={"X-HIP-ID": hip_id(service_id), "X-LINK-TOKEN": link_token},
         request_id=request_id,
         expected_status=202,
     )
@@ -271,6 +348,7 @@ async def link_care_contexts(
 
 async def notify_care_context(
     *,
+    service_id: str,
     abha_address: str,
     care_context_reference: str,
     hi_types: Sequence[str],
@@ -295,11 +373,54 @@ async def notify_care_context(
                 },
                 "hiTypes": list(hi_types),
                 "date": _now_iso(),
-                "hip": {"id": hip_id()},
+                "hip": {"id": hip_id(service_id)},
             }
         },
-        extra_headers={"X-HIP-ID": hip_id()},
+        extra_headers={"X-HIP-ID": hip_id(service_id)},
         request_id=request_id,
+    )
+
+
+def deep_link_phone(mobile: str | None) -> str:
+    """`+91-` and ten national digits, the form of the gateway's notify2 example.
+
+    The M2 Postman leaves phoneNo as a placeholder and the docs page shows no
+    body, so this is the one place to change if NHA's sandbox refuses it.
+    """
+    from app.integrations.abdm.hip.discovery import national_mobile
+
+    digits = national_mobile(mobile)
+    if digits is None:
+        raise ValueError("Not an Indian mobile number")
+    return f"+91-{digits}"
+
+
+async def notify_patient_sms(
+    *,
+    service_id: str,
+    mobile: str,
+    hip_name: str,
+    request_id: str | None = None,
+) -> tuple[str, AbdmResponse]:
+    """HIP -> gateway. A new record exists for a patient who shared a mobile only.
+
+    ABDM texts the patient a deep link to a PHR app, which then discovers the
+    record here by demographics. Only the mobile number and this HIP are sent,
+    as the M2 case specifies; no record, name or identifier.
+    """
+    settings = get_settings()
+    rid = request_id or str(uuid.uuid4())
+    return await _post(
+        settings.abdm_path_hip_sms_notify,
+        {
+            "requestId": rid,
+            "timestamp": _now_iso(),
+            "notification": {
+                "phoneNo": deep_link_phone(mobile),
+                "hip": {"name": hip_name, "id": hip_id(service_id)},
+            },
+        },
+        request_id=rid,
     )
 
 
@@ -310,6 +431,7 @@ async def notify_care_context(
 
 async def respond_to_discovery(
     *,
+    service_id: str,
     transaction_id: str,
     gateway_request_id: str,
     abha_address: str,
@@ -356,13 +478,14 @@ async def respond_to_discovery(
         # X-HIP-ID is what identifies the sender. Both are sent: the gateway
         # ignores headers it does not use, and sending only the one the
         # collection shows would mean claiming to be an HIU.
-        extra_headers={"X-HIP-ID": hip_id()},
+        extra_headers={"X-HIP-ID": hip_id(service_id)},
         request_id=request_id,
     )
 
 
 async def respond_to_discovery_groups(
     *,
+    service_id: str,
     transaction_id: str,
     gateway_request_id: str,
     patient_groups: Sequence[Mapping[str, Any]],
@@ -377,17 +500,18 @@ async def respond_to_discovery_groups(
         settings.abdm_path_hip_on_discover,
         {
             "transactionId": transaction_id,
-            "patient": [dict(group) for group in patient_groups],
+            "patient": [_wire_group(group) for group in patient_groups],
             "matchedBy": list(matched_by),
             "response": {"requestId": gateway_request_id},
         },
-        extra_headers={"X-HIP-ID": hip_id()},
+        extra_headers={"X-HIP-ID": hip_id(service_id)},
         request_id=request_id,
     )
 
 
 async def respond_to_link_init(
     *,
+    service_id: str,
     transaction_id: str,
     gateway_request_id: str,
     link_ref_number: str,
@@ -417,13 +541,14 @@ async def respond_to_link_init(
             },
             "response": {"requestId": gateway_request_id},
         },
-        extra_headers={"X-HIP-ID": hip_id()},
+        extra_headers={"X-HIP-ID": hip_id(service_id)},
         request_id=request_id,
     )
 
 
 async def respond_to_link_confirm_error(
     *,
+    service_id: str,
     gateway_request_id: str,
     code: str,
     message: str,
@@ -437,13 +562,14 @@ async def respond_to_link_confirm_error(
             "error": {"code": code, "message": message},
             "response": {"requestId": gateway_request_id},
         },
-        extra_headers={"X-HIP-ID": hip_id()},
+        extra_headers={"X-HIP-ID": hip_id(service_id)},
         request_id=request_id,
     )
 
 
 async def respond_to_link_confirm(
     *,
+    service_id: str,
     gateway_request_id: str,
     abha_address: str,
     display: str,
@@ -471,13 +597,14 @@ async def respond_to_link_confirm(
             ],
             "response": {"requestId": gateway_request_id},
         },
-        extra_headers={"X-HIP-ID": hip_id()},
+        extra_headers={"X-HIP-ID": hip_id(service_id)},
         request_id=request_id,
     )
 
 
 async def respond_to_link_confirm_groups(
     *,
+    service_id: str,
     gateway_request_id: str,
     patient_groups: Sequence[Mapping[str, Any]],
     request_id: str | None = None,
@@ -489,10 +616,10 @@ async def respond_to_link_confirm_groups(
     return await _post(
         settings.abdm_path_hip_on_link_confirm,
         {
-            "patient": [dict(group) for group in patient_groups],
+            "patient": [_wire_group(group) for group in patient_groups],
             "response": {"requestId": gateway_request_id},
         },
-        extra_headers={"X-HIP-ID": hip_id()},
+        extra_headers={"X-HIP-ID": hip_id(service_id)},
         request_id=request_id,
     )
 
@@ -504,6 +631,7 @@ async def respond_to_link_confirm_groups(
 
 async def acknowledge_consent_notification(
     *,
+    service_id: str,
     consent_id: str,
     gateway_request_id: str,
     status: str = "OK",
@@ -521,13 +649,14 @@ async def acknowledge_consent_notification(
             "acknowledgement": {"status": status, "consentId": consent_id},
             "response": {"requestId": gateway_request_id},
         },
-        extra_headers={"X-HIP-ID": hip_id()},
+        extra_headers={"X-HIP-ID": hip_id(service_id)},
         request_id=request_id,
     )
 
 
 async def acknowledge_profile_share(
     *,
+    service_id: str,
     gateway_request_id: str,
     abha_address: str,
     context: str,
@@ -553,13 +682,14 @@ async def acknowledge_profile_share(
             },
             "response": {"requestId": gateway_request_id},
         },
-        extra_headers={"X-HIP-ID": hip_id()},
+        extra_headers={"X-HIP-ID": hip_id(service_id)},
         request_id=request_id,
     )
 
 
 async def acknowledge_hi_request(
     *,
+    service_id: str,
     transaction_id: str,
     gateway_request_id: str,
     session_status: str = "ACKNOWLEDGED",
@@ -582,13 +712,14 @@ async def acknowledge_hi_request(
             },
             "response": {"requestId": gateway_request_id},
         },
-        extra_headers={"X-HIP-ID": hip_id()},
+        extra_headers={"X-HIP-ID": hip_id(service_id)},
         request_id=request_id,
     )
 
 
 async def notify_hi_transfer(
     *,
+    service_id: str,
     consent_id: str,
     transaction_id: str,
     session_status: str,
@@ -598,10 +729,20 @@ async def notify_hi_transfer(
     """HIP -> gateway. Report what happened to a data push.
 
     `status_responses` is per care context: `careContextReference`, `hiStatus`
-    ("OK" / "ERRORED") and a short `description`. The gateway shows this to the
-    patient, so the description must describe the transfer and never the
-    clinical content.
+    and a short `description`. The gateway shows this to the patient, so the
+    description must describe the transfer and never the clinical content.
+
+    ABDM's data-flow specification gives the HIP its own values: session
+    TRANSFERRED or FAILED, and per care context DELIVERED or ERRORED. "OK" and
+    RECEIVED are the HIU's, and the HIU notice refuses the HIP's in turn.
     """
+    if session_status not in {"TRANSFERRED", "FAILED"}:
+        raise ValueError("A HIP reports TRANSFERRED or FAILED")
+    if not status_responses or any(
+        s.get("hiStatus") not in {"DELIVERED", "ERRORED"} or not s.get("careContextReference")
+        for s in status_responses
+    ):
+        raise ValueError("Each care context is DELIVERED or ERRORED and named")
     settings = get_settings()
     return await _post(
         settings.abdm_path_hip_hi_notify,
@@ -610,14 +751,14 @@ async def notify_hi_transfer(
                 "consentId": consent_id,
                 "transactionId": transaction_id,
                 "doneAt": _now_iso(),
-                "notifier": {"type": "HIP", "id": hip_id()},
+                "notifier": {"type": "HIP", "id": hip_id(service_id)},
                 "statusNotification": {
                     "sessionStatus": session_status,
-                    "hipId": hip_id(),
+                    "hipId": hip_id(service_id),
                     "statusResponses": [dict(s) for s in status_responses],
                 },
             }
         },
-        extra_headers={"X-HIP-ID": hip_id()},
+        extra_headers={"X-HIP-ID": hip_id(service_id)},
         request_id=request_id,
     )

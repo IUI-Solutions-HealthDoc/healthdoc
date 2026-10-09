@@ -49,6 +49,26 @@ test("an ABDM rejection is not presented as a temporary outage or raw gateway te
   assert.equal(userFacingApiError(503), "The service is temporarily unavailable. Try again shortly.");
 });
 
+test("a licence that does not match its record says so, not 'highlighted fields'", () => {
+  // Live, 3 Oct 2026: ABDM-1203 "The details provided by you do not match
+  // against your documents details" reached the desk as the generic 400 copy.
+  const message = userFacingApiError(400, { code: "abha_licence_rejected", message: "server text" });
+  assert.match(message, /did not match these details to the driving licence record/);
+  assert.match(message, /exactly as printed/);
+  assert.doesNotMatch(message, /highlighted fields|server text/);
+});
+
+test("a server fault is not presented as a temporary outage", () => {
+  for (const status of [500, 501]) {
+    const message = userFacingApiError(status, "Traceback: private stack frame");
+    assert.equal(message, "Something went wrong on the server. Report it to IT if it happens again.");
+    assert.doesNotMatch(message, /temporarily|private|Traceback/);
+  }
+  for (const status of [502, 503, 504]) {
+    assert.equal(userFacingApiError(status), "The service is temporarily unavailable. Try again shortly.");
+  }
+});
+
 test("staff provisioning failures explain the remedy without hiding role denials", () => {
   for (const payload of [
     { code: "actor_not_provisioned", message: "PRIVATE-SUBJECT" },
@@ -67,4 +87,26 @@ test("requester profile errors consistently describe all three registration fiel
   const message = userFacingApiError(422, { code: "invalid_abdm_requester_profile" });
   assert.match(message, /registration number, identifier type and issuing registry URI/);
   assert.match(message, /all three/);
+});
+
+test("ABHA enrolment refusals name their cause instead of 'highlighted fields' or an outage", () => {
+  // Live, 6 Oct 2026: a missing mobile, a refused mobile and a UIDAI outage
+  // all reached the desk as the generic 400/503 copy.
+  const cases = [
+    [400, "otp_rejected", /did not accept this OTP/],
+    [422, "abha_mobile_required", /10-digit mobile number/],
+    [400, "abha_mobile_rejected", /did not accept this mobile number/],
+    [503, "aadhaar_service_unavailable", /Aadhaar \(UIDAI\) service/],
+    [400, "abha_address_invalid", /not a valid ABHA address/],
+  ];
+  for (const [status, code, expected] of cases) {
+    const message = userFacingApiError(status, { code, message: "server text 9876543210" });
+    assert.match(message, expected);
+    assert.doesNotMatch(message, /highlighted fields|temporarily unavailable|server text|9876543210/);
+  }
+  // Configuration faults share abdm_unavailable; it keeps the neutral copy.
+  assert.equal(
+    userFacingApiError(503, { code: "abdm_unavailable" }),
+    "The service is temporarily unavailable. Try again shortly.",
+  );
 });

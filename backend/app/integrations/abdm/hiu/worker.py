@@ -1,11 +1,12 @@
 """Retry HIU receipt notification without rolling back or re-decrypting data."""
 
+import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import select
 
-from app.common.config import get_settings
 from app.common.db import SessionLocal
+from app.integrations.abdm.facilities import FacilityNotServed, service_id_for
 from app.integrations.abdm.hiu import gateway, records, requester
 from app.integrations.abdm.hiu.models import (
     AbdmConsentRequest,
@@ -14,22 +15,16 @@ from app.integrations.abdm.hiu.models import (
     AbdmReceivedBundle,
 )
 from app.integrations.abdm.jobs import AbdmJob
-from app.users.models import Facility, User
+from app.users.models import User
 
 
-async def _require_configured_facility(db, job: AbdmJob) -> None:
-    # Gateway helpers use a single configured HIU identity. Facility-scoped
-    # rows must not be sent under that identity for any other hospital.
-    configured = get_settings().abdm_hfr_facility_id
-    facility = await db.get(Facility, job.facility_id)
-    if (
-        not configured
-        or configured == "change-me"
-        or facility is None
-        or not facility.is_active
-        or facility.hfr_facility_id != configured
-    ):
-        raise ValueError("Facility is not configured for this bridge")
+async def _require_configured_facility(db, job: AbdmJob) -> str:
+    """The HIU identity this job's facility asks under. A facility's rows are
+    only ever sent under its own identity, never another hospital's."""
+    try:
+        return await service_id_for(db, job.facility_id, "hiu")
+    except FacilityNotServed as exc:
+        raise ValueError("Facility is not configured for this bridge") from exc
 
 
 async def dispatch(job: AbdmJob) -> None:
@@ -37,7 +32,7 @@ async def dispatch(job: AbdmJob) -> None:
         await notify_received(job)
         return
     async with SessionLocal() as db:
-        await _require_configured_facility(db, job)
+        service_id = await _require_configured_facility(db, job)
         if job.kind == "hiu_fetch":
             artefact = await db.get(AbdmHiuConsentArtefact, job.target_id)
             if artefact is None or artefact.facility_id != job.facility_id:
@@ -52,13 +47,21 @@ async def dispatch(job: AbdmJob) -> None:
             ):
                 return
             await gateway.fetch_consent_artefact(
-                consent_id=artefact.consent_artefact_id, request_id=str(job.id)
+                service_id=service_id, consent_id=artefact.consent_artefact_id, request_id=str(job.id)
             )
         elif job.kind == "hiu_consent":
             row = await db.get(AbdmConsentRequest, job.target_id)
             if row is None or row.facility_id != job.facility_id:
                 raise ValueError("Consent request unavailable")
-            if row.status != "requested" or row.consent_request_id:
+            if row.status != "requested":
+                return
+            if row.consent_request_id:
+                # Re-armed by on-init: the decision may have come before the id.
+                await gateway.check_consent_request_status(
+                    service_id=service_id,
+                    consent_request_id=row.consent_request_id,
+                    request_id=str(uuid.uuid4()),
+                )
                 return
             from app.patients.models import Patient
 
@@ -78,6 +81,7 @@ async def dispatch(job: AbdmJob) -> None:
             if current["identifier"] != snapshot["identifier"]:
                 raise requester.RequesterUnavailable("Requester identity changed; reconcile the ask")
             _, response = await gateway.request_consent(
+                service_id=service_id,
                 abha_address=row.abha_address,
                 hi_types=row.hi_types,
                 date_from=row.date_range_from,
@@ -108,6 +112,7 @@ async def dispatch(job: AbdmJob) -> None:
             ):
                 raise ValueError("Transfer key or consent range unavailable")
             await gateway.request_health_information(
+                service_id=service_id,
                 consent_id=grant.artefact.consent_artefact_id,
                 date_from=grant.artefact.date_range_from,
                 date_to=grant.artefact.date_range_to,
@@ -122,7 +127,7 @@ async def dispatch(job: AbdmJob) -> None:
 
 async def notify_received(job: AbdmJob) -> None:
     async with SessionLocal() as db:
-        await _require_configured_facility(db, job)
+        service_id = await _require_configured_facility(db, job)
         request = await db.get(AbdmHiuHealthInformationRequest, job.target_id)
         if (
             request is None
@@ -154,6 +159,7 @@ async def notify_received(job: AbdmJob) -> None:
             .all()
         )
         await gateway.notify_hi_receipt(
+            service_id=service_id,
             consent_id=artefact.consent_artefact_id,
             transaction_id=request.transaction_id,
             session_status="RECEIVED",

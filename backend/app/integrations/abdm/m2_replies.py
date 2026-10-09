@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 
 from app.common.security import decrypt_pii
 from app.integrations.abdm.callback_replies import response_aad
+from app.integrations.abdm.facilities import service_id_for
 from app.integrations.abdm.hip import gateway, link_otp
 from app.integrations.abdm.hip.models import AbdmCareContextLink
 from app.patients.models import Patient
@@ -29,7 +30,11 @@ async def dispatch(db, reply, job):
             associated_data=response_aad(reply.id, reply.facility_id, reply.kind),
         )
     )
-    common = {"gateway_request_id": reply.gateway_request_id, "request_id": str(job.id)}
+    common = {
+        "service_id": await service_id_for(db, job.facility_id, "hip"),
+        "gateway_request_id": reply.gateway_request_id,
+        "request_id": str(job.id),
+    }
     if reply.kind == "hip_link_reject":
         await gateway.respond_to_link_confirm_error(
             **common, code="ABDM-1035", message="Incorrect OTP"
@@ -54,15 +59,21 @@ async def dispatch(db, reply, job):
             mobile=patient.mobile,
             expires_at=aware(link.expires_at),
         )
-        await gateway.respond_to_link_init(**common, **data["wire"])
+        # Snapshots frozen before 3 Oct 2026 carry a masked hint NHA refuses.
+        wire = {**data["wire"], "communication_hint": link_otp.communication_hint(patient.mobile)}
+        await gateway.respond_to_link_init(**common, **wire)
         return
     patient = await db.get(Patient, reply.target_id) if reply.target_id else None
+    # A demographic discovery matched a chart holding no ABHA address. It may
+    # since have been bound to the address that asked, but to no other.
+    # Snapshots written before `chart_address` existed matched by address.
+    allowed = {data.get("chart_address", data["abha_address"]), data["abha_address"]}
     if reply.target_id and (
         patient is None
         or patient.facility_id != job.facility_id
         or patient.deleted_at is not None
         or patient.merged_into_patient_id is not None
-        or patient.abha_address != data["abha_address"]
+        or patient.abha_address not in allowed
     ):
         raise ValueError("M2 patient binding changed")
     if reply.kind == "hip_discover":

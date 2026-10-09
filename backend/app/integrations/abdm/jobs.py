@@ -115,9 +115,56 @@ async def enqueue(
     return ident
 
 
+
+async def rearm(
+    db: AsyncSession, *, kind: str, target_id: uuid.UUID, facility_id: uuid.UUID
+) -> uuid.UUID:
+    """Run the job again now, because a new fact changes what it should do.
+
+    Completed, dead or deferred work becomes pending with a fresh attempt
+    budget; a job a worker holds, or an operator froze, is left alone.
+    """
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+    insert = pg_insert if db.bind.dialect.name == "postgresql" else sqlite_insert
+    ident, now = job_id(kind, target_id), datetime.now(UTC)
+    statement = insert(AbdmJob).values(
+        id=ident,
+        facility_id=facility_id,
+        kind=kind,
+        target_id=target_id,
+        available_at=now,
+        status="pending",
+        attempts=0,
+    )
+    await db.execute(
+        statement.on_conflict_do_update(
+            index_elements=["id"],
+            set_={
+                "status": "pending",
+                "attempts": 0,
+                "available_at": now,
+                "last_error": None,
+                "updated_at": now,
+            },
+            where=AbdmJob.status.in_(["done", "dead", "pending"]),
+        )
+    )
+    return ident
+
 async def claim(
-    db: AsyncSession, *, now: datetime | None = None, ident: uuid.UUID | None = None
+    db: AsyncSession,
+    *,
+    now: datetime | None = None,
+    ident: uuid.UUID | None = None,
+    facility_id: uuid.UUID | None = None,
+    created_since: datetime | None = None,
 ) -> AbdmJob | None:
+    if created_since is not None and (
+        created_since.tzinfo is None or created_since.utcoffset() is None or facility_id is None
+    ):
+        raise ValueError("Session cutoff requires a facility and timezone-aware timestamp")
     now = now or datetime.now(UTC)
     ready = or_(
         (AbdmJob.status == "pending") & (AbdmJob.available_at <= now),
@@ -125,6 +172,10 @@ async def claim(
     )
     if ident is not None:
         ready = ready & (AbdmJob.id == ident)
+    if facility_id is not None:
+        ready = ready & (AbdmJob.facility_id == facility_id)
+    if created_since is not None:
+        ready = ready & (AbdmJob.created_at >= created_since)
     row = (
         await db.execute(
             select(AbdmJob)

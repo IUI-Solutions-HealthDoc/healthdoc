@@ -43,6 +43,7 @@ from fastapi import Header, HTTPException, Request
 
 from app.common.config import get_settings
 from app.common.redis import get_redis
+from app.integrations.abdm.facilities import served_ids
 
 log = logging.getLogger("healthdoc.abdm")
 
@@ -52,7 +53,16 @@ log = logging.getLogger("healthdoc.abdm")
 CALLBACK_SECRET_HEADER = "X-HealthDoc-Callback-Secret"
 
 _PLACEHOLDER = "change-me"
-_MAX_CLOCK_SKEW = timedelta(minutes=10)
+#: How old a callback's TIMESTAMP may be. NHA's sandbox delivered a genuine
+#: on-generate-token 16 minutes after stamping it (29 Sep 2026: stamped 12:31:19,
+#: delivered 12:47:21, REQUEST-ID 46b3d102-0bc9-48bf-ad84-8c8774ad1f71), and the
+#: former symmetric 10-minute window discarded the link token. Replays are refused
+#: by the durable state below each callback (for example, a token is accepted only
+#: for a pending link with no token whose outbound request id matches), not by
+#: this window, which only bounds how stale a first delivery may be.
+_MAX_CALLBACK_AGE = timedelta(minutes=60)
+#: A timestamp from the future is clock skew or forgery; keep that bound tight.
+_MAX_FUTURE_SKEW = timedelta(minutes=5)
 # This key is a short processing lock, not the durable idempotency record.  A
 # gateway retry while the first request is still running is coalesced, but a
 # failed handler must be allowed to run again.  The database transaction/state
@@ -76,6 +86,10 @@ _HIP_CALLBACKS_WITHOUT_CM_ID = frozenset(
 )
 _HIU_CALLBACKS_WITHOUT_CM_ID = frozenset(
     {
+        # The published collection sends X-CM-ID on consent on-init; the live
+        # sandbox did not (3 Oct 2026, receipt f3a72f0a), and refusing it lost
+        # the consent request's id.
+        "/api/v3/hiu/consent/request/on-init",
         "/api/v3/hiu/consent/request/notify",
         "/api/v3/hiu/consent/request/on-status",
         "/api/v3/hiu/consent/on-fetch",
@@ -212,9 +226,12 @@ def _parse_timestamp(raw: str) -> datetime:
             400, {"code": "invalid_timestamp", "message": "Invalid TIMESTAMP"}
         ) from exc
     if value.tzinfo is None:
-        raise HTTPException(
-            400, {"code": "invalid_timestamp", "message": "TIMESTAMP must include a timezone"}
-        )
+        # NHA's link/on_carecontext sends TIMESTAMP with no zone
+        # ("2026-09-30T17:53:23.379539", 24 ms before it arrived here in UTC)
+        # while its other callbacks carry "+00:00". Refusing it discarded a
+        # genuine link result. Read it as UTC: a zone guessed wrong lands hours
+        # away and still fails the freshness window below.
+        value = value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
 
 
@@ -222,8 +239,10 @@ async def _verify_gateway_headers(
     request: Request,
     *,
     recipient_header: str | None,
-    expected_recipient: str | None,
+    expected_recipients: frozenset[str] | None,
     require_cm_id: bool = True,
+    require_request_id: bool = True,
+    replay_scope: str | None = None,
 ) -> GatewayCallback:
     """Validate ABDM's documented callback headers and reject replays.
 
@@ -238,12 +257,12 @@ async def _verify_gateway_headers(
     recipient = request.headers.get(recipient_header) if recipient_header else None
     cm_id = request.headers.get("X-CM-ID")
     if (
-        not request_id
+        (require_request_id and not request_id)
         or not raw_timestamp
         or (require_cm_id and not cm_id)
         or (recipient_header is not None and not recipient)
     ):
-        required_headers = ["REQUEST-ID", "TIMESTAMP"]
+        required_headers = ["REQUEST-ID", "TIMESTAMP"] if require_request_id else ["TIMESTAMP"]
         if require_cm_id:
             required_headers.append("X-CM-ID")
         if recipient_header:
@@ -262,14 +281,15 @@ async def _verify_gateway_headers(
             },
         )
     try:
-        uuid.UUID(request_id)
+        if request_id:
+            uuid.UUID(request_id)
     except ValueError as exc:
         raise HTTPException(
             400, {"code": "invalid_request_id", "message": "REQUEST-ID must be a UUID"}
         ) from exc
 
     settings = get_settings()
-    if recipient_header and (not expected_recipient or expected_recipient == _PLACEHOLDER):
+    if recipient_header and not expected_recipients:
         raise HTTPException(
             503,
             {
@@ -277,13 +297,17 @@ async def _verify_gateway_headers(
                 "message": f"{recipient_header} is not configured on this server",
             },
         )
-    if recipient_header and not hmac.compare_digest(recipient or "", expected_recipient or ""):
+    # Every served id is compared, so the time taken says nothing about which.
+    if recipient_header and not sum(
+        hmac.compare_digest(recipient or "", served) for served in sorted(expected_recipients or ())
+    ):
         raise HTTPException(404, {"code": "unknown_service", "message": "Unknown ABDM service"})
     if cm_id is not None and not hmac.compare_digest(cm_id, settings.abdm_x_cm_id):
         raise HTTPException(401, {"code": "invalid_cm_id", "message": "Unauthorised"})
 
     timestamp = _parse_timestamp(raw_timestamp)
-    if abs(datetime.now(UTC) - timestamp) > _MAX_CLOCK_SKEW:
+    age = datetime.now(UTC) - timestamp
+    if age > _MAX_CALLBACK_AGE or age < -_MAX_FUTURE_SKEW:
         raise HTTPException(
             400,
             {
@@ -292,7 +316,14 @@ async def _verify_gateway_headers(
             },
         )
 
-    replay_scope = recipient_header.lower() if recipient_header else "profile-share"
+    if not request_id:
+        # Only acknowledgement-only callbacks reach here (require_request_id is
+        # False). With no id there is nothing to coalesce on; their handlers
+        # change no state, so a redelivery is harmless.
+        return GatewayCallback(
+            request_id="", timestamp=timestamp, recipient_id=recipient or cm_id or ""
+        )
+    replay_scope = replay_scope or (recipient_header.lower() if recipient_header else "profile-share")
     replay_key = f"abdm:callback:{replay_scope}:{request.url.path}:{request_id}"
     try:
         first_seen = await get_redis().set(replay_key, "1", ex=_REPLAY_TTL_SECONDS, nx=True)
@@ -343,7 +374,7 @@ async def verify_hip_gateway_callback(request: Request) -> GatewayCallback:
     return await _verify_gateway_headers(
         request,
         recipient_header="X-HIP-ID",
-        expected_recipient=get_settings().abdm_hip_id,
+        expected_recipients=served_ids("hip"),
         require_cm_id=request.url.path not in _HIP_CALLBACKS_WITHOUT_CM_ID,
     )
 
@@ -352,7 +383,7 @@ async def verify_hiu_gateway_callback(request: Request) -> GatewayCallback:
     return await _verify_gateway_headers(
         request,
         recipient_header="X-HIU-ID",
-        expected_recipient=get_settings().abdm_hiu_id,
+        expected_recipients=served_ids("hiu"),
         require_cm_id=request.url.path not in _HIU_CALLBACKS_WITHOUT_CM_ID,
     )
 
@@ -368,22 +399,54 @@ async def verify_hip_link_gateway_callback(request: Request) -> GatewayCallback:
     return await _verify_gateway_headers(
         request,
         recipient_header="X-HIP-ID",
-        expected_recipient=get_settings().abdm_hip_id,
+        expected_recipients=served_ids("hip"),
         require_cm_id=False,
     )
 
 
-async def verify_profile_gateway_callback(request: Request) -> GatewayCallback:
-    """Validate Scan-and-Share, whose published callback has no X-HIP-ID.
+async def verify_hip_ack_callback(request: Request) -> GatewayCallback:
+    """Acknowledgements of requests HealthDoc made, which change no state.
 
-    The addressed HIP is carried in ``metaData.hipId`` and is checked by the
-    route after Pydantic has validated the body.  Requiring a header which the
-    gateway does not send made an otherwise valid profile share impossible.
+    NHA acknowledged our care-context notification on 30 September 2026 with
+    X-HIP-ID and TIMESTAMP but no REQUEST-ID and no X-CM-ID (receipt 2ca67b4a),
+    and requiring them answered a genuine acknowledgement with 400. The
+    recipient must still be ours and the timestamp fresh; a REQUEST-ID or
+    X-CM-ID that is sent must still be valid. Not for any callback whose
+    handler records or changes anything.
     """
     return await _verify_gateway_headers(
         request,
+        recipient_header="X-HIP-ID",
+        expected_recipients=served_ids("hip"),
+        require_cm_id=False,
+        require_request_id=False,
+    )
+
+
+async def verify_profile_gateway_callback(request: Request) -> GatewayCallback:
+    """Validate Scan-and-Share, whose two header sets disagree in practice.
+
+    The published collection (14 Aug 2025) sends X-CM-ID and no X-HIP-ID. The
+    live sandbox on 29 Sep 2026 sent X-HIP-ID and no X-CM-ID (receipt
+    f2ce31a9, REQUEST-ID 1119f666-8561-4630-888d-18435f238efa), and requiring
+    X-CM-ID refused a genuine share. Accept either: an X-HIP-ID must be ours,
+    an X-CM-ID must match, and one of them must be present. The addressed HIP
+    in ``metaData.hipId`` is still checked by the route. Both variants share one
+    replay scope, so a redelivery in the other shape is still a replay.
+    """
+    if request.headers.get("X-HIP-ID"):
+        return await _verify_gateway_headers(
+            request,
+            recipient_header="X-HIP-ID",
+            expected_recipients=served_ids("hip"),
+            require_cm_id=False,
+            replay_scope="profile-share",
+        )
+    return await _verify_gateway_headers(
+        request,
         recipient_header=None,
-        expected_recipient=None,
+        expected_recipients=None,
+        replay_scope="profile-share",
     )
 
 
@@ -418,6 +481,10 @@ async def hip_link_gateway_callback(request: Request) -> AsyncIterator[GatewayCa
     except Exception:
         await _release_replay(callback)
         raise
+
+
+async def hip_ack_callback(request: Request) -> AsyncIterator[GatewayCallback]:
+    yield await verify_hip_ack_callback(request)
 
 
 async def profile_gateway_callback(request: Request) -> AsyncIterator[GatewayCallback]:

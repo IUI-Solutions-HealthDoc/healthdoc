@@ -1,5 +1,6 @@
 """M2 reply outage/commit boundaries use synthetic records and mocked transport."""
 
+import json
 import uuid
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
@@ -8,7 +9,7 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy import select
 
-from app.common.security import decrypt_pii
+from app.common.security import decrypt_pii, encrypt_pii
 from app.integrations.abdm import callback_replies, external_router, job_runner, jobs
 from app.integrations.abdm.contracts_v3 import DiscoverCallback, ProfileShareCallback
 from app.integrations.abdm.hip import gateway, link_otp
@@ -240,3 +241,68 @@ async def test_profile_does_not_guess_a_token_from_missing_or_legacy_uhid(
     assert caught.value.status_code == 409
     assert caught.value.detail["code"] == "profile_uhid_unavailable"
     transports["acknowledge_profile_share"].assert_not_awaited()
+
+
+# ------------------------------------------------ Scan-and-Share address (M1)
+# The published profile-share body carries address as an object:
+# {"line", "district", "state", "pinCode"} (Scan-and-Share collection, 14 Aug 2025).
+# The ticket builder read it with attribute access, so any non-empty address
+# raised AttributeError and failed the share. The tests above send no address.
+@pytest.mark.parametrize(
+    ("address", "expected"),
+    [
+        (
+            {"line": " 67 Block Se ", "district": "PUNE", "state": "MAHARASHTRA", "pinCode": "411015"},
+            {"line": "67 Block Se", "district": "PUNE", "state": "MAHARASHTRA", "pincode": "411015"},
+        ),
+        (
+            {"line": "Ward 4", "district": None, "state": None, "pinCode": None},
+            {"line": "Ward 4", "district": None, "state": None, "pincode": None},
+        ),
+        (None, None),
+        ({"line": "", "district": "   "}, None),
+    ],
+)
+async def test_profile_share_maps_the_published_address_object(
+    db, mediated_case, transports, address, expected
+):
+    from app.integrations.abdm.models import ScanShareTicket
+
+    patient, _, _ = mediated_case
+    patient.uhid = "IN-TS-TST01-2026-000001-1"
+    await db.flush()
+    shared = {"abhaAddress": patient.abha_address, "name": patient.full_name}
+    if address is not None:
+        shared["address"] = address
+    payload = ProfileShareCallback.model_validate(
+        {"metaData": {"context": "5"}, "profile": {"patient": shared}}
+    )
+
+    await external_router.profile_share(payload, callback(), db)
+
+    ticket = (
+        await db.execute(select(ScanShareTicket).where(ScanShareTicket.patient_id == patient.id))
+    ).scalar_one()
+    assert ticket.profile_data["address"] == expected
+
+
+def test_shared_address_ignores_anything_that_is_not_an_object():
+    assert external_router._shared_address("67 Block Se, Pune") is None
+    assert external_router._shared_address(["67 Block Se"]) is None
+    assert external_router._shared_address({"line": "x" * 500})["line"] == "x" * 200
+
+
+async def test_a_snapshot_frozen_with_a_masked_hint_is_sent_with_the_number_nha_accepts(
+    db, mediated_case, transports
+):
+    """3 Oct 2026: NHA refused on-init "******3210" with ABDM-9999 "Invalid
+    communication hint"; a reply already queued must not keep repeating it."""
+    await start(db, mediated_case, "hip_link_init")
+    reply = (await db.execute(select(jobs.AbdmCallbackReply))).scalar_one()
+    aad = callback_replies.response_aad(reply.id, reply.facility_id, reply.kind)
+    data = json.loads(decrypt_pii(reply.response_encrypted, associated_data=aad))
+    data["wire"]["communication_hint"] = "******3210"
+    reply.response_encrypted = encrypt_pii(json.dumps(data), associated_data=aad)
+    await db.commit()
+    await job_runner.run_once((await db.execute(select(jobs.AbdmJob))).scalar_one().id)
+    assert transports["respond_to_link_init"].call_args.kwargs["communication_hint"] == "9876543210"

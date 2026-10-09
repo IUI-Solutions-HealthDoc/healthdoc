@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException
@@ -33,8 +33,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import CurrentDbUser, require_roles
 from app.common.db import get_db
+from app.common.idempotency import (
+    check_idempotency,
+    hash_request_body,
+    record_idempotent_response,
+)
+from app.common.patient_scope import facility_timezone
+from app.files.models import FileRecord
 from app.integrations.abdm.callback_auth import verify_callback
 from app.integrations.abdm.client import AbdmError
+from app.integrations.abdm.facilities import facility_for_service_id
+from app.integrations.abdm.fhir.builder import (
+    DOCUMENT_CONTENT_TYPES,
+    MAX_DOCUMENT_ATTACHMENT_BYTES,
+)
 from app.integrations.abdm.hip import gateway, service
 from app.integrations.abdm.hip.documents import (
     DocumentUnavailable,
@@ -45,8 +57,9 @@ from app.integrations.abdm.hip.models import (
     AbdmCareContext,
     AbdmCareContextLink,
     AbdmHipHealthInformationRequest,
+    AbdmReleasedDocument,
 )
-from app.integrations.abdm.hip.publisher import publish_document
+from app.integrations.abdm.hip.publisher import publish_released_document, publish_source
 from app.opd.models import Visit
 from app.patients.models import Patient
 from app.users.models import Facility
@@ -81,6 +94,16 @@ def _require_idempotency_key(
 
 IdempotencyKey = Annotated[str, Depends(_require_idempotency_key)]
 
+#: Publishing a care context, notifying the consent manager and linking are
+#: clinical-record decisions, and the only screen that makes or lists them is
+#: the doctor's. The front desk registers patients; it does not decide which
+#: finalized documents an ABHA address may see.
+_HIP_STAFF_ROLES = ("doctor", "admin")
+
+
+class _NoBody(BaseModel):
+    """Fingerprint for a bodyless mutation; its endpoint key names the target."""
+
 
 async def _acknowledge(what: str, coro) -> None:
     """Send an acknowledgement the gateway is waiting for, and never fail on it.
@@ -108,9 +131,8 @@ def _refusal(exc: service.HipError, status: int = 409) -> HTTPException:
 
 
 async def _facility_for_hfr_id(db: AsyncSession, hfr_id: str) -> uuid.UUID:
-    facility = (
-        await db.execute(select(Facility).where(Facility.hfr_facility_id == hfr_id))
-    ).scalar_one_or_none()
+    # Only a facility this bridge serves: an HFR id on a row is not a link at NHA.
+    facility = await facility_for_service_id(db, hfr_id, "hip")
     if facility is None:
         # 404 rather than 403, the same rule the rest of this codebase follows
         # for a record that is not yours: a 403 would confirm which HFR ids
@@ -132,7 +154,8 @@ class CareContextIn(BaseModel):
         min_length=1,
         max_length=100,
         description="Finalized source: encounter/UUID, prescription/UUID, lab-result/UUID, "
-        "radiology-report/UUID, discharge/UUID or wellness/UUID. Visit-wide references are not shareable.",
+        "radiology-report/UUID, discharge/UUID, wellness/UUID or immunization/UUID (no visit). "
+        "Visit-wide references are not shareable.",
     )
     display: str = Field(min_length=1, max_length=200)
     hi_type: str
@@ -149,7 +172,7 @@ class CareContextOut(BaseModel):
     "/care-contexts",
     status_code=201,
     response_model=CareContextOut,
-    dependencies=[Depends(require_roles("doctor", "receptionist", "admin"))],
+    dependencies=[Depends(require_roles(*_HIP_STAFF_ROLES))],
 )
 async def create_care_context(
     payload: CareContextIn,
@@ -209,6 +232,13 @@ async def create_care_context(
                 },
             )
 
+    endpoint = "POST /abdm/hip/care-contexts"
+    replay = await check_idempotency(
+        db, idempotency_key, endpoint, hash_request_body(payload), current_db_user.id
+    )
+    if replay is not None:
+        return CareContextOut.model_validate(replay.response_body)
+
     try:
         source = await resolve_document(
             db,
@@ -220,26 +250,30 @@ async def create_care_context(
         )
     except DocumentUnavailable as exc:
         raise HTTPException(422, {"code": "document_unavailable", "message": str(exc)}) from exc
-    context = await publish_document(
+    context = await publish_source(
         db,
-        kind=source.kind,
-        source_id=source.source_id,
-        visit=source.visit,
+        source,
+        patient_id=payload.patient_id,
+        facility_id=current_db_user.facility_id,
         actor_id=current_db_user.id,
         display=payload.display,
     )
-    return CareContextOut(
+    response = CareContextOut(
         id=context.id,
         reference=context.reference,
         display=context.display,
         hi_type=context.hi_type,
     )
+    await record_idempotent_response(
+        db, idempotency_key, endpoint, 201, response.model_dump(mode="json"), current_db_user.id
+    )
+    return response
 
 
 @router.post(
     "/care-contexts/{context_id}/notify",
     status_code=202,
-    dependencies=[Depends(require_roles("doctor", "receptionist", "admin"))],
+    dependencies=[Depends(require_roles(*_HIP_STAFF_ROLES))],
 )
 async def notify_care_context(
     context_id: uuid.UUID,
@@ -268,6 +302,16 @@ async def notify_care_context(
     if context is None:
         # 404 not 403, the same rule as everywhere else here.
         raise HTTPException(404, {"code": "not_found", "message": "No such care context"})
+
+    # A retried notify replays the recorded answer instead of calling the
+    # gateway a second time. A refused or failed attempt rolls its reservation
+    # back with the request, so the retry after an outage really does retry.
+    endpoint = f"POST /abdm/hip/care-contexts/{context_id}/notify"
+    replay = await check_idempotency(
+        db, idempotency_key, endpoint, hash_request_body(_NoBody()), current_db_user.id
+    )
+    if replay is not None:
+        return replay.response_body
 
     try:
         await resolve_context_document(db, context)
@@ -300,7 +344,9 @@ async def notify_care_context(
         )
 
     try:
+        facility = await db.get(Facility, context.facility_id)
         request_id, _ = await gateway.notify_care_context(
+            service_id=facility.hfr_facility_id if facility else "",
             abha_address=link.abha_address,
             care_context_reference=context.reference,
             hi_types=[context.hi_type],
@@ -318,7 +364,11 @@ async def notify_care_context(
             },
         ) from exc
 
-    return {"notified": context.reference, "request_id": request_id}
+    response = {"notified": context.reference, "request_id": request_id}
+    await record_idempotent_response(
+        db, idempotency_key, endpoint, 202, response, current_db_user.id
+    )
+    return response
 
 
 class LinkOut(BaseModel):
@@ -337,7 +387,7 @@ class LinkDocumentsIn(BaseModel):
     "/patients/{patient_id}/links",
     status_code=202,
     response_model=list[LinkOut],
-    dependencies=[Depends(require_roles("doctor", "receptionist", "admin"))],
+    dependencies=[Depends(require_roles(*_HIP_STAFF_ROLES))],
 )
 async def initiate_links(
     patient_id: uuid.UUID,
@@ -346,11 +396,6 @@ async def initiate_links(
     idempotency_key: IdempotencyKey,
     db: DbSession,
 ) -> list[LinkOut]:
-    from app.common.idempotency import (
-        check_idempotency,
-        hash_request_body,
-        record_idempotent_response,
-    )
     from app.integrations.abdm.hip.linking import initiate
 
     patient = (
@@ -426,7 +471,7 @@ async def initiate_links(
 @router.get(
     "/patients/{patient_id}/care-contexts",
     response_model=list[CareContextOut],
-    dependencies=[Depends(require_roles("doctor", "receptionist", "admin"))],
+    dependencies=[Depends(require_roles(*_HIP_STAFF_ROLES))],
 )
 async def list_patient_contexts(
     patient_id: uuid.UUID,
@@ -483,10 +528,194 @@ async def list_patient_contexts(
     return result
 
 
+class ReleaseDocumentIn(BaseModel):
+    file_id: uuid.UUID
+    #: What the patient sees in their PHR; ABDM's care-context display keeps
+    #: the first characters, the document carries all of it.
+    title: str = Field(min_length=1, max_length=100)
+    #: When the document itself was written, read off the page.
+    document_date: date
+
+
+class ReleasedDocumentOut(BaseModel):
+    id: uuid.UUID
+    file_id: uuid.UUID
+    title: str
+    document_date: date
+    released_at: datetime
+    care_context_reference: str
+    display: str
+
+
+async def _scoped_patient(db: AsyncSession, patient_id: uuid.UUID, facility_id: uuid.UUID) -> None:
+    patient = (
+        await db.execute(
+            select(Patient.id).where(Patient.id == patient_id, Patient.facility_id == facility_id)
+        )
+    ).scalar_one_or_none()
+    if patient is None:
+        raise HTTPException(404, {"code": "patient_not_found", "message": "No such patient"})
+
+
+def _released_out(document: AbdmReleasedDocument, context: AbdmCareContext) -> ReleasedDocumentOut:
+    return ReleasedDocumentOut(
+        id=document.id,
+        file_id=document.file_id,
+        title=document.title,
+        document_date=document.document_date,
+        released_at=document.released_at,
+        care_context_reference=context.reference,
+        display=context.display,
+    )
+
+
+@router.post(
+    "/patients/{patient_id}/documents",
+    status_code=201,
+    response_model=ReleasedDocumentOut,
+    dependencies=[Depends(require_roles(*_HIP_STAFF_ROLES))],
+)
+async def release_document(
+    patient_id: uuid.UUID,
+    payload: ReleaseDocumentIn,
+    current_db_user: CurrentDbUser,
+    idempotency_key: IdempotencyKey,
+    db: DbSession,
+) -> ReleasedDocumentOut:
+    """Release one uploaded PDF on this chart as a HealthDocumentRecord.
+
+    The upload alone shares nothing. Releasing offers it to the patient's ABHA
+    in the same transaction; it is sent only after a link and a consent.
+    """
+    facility_id = current_db_user.facility_id
+    await _scoped_patient(db, patient_id, facility_id)
+    title = payload.title.strip()
+    if not title:
+        raise HTTPException(422, {"code": "document_title_required", "message": "Give the document a title"})
+    # Another chart's or facility's file is "not found", never "forbidden".
+    file = (
+        await db.execute(
+            select(FileRecord).where(
+                FileRecord.id == payload.file_id,
+                FileRecord.patient_id == patient_id,
+                FileRecord.facility_id == facility_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if file is None:
+        raise HTTPException(404, {"code": "file_not_found", "message": "No such file on this chart"})
+    if file.is_erased:
+        raise HTTPException(422, {"code": "file_erased", "message": "This file has been erased"})
+    if file.content_type not in DOCUMENT_CONTENT_TYPES:
+        raise HTTPException(
+            422,
+            {
+                "code": "document_not_pdf",
+                "message": "Only a PDF can be released. Convert an image to PDF and upload that.",
+            },
+        )
+    if file.size_bytes is None or file.size_bytes > MAX_DOCUMENT_ATTACHMENT_BYTES:
+        raise HTTPException(
+            422, {"code": "document_too_large", "message": "A released document must be 1 MB or smaller"}
+        )
+    today = datetime.now(await facility_timezone(db, facility_id)).date()
+    if payload.document_date > today:
+        raise HTTPException(
+            422, {"code": "document_date_in_future", "message": "The document date cannot be in the future"}
+        )
+
+    endpoint = f"POST /abdm/hip/patients/{patient_id}/documents"
+    replay = await check_idempotency(
+        db, idempotency_key, endpoint, hash_request_body(payload), current_db_user.id
+    )
+    if replay is not None:
+        return ReleasedDocumentOut.model_validate(replay.response_body)
+
+    already = (
+        await db.execute(
+            select(AbdmReleasedDocument.id).where(AbdmReleasedDocument.file_id == file.id)
+        )
+    ).scalar_one_or_none()
+    if already is not None:
+        raise HTTPException(
+            409, {"code": "document_already_released", "message": "This file is already released"}
+        )
+    document = AbdmReleasedDocument(
+        id=uuid.uuid4(),
+        facility_id=facility_id,
+        patient_id=patient_id,
+        file_id=file.id,
+        title=title,
+        document_date=payload.document_date,
+        released_by=current_db_user.id,
+    )
+    db.add(document)
+    await db.flush()
+    await db.refresh(document)
+    try:
+        context = await publish_released_document(db, document, current_db_user.id)
+    except DocumentUnavailable as exc:
+        raise HTTPException(422, {"code": "document_unavailable", "message": str(exc)}) from exc
+    response = _released_out(document, context)
+    await record_idempotent_response(
+        db, idempotency_key, endpoint, 201, response.model_dump(mode="json"), current_db_user.id
+    )
+    return response
+
+
+@router.get(
+    "/patients/{patient_id}/documents",
+    response_model=list[ReleasedDocumentOut],
+    dependencies=[Depends(require_roles(*_HIP_STAFF_ROLES))],
+)
+async def list_released_documents(
+    patient_id: uuid.UUID,
+    current_db_user: CurrentDbUser,
+    db: DbSession,
+) -> list[ReleasedDocumentOut]:
+    facility_id = current_db_user.facility_id
+    await _scoped_patient(db, patient_id, facility_id)
+    documents = (
+        (
+            await db.execute(
+                select(AbdmReleasedDocument)
+                .where(
+                    AbdmReleasedDocument.patient_id == patient_id,
+                    AbdmReleasedDocument.facility_id == facility_id,
+                )
+                .order_by(AbdmReleasedDocument.released_at.desc(), AbdmReleasedDocument.id)
+                .limit(100)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    # The reference is built here, not in SQL: a UUID's text form is the
+    # driver's, and "document/<uuid>" is the string ABDM quotes back.
+    references = {f"document/{document.id}": document for document in documents}
+    contexts = {
+        context.reference: context
+        for context in (
+            await db.execute(
+                select(AbdmCareContext).where(
+                    AbdmCareContext.patient_id == patient_id,
+                    AbdmCareContext.facility_id == facility_id,
+                    AbdmCareContext.reference.in_(list(references)),
+                )
+            )
+        ).scalars()
+    }
+    return [
+        _released_out(document, contexts[reference])
+        for reference, document in references.items()
+        if reference in contexts
+    ]
+
+
 @router.get(
     "/patients/{patient_id}/links",
     response_model=list[LinkOut],
-    dependencies=[Depends(require_roles("doctor", "receptionist", "admin"))],
+    dependencies=[Depends(require_roles(*_HIP_STAFF_ROLES))],
 )
 async def list_links(
     patient_id: uuid.UUID,
@@ -588,6 +817,7 @@ async def consent_notify(
         await _acknowledge(
             "consent notification",
             gateway.acknowledge_consent_notification(
+                service_id=payload.hip_id,
                 consent_id=payload.consent_artefact_id,
                 gateway_request_id=payload.gateway_request_id,
             ),
@@ -711,6 +941,7 @@ async def hi_request(
         await _acknowledge(
             "health-information request",
             gateway.acknowledge_hi_request(
+                service_id=payload.hip_id,
                 transaction_id=payload.transaction_id,
                 gateway_request_id=payload.gateway_request_id,
             ),

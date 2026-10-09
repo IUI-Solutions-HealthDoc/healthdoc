@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
 
 class WireModel(BaseModel):
@@ -31,6 +31,15 @@ class Identifier(WireModel):
     value: str | None = None
 
 
+def _as_text(value: object) -> object:
+    """NHA sends date parts as numbers where its Postman shows strings."""
+    return str(value) if isinstance(value, int) and not isinstance(value, bool) else value
+
+
+def _null_as_empty(value: object) -> object:
+    return [] if value is None else value
+
+
 class DiscoveryPatient(WireModel):
     id: str
     name: str | None = None
@@ -41,6 +50,13 @@ class DiscoveryPatient(WireModel):
     )
     unverified_identifiers: list[Identifier] = Field(
         default_factory=list, alias="unverifiedIdentifiers"
+    )
+
+    # The PHR's live discover (3 Oct 2026, phrsbx) sent "yearOfBirth": 2000 and
+    # "unverifiedIdentifiers": null; refusing either 422'd the whole discovery.
+    _year = field_validator("year_of_birth", mode="before")(_as_text)
+    _lists = field_validator("verified_identifiers", "unverified_identifiers", mode="before")(
+        _null_as_empty
     )
 
 
@@ -54,12 +70,13 @@ class DiscoverCallback(WireModel):
 
 class CareContext(WireModel):
     reference_number: str = Field(alias="referenceNumber")
-    display: str
+    # The PHR's live link-init (3 Oct 2026) names contexts by reference only.
+    display: str | None = None
 
 
 class PatientCareContexts(WireModel):
     reference_number: str = Field(alias="referenceNumber")
-    display: str
+    display: str | None = None
     care_contexts: list[CareContext] = Field(default_factory=list, alias="careContexts")
     hi_type: str = Field(alias="hiType")
     count: int | None = None
@@ -106,6 +123,11 @@ class SharedPatientProfile(WireModel):
     phone_number: str | None = Field(default=None, alias="phoneNumber")
     identifiers: list[Identifier] = Field(default_factory=list)
 
+    _dates = field_validator("year_of_birth", "day_of_birth", "month_of_birth", mode="before")(
+        _as_text
+    )
+    _lists = field_validator("identifiers", mode="before")(_null_as_empty)
+
 
 class ProfileShareMetadata(WireModel):
     hip_id: str | None = Field(default=None, alias="hipId")
@@ -150,7 +172,9 @@ class ConsentDetail(WireModel):
     patient: Party
     care_contexts: list[ConsentCareContext] = Field(default_factory=list, alias="careContexts")
     hip: Party
-    hiu: Party
+    # NHA's HIP consent notification omits it (30 September 2026, a PHR
+    # self-consent). The HIU consent handler still refuses one without it.
+    hiu: Party | None = None
     hi_types: list[str] = Field(default_factory=list, alias="hiTypes")
     permission: Permission
 

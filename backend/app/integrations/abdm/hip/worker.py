@@ -25,19 +25,34 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admissions.models import Admission, Discharge
 from app.allergies.models import Allergy
+from app.billing.models import Invoice, InvoiceItem
 from app.common.config import get_settings
 from app.common.db import SessionLocal
-from app.integrations.abdm.fhir.builder import build_clinical_bundle
+from app.files import service as files_service
+from app.files.models import FileRecord
+from app.immunization.models import ImmunizationRecord, VaccineCatalogue
+from app.integrations.abdm.client import safe_rejection_message
+from app.integrations.abdm.facilities import service_id_for
+from app.integrations.abdm.fhir.builder import (
+    DOCUMENT_CONTENT_TYPES,
+    MAX_DOCUMENT_ATTACHMENT_BYTES,
+    build_clinical_bundle,
+)
 from app.integrations.abdm.hip import gateway as hip_gateway
 from app.integrations.abdm.hip import service as hip_service
-from app.integrations.abdm.hip.documents import DocumentUnavailable, resolve_context_document
+from app.integrations.abdm.hip.documents import (
+    DocumentSource,
+    DocumentUnavailable,
+    resolve_context_document,
+)
 from app.integrations.abdm.hip.models import (
     AbdmCareContext,
     AbdmHipConsentArtefact,
     AbdmHipHealthInformationRequest,
     AbdmHipTransferPage,
+    AbdmReleasedDocument,
 )
-from app.integrations.abdm.jobs import enqueue, job_id
+from app.integrations.abdm.jobs import AbdmJob, enqueue, job_id
 from app.nursing.models import Vitals
 from app.opd.models import Diagnosis
 from app.orders.models import Order, Prescription, PrescriptionItem
@@ -58,6 +73,21 @@ class TransferError(RuntimeError):
 
 class TransientTransferError(TransferError):
     """A transport outage; retry the frozen page, not a newly built document."""
+
+
+class PageRefused(TransferError):
+    """The HIU refused this one document for good (a 4xx other than 404, 408,
+    425 or 429). It is reported ERRORED and the remaining pages still go:
+    live 7 Oct 2026, one refused X-ray report held back six other records."""
+
+
+class HiuTransactionUnknown(TransientTransferError):
+    """The HIU answered 404: it does not know this transaction yet.
+
+    NHA delivers the HIU's on-request, which carries the transaction id, on
+    its own schedule; our push reached the HIU first (live, 3 Oct 2026). This
+    is waiting, not failing, and lasts at most until the HIU's key expires.
+    """
 
 
 def _aware(value: datetime | None) -> datetime | None:
@@ -117,6 +147,126 @@ def _result_observations(test_name: str, result_data: dict[str, Any], result_id:
     return observations
 
 
+#: HealthDoc's visit types onto ndhm-invoice-types; anything else is "Others".
+_INVOICE_TYPE_BY_VISIT = {"opd": "03", "teleconsult": "03", "emergency": "03", "ipd": "02"}
+
+
+async def _invoice_facts(
+    db: AsyncSession,
+    context: AbdmCareContext,
+    source: DocumentSource,
+    *,
+    patient: Patient,
+    facility: Facility,
+) -> dict[str, Any]:
+    """An issued bill: its lines and totals, authored by the facility."""
+    invoice = await db.get(Invoice, source.source_id, populate_existing=True)
+    if invoice is None:
+        raise TransferError("Invoice is unavailable")
+    if not facility.hfr_facility_id:
+        raise TransferError("Facility has no HFR identifier")
+    lines = list(
+        (
+            await db.execute(
+                select(InvoiceItem)
+                .where(InvoiceItem.invoice_id == invoice.id)
+                .order_by(InvoiceItem.created_at, InvoiceItem.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not lines:
+        raise TransferError("Invoice has no charge lines")
+    visit_type = str(getattr(source.visit, "visit_type", "") or "").lower()
+    return {
+        "patient": {
+            "id": patient.id,
+            "name": patient.full_name,
+            "identifier": patient.uhid or patient.thid,
+            "abha_number": patient.abha_number,
+            "gender": patient.sex,
+            "birth_date": patient.dob,
+            "mobile": patient.mobile,
+        },
+        "practitioner": None,
+        "organization": {"id": facility.id, "name": facility.name, "hfr_id": facility.hfr_facility_id},
+        "encounter": None,
+        "authored_at": source.authored_at,
+        "care_context_reference": context.reference,
+        "document_label": context.display,
+        "invoice": {
+            "id": invoice.id,
+            "number": invoice.invoice_number,
+            "status": invoice.status,
+            "type_code": _INVOICE_TYPE_BY_VISIT.get(visit_type, "99"),
+            "issued_at": source.authored_at,
+            "discount_amount": invoice.discount_amount,
+            "scheme_adjustment": invoice.scheme_adjustment,
+            "net_amount": invoice.net_amount,
+            "lines": [
+                {
+                    "id": line.id,
+                    "category": line.charge_category,
+                    "description": line.description,
+                    "quantity": line.quantity,
+                    "amount": line.amount,
+                }
+                for line in lines
+            ],
+        },
+    }
+
+
+async def _document_facts(
+    db: AsyncSession,
+    context: AbdmCareContext,
+    source: DocumentSource,
+    *,
+    patient: Patient,
+    facility: Facility,
+) -> dict[str, Any]:
+    """A released PDF: its exact uploaded bytes, authored by the facility."""
+    released = await db.get(AbdmReleasedDocument, source.source_id, populate_existing=True)
+    file = await db.get(FileRecord, released.file_id, populate_existing=True) if released else None
+    if released is None or file is None:
+        raise TransferError("Released document is unavailable")
+    if not facility.hfr_facility_id:
+        raise TransferError("Facility has no HFR identifier")
+    if file.content_type not in DOCUMENT_CONTENT_TYPES:
+        raise TransferError("Released document is not a PDF")
+    try:
+        content = await files_service.read_file_bytes(
+            file, max_bytes=MAX_DOCUMENT_ATTACHMENT_BYTES
+        )
+    except files_service.FileContentUnavailable as exc:
+        raise TransferError(str(exc)) from exc
+    return {
+        "patient": {
+            "id": patient.id,
+            "name": patient.full_name,
+            "identifier": patient.uhid or patient.thid,
+            "abha_number": patient.abha_number,
+            "gender": patient.sex,
+            "birth_date": patient.dob,
+            "mobile": patient.mobile,
+        },
+        "practitioner": None,
+        "organization": {"id": facility.id, "name": facility.name, "hfr_id": facility.hfr_facility_id},
+        "encounter": None,
+        "authored_at": source.authored_at,
+        "care_context_reference": context.reference,
+        "document_label": context.display,
+        "document": {
+            "id": released.id,
+            "title": released.title,
+            "content_type": file.content_type,
+            "content": content,
+            "document_date": released.document_date,
+        },
+    }
+
+
 async def _clinical_facts(
     db: AsyncSession,
     context: AbdmCareContext,
@@ -133,12 +283,22 @@ async def _clinical_facts(
         raise TransferError(str(exc)) from exc
     visit, primary = source.visit, source.encounter
     encounters = [primary] if primary is not None else []
+    if source.kind == "invoice":
+        return await _invoice_facts(db, context, source, patient=patient, facility=facility)
+    if source.kind == "document":
+        return await _document_facts(db, context, source, patient=patient, facility=facility)
     practitioner = await db.get(User, source.author_id)
     if practitioner is None:
         raise TransferError("Document author has no registration number")
-    practitioner_facts = {"id": practitioner.id, "name": practitioner.full_name}
+    practitioner_facts: dict[str, Any] | None = {"id": practitioner.id, "name": practitioner.full_name}
     if (practitioner.registration_number or "").strip():
         practitioner_facts["registration_number"] = practitioner.registration_number
+    elif source.kind == "lab-result":
+        # A laboratory result is entered and verified by laboratory staff, who
+        # hold no medical registration. The report is the laboratory's, so the
+        # facility authors it; nobody is given a licence they do not hold.
+        # Live 6 Oct 2026, every lab report failed transfer here.
+        practitioner_facts = None
     else:
         settings = get_settings()
         # Never turn a missing licence into a plausible licence. This opt-in
@@ -160,6 +320,50 @@ async def _clinical_facts(
         practitioner_facts["sandbox_account_id"] = str(practitioner.id)
     if not facility.hfr_facility_id:
         raise TransferError("Facility has no HFR identifier")
+    patient_facts = {
+        "id": patient.id,
+        "name": patient.full_name,
+        "identifier": patient.uhid or patient.thid,
+        "abha_number": patient.abha_number,
+        "gender": patient.sex,
+        "birth_date": patient.dob,
+        "mobile": patient.mobile,
+    }
+    organization_facts = {
+        "id": facility.id,
+        "name": facility.name,
+        "hfr_id": facility.hfr_facility_id,
+    }
+    if source.kind == "immunization":
+        record = await db.get(ImmunizationRecord, source.source_id, populate_existing=True)
+        vaccine = await db.get(VaccineCatalogue, record.vaccine_id) if record else None
+        if record is None or vaccine is None:
+            raise TransferError("Immunization record is unavailable")
+        return {
+            "patient": patient_facts,
+            "practitioner": practitioner_facts,
+            "organization": organization_facts,
+            "encounter": None,
+            "authored_at": source.authored_at,
+            "care_context_reference": context.reference,
+            "document_label": context.display,
+            "immunizations": [
+                {
+                    "id": record.id,
+                    "vaccine": vaccine.name,
+                    "target_disease": vaccine.target_disease,
+                    "occurred_at": record.administered_at,
+                    "dose_number": record.dose_number,
+                    "lot_number": record.batch_number,
+                    "expiration_date": record.expiry_date,
+                    "manufacturer": record.manufacturer,
+                    "site": record.site,
+                    "route": record.route,
+                    "adverse_reaction": record.adverse_reaction,
+                    "notes": record.notes,
+                }
+            ],
+        }
 
     # Only the selected consultation/wellness record owns encounter-wide facts.
     # A prescription or report must not absorb its siblings from the same visit.
@@ -361,21 +565,9 @@ async def _clinical_facts(
     encounter_class = "IMP" if discharge_row else "AMB"
 
     common = {
-        "patient": {
-            "id": patient.id,
-            "name": patient.full_name,
-            "identifier": patient.uhid or patient.thid,
-            "abha_number": patient.abha_number,
-            "gender": patient.sex,
-            "birth_date": patient.dob,
-            "mobile": patient.mobile,
-        },
+        "patient": patient_facts,
         "practitioner": practitioner_facts,
-        "organization": {
-            "id": facility.id,
-            "name": facility.name,
-            "hfr_id": facility.hfr_facility_id,
-        },
+        "organization": organization_facts,
         "encounter": {
             "id": primary.id if primary else visit.id,
             "status": encounter_status,
@@ -468,23 +660,52 @@ def _hiu_key_material(row: AbdmHipHealthInformationRequest) -> tuple[str, str, s
 
 async def _post_page(url: str, payload: dict[str, Any]) -> None:
     last_error: Exception | None = None
+    last_status: int | None = None
     async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
         for attempt in range(_MAX_ATTEMPTS):
             try:
                 response = await client.post(url, json=payload)
                 if 200 <= response.status_code < 300:
                     return
-                last_error = TransferError(f"HIU returned HTTP {response.status_code}")
+                last_status = response.status_code
+                last_error = TransferError(_push_refusal(response))
             except httpx.HTTPError as exc:
+                last_status = None
                 last_error = exc
             if attempt + 1 < _MAX_ATTEMPTS:
                 await asyncio.sleep(0.25 * (2**attempt))
-    raise TransientTransferError("HIU data push failed after bounded retries") from last_error
+    reason = str(last_error) if isinstance(last_error, TransferError) else type(last_error).__name__
+    if last_status == 404:
+        raise HiuTransactionUnknown(f"HIU data push failed ({reason})") from last_error
+    if last_status is not None and 400 <= last_status < 500 and last_status not in {408, 425, 429}:
+        raise PageRefused(f"HIU refused the document ({reason})") from last_error
+    raise TransientTransferError(f"HIU data push failed ({reason})") from last_error
+
+
+def _push_refusal(response: httpx.Response) -> str:
+    """Status and ABDM code of a refused push; its message goes to the log only.
+
+    The worker used to keep only "failed after bounded retries", and the
+    reason ABDM's PHR refused a page (our key encoding, 1 October 2026) had to
+    be recovered by replaying the page by hand.
+    """
+    try:
+        body = response.json()
+    except ValueError:
+        body = None
+    error = body.get("error", body) if isinstance(body, dict) else None
+    code = error.get("code") if isinstance(error, dict) else None
+    code = str(code).strip().rstrip(":").strip()[:20] if code else ""
+    message = safe_rejection_message(body) if body is not None else None
+    if message:
+        log.warning("HIU refused a data push: HTTP %s %s %s", response.status_code, code, message)
+    return f"HIU returned HTTP {response.status_code}" + (f" {code}" if code else "")
 
 
 async def _notify_gateway(
     row: AbdmHipHealthInformationRequest,
     *,
+    service_id: str,
     session_status: str,
     statuses: list[dict[str, str]],
 ) -> None:
@@ -492,6 +713,7 @@ async def _notify_gateway(
     for attempt in range(_MAX_ATTEMPTS):
         try:
             await hip_gateway.notify_hi_transfer(
+                service_id=service_id,
                 consent_id=row.consent_artefact_id,
                 transaction_id=row.transaction_id,
                 session_status=session_status,
@@ -607,6 +829,7 @@ async def transfer_transaction(transaction_id: str, *, retry_transport: bool = F
                     )
                 db.add_all(pages)
                 await db.commit()
+            refused: list[str] = []
             for page in pages:
                 reference = page.payload["entries"][0]["careContextReference"]
                 if page.delivered_at is not None:
@@ -644,26 +867,40 @@ async def transfer_transaction(transaction_id: str, *, retry_transport: bool = F
                     raise TransferError("Care context is no longer authorised for transfer")
                 await resolve_context_document(db, current_context)
                 _hiu_key_material(row)
-                await _post_page(push_url, page.payload)
+                try:
+                    await _post_page(push_url, page.payload)
+                except PageRefused:
+                    refused.append(reference)
+                    statuses.append(
+                        {
+                            "careContextReference": reference,
+                            "hiStatus": "ERRORED",
+                            "description": "The HIU refused this document",
+                        }
+                    )
+                    continue
                 page.delivered_at = datetime.now(UTC)
                 row.bundles_sent = str(sum(item.delivered_at is not None for item in pages))
                 await db.commit()
                 statuses.append(
                     {
                         "careContextReference": reference,
-                        "hiStatus": "OK",
+                        "hiStatus": "DELIVERED",
                         "description": "FHIR document transferred",
                     }
                 )
+            delivered = sum(item.delivered_at is not None for item in pages)
+            if not delivered:
+                raise TransferError("The HIU refused every document")
             row.status = "delivered"
-            row.bundles_sent = str(len(statuses))
-            row.failure_reason = None
+            row.bundles_sent = str(delivered)
+            row.failure_reason = f"HIU refused: {', '.join(refused)}"[:500] if refused else None
             row.completed_at = datetime.now(UTC)
             await enqueue(db, kind="hip_notify", target_id=row.id, facility_id=row.facility_id)
             await db.commit()
         except Exception as exc:
             if retry_transport and isinstance(exc, TransientTransferError):
-                row.failure_reason = "Data push pending retry"
+                row.failure_reason = f"Data push pending retry: {exc}"[:500]
                 await db.commit()
                 raise
             safe_reason = (
@@ -677,6 +914,83 @@ async def transfer_transaction(transaction_id: str, *, retry_transport: bool = F
             await enqueue(db, kind="hip_notify", target_id=row.id, facility_id=row.facility_id)
             await db.commit()
             log.error("ABDM transfer failed (%s)", type(exc).__name__)
+
+
+async def abandon_transfer(request_id: uuid.UUID) -> bool:
+    """Close a transfer whose push job ran out of retries, and tell ABDM.
+
+    A dead hip_transfer job used to leave its request "transferring" with no
+    notice (1 October 2026, request fa9976b2): the HIU waited for data that
+    would never come. Mark it failed with the last push reason and queue the
+    FAILED notification. Delivered or already-failed requests are left alone.
+    """
+    async with SessionLocal() as db:
+        row = (
+            await db.execute(
+                select(AbdmHipHealthInformationRequest)
+                .where(AbdmHipHealthInformationRequest.id == request_id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if row is None or row.status != "transferring":
+            return False
+        reason = (row.failure_reason or "").removeprefix("Data push pending retry: ")
+        row.status = "failed"
+        row.failure_reason = f"Data push abandoned after retries: {reason or 'no detail'}"[:500]
+        row.completed_at = datetime.now(UTC)
+        await enqueue(db, kind="hip_notify", target_id=row.id, facility_id=row.facility_id)
+        await db.commit()
+        return True
+
+
+async def close_unacknowledged_request(request_id: uuid.UUID, reason: str) -> bool:
+    """Fail a health-information request whose acknowledgement ABDM refused.
+
+    The push starts only after ABDM accepts the acknowledgement, so a dead
+    acknowledgement left the request "transferring" with nothing ever sent
+    (6 Oct 2026: ABDM delivered request 49a2bc64 sixteen minutes after its
+    own timestamp and answered the immediate reply with ABDM-1015 "Invalid
+    Response"). No FAILED notification is queued: ABDM has already closed
+    the transaction it would be addressed to.
+    """
+    async with SessionLocal() as db:
+        row = (
+            await db.execute(
+                select(AbdmHipHealthInformationRequest)
+                .where(AbdmHipHealthInformationRequest.id == request_id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        # bundles_sent is a string column; anything but "0" means data left.
+        if row is None or row.status != "transferring" or (row.bundles_sent or "0") != "0":
+            return False
+        row.status = "failed"
+        row.failure_reason = f"ABDM did not accept the acknowledgement: {reason or 'no detail'}"[:500]
+        row.completed_at = datetime.now(UTC)
+        await db.commit()
+        return True
+
+
+async def abandon_exhausted_transfers(facility_id: uuid.UUID) -> int:
+    """Reconcile transfers stranded by a dead push job before abandon_transfer existed."""
+    async with SessionLocal() as db:
+        stranded = (
+            (
+                await db.execute(
+                    select(AbdmHipHealthInformationRequest.id)
+                    .join(AbdmJob, AbdmJob.target_id == AbdmHipHealthInformationRequest.id)
+                    .where(
+                        AbdmHipHealthInformationRequest.facility_id == facility_id,
+                        AbdmHipHealthInformationRequest.status == "transferring",
+                        AbdmJob.kind == "hip_transfer",
+                        AbdmJob.status == "dead",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    return sum([await abandon_transfer(ident) for ident in stranded])
 
 
 async def notify_transaction(request_id: uuid.UUID) -> None:
@@ -700,7 +1014,7 @@ async def notify_transaction(request_id: uuid.UUID) -> None:
         statuses = [
             {
                 "careContextReference": p.payload["entries"][0]["careContextReference"],
-                "hiStatus": "OK" if p.delivered_at else "ERRORED",
+                "hiStatus": "DELIVERED" if p.delivered_at else "ERRORED",
                 "description": "FHIR document transferred"
                 if p.delivered_at
                 else "Document not transferred",
@@ -708,15 +1022,34 @@ async def notify_transaction(request_id: uuid.UUID) -> None:
             for p in pages
         ]
         if not statuses:
+            # Refused before any page was built (no authorised author, say).
+            # NHA kept refusing this notice when it named care context "", so
+            # report each care context the consent covered. With none to
+            # name, there is no valid notice to send.
+            artefact = (
+                await db.execute(
+                    select(AbdmHipConsentArtefact).where(
+                        AbdmHipConsentArtefact.consent_artefact_id == row.consent_artefact_id,
+                        AbdmHipConsentArtefact.facility_id == row.facility_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            references = hip_service.consented_care_contexts(
+                artefact.raw_artefact if artefact else None
+            )
+            if not references:
+                raise TransferError("Failed transfer has no care context to report against")
             statuses = [
                 {
-                    "careContextReference": "",
+                    "careContextReference": reference,
                     "hiStatus": "ERRORED",
                     "description": "Health information transfer failed",
                 }
+                for reference in references
             ]
         await _notify_gateway(
             row,
+            service_id=await service_id_for(db, row.facility_id, "hip"),
             session_status="TRANSFERRED" if row.status == "delivered" else "FAILED",
             statuses=statuses,
         )

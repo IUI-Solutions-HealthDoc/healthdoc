@@ -18,6 +18,9 @@ from sqlalchemy import text
 from sqlalchemy.sql.elements import TextClause
 
 from app.common.db import SessionLocal
+from app.forms.service import ensure_defaults_seeded as ensure_default_forms
+from app.immunization.service import ensure_catalogue_seeded as ensure_default_vaccines
+from app.users import models as _users_models  # noqa: F401 — FK target for the ORM flush
 
 FACILITY_ID = uuid.UUID("00000000-0000-0000-0000-000000000101")
 
@@ -147,15 +150,19 @@ async def seed(users: list[tuple[str, str]]) -> None:
             text(
                 """
                 INSERT INTO facilities
-                    (id, code, name, name_hi, state_code, timezone, facility_type, is_active)
+                    (id, code, name, name_hi, state_code, timezone, facility_type,
+                     ownership, is_active)
                 VALUES
                     (:id, 'DEV001', 'HealthDoc Development Hospital',
                      'हेल्थडॉक विकास अस्पताल', 'DL',
-                     'Asia/Kolkata', 'hospital', true)
+                     'Asia/Kolkata', 'hospital', 'government', true)
                 ON CONFLICT (id) DO UPDATE SET
                     name = EXCLUDED.name,
                     name_hi = EXCLUDED.name_hi,
                     timezone = EXCLUDED.timezone,
+                    -- HealthDoc targets government hospitals; keep a value an
+                    -- operator recorded deliberately.
+                    ownership = COALESCE(facilities.ownership, EXCLUDED.ownership),
                     is_active = true
                 """
             ),
@@ -425,6 +432,12 @@ async def seed(users: list[tuple[str, str]]) -> None:
                 ),
                 {"facility_id": FACILITY_ID},
             )
+
+            # Default form definitions, order sets and vaccine catalogue. These
+            # used to be inserted by the first GET of /forms/definitions,
+            # /order-sets or /immunization/catalogue.
+            await ensure_default_forms(session, tariff_author)
+            await ensure_default_vaccines(session)
 
         # ------------------------------------------------------------------
         # A small medicine catalogue.

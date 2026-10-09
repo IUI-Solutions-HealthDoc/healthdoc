@@ -39,8 +39,8 @@ def compute_donor_eligibility(
     weight_kg: float | None,
     hemoglobin_g_dl: float | None,
     last_donation_date: date | None,
+    today: date,
 ) -> tuple[bool, date | None]:
-    today = date.today()
     next_date = None
     if last_donation_date:
         next_date = last_donation_date + timedelta(days=90)
@@ -78,7 +78,8 @@ async def create_donor(
     if payload.patient_id:
         await require_patient_scope(db, payload.patient_id, facility_id)
     is_eligible, next_eligible = compute_donor_eligibility(
-        payload.weight_kg, payload.hemoglobin_g_dl, payload.last_donation_date
+        payload.weight_kg, payload.hemoglobin_g_dl, payload.last_donation_date,
+        await facility_today(db, facility_id),
     )
 
     donor = BloodDonor(

@@ -80,6 +80,17 @@ export interface AppointmentUpdate {
   notes?: string | null;
 }
 
+export interface BookableProvider {
+  staff_user_id: string;
+  staff_name: string;
+  department_id: string;
+}
+
+export interface BookableProviders {
+  service_date: string;
+  items: BookableProvider[];
+}
+
 export interface AppointmentCheckInRequest {
   queue_id?: string | null;
   priority?: "normal" | "urgent" | "vip" | "emergency";
@@ -92,4 +103,6 @@ export interface AppointmentCheckInResult {
   visit_number: string;
   token_id?: string | null;
   token_display?: string | null;
+  token_status: "issued" | "not_issued";
+  token_not_issued_reason?: string | null;
 }

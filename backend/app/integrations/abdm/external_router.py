@@ -17,11 +17,11 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.common.config import get_settings
 from app.common.db import get_db
-from app.integrations.abdm import callback_replies
+from app.integrations.abdm import callback_replies, jobs
 from app.integrations.abdm.callback_auth import (
     GatewayCallback,
+    hip_ack_callback,
     hip_gateway_callback,
     hip_link_gateway_callback,
     hiu_gateway_callback,
@@ -44,7 +44,8 @@ from app.integrations.abdm.contracts_v3 import (
     ProfileShareCallback,
     raw_dict,
 )
-from app.integrations.abdm.hip import link_otp
+from app.integrations.abdm.facilities import Role, facility_for_service_id, served_ids
+from app.integrations.abdm.hip import discovery, link_otp
 from app.integrations.abdm.hip import service as hip_service
 from app.integrations.abdm.hip.documents import DocumentUnavailable, resolve_context_document
 from app.integrations.abdm.hip.models import (
@@ -72,6 +73,7 @@ _PLACEHOLDER = "change-me"
 DbSession = Annotated[AsyncSession, Depends(get_db)]
 HipCallback = Annotated[GatewayCallback, Depends(hip_gateway_callback)]
 HipLinkCallback = Annotated[GatewayCallback, Depends(hip_link_gateway_callback)]
+HipAckCallback = Annotated[GatewayCallback, Depends(hip_ack_callback)]
 HiuCallback = Annotated[GatewayCallback, Depends(hiu_gateway_callback)]
 ProfileCallback = Annotated[GatewayCallback, Depends(profile_gateway_callback)]
 
@@ -80,28 +82,43 @@ def _accepted() -> Response:
     return Response(status_code=202)
 
 
-async def _facility_id(db: AsyncSession) -> uuid.UUID:
-    hfr_id = get_settings().abdm_hfr_facility_id
-    if not hfr_id or hfr_id == _PLACEHOLDER:
-        raise HTTPException(
-            503,
-            {
-                "code": "abdm_hfr_not_configured",
-                "message": "ABDM_HFR_FACILITY_ID is not configured",
-            },
-        )
-    facility = (
-        await db.execute(select(Facility).where(Facility.hfr_facility_id == hfr_id))
-    ).scalar_one_or_none()
+async def _facility_id(db: AsyncSession, service_id: str | None, role: Role) -> uuid.UUID:
+    """The facility NHA addressed: X-HIP-ID or X-HIU-ID names one of this
+    bridge's services (integrations/abdm/facilities.py). An id we do not serve
+    is refused, never attributed to whichever facility is configured first."""
+    facility = await facility_for_service_id(db, service_id, role)
     if facility is None:
-        raise HTTPException(
-            503,
-            {
-                "code": "abdm_hfr_not_seeded",
-                "message": "No HealthDoc facility matches ABDM_HFR_FACILITY_ID",
-            },
-        )
+        # 404, not 403: a 403 would confirm which HFR ids this deployment serves.
+        raise HTTPException(404, {"code": "unknown_service", "message": "Unknown ABDM service"})
     return facility.id
+
+
+def _shared_address(address: object) -> dict[str, str | None] | None:
+    """Map NHA's profile-share address onto the ticket snapshot.
+
+    The wire object is `{"line", "district", "state", "pinCode"}` (Scan-and-Share
+    collection, 14 Aug 2025) and arrives as a dict. Reading it with attribute
+    access raised AttributeError on any non-empty address, failing the share for
+    the patient at the desk. Only non-blank strings are kept, bounded; anything
+    that is not an object is treated as no address rather than refusing the share.
+    """
+    if not isinstance(address, dict):
+        return None
+
+    def text(*keys: str) -> str | None:
+        for key in keys:
+            value = address.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()[:200]
+        return None
+
+    mapped = {
+        "line": text("line"),
+        "district": text("district"),
+        "state": text("state"),
+        "pincode": text("pinCode", "pincode"),
+    }
+    return mapped if any(mapped.values()) else None
 
 
 async def _patient_by_address(
@@ -187,13 +204,92 @@ def _groups(patient: Patient, contexts: list[AbdmCareContext]) -> list[dict]:
     ]
 
 
+async def _bind_linked_identity(db: AsyncSession, link: AbdmCareContextLink) -> None:
+    """After a confirmed link, show the proven ABHA on a chart that had none."""
+    patient = await db.get(Patient, link.patient_id)
+    if (
+        patient is None
+        or patient.abha_address is not None
+        or not await discovery.link_began_from_match(db, link)
+    ):
+        return
+    bound = await discovery.bind_confirmed_identity(
+        db,
+        patient=patient,
+        abha_address=link.abha_address,
+        transaction_id=link.transaction_id,
+        now=link.confirmed_at,
+    )
+    if not bound:
+        return
+    from app.audit.actions import AuditAction
+    from app.audit.service import write_audit_log
+    from app.outbox.service import enqueue as enqueue_event
+
+    facility = await db.get(Facility, link.facility_id)
+    actor = await _abdm_service_user(db, facility)
+    patient.updated_by = actor.id
+    await write_audit_log(
+        db,
+        facility_id=link.facility_id,
+        action=AuditAction.UPDATE,
+        resource_type="patients",
+        resource_id=patient.id,
+        user_id=actor.id,
+        patient_id=patient.id,
+        new_value={
+            "abha_bound_via": "phr_discovery_link",
+            "link_id": str(link.id),
+            "abha_number_recorded": patient.abha_number is not None,
+        },
+    )
+    await enqueue_event(
+        db,
+        aggregate_type="patient",
+        aggregate_id=str(patient.id),
+        event_type="abha_linked",
+        payload={"abha_number": patient.abha_number},
+        sensitivity="important",
+    )
+
+
+async def _linked_references(
+    db: AsyncSession, *, facility_id: uuid.UUID, patient_id: uuid.UUID, abha_address: str
+) -> set[str]:
+    """Care-context references this ABHA address already holds a confirmed link to."""
+    rows = (
+        await db.execute(
+            select(AbdmCareContextLink.care_context_references).where(
+                AbdmCareContextLink.facility_id == facility_id,
+                AbdmCareContextLink.patient_id == patient_id,
+                AbdmCareContextLink.abha_address == abha_address,
+                AbdmCareContextLink.status == "confirmed",
+            )
+        )
+    ).scalars()
+    return {str(reference) for references in rows for reference in (references or [])}
+
+
 async def _link_patient_contexts(
     db: AsyncSession, link: AbdmCareContextLink
 ) -> tuple[Patient, list[AbdmCareContext]]:
-    patient = await _patient_by_address(
-        db, facility_id=link.facility_id, abha_address=link.abha_address
-    )
-    if patient is None or patient.id != link.patient_id:
+    patient = await db.get(Patient, link.patient_id)
+    # The chart holds the link's address, or none yet when this very link
+    # began from a mobile-and-demographics discovery of it. A chart whose
+    # address was removed after an address-based link-init is not that case.
+    if (
+        patient is None
+        or patient.facility_id != link.facility_id
+        or patient.deleted_at is not None
+        or patient.merged_into_patient_id is not None
+        or (
+            patient.abha_address != link.abha_address
+            and not (
+                patient.abha_address is None
+                and await discovery.link_began_from_match(db, link)
+            )
+        )
+    ):
         raise HTTPException(404, {"code": "patient_not_found", "message": "Patient not found"})
     refs = set(link.care_context_references or [])
     rows = await _contexts(db, facility_id=link.facility_id, patient_id=patient.id, references=refs)
@@ -220,18 +316,52 @@ async def discover(
 ) -> Response:
     if callback.replayed:
         return _accepted()
-    facility_id = await _facility_id(db)
+    facility_id = await _facility_id(db, callback.recipient_id, "hip")
     patient = await _patient_by_address(
         db, facility_id=facility_id, abha_address=payload.patient.id
     )
     patient_groups: list[dict] = []
     matched_by: list[str] = []
     if patient is not None:
+        matched_by = ["ABHA_ADDRESS"]
+    else:
+        # No chart holds this address: the patient may have registered with
+        # name, birth year, gender and mobile only (the deep-link SMS case).
+        from app.common.patient_scope import facility_today
+
+        patient, matched_by = await discovery.match_by_demographics(
+            db,
+            facility_id=facility_id,
+            wire=payload.patient,
+            today=await facility_today(db, facility_id),
+        )
+    if patient is not None:
+        # A record this address has already linked is not offered again. The
+        # first live PHR discovery (3 Oct 2026) listed one, and the PHR's link
+        # attempt then timed out without NHA ever calling link-init here.
+        linked = await _linked_references(
+            db, facility_id=facility_id, patient_id=patient.id, abha_address=payload.patient.id
+        )
         patient_groups = _groups(
             patient,
-            await _contexts(db, facility_id=facility_id, patient_id=patient.id),
+            [
+                context
+                for context in await _contexts(db, facility_id=facility_id, patient_id=patient.id)
+                if context.reference not in linked
+            ],
         )
-        matched_by = ["ABHA_ADDRESS"]
+        if matched_by != ["ABHA_ADDRESS"]:
+            # The link-init that follows cannot find this chart by address.
+            await discovery.record_match(
+                db,
+                facility_id=facility_id,
+                transaction_id=payload.transaction_id,
+                wire=payload.patient,
+                patient=patient,
+                references=[c["referenceNumber"] for g in patient_groups for c in g["careContexts"]],
+                matched_by=matched_by,
+                now=datetime.now(UTC),
+            )
     await callback_replies.schedule(
         db,
         facility_id=facility_id,
@@ -242,6 +372,9 @@ async def discover(
         subject_ids=[c["referenceNumber"] for g in patient_groups for c in g["careContexts"]],
         response_data={
             "abha_address": payload.patient.id,
+            # What the matched chart held when discovered: the same address,
+            # or None for a mobile-and-demographics match.
+            "chart_address": patient.abha_address if patient else None,
             "wire": {
                 "transaction_id": payload.transaction_id,
                 "patient_groups": patient_groups,
@@ -260,10 +393,25 @@ async def link_init(
 ) -> Response:
     if callback.replayed:
         return _accepted()
-    facility_id = await _facility_id(db)
+    facility_id = await _facility_id(db, callback.recipient_id, "hip")
     patient = await _patient_by_address(
         db, facility_id=facility_id, abha_address=payload.abha_address
     )
+    if patient is None:
+        # A chart found by mobile and demographics holds no address yet; only
+        # the exact discovery transaction that matched it may name it.
+        patient = await discovery.discovered_patient(
+            db,
+            facility_id=facility_id,
+            transaction_id=payload.transaction_id,
+            abha_address=payload.abha_address,
+            requested={
+                context.reference_number
+                for group in payload.patient
+                for context in group.care_contexts
+            },
+            now=datetime.now(UTC),
+        )
     if patient is None:
         raise HTTPException(404, {"code": "patient_not_found", "message": "Patient not found"})
     # Serializes the transaction, even if concurrent callbacks claim different
@@ -342,7 +490,7 @@ async def link_init(
                 "message": "The patient has no mobile number for mediated linking",
             },
         )
-    communication_hint = link_otp.masked_mobile(patient.mobile)
+    communication_hint = link_otp.communication_hint(patient.mobile)
     expiry = (link.expires_at or datetime.now(UTC) + timedelta(minutes=10)).astimezone(UTC)
     await callback_replies.schedule(
         db,
@@ -384,7 +532,7 @@ async def link_confirm(
             select(AbdmCareContextLink)
             .where(
                 AbdmCareContextLink.link_ref_number == payload.confirmation.link_ref_number,
-                AbdmCareContextLink.facility_id == await _facility_id(db),
+                AbdmCareContextLink.facility_id == await _facility_id(db, callback.recipient_id, "hip"),
                 AbdmCareContextLink.status.in_(["pending", "confirmed", "expired"]),
             )
             .with_for_update()
@@ -457,6 +605,19 @@ async def link_confirm(
     link.status = "confirmed"
     link.confirmed_at = datetime.now(UTC)
     await db.flush()
+    await _bind_linked_identity(db, link)
+    # A record published before this chart had an ABHA address was announced by
+    # deep-link SMS, or deferred. The PHR fetches a newly linked record only
+    # after this notification (live, 3 Oct 2026), so send it for each one now.
+    for context in await _contexts(
+        db,
+        facility_id=link.facility_id,
+        patient_id=link.patient_id,
+        references=set(link.care_context_references or []),
+    ):
+        await jobs.rearm(
+            db, kind="context_notify", target_id=context.id, facility_id=link.facility_id
+        )
     # Commit proof and delivery intent together. A network failure must not
     # roll back the link after Redis has already reserved the successful OTP.
     await callback_replies.schedule(db, **reply_kwargs)
@@ -476,7 +637,7 @@ async def generated_link_token(
             select(AbdmCareContextLink)
             .where(
                 AbdmCareContextLink.token_request_id == payload.response.request_id,
-                AbdmCareContextLink.facility_id == await _facility_id(db),
+                AbdmCareContextLink.facility_id == await _facility_id(db, callback.recipient_id, "hip"),
             )
             .with_for_update()
         )
@@ -513,7 +674,7 @@ async def on_care_context(
             select(AbdmCareContextLink)
             .where(
                 AbdmCareContextLink.gateway_request_id == payload.response.request_id,
-                AbdmCareContextLink.facility_id == await _facility_id(db),
+                AbdmCareContextLink.facility_id == await _facility_id(db, callback.recipient_id, "hip"),
             )
             .with_for_update()
         )
@@ -530,7 +691,7 @@ async def on_care_context(
 @router.post("/api/v3/links/context/on-notify", status_code=202)
 async def context_notify_ack(
     payload: GenericCallback,
-    callback: HipCallback,
+    callback: HipAckCallback,
 ) -> Response:
     return _accepted()
 
@@ -538,7 +699,7 @@ async def context_notify_ack(
 @router.post("/api/v3/patients/sms/on-notify", status_code=202)
 async def deep_link_sms_notify_ack(
     payload: GenericCallback,
-    callback: HipCallback,
+    callback: HipAckCallback,
 ) -> Response:
     """Receive the gateway acknowledgement for a deep-linking SMS request."""
     return _accepted()
@@ -553,10 +714,16 @@ async def profile_share(
     """Receive ABDM scan-and-share demographics and return a facility token."""
     if callback.replayed:
         return _accepted()
-    settings = get_settings()
-    if payload.meta_data.hip_id and payload.meta_data.hip_id != settings.abdm_hip_id:
+    # The share names its HIP in metaData.hipId, and in X-HIP-ID when NHA sends
+    # one; they must agree. The published shape carries X-CM-ID only, which
+    # names no facility: then only a bridge serving exactly one can place it.
+    header_hip = callback.recipient_id if callback.recipient_id in served_ids("hip") else None
+    named = payload.meta_data.hip_id or header_hip
+    if payload.meta_data.hip_id and header_hip and payload.meta_data.hip_id != header_hip:
         raise HTTPException(404, {"code": "unknown_service", "message": "Unknown ABDM service"})
-    facility_id = await _facility_id(db)
+    if not named and len(served_ids("hip")) == 1:
+        named = next(iter(served_ids("hip")))
+    facility_id = await _facility_id(db, named, "hip")
     facility = await db.get(Facility, facility_id)
     if facility is None:
         raise HTTPException(
@@ -699,12 +866,7 @@ async def profile_share(
             "age_years": patient.age_years,
             "mobile": patient.mobile,
             "abha_number": patient.abha_number,
-            "address": {
-                "line": shared.address.line if shared.address else None,
-                "district": shared.address.district if shared.address else None,
-                "state": shared.address.state if shared.address else None,
-                "pincode": shared.address.pincode if shared.address else None,
-            } if shared.address else None,
+            "address": _shared_address(shared.address),
         },
         status="active",
         counter=None,
@@ -744,12 +906,32 @@ async def hip_consent_notify(
     if callback.replayed:
         return _accepted()
     detail = payload.notification.consent_detail
-    if detail is None:
+    status = payload.notification.status.lower()
+    if detail is None and status not in {"revoked", "expired"}:
         raise HTTPException(
             422, {"code": "consent_detail_missing", "message": "Consent detail is required"}
         )
-    facility_id = await _facility_id(db)
-    status = payload.notification.status.lower()
+    facility_id = await _facility_id(db, callback.recipient_id, "hip")
+    if detail is None:
+        # A revocation or expiry names only the consent (live 7 Oct 2026:
+        # {"status": "REVOKED", "consentId": ...}). Refusing it for lack of a
+        # consentDetail left the HIP still sharing under a revoked consent.
+        await hip_service.withdraw_consent(
+            db,
+            facility_id=facility_id,
+            artefact_id=payload.notification.consent_id,
+            status=status,
+            raw=raw_dict(payload),
+        )
+        await callback_replies.schedule(
+            db,
+            facility_id=facility_id,
+            kind="hip_consent",
+            gateway_request_id=callback.request_id,
+            payload=payload,
+            subject_ids=[payload.notification.consent_id],
+        )
+        return _accepted()
     await hip_service.record_consent_notification(
         db,
         facility_id=facility_id,
@@ -782,7 +964,7 @@ async def hip_health_information_request(
 ) -> Response:
     if callback.replayed:
         return _accepted()
-    facility_id = await _facility_id(db)
+    facility_id = await _facility_id(db, callback.recipient_id, "hip")
     consent_id = payload.hi_request.consent.id
     artefact = (
         await db.execute(
@@ -874,9 +1056,9 @@ async def hip_health_information_request(
 
 
 async def _consent_request_by_gateway_id(
-    db: AsyncSession, request_id: str
+    db: AsyncSession, request_id: str, *, service_id: str
 ) -> AbdmConsentRequest | None:
-    facility_id = await _facility_id(db)
+    facility_id = await _facility_id(db, service_id, "hiu")
     return (
         await db.execute(
             select(AbdmConsentRequest)
@@ -911,7 +1093,9 @@ async def consent_on_init(
 ) -> Response:
     if callback.replayed:
         return _accepted()
-    row = await _consent_request_by_gateway_id(db, payload.response.request_id)
+    row = await _consent_request_by_gateway_id(
+        db, payload.response.request_id, service_id=callback.recipient_id
+    )
     if row is None:
         raise HTTPException(
             404, {"code": "consent_request_not_found", "message": "Consent request not found"}
@@ -925,6 +1109,14 @@ async def consent_on_init(
             raise HTTPException(409, {"code": "consent_correlation_conflict"})
         if row.status not in {"failed", "denied", "expired", "revoked"}:
             row.consent_request_id = payload.consent_request.id
+        if row.status == "requested":
+            # NHA's decision can arrive before this id does (live, 3 Oct 2026:
+            # GRANTED 30 s after the request, on-init 16 min later), and a
+            # decision for an unknown id cannot be matched. Ask for the status
+            # now that the id is known; a later decision still arrives normally.
+            await jobs.rearm(
+                db, kind="hiu_consent", target_id=row.id, facility_id=row.facility_id
+            )
     return _accepted()
 
 
@@ -936,7 +1128,22 @@ async def consent_on_status(
 ) -> Response:
     if callback.replayed:
         return _accepted()
-    row = await _consent_request_by_gateway_id(db, payload.response.request_id)
+    row = await _consent_request_by_gateway_id(
+        db, payload.response.request_id, service_id=callback.recipient_id
+    )
+    if row is None and payload.consent_request and payload.consent_request.id:
+        # A status poll carries its own REQUEST-ID, so the answer is matched by
+        # NHA's consent-request id, exactly; never by patient or time.
+        row = (
+            await db.execute(
+                select(AbdmConsentRequest)
+                .where(
+                    AbdmConsentRequest.consent_request_id == payload.consent_request.id,
+                    AbdmConsentRequest.facility_id == await _facility_id(db, callback.recipient_id, "hiu"),
+                )
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
     if row is None:
         raise HTTPException(
             404, {"code": "consent_request_not_found", "message": "Consent request not found"}
@@ -946,8 +1153,30 @@ async def consent_on_status(
         if payload.consent_request.id not in {None, row.consent_request_id}:
             raise HTTPException(409, {"code": "consent_correlation_conflict"})
         status = payload.consent_request.status.lower()
-        if _advance_consent_status(row, status):
+        applicable = _advance_consent_status(row, status)
+        if applicable:
             await hiu_service.end_consent_request(db, row)
+        if applicable and status == "granted":
+            # The grant this status reports may never have reached us as a
+            # notification; record its artefacts and fetch them, as the
+            # acknowledged notification would have.
+            for reference in payload.consent_request.consent_artefacts:
+                artefact = await _record_hiu_artefact(
+                    db,
+                    facility_id=row.facility_id,
+                    consent_request=row,
+                    artefact_id=reference.id,
+                    status="granted",
+                    hi_types=[],
+                    date_range_from=None,
+                    date_range_to=None,
+                    expires_at=None,
+                    raw=raw_dict(payload),
+                )
+                if artefact.status == "granted":
+                    await jobs.enqueue(
+                        db, kind="hiu_fetch", target_id=artefact.id, facility_id=row.facility_id
+                    )
     return _accepted()
 
 
@@ -959,7 +1188,7 @@ async def hiu_consent_notify(
 ) -> Response:
     if callback.replayed:
         return _accepted()
-    facility_id = await _facility_id(db)
+    facility_id = await _facility_id(db, callback.recipient_id, "hiu")
     row = (
         await db.execute(
             select(AbdmConsentRequest)
@@ -1019,7 +1248,7 @@ async def consent_on_fetch(
             422, {"code": "consent_fetch_failed", "message": "Consent artefact was not returned"}
         )
     detail = payload.consent.consent_detail
-    facility_id = await _facility_id(db)
+    facility_id = await _facility_id(db, callback.recipient_id, "hiu")
     existing = (
         await db.execute(
             select(AbdmHiuConsentArtefact).where(
@@ -1067,6 +1296,7 @@ async def consent_on_fetch(
         return _accepted()
     if (
         detail.patient.id != request_row.abha_address
+        or detail.hiu is None
         or detail.hiu.id != callback.recipient_id
         or not detail.hi_types
         or not set(detail.hi_types).issubset(request_row.hi_types)
@@ -1109,7 +1339,7 @@ async def hiu_health_information_on_request(
 ) -> Response:
     if callback.replayed:
         return _accepted()
-    facility_id = await _facility_id(db)
+    facility_id = await _facility_id(db, callback.recipient_id, "hiu")
     row = (
         await db.execute(
             select(AbdmHiuHealthInformationRequest)
@@ -1134,7 +1364,19 @@ async def hiu_health_information_on_request(
     else:
         row.transaction_id = payload.hi_request.transaction_id
         status = payload.hi_request.session_status.upper()
-        row.status = "acknowledged" if status == "ACKNOWLEDGED" else "failed"
+        # The consent manager answers the HIU with REQUESTED; ACKNOWLEDGED is
+        # the HIP's word. Reading REQUESTED as failure (live, 3 Oct 2026)
+        # discarded the key and refused the records that followed.
+        if status in {"REQUESTED", "ACKNOWLEDGED"}:
+            row.status = "acknowledged"
+        else:
+            row.status = "failed"
+            # A status name, not patient data; kept so a new value is visible.
+            row.failure_reason = (
+                f"ABDM session status {status}"
+                if re.fullmatch(r"[A-Z_]{1,30}", status)
+                else "ABDM session status not recognised"
+            )
     if row.status == "failed":
         hiu_service._clear_key(row)
     return _accepted()
