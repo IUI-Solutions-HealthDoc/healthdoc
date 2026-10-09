@@ -10,7 +10,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { ApiError } from "@/lib/api";
+import { ApiError, formatDateTime } from "@/lib/api";
 import { useLocale } from "@/lib/i18n";
 
 import { getMonitorBoard, type MonitorBoard, type MonitorFacilityRow, type MonitorStatus } from "./api";
@@ -98,7 +98,7 @@ export function ControlRoom() {
         <div>
           <h1 className="text-xl font-semibold">{t("monitor.title")}</h1>
           <p className="text-sm text-muted-foreground">
-            {area} · {t("monitor.updated")} {new Date(board.generated_at).toLocaleTimeString()}
+            {area} · {t("monitor.updated")} {formatDateTime(board.generated_at)}
           </p>
           {error ? (
             <p className="text-sm text-danger" role="alert">
@@ -212,7 +212,7 @@ function FacilityRow({ row }: { row: MonitorFacilityRow }) {
       <td className="px-3 py-2 text-right tabular-nums">{n(row.batches_expiring_30d)}</td>
       <td className="px-3 py-2 text-right tabular-nums">{n(row.staff_rostered_today)}</td>
       <td className="px-3 py-2 text-xs text-muted-foreground">
-        {row.captured_at ? new Date(row.captured_at).toLocaleTimeString() : t("monitor.never")}
+        {row.captured_at ? formatDateTime(row.captured_at) : t("monitor.never")}
       </td>
     </tr>
   );
