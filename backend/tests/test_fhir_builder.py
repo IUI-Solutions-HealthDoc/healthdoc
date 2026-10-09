@@ -13,10 +13,10 @@ from app.integrations.abdm.fhir.builder import (
 )
 
 
-def test_all_seven_record_types_valid():
+def test_all_eight_record_types_valid():
     bundles = build_all("patient-123", "HPR-9999")
     assert set(bundles) == set(RECORD_TYPES)
-    assert len(RECORD_TYPES) == 7
+    assert len(RECORD_TYPES) == 8
     for rt, b in bundles.items():
         assert validate_min(b) == [], (rt, validate_min(b))
 
@@ -166,6 +166,8 @@ def test_document_label_survives_export_without_changing_the_profile_type(record
         if record_type == "ImmunizationRecord"
         else {**_facts(), "encounter": None, "practitioner": None, "invoice": _bill()}
         if record_type == "Invoice"
+        else {**_facts(), "encounter": None, "practitioner": None, "document": _released()}
+        if record_type == "HealthDocumentRecord"
         else {**_facts(), "care_plan": "Synthetic test content"}
     )
     original = build_clinical_bundle(record_type, **facts)["entry"][0]["resource"]
@@ -398,7 +400,8 @@ def test_an_immunization_record_carries_nothing_but_immunizations(extra):
 
 
 @pytest.mark.parametrize(
-    "record_type", [t for t in RECORD_TYPES if t not in {"ImmunizationRecord", "Invoice"}]
+    "record_type",
+    [t for t in RECORD_TYPES if t not in {"ImmunizationRecord", "Invoice", "HealthDocumentRecord"}],
 )
 def test_every_other_document_still_requires_an_encounter_and_refuses_doses(record_type):
     with pytest.raises(ValueError, match="requires an encounter"):
@@ -415,6 +418,31 @@ def test_the_minimum_check_still_demands_an_encounter_outside_immunization_recor
         entry for entry in bundle["entry"] if entry["resource"]["resourceType"] != "Encounter"
     ]
     assert validate_min(bundle) == ["bundle must contain a Encounter"]
+
+def _released() -> dict:
+    return {
+        "id": "doc-1", "title": "Synthetic released document", "content_type": "application/pdf",
+        "document_date": date(2026, 10, 1), "content": b"%PDF-1.4\n%%EOF\n",
+    }
+
+
+def test_a_health_document_record_carries_the_released_pdf_only():
+    facts = {**_facts(), "encounter": None, "practitioner": None}
+    bundle = build_clinical_bundle("HealthDocumentRecord", **facts, document=_released())
+    kinds = [entry["resource"]["resourceType"] for entry in bundle["entry"]]
+    assert kinds == ["Composition", "Organization", "Patient", "DocumentReference"]
+    with pytest.raises(ValueError, match="released document only"):
+        build_clinical_bundle(
+            "HealthDocumentRecord", **facts, document=_released(), care_plan="Synthetic"
+        )
+    with pytest.raises(ValueError, match="must be a PDF"):
+        build_clinical_bundle(
+            "HealthDocumentRecord", **facts,
+            document={**_released(), "content_type": "image/jpeg"},
+        )
+    with pytest.raises(ValueError, match="cannot carry a released document"):
+        build_clinical_bundle("WellnessRecord", **_facts(), document=_released())
+
 
 def _bill() -> dict:
     return {

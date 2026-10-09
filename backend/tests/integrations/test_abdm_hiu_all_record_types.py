@@ -42,9 +42,11 @@ EIGHT = {
 PDF = b"%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n"
 
 
-def test_the_hiu_vocabulary_is_the_eight_hi_types_and_wider_than_what_we_build():
+def test_the_hiu_and_hip_vocabularies_are_both_the_eight_hi_types():
+    # The HIU asks for what any HIP may hold; since 0096 HealthDoc builds all
+    # eight as a HIP too. They are separate constants on purpose.
     assert hiu_gw.REQUESTABLE_HI_TYPES == EIGHT
-    assert hip_gw.HI_TYPES < hiu_gw.REQUESTABLE_HI_TYPES
+    assert hip_gw.HI_TYPES == hiu_gw.REQUESTABLE_HI_TYPES
     assert set(records.PROFILES.values()) == EIGHT
 
 

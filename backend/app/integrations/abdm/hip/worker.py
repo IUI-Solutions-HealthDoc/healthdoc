@@ -28,10 +28,16 @@ from app.allergies.models import Allergy
 from app.billing.models import Invoice, InvoiceItem
 from app.common.config import get_settings
 from app.common.db import SessionLocal
+from app.files import service as files_service
+from app.files.models import FileRecord
 from app.immunization.models import ImmunizationRecord, VaccineCatalogue
 from app.integrations.abdm.client import safe_rejection_message
 from app.integrations.abdm.facilities import service_id_for
-from app.integrations.abdm.fhir.builder import build_clinical_bundle
+from app.integrations.abdm.fhir.builder import (
+    DOCUMENT_CONTENT_TYPES,
+    MAX_DOCUMENT_ATTACHMENT_BYTES,
+    build_clinical_bundle,
+)
 from app.integrations.abdm.hip import gateway as hip_gateway
 from app.integrations.abdm.hip import service as hip_service
 from app.integrations.abdm.hip.documents import (
@@ -44,6 +50,7 @@ from app.integrations.abdm.hip.models import (
     AbdmHipConsentArtefact,
     AbdmHipHealthInformationRequest,
     AbdmHipTransferPage,
+    AbdmReleasedDocument,
 )
 from app.integrations.abdm.jobs import AbdmJob, enqueue, job_id
 from app.nursing.models import Vitals
@@ -211,6 +218,55 @@ async def _invoice_facts(
     }
 
 
+async def _document_facts(
+    db: AsyncSession,
+    context: AbdmCareContext,
+    source: DocumentSource,
+    *,
+    patient: Patient,
+    facility: Facility,
+) -> dict[str, Any]:
+    """A released PDF: its exact uploaded bytes, authored by the facility."""
+    released = await db.get(AbdmReleasedDocument, source.source_id, populate_existing=True)
+    file = await db.get(FileRecord, released.file_id, populate_existing=True) if released else None
+    if released is None or file is None:
+        raise TransferError("Released document is unavailable")
+    if not facility.hfr_facility_id:
+        raise TransferError("Facility has no HFR identifier")
+    if file.content_type not in DOCUMENT_CONTENT_TYPES:
+        raise TransferError("Released document is not a PDF")
+    try:
+        content = await files_service.read_file_bytes(
+            file, max_bytes=MAX_DOCUMENT_ATTACHMENT_BYTES
+        )
+    except files_service.FileContentUnavailable as exc:
+        raise TransferError(str(exc)) from exc
+    return {
+        "patient": {
+            "id": patient.id,
+            "name": patient.full_name,
+            "identifier": patient.uhid or patient.thid,
+            "abha_number": patient.abha_number,
+            "gender": patient.sex,
+            "birth_date": patient.dob,
+            "mobile": patient.mobile,
+        },
+        "practitioner": None,
+        "organization": {"id": facility.id, "name": facility.name, "hfr_id": facility.hfr_facility_id},
+        "encounter": None,
+        "authored_at": source.authored_at,
+        "care_context_reference": context.reference,
+        "document_label": context.display,
+        "document": {
+            "id": released.id,
+            "title": released.title,
+            "content_type": file.content_type,
+            "content": content,
+            "document_date": released.document_date,
+        },
+    }
+
+
 async def _clinical_facts(
     db: AsyncSession,
     context: AbdmCareContext,
@@ -229,6 +285,8 @@ async def _clinical_facts(
     encounters = [primary] if primary is not None else []
     if source.kind == "invoice":
         return await _invoice_facts(db, context, source, patient=patient, facility=facility)
+    if source.kind == "document":
+        return await _document_facts(db, context, source, patient=patient, facility=facility)
     practitioner = await db.get(User, source.author_id)
     if practitioner is None:
         raise TransferError("Document author has no registration number")

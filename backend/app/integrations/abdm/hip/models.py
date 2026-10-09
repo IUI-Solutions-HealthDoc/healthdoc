@@ -19,6 +19,7 @@ from __future__ import annotations
 from sqlalchemy import (
     CheckConstraint,
     Column,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -27,6 +28,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    func,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
@@ -77,7 +79,8 @@ class AbdmCareContext(Base, UUIDPk, Timestamps, Blame):
         # agreement.
         CheckConstraint(
             "hi_type IN ('OPConsultation','Prescription','DiagnosticReport',"
-            "'DischargeSummary','WellnessRecord','ImmunizationRecord','Invoice')",
+            "'DischargeSummary','WellnessRecord','ImmunizationRecord','Invoice',"
+            "'HealthDocumentRecord')",
             name="abdm_care_context_hi_type",
         ),
         Index("ix_abdm_care_contexts_facility_id", "facility_id"),
@@ -92,6 +95,48 @@ class AbdmCareContext(Base, UUIDPk, Timestamps, Blame):
         Index("ix_abdm_care_contexts_updated_by", "updated_by"),
     )
 
+
+
+class AbdmReleasedDocument(Base, UUIDPk, Timestamps):
+    """A clinician's decision to share one uploaded PDF as a HealthDocumentRecord.
+
+    Uploading a file to a chart shares nothing; this row does, with the title
+    and document date the patient will see. A file is released at most once,
+    so its care-context reference (`document/<id>`) never changes. Withdrawal
+    is erasure of the file, which the resolver honours.
+    """
+
+    __tablename__ = "abdm_released_documents"
+
+    facility_id = Column(
+        UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False
+    )
+    patient_id = Column(
+        UUID(as_uuid=True), ForeignKey("patients.id", ondelete="RESTRICT"), nullable=False
+    )
+    file_id = Column(
+        UUID(as_uuid=True), ForeignKey("files.id", ondelete="RESTRICT"), nullable=False
+    )
+    title = Column(String(100), nullable=False)
+    #: When the document itself was written, as the clinician read it off the
+    #: page. Not the release time, which is when it became shareable.
+    document_date = Column(Date, nullable=False)
+    released_by = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    released_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __audit_resource_type__ = "abdm_released_documents"
+    __audit_facility_id_field__ = "facility_id"
+    __audit_patient_id_field__ = "patient_id"
+
+    __table_args__ = (
+        UniqueConstraint("file_id", name="uq_abdm_released_documents_file_id"),
+        CheckConstraint("trim(title) <> ''", name="ck_abdm_released_documents_title"),
+        Index("ix_abdm_released_documents_facility_id", "facility_id"),
+        Index("ix_abdm_released_documents_patient_id", "patient_id"),
+        Index("ix_abdm_released_documents_released_by", "released_by"),
+    )
 
 class AbdmDiscoveryMatch(Base, UUIDPk, Timestamps):
     """A PHR discovery that matched a chart by mobile and demographics.
