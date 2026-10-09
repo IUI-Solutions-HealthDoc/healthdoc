@@ -35,7 +35,9 @@ therefore apply as follows:
    visible to the facility admin. **Not built until the health department's
    data-protection officer approves the purpose list.**
 
-Every control-room read is audited with the monitor's subject and scope.
+Board, drill-down and trend reads are written to the application log with the
+officer's subject; activity-trail reads (patient-level, masked) are written to the
+facility's audit table.
 
 ## Data model
 

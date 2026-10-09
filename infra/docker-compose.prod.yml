@@ -147,6 +147,19 @@ services:
       keycloak: {condition: service_started}
       minio-init: {condition: service_completed_successfully}
 
+  # Control room (docs/control-room-design-2026-10-10.md): every 15 minutes,
+  # counts per facility for the state/district board. Same image as backend.
+  monitor-capture:
+    <<: *restart
+    image: ${HEALTHDOC_BACKEND_IMAGE:?required}
+    env_file: ../${HEALTHDOC_ENV_FILE:-.env.production}
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    command: ["python", "-m", "scripts.run_monitor_capture"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+
   frontend:
     <<: *restart
     image: ${HEALTHDOC_FRONTEND_IMAGE:?required}
