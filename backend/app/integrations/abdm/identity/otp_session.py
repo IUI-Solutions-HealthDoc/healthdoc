@@ -137,6 +137,9 @@ class OtpSession:
     #: is remembered here rather than re-derived from client input. None for
     #: sessions written before this field existed, which behave as before.
     login_hint: str | None = None
+    #: ABDM otpSystem of the first leg ("abdm" or "aadhaar"); an ABHA address
+    #: may use either and the verify leg must quote the matching scope.
+    otp_system: str | None = None
     #: How many fresh gateway transactions this desk attempt has already used.
     resends: int = 0
     #: Official ABHA enrolment grant identifiers only — never Aadhaar or OTP.
@@ -184,6 +187,7 @@ async def start(
     started_by: str,
     patient_id: str | None = None,
     login_hint: str | None = None,
+    otp_system: str | None = None,
     resends: int = 0,
     consent_code: str | None = None,
     consent_version: str | None = None,
@@ -208,6 +212,7 @@ async def start(
         patient_id=str(patient_id) if patient_id else None,
         created_at=datetime.now(UTC).isoformat(),
         login_hint=login_hint,
+        otp_system=otp_system,
         resends=resends,
         consent_code=consent_code,
         consent_version=consent_version,

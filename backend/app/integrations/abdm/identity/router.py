@@ -356,6 +356,9 @@ class AbhaLoginOtpRequest(BaseModel):
     aadhaar: str | None = Field(default=None, min_length=12, max_length=12, pattern=r"^\d{12}$")
     abha_address: str | None = Field(default=None, min_length=3, max_length=120)
     mobile: str | None = Field(default=None, pattern=r"^\d{10}$")
+    #: With `abha_address` only: prove it with the ABHA mobile OTP or an
+    #: Aadhaar OTP (workbook VRFY_ABHA_202 / VRFY_ABHA_102).
+    address_otp: Literal["mobile", "aadhaar"] = "mobile"
     patient_id: uuid.UUID
     #: Required with `mobile` (M1 VRFY_ABHA_301 "Captcha preferred"): the
     #: challenge from GET /captcha and the characters the desk read from it.
@@ -367,6 +370,8 @@ class AbhaLoginOtpRequest(BaseModel):
         present = [value for value in (self.abha_number, self.aadhaar, self.abha_address, self.mobile) if value is not None]
         if len(present) != 1:
             raise ValueError("provide exactly one of abha_number, aadhaar, abha_address or mobile")
+        if self.address_otp != "mobile" and self.abha_address is None:
+            raise ValueError("address_otp applies only to an ABHA address")
         return self
 
 
@@ -1944,6 +1949,7 @@ async def login_request_otp(
             aadhaar=payload.aadhaar,
             abha_address=payload.abha_address,
             mobile=payload.mobile,
+            address_otp_system="aadhaar" if payload.address_otp == "aadhaar" else "abdm",
             facility_id=str(current_db_user.facility_id),
             started_by=str(current_db_user.id),
             patient_id=str(payload.patient_id),

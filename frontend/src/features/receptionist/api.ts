@@ -58,7 +58,12 @@ export function registerPatient(
 function loginIdentifierBody(identifier: AbhaLoginIdentifier): Record<string, string> {
   if ("aadhaar" in identifier) return { aadhaar: digitsOnly(identifier.aadhaar) };
   if ("mobile" in identifier) return { mobile: digitsOnly(identifier.mobile) };
-  if ("abha_address" in identifier) return { abha_address: identifier.abha_address.trim() };
+  if ("abha_address" in identifier) {
+    // VRFY_ABHA_102: an ABHA address may be proved with an Aadhaar OTP instead.
+    return identifier.address_otp === "aadhaar"
+      ? { abha_address: identifier.abha_address.trim(), address_otp: "aadhaar" }
+      : { abha_address: identifier.abha_address.trim() };
+  }
   return { abha_number: digitsOnly(identifier.abha_number) };
 }
 

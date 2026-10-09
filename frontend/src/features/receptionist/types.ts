@@ -110,7 +110,7 @@ export interface AbhaOtpRequested {
 export type AbhaLoginIdentifier =
   | { abha_number: string }
   | { aadhaar: string }
-  | { abha_address: string }
+  | { abha_address: string; address_otp?: "mobile" | "aadhaar" }
   | { mobile: string };
 
 export interface AbhaIdentityLinked {
