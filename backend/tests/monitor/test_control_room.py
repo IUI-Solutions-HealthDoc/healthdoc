@@ -458,3 +458,42 @@ async def test_rostered_staff_with_waiting_patients_and_no_activity_turn_the_row
     colour, reasons = service.status_of(pulse, now=NOW)
     assert colour == "amber"
     assert "2 patients waiting for 1 rostered staff with no activity yet" in reasons
+# ---------------------------------------------------------------- session audit for officers
+
+
+from types import SimpleNamespace  # noqa: E402
+
+from app.audit import router as audit_router  # noqa: E402
+
+_REQUEST = SimpleNamespace(client=SimpleNamespace(host="203.0.113.7"))
+
+
+async def test_an_officer_login_is_logged_without_a_facility_audit_row(db):
+    sub = str(uuid.uuid4())
+    before = (await db.execute(sa.text("SELECT count(*) FROM audit_logs"))).scalar_one()
+    out = await audit_router.record_login(_REQUEST, jwt_user=_officer(sub), db=db)
+    assert out == {"recorded": "login", "where": "application_log"}
+    assert (await db.execute(sa.text("SELECT count(*) FROM audit_logs"))).scalar_one() == before
+
+
+async def test_a_facility_users_login_still_writes_the_audit_row(db):
+    facility = await _facility(db)
+    sub = str(uuid.uuid4())
+    await db.execute(sa.text("INSERT INTO users (id, keycloak_sub, username, full_name, facility_id) "
+                             "VALUES (:u, :s, :n, 'Desk', :f)"),
+                     {"u": uuid.uuid4(), "s": sub, "n": f"r{uuid.uuid4().hex[:8]}", "f": facility.id})
+    await db.flush()
+    out = await audit_router.record_login(
+        _REQUEST, jwt_user=AuthUser(sub=sub, username="desk", roles=["receptionist"]), db=db
+    )
+    assert out == {"recorded": "login"}
+    rows = (await db.execute(sa.text("SELECT count(*) FROM audit_logs WHERE facility_id = :f"), {"f": facility.id})).scalar_one()
+    assert rows == 1
+
+
+async def test_an_unprovisioned_non_officer_is_still_refused(db):
+    with pytest.raises(HTTPException) as refused:
+        await audit_router.record_login(
+            _REQUEST, jwt_user=AuthUser(sub=str(uuid.uuid4()), username="x", roles=["doctor"]), db=db
+        )
+    assert refused.value.status_code == 403
