@@ -57,6 +57,9 @@ DISPLAY_NAMES = {
     "dev.superadmin": "Dev Platform Superadmin",
 }
 
+#: Control-room officers: seeded as a monitor_scopes grant, never a users row.
+MONITOR_LOGINS = frozenset({"dev.monitor"})
+
 
 UPDATE_USER = text(
     """
@@ -590,8 +593,45 @@ async def seed(users: list[tuple[str, str]]) -> None:
             )
 
 
+async def seed_monitors(monitors) -> None:
+    """A whole-state grant for each officer, keyed by Keycloak subject.
+
+    Officers get no users row: they belong to no hospital, and a users row
+    would need a facility_id that would be a lie.
+    """
+    if not monitors:
+        return
+    async with SessionLocal() as session, session.begin():
+        state = (
+            await session.execute(text("SELECT state_code FROM facilities WHERE id = :id"), {"id": FACILITY_ID})
+        ).scalar_one()
+        for username, subject in monitors:
+            if username not in MONITOR_LOGINS:
+                raise SystemExit(f"{username} is not a control-room login; see MONITOR_LOGINS")
+            # NULL district = whole state; ON CONFLICT cannot see NULLs, so NOT EXISTS.
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO monitor_scopes (id, keycloak_sub, username, state_code, district, granted_by_sub)
+                    SELECT :id, :sub, :username, :state, NULL, 'dev_setup'
+                     WHERE NOT EXISTS (
+                        SELECT 1 FROM monitor_scopes
+                         WHERE keycloak_sub = :sub AND state_code = :state AND district IS NULL)
+                    """
+                ),
+                {"id": uuid.uuid4(), "sub": subject, "username": username, "state": state},
+            )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--monitor",
+        action="append",
+        type=parse_user,
+        default=[],
+        help="Control-room officer and Keycloak subject: USERNAME=SUB (no users row)",
+    )
     parser.add_argument(
         "--user",
         action="append",
@@ -601,7 +641,10 @@ def main() -> None:
     )
     args = parser.parse_args()
     asyncio.run(seed(args.user))
+    asyncio.run(seed_monitors(args.monitor))
     print(f"Seeded development facility and {len(args.user)} authenticated users")
+    if args.monitor:
+        print(f"Granted {len(args.monitor)} control-room officer(s) the dev facility's state")
 
 
 if __name__ == "__main__":

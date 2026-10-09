@@ -44,6 +44,7 @@ MODULES = [
     "ipd",
     "notifications",
     "maintenance",
+    "monitor",
     "nursing",
     "opd",
     "orders",

@@ -341,6 +341,18 @@ const ROLE_DASHBOARDS = [
       },
     ],
   },
+  {
+    name: "monitor",
+    username: "dev.monitor",
+    landingPath: "/monitor",
+    dashboards: [
+      {
+        path: "/monitor",
+        expectCalls: true,
+        expectedText: "Facilities reporting",
+      },
+    ],
+  },
 ];
 
 const selectedRoles = requestedRole

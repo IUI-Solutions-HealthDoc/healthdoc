@@ -265,6 +265,8 @@ SUPERVISOR_SUB=$(ensure_keycloak_user dev.supervisor Dev "Records Supervisor" su
 # anyone. Two accounts cover all three actors (requester unmerges).
 SUPERVISOR2_SUB=$(ensure_keycloak_user dev.supervisor2 Dev "Records Supervisor Two" supervisor)
 SUPERADMIN_SUB=$(ensure_keycloak_user dev.superadmin Dev "Platform Superadmin" superadmin)
+# A state control-room officer: no hospital, no users row, a granted area.
+MONITOR_SUB=$(ensure_keycloak_user dev.monitor Dev "Control Room Officer" monitor)
 
 # Do not print a successful setup banner if even one advertised login was not
 # created. This explicit postcondition catches partial Keycloak bootstrap on
@@ -273,7 +275,7 @@ SUPERADMIN_SUB=$(ensure_keycloak_user dev.superadmin Dev "Platform Superadmin" s
 DEV_USERNAMES=(
   dev.receptionist dev.doctor dev.nurse dev.labtech dev.radiology
   dev.pharmacist dev.admin dev.auditor dev.patient dev.hod dev.emergency
-  dev.billing dev.supervisor dev.supervisor2 dev.superadmin
+  dev.billing dev.supervisor dev.supervisor2 dev.superadmin dev.monitor
 )
 for username in "${DEV_USERNAMES[@]}"; do
   subject=$(kc get users -r healthdoc -q exact=true -q username="$username" \
@@ -300,7 +302,8 @@ docker compose -f infra/docker-compose.yml --env-file .env exec -T backend \
     --user "dev.billing=$BILLING_SUB" \
     --user "dev.supervisor=$SUPERVISOR_SUB" \
     --user "dev.supervisor2=$SUPERVISOR2_SUB" \
-    --user "dev.superadmin=$SUPERADMIN_SUB"
+    --user "dev.superadmin=$SUPERADMIN_SUB" \
+    --monitor "dev.monitor=$MONITOR_SUB"
 
 # ---------------------------------------------------------------------------
 # Verify the OUTCOME, not just the absence of an error.
@@ -322,7 +325,7 @@ docker compose -f infra/docker-compose.yml --env-file .env exec -T backend \
 # ---------------------------------------------------------------------------
 expected_users="dev.receptionist dev.doctor dev.nurse dev.labtech dev.radiology \
 dev.pharmacist dev.admin dev.auditor dev.patient dev.hod dev.emergency \
-dev.supervisor dev.superadmin"
+dev.supervisor dev.superadmin dev.monitor"
 
 missing_users=""
 for username in $expected_users; do
@@ -359,5 +362,6 @@ HealthDoc dev stack is up:
 Dev logins (Keycloak realm 'healthdoc', password 'devpass'):
   dev.receptionist / dev.doctor / dev.nurse / dev.labtech /
   dev.radiology / dev.pharmacist / dev.admin / dev.auditor / dev.patient / dev.hod /
-  dev.billing / dev.emergency / dev.supervisor / dev.supervisor2 / dev.superadmin
+  dev.billing / dev.emergency / dev.supervisor / dev.supervisor2 / dev.superadmin /
+  dev.monitor (control room, whole state of the dev facility)
 DONE
