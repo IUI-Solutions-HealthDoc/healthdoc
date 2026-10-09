@@ -283,6 +283,9 @@ async def discharge_admission(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
                              "destination_facility_id or destination_facility_name is required "
                              "when discharge_type is 'transferred'")
+    except service.DischargeBeforeAdmission:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                             "The discharge time is before the admission time") from None
     return schemas.DischargeOut.model_validate(discharge)
 
 
