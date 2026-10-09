@@ -53,6 +53,41 @@ export function FacilityDetail({ facilityId, onClose }: { facilityId: string; on
       ) : null}
       {detail && detail.facility.status === "grey" ? <p className="text-sm text-muted-foreground">{t("monitor.detailNotReporting")}</p> : null}
       {detail && detail.facility.status !== "grey" ? (
+        <div className="space-y-4">
+        <div>
+          <h3 className="mb-2 text-sm font-medium">{t("monitor.staffToday")}</h3>
+          {detail.staff.length === 0 ? (
+            <p className="text-sm text-muted-foreground">{t("monitor.noStaff")}</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="text-left text-xs text-muted-foreground">
+                <tr>
+                  <th className="py-1">{t("monitor.staffName")}</th>
+                  <th className="py-1">{t("monitor.department")}</th>
+                  <th className="py-1">{t("monitor.shift")}</th>
+                  <th className="py-1">{t("monitor.activity")}</th>
+                  <th className="py-1 text-right">{t("monitor.colWaiting")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {detail.staff.map((person) => (
+                  <tr key={`${person.name}-${person.department ?? ""}`} className="border-t border-border">
+                    <td className="py-1">
+                      {person.name}
+                      {person.designation ? <span className="block text-xs text-muted-foreground">{person.designation}</span> : null}
+                    </td>
+                    <td className="py-1">{person.department ?? "—"}</td>
+                    <td className="py-1">{person.shift ?? "—"}</td>
+                    <td className={`py-1 ${!person.active_today && person.waiting > 0 ? "font-medium text-amber-800" : ""}`}>
+                      {person.active_today ? t("monitor.activeToday") : t("monitor.noActivityYet")}
+                    </td>
+                    <td className="py-1 text-right tabular-nums">{person.waiting}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
         <div className="grid gap-4 lg:grid-cols-3">
           <div>
             <h3 className="mb-2 text-sm font-medium">{t("monitor.wards")}</h3>
@@ -125,6 +160,7 @@ export function FacilityDetail({ facilityId, onClose }: { facilityId: string; on
               </ul>
             )}
           </div>
+        </div>
         </div>
       ) : null}
       {detail ? <p className="text-xs text-muted-foreground">{t("monitor.listLimit", { limit: detail.list_limit })}</p> : null}

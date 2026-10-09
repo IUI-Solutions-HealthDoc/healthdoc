@@ -64,6 +64,7 @@ export function getMonitorBoard(district: string | null): Promise<MonitorBoard> 
 
 export interface MonitorFacilityDetail {
   facility: MonitorFacilityRow;
+  staff: { name: string; designation: string | null; department: string | null; shift: string | null; active_today: boolean; waiting: number }[];
   wards: { ward: string; department: string | null; beds: number; occupied: number; free: number; maintenance: number }[];
   stock_short: { item: string; strength: string | null; available: string; reorder_level: string }[];
   expiring: { item: string; batch: string; expiry: string; quantity: string }[];

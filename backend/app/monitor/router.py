@@ -175,8 +175,18 @@ class ExpiringOut(BaseModel):
     quantity: str
 
 
+class StaffOut(BaseModel):
+    name: str
+    designation: str | None
+    department: str | None
+    shift: str | None
+    active_today: bool
+    waiting: int
+
+
 class FacilityDetailOut(BaseModel):
     facility: FacilityRowOut
+    staff: list[StaffOut]
     wards: list[WardOut]
     stock_short: list[StockShortOut]
     expiring: list[ExpiringOut]
@@ -198,6 +208,7 @@ async def get_facility_detail(
     log.info("monitor facility read", extra={"monitor_sub": user.sub, "facility_id": str(facility.id)})
     return FacilityDetailOut(
         facility=_row(facility, pulse, now=now),
+        staff=detail.get("staff", []),
         wards=detail.get("wards", []),
         stock_short=detail.get("stock_short", []),
         expiring=detail.get("expiring", []),
