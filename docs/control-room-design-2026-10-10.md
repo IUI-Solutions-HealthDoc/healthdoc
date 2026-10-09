@@ -1,6 +1,6 @@
 # Control room (state / district monitoring) — design
 
-Date: 10 October 2026. Status: agreed scope, slice 1 in progress.
+Date: 10 October 2026. Status: slices 1–6 built (PRs #676–#681, stacked); slice 7 waits for DPO approval.
 Context: the BHAVYA comparison (`docs/BHAVYA-vs-HealthDoc-comparison-2026-10-09.docx`)
 found that HealthDoc has per-facility KPIs but no view across hospitals.
 
@@ -22,9 +22,14 @@ therefore apply as follows:
    facts only. No patient identifiers. Disease trends suppress cells below 5
    patients so a rare diagnosis in a small block cannot identify a person.
 2. **Activity drill-down** (slice 6): shows the event trail (time, service,
-   medicine or procedure, staff name and role) with the patient as a
-   pseudonymous reference (masked UHID). This answers "who treated, what was
-   given, when" without naming the patient.
+   medicine or procedure, staff name) with the patient as a day code
+   `P-XXXXXX`: HMAC-SHA256 of (facility, day, patient) under a key derived from
+   the server's PII key with its own label. Stable for one patient all day at
+   one facility (an officer can follow a journey), different the next day and
+   elsewhere (not a standing identifier), not reversible without the server.
+   Loaded on request, one facility and one day (last 90 days), at most 500
+   events, and every load is written to that facility's audit log with the
+   officer's Keycloak subject. The owner accepted this masked view on 10 Oct.
 3. **Opening a named patient record** from the control room (slice 7) is a
    break-glass action: reason required, time-limited, written to the audit log,
    visible to the facility admin. **Not built until the health department's
@@ -50,6 +55,8 @@ Status colour is computed when read, from documented thresholds
 45 minutes = grey "not reporting").
 
 ## Slices (each its own PR)
+
+Status 10 Oct: 1 #676, 2 #677, 3 #678, 4 #679, 5 #680, 6 #681 (stacked in that order); 7 not started.
 
 | # | Slice | Contents |
 |---|---|---|

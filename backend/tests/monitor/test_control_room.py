@@ -480,3 +480,73 @@ async def test_a_critical_machine_down_turns_the_facility_red(db):
     assert [e["name"] for e in pulse.detail["equipment"]] == ["Oxygen plant", "X-ray"]
     colour, reasons = service.status_of(pulse, now=NOW)
     assert colour == "red" and "1 critical machines not working" in reasons
+
+
+# ---------------------------------------------------------------- activity trail (masked)
+
+
+from app.monitor import activity  # noqa: E402
+
+
+async def test_the_trail_shows_who_did_what_with_patients_masked_and_audited(db):
+    facility = await _facility(db, district="Patna")
+    fid, doctor, ward = facility.id, uuid.uuid4(), uuid.uuid4()
+    await db.execute(sa.text("INSERT INTO users (id, keycloak_sub, username, full_name, facility_id) "
+                             "VALUES (:u, :s, :n, 'Dr Meera Sinha', :f)"),
+                     {"u": doctor, "s": str(uuid.uuid4()), "n": f"d{uuid.uuid4().hex[:8]}", "f": fid})
+    patients = {}
+    for name in ("Ramesh Kumar", "Sita Devi"):
+        patients[name] = uuid.uuid4()
+        await db.execute(sa.text("INSERT INTO patients (id, full_name, sex, identity_path, facility_id, created_by, age_years, uhid) "
+                                 "VALUES (:p, :n, 'other', 'demographics_only', :f, :u, 40, :h)"),
+                         {"p": patients[name], "n": name, "f": fid, "u": doctor, "h": f"IN-BR-{uuid.uuid4().hex[:10]}"})
+    visits = {}
+    for name, hour in (("Ramesh Kumar", 3), ("Sita Devi", 5)):          # 08:30 and 10:30 IST
+        visits[name] = uuid.uuid4()
+        at = datetime(2026, 10, 10, hour, 0, tzinfo=UTC)
+        await db.execute(sa.text("INSERT INTO visits (id, visit_number, patient_id, facility_id, visit_type, visit_date, created_by) "
+                                 "VALUES (:v, :n, :p, :f, 'opd', :at, :u)"),
+                         {"v": visits[name], "n": f"V-{uuid.uuid4().hex[:10]}", "p": patients[name], "f": fid, "at": at, "u": doctor})
+        await db.execute(sa.text("INSERT INTO encounters (id, visit_id, facility_id, provider_user_id, created_by, started_at) "
+                                 "VALUES (:e, :v, :f, :u, :u, :at)"),
+                         {"e": uuid.uuid4(), "v": visits[name], "f": fid, "u": doctor, "at": at + timedelta(minutes=20)})
+    await db.execute(sa.text("INSERT INTO wards (id, name, facility_id) VALUES (:w, 'Female Ward', :f)"), {"w": ward, "f": fid})
+    bed = uuid.uuid4()
+    await db.execute(sa.text("INSERT INTO beds (id, ward_id, bed_number) VALUES (:b, :w, 'F1')"), {"b": bed, "w": ward})
+    await db.execute(sa.text("INSERT INTO admissions (id, visit_id, patient_id, ward_id, bed_id, admitted_at, created_by) "
+                             "VALUES (:a, :v, :p, :w, :b, :at, :u)"),
+                     {"a": uuid.uuid4(), "v": visits["Sita Devi"], "p": patients["Sita Devi"], "w": ward, "b": bed,
+                      "at": datetime(2026, 10, 10, 6, 0, tzinfo=UTC), "u": doctor})
+    await db.flush()
+    sub = str(uuid.uuid4())
+    await _grant(db, sub, "BR", "Patna")
+
+    trail = await monitor_router.get_facility_activity(fid, user=_officer(sub), db=db, day=date(2026, 10, 10))
+    assert [e.kind for e in trail.events] == ["registered", "consultation", "registered", "consultation", "admitted"]
+    sita = activity.patient_ref(fid, date(2026, 10, 10), patients["Sita Devi"])
+    assert trail.last_patient == sita and trail.events[-1].patient == sita
+    assert trail.first_patient == trail.events[0].patient != sita
+    assert trail.events[1].staff == "Dr Meera Sinha" and trail.events[-1].detail == "Female Ward"
+    assert trail.patients == 2
+    flat = trail.model_dump_json()
+    assert "Ramesh" not in flat and "Sita" not in flat and str(patients["Sita Devi"]) not in flat
+    # A new day, a new code: the reference does not become a standing identifier.
+    assert activity.patient_ref(fid, date(2026, 10, 11), patients["Sita Devi"]) != sita
+    logged = (await db.execute(sa.text(
+        "SELECT new_value FROM audit_logs WHERE facility_id = :f AND resource_type = 'monitor_activity'"),
+        {"f": fid})).scalars().all()
+    assert len(logged) == 1 and logged[0]["monitor_sub"] == sub and logged[0]["day"] == "2026-10-10"
+
+
+async def test_the_trail_is_404_outside_the_grant_and_bounded_in_time(db):
+    mine = await _facility(db, district="Patna")
+    theirs = await _facility(db, district="Gaya")
+    sub = str(uuid.uuid4())
+    await _grant(db, sub, "BR", "Patna")
+    with pytest.raises(HTTPException) as refused:
+        await monitor_router.get_facility_activity(theirs.id, user=_officer(sub), db=db, day=None)
+    assert refused.value.status_code == 404
+    for day in (date(2026, 10, 11), date(2026, 7, 1)):
+        with pytest.raises(HTTPException) as refused:
+            await monitor_router.get_facility_activity(mine.id, user=_officer(sub), db=db, day=day)
+        assert refused.value.status_code == 422

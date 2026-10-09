@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
 import { ApiError, formatDateTime } from "@/lib/api";
 import { useLocale } from "@/lib/i18n";
 
+import { ActivityTrail } from "./ActivityTrail";
 import { getMonitorFacility, type MonitorFacilityDetail } from "./api";
 
 export function FacilityDetail({ facilityId, onClose }: { facilityId: string; onClose: () => void }) {
@@ -184,6 +185,7 @@ export function FacilityDetail({ facilityId, onClose }: { facilityId: string; on
         </div>
         </div>
       ) : null}
+      {detail ? <ActivityTrail facilityId={facilityId} /> : null}
       {detail ? <p className="text-xs text-muted-foreground">{t("monitor.listLimit", { limit: detail.list_limit })}</p> : null}
     </section>
   );
