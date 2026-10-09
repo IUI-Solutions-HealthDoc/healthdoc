@@ -6,6 +6,116 @@ import { useLocale } from "@/lib/i18n";
 
 interface Context { id: string; reference: string; display: string; hi_type: string }
 interface LinkStatus { id: string; status: string; care_context_references: string[] }
+interface UploadedFile { id: string; patient_id: string | null; erased_at: string | null }
+
+const MAX_RELEASE_BYTES = 1024 * 1024;
+
+/** One uploaded PDF released as a HealthDocumentRecord. The upload alone
+ * shares nothing; the release offers it for linking. */
+function ReleaseDocument({ patientId, onReleased }: { patientId: string; onReleased: () => void }) {
+  const { t } = useLocale();
+  const [file, setFile] = useState<File | null>(null);
+  const [title, setTitle] = useState("");
+  const [documentDate, setDocumentDate] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  // An upload that succeeded is reused if the release then fails, so a retry
+  // does not leave a second copy on the chart.
+  const uploaded = useRef<{ source: File; id: string } | null>(null);
+  const retry = useRef<{ signature: string; key: string } | null>(null);
+  const valid = !!file && /\.pdf$/i.test(file.name) && file.size > 0 && file.size <= MAX_RELEASE_BYTES;
+  async function release() {
+    if (!file || !valid || !title.trim() || !documentDate) {
+      setError(t("doctor.abdm.releaseNotPdf"));
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      if (uploaded.current?.source !== file) {
+        const body = new FormData();
+        body.append("upload", file);
+        body.append("patient_id", patientId);
+        body.append("owner_module", "patients");
+        body.append("sensitivity", "sensitive");
+        // /files/upload has no idempotency protocol; never auto-retry it.
+        const saved = await api<UploadedFile>("/files/upload", { method: "POST", body, idempotencyKey: null });
+        if (saved.patient_id !== patientId || saved.erased_at) throw new Error(t("doctor.abdm.releaseFailed"));
+        uploaded.current = { source: file, id: saved.id };
+      }
+      const payload = { file_id: uploaded.current.id, title: title.trim(), document_date: documentDate };
+      const signature = JSON.stringify(payload);
+      if (retry.current?.signature !== signature) retry.current = { signature, key: newIdempotencyKey() };
+      await api(`/abdm/hip/patients/${patientId}/documents`, {
+        method: "POST",
+        body: signature,
+        idempotencyKey: retry.current.key,
+      });
+      setNotice(t("doctor.abdm.releaseDone"));
+      setFile(null);
+      setTitle("");
+      setDocumentDate("");
+      uploaded.current = null;
+      retry.current = null;
+      onReleased();
+    } catch (reason) {
+      setError(getUserFacingError(reason, t("doctor.abdm.releaseFailed")));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="space-y-3 rounded border border-border p-4">
+      <h3 className="font-semibold">{t("doctor.abdm.releaseTitle")}</h3>
+      <p className="text-sm text-muted-foreground">{t("doctor.abdm.releaseIntro")}</p>
+      {error && <p role="alert" className="text-danger">{error}</p>}
+      {notice && <p role="status">{notice}</p>}
+      <label className="block text-sm">
+        {t("doctor.abdm.releaseFile")}
+        <input
+          type="file"
+          accept="application/pdf,.pdf"
+          className="mt-1 block"
+          disabled={busy}
+          onChange={(event) => {
+            setError(null);
+            setFile(event.target.files?.[0] ?? null);
+          }}
+        />
+      </label>
+      <label className="block text-sm">
+        {t("doctor.abdm.releaseDocTitle")}
+        <input
+          className="mt-1 block w-full rounded border border-border px-2 py-1"
+          maxLength={100}
+          value={title}
+          disabled={busy}
+          onChange={(event) => setTitle(event.target.value)}
+        />
+      </label>
+      <label className="block text-sm">
+        {t("doctor.abdm.releaseDocDate")}
+        <input
+          type="date"
+          className="mt-1 block rounded border border-border px-2 py-1"
+          value={documentDate}
+          disabled={busy}
+          onChange={(event) => setDocumentDate(event.target.value)}
+        />
+      </label>
+      <button
+        type="button"
+        className="rounded bg-primary px-4 py-2 text-white disabled:opacity-50"
+        disabled={busy || !valid || !title.trim() || !documentDate}
+        onClick={() => void release()}
+      >
+        {t("doctor.abdm.releaseButton")}
+      </button>
+    </div>
+  );
+}
 
 export function DocumentSharing({ patientId, verified }: { patientId: string; verified: boolean }) {
   const { t } = useLocale();
@@ -66,6 +176,7 @@ export function DocumentSharing({ patientId, verified }: { patientId: string; ve
     <section className="surface-card space-y-4 p-5" aria-label="Share finalized documents">
       <h2 className="text-xl font-semibold">{t("doctor.abdm.shareTitle")}</h2>
       <p className="text-sm text-muted-foreground">{t("doctor.abdm.shareIntro")}</p>
+      <ReleaseDocument patientId={patientId} onReleased={() => setRefresh((value) => value + 1)} />
       {!verified && <p>{t("doctor.abdm.verifyBeforeLinking")}</p>}
       {error && <p role="alert" className="text-danger">{error}</p>}
       {notice && <p role="status">{notice}</p>}

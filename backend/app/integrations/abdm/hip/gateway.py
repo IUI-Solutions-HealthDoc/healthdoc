@@ -59,7 +59,8 @@ log = logging.getLogger("healthdoc.abdm")
 #: fhir/builder.py can populate it, and the drift test will hold the three sets
 #: together. ImmunizationRecord came back (migration 0092) with a builder for
 #: one recorded vaccine dose. Invoice came back (migration 0094) with a
-#: builder for one issued bill, the eighth type NHA's HMIS FAQ asks for.
+#: builder for one issued bill. HealthDocumentRecord came back (migration 0096)
+#: for one PDF a clinician released, completing the eight NHA's HMIS FAQ asks for.
 HI_TYPES: frozenset[str] = frozenset(
     {
         "OPConsultation",
@@ -69,6 +70,7 @@ HI_TYPES: frozenset[str] = frozenset(
         "WellnessRecord",
         "ImmunizationRecord",
         "Invoice",
+        "HealthDocumentRecord",
     }
 )
 
