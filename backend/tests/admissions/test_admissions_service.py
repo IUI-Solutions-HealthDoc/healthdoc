@@ -228,3 +228,55 @@ class TestDischargePatient:
             await service.discharge_patient(
                 db, admission=admission, discharge_type="discharged", created_by=doctor.id,
             )
+
+
+class TestClinicalTimes:
+    """A datetime-local value sent without its zone was read as UTC, so a
+    14:33 IST admission was stored 5½ hours in the future and a discharge
+    could precede its admission (live, 9 Oct 2026)."""
+
+    def test_a_time_without_a_zone_is_refused_not_guessed(self):
+        from pydantic import ValidationError
+
+        from app.admissions.schemas import AdmissionCreate, DischargeRequest
+
+        ids = {"visit_id": uuid.uuid4(), "ward_id": uuid.uuid4(), "bed_id": uuid.uuid4()}
+        with pytest.raises(ValidationError):
+            AdmissionCreate(**ids, admitted_at="2026-10-09T14:33")
+        with pytest.raises(ValidationError):
+            DischargeRequest(discharge_type="discharged", discharged_at="2026-10-09T14:33")
+        zoned = AdmissionCreate(**ids, admitted_at="2026-10-09T09:03:00Z")
+        assert zoned.admitted_at.utcoffset() is not None
+
+    def test_a_clinical_time_in_the_future_is_refused(self):
+        from datetime import UTC, datetime, timedelta
+
+        from pydantic import ValidationError
+
+        from app.admissions.schemas import AdmissionCreate, DischargeRequest
+
+        ids = {"visit_id": uuid.uuid4(), "ward_id": uuid.uuid4(), "bed_id": uuid.uuid4()}
+        later = datetime.now(UTC) + timedelta(hours=5, minutes=30)
+        with pytest.raises(ValidationError, match="future"):
+            AdmissionCreate(**ids, admitted_at=later)
+        with pytest.raises(ValidationError, match="future"):
+            DischargeRequest(discharge_type="discharged", discharged_at=later)
+        # A ward PC a minute ahead of the server is not a typo.
+        AdmissionCreate(**ids, admitted_at=datetime.now(UTC) + timedelta(minutes=1))
+
+    async def test_a_discharge_before_its_admission_is_refused(self, db, seed, visit, ward, bed):
+        from datetime import UTC, datetime, timedelta
+
+        _dept, _room, doctor = seed
+        admitted = datetime.now(UTC) - timedelta(hours=1)
+        admission = await service.admit_patient(
+            db, visit_id=visit.id, ward_id=ward.id, bed_id=bed.id, created_by=doctor.id,
+            admitted_at=admitted,
+        )
+        with pytest.raises(service.DischargeBeforeAdmission):
+            await service.discharge_patient(
+                db, admission=admission, discharge_type="discharged", created_by=doctor.id,
+                discharge_summary="Synthetic.", discharged_at=admitted - timedelta(minutes=5),
+            )
+        await db.refresh(admission)
+        assert admission.status == "admitted"

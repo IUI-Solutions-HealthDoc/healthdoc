@@ -3,10 +3,20 @@
 follow-up PR that adds discharge_patient()."""
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, Field, field_validator
+
+#: A clinical time may run slightly ahead of the server clock (a ward PC's
+#: clock drift); beyond this it is a typo or a time-zone slip, not care given.
+_FUTURE_TOLERANCE = timedelta(minutes=5)
+
+
+def _not_in_future(value: datetime | None) -> datetime | None:
+    if value is not None and value > datetime.now(UTC) + _FUTURE_TOLERANCE:
+        raise ValueError("cannot be in the future")
+    return value
 
 
 class AdmissionCreate(BaseModel):
@@ -14,7 +24,12 @@ class AdmissionCreate(BaseModel):
     ward_id: UUID
     bed_id: UUID
     reason: str | None = None
-    admitted_at: datetime | None = None
+    #: Must carry its UTC offset. A bare "2026-10-09T14:33" was read as UTC,
+    #: so an admission entered at 14:33 IST was stored 5½ hours in the future
+    #: (live, 9 Oct 2026). Refusing it is safer than guessing the zone.
+    admitted_at: AwareDatetime | None = None
+
+    _admitted_not_future = field_validator("admitted_at")(_not_in_future)
 
 
 class AdmissionOut(BaseModel):
@@ -41,7 +56,10 @@ class DischargeRequest(BaseModel):
     follow_up_date: date | None = None
     destination_facility_id: UUID | None = None
     destination_facility_name: str | None = None
-    discharged_at: datetime | None = None
+    #: Must carry its UTC offset, as admitted_at does.
+    discharged_at: AwareDatetime | None = None
+
+    _discharged_not_future = field_validator("discharged_at")(_not_in_future)
 
 
 class DischargeOut(BaseModel):
