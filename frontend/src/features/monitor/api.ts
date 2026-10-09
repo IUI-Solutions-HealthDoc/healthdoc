@@ -73,3 +73,25 @@ export interface MonitorFacilityDetail {
 export function getMonitorFacility(facilityId: string): Promise<MonitorFacilityDetail> {
   return api<MonitorFacilityDetail>(`/monitor/facilities/${facilityId}`);
 }
+
+export interface MonitorTrends {
+  week_ending: string;
+  small_cell_below: number;
+  spike_rule: string;
+  trends: {
+    district: string | null;
+    icd_version: string;
+    icd_code: string;
+    title: string | null;
+    /** A number, or "<5": small exact counts are never sent. */
+    this_week: string;
+    last_week: string;
+    spike: boolean;
+  }[];
+}
+
+export function getMonitorTrends(district: string | null): Promise<MonitorTrends> {
+  const query = new URLSearchParams();
+  if (district) query.set("district", district);
+  return api<MonitorTrends>(`/monitor/trends?${query.toString()}`);
+}
