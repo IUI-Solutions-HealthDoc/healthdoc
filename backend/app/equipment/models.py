@@ -52,13 +52,13 @@ class Equipment(Base, UUIDPk, Timestamps):
         UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False
     )
     name: Mapped[str] = mapped_column(String(120), nullable=False)
-    category: Mapped[str] = mapped_column(String(30), nullable=False)
+    category: Mapped[str] = mapped_column(String(50), nullable=False)
     #: Where it stands: "ICU", "X-ray room 2". Free text: wards are not the only places machines live.
     location: Mapped[str | None] = mapped_column(String(120))
     asset_tag: Mapped[str | None] = mapped_column(String(60))
     #: A critical machine down turns the facility red, not amber (ventilator, oxygen plant, generator).
     is_critical: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default="working", server_default="working")
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="working", server_default="working")
     status_since: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     status_reason: Mapped[str | None] = mapped_column(Text)
     created_by: Mapped[uuid.UUID] = mapped_column(
@@ -85,8 +85,8 @@ class EquipmentStatusEvent(Base, UUIDPk):
     facility_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False
     )
-    from_status: Mapped[str | None] = mapped_column(String(20))
-    to_status: Mapped[str] = mapped_column(String(20), nullable=False)
+    from_status: Mapped[str | None] = mapped_column(String(50))
+    to_status: Mapped[str] = mapped_column(String(50), nullable=False)
     reason: Mapped[str | None] = mapped_column(Text)
     changed_by: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False

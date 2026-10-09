@@ -2250,11 +2250,11 @@ below 5 as "<5"; titles come from icd_codes, never from diagnosis free text.
 ```
 facility_id UUID NOT NULL → facilities
 name varchar(120) NOT NULL CHECK (trim(name) <> '')
-category varchar(30) NOT NULL                      -- imaging|laboratory|life_support|monitoring|surgical|sterilisation|power|cold_chain|other
+category varchar(50) NOT NULL                      -- imaging|laboratory|life_support|monitoring|surgical|sterilisation|power|cold_chain|other
 location varchar(120)
 asset_tag varchar(60)                              -- UNIQUE (facility_id, asset_tag)
 is_critical boolean NOT NULL DEFAULT false         -- critical and not working turns the control-room row red
-status varchar(20) NOT NULL DEFAULT 'working'      -- working|down|maintenance|retired
+status varchar(50) NOT NULL DEFAULT 'working'      -- working|down|maintenance|retired
 status_since timestamptz NOT NULL DEFAULT now()
 status_reason text                                 -- required for any status but working
 created_by UUID NOT NULL → users
@@ -2265,8 +2265,8 @@ Audited (resource type `equipment`). Register and retire: admin. Report down/bac
 **equipment_status_events** (0100) — append-only history of every status change
 ```
 equipment_id UUID NOT NULL → equipment · facility_id UUID NOT NULL → facilities
-from_status varchar(20)                            -- NULL on registration
-to_status varchar(20) NOT NULL
+from_status varchar(50)                            -- NULL on registration
+to_status varchar(50) NOT NULL
 reason text
 changed_by UUID NOT NULL → users
 changed_at timestamptz NOT NULL DEFAULT now()
