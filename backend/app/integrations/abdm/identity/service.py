@@ -113,6 +113,16 @@ _LOGIN_OTP_SYSTEMS: dict[str, str] = {
     "abha-address": "abdm",
     "mobile": "abdm",
 }
+#: An ABHA address can also be proved with an Aadhaar OTP ("ABHA Address Login,
+#: Aadhaar OTP" in the M1 collection, workbook VRFY_ABHA_102): same endpoints,
+#: aadhaar-verify scope and the aadhaar OTP system.
+ADDRESS_OTP_SYSTEMS = ("abdm", "aadhaar")
+
+
+def _login_scope(login_hint: str, otp_system: str | None) -> list[str]:
+    if login_hint == "abha-address" and otp_system == "aadhaar":
+        return ["abha-address-login", "aadhaar-verify"]
+    return _LOGIN_SCOPES[login_hint]
 
 
 @dataclass(frozen=True)
@@ -815,6 +825,7 @@ async def request_login_otp(
     aadhaar: str | None = None,
     abha_address: str | None = None,
     mobile: str | None = None,
+    address_otp_system: str = "abdm",
     facility_id: str,
     started_by: str,
     patient_id: str | None = None,
@@ -839,6 +850,13 @@ async def request_login_otp(
             "exactly one of ABHA number, Aadhaar, ABHA address or mobile is required",
         )
     login_hint = present[0]
+    if address_otp_system not in ADDRESS_OTP_SYSTEMS:
+        raise AbdmIdentityError("abdm_otp_system_invalid", "unsupported OTP system")
+    if address_otp_system != "abdm" and login_hint != "abha-address":
+        raise AbdmIdentityError(
+            "abdm_otp_system_invalid", "only an ABHA address can choose its OTP system"
+        )
+    otp_system = address_otp_system if login_hint == "abha-address" else _LOGIN_OTP_SYSTEMS[login_hint]
     login_id = _login_id_for(login_hint, supplied[login_hint] or "")
     settings = get_settings()
     body = (
@@ -847,9 +865,9 @@ async def request_login_otp(
             if login_hint == "abha-address"
             else settings.abdm_path_login_request_otp,
             {
-                "scope": _LOGIN_SCOPES[login_hint],
+                "scope": _login_scope(login_hint, otp_system),
                 "loginHint": login_hint,
-                "otpSystem": _LOGIN_OTP_SYSTEMS[login_hint],
+                "otpSystem": otp_system,
                 "loginId": encrypt_for_abdm(login_id),
             },
         )
@@ -862,6 +880,7 @@ async def request_login_otp(
         started_by=started_by,
         patient_id=patient_id,
         login_hint=login_hint,
+        otp_system=otp_system,
         resends=resends,
     )
     return OtpRequested(
@@ -932,6 +951,13 @@ async def resend_otp(
             aadhaar=aadhaar,
             abha_address=abha_address,
             mobile=mobile,
+            # A resend keeps the OTP system the desk chose; an older session
+            # without one was a mobile OTP.
+            address_otp_system=(
+                session.otp_system
+                if session.login_hint == "abha-address" and session.otp_system
+                else "abdm"
+            ),
             **common,
         )
     else:
@@ -994,7 +1020,7 @@ async def verify_login_otp(
             {
                 # Same scope as the request leg; a session from before
                 # login_hint existed was necessarily an ABHA-number login.
-                "scope": _LOGIN_SCOPES.get(session.login_hint or "abha-number", _LOGIN_SCOPES["abha-number"]),
+                "scope": _login_scope(session.login_hint or "abha-number", session.otp_system),
                 "authData": {
                     "authMethods": ["otp"],
                     "otp": {

@@ -229,6 +229,9 @@ _ALLOWED_SESSION_FIELDS = {
     # Admitted 21 September for resend/Aadhaar-verify: a category label
     # ("abha-number"/"aadhaar", never the identifier) and a resend counter.
     "login_hint",
+    # Admitted 9 October for VRFY_ABHA_102: ABDM's OTP system label
+    # ("abdm"/"aadhaar"), never an identifier or OTP.
+    "otp_system",
     "resends",
     "consent_code",
     "consent_version",
@@ -955,6 +958,47 @@ async def test_abha_address_login_uses_the_phr_family_and_its_own_scope(monkeypa
     assert issued.linking_token == "phr-x-token", "the refresh token is not the profile credential"
     assert issued.token_kind == "phr"
     assert issued.name == "Deepak Kumar Singh"
+
+
+async def test_abha_address_can_be_proved_with_an_aadhaar_otp(monkeypatch, rsa_key, fake_redis):
+    """Workbook VRFY_ABHA_102, "ABHA Address Login, Aadhaar OTP": same PHR family,
+    aadhaar-verify scope and the aadhaar OTP system on every leg, resend included."""
+    gw = _gateway(
+        monkeypatch,
+        [{"txnId": "phr-txn-1"}, {"txnId": "phr-txn-2"}, _PHR_VERIFIED],
+    )
+    first = await service.request_login_otp(
+        abha_address="singh128@sbx", address_otp_system="aadhaar",
+        facility_id=FACILITY_A, started_by=STAFF, patient_id="p1",
+    )
+    scope = ["abha-address-login", "aadhaar-verify"]
+    assert gw.calls[0][1]["scope"] == scope and gw.calls[0][1]["otpSystem"] == "aadhaar"
+    aged = json.loads(fake_redis.store[f"abdm:otp:{first.session_id}"])
+    aged["created_at"] = "2026-09-20T00:00:00+00:00"  # cooldown elapsed
+    fake_redis.store[f"abdm:otp:{first.session_id}"] = json.dumps(aged)
+    second = await service.resend_otp(
+        session_id=first.session_id, purpose=OtpPurpose.LOGIN_BY_ABHA,
+        facility_id=FACILITY_A, started_by=STAFF, abha_address="singh128@sbx",
+    )
+    assert gw.calls[1][1]["scope"] == scope and gw.calls[1][1]["otpSystem"] == "aadhaar"
+    issued = await service.verify_login_otp(
+        session_id=second.session_id, otp="123456", facility_id=FACILITY_A,
+    )
+    path, body = gw.calls[2]
+    assert path == "https://abha.test/abha/api/v3/phr/web/login/abha/verify"
+    assert body["scope"] == scope and body["authData"]["otp"]["txnId"] == "phr-txn-2"
+    assert issued.abha_address == "singh128@sbx"
+
+
+async def test_only_an_abha_address_chooses_its_otp_system(monkeypatch, rsa_key):
+    gw = _gateway(monkeypatch, [])
+    with pytest.raises(service.AbdmIdentityError) as exc:
+        await service.request_login_otp(
+            abha_number="91-1111-2222-3333", address_otp_system="aadhaar",
+            facility_id=FACILITY_A, started_by=STAFF,
+        )
+    assert exc.value.code == "abdm_otp_system_invalid"
+    assert gw.calls == []
 
 
 async def test_abha_address_login_keeps_a_fully_disclosed_number(monkeypatch, rsa_key):

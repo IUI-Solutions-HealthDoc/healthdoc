@@ -87,6 +87,8 @@ async def test_the_aadhaar_number_is_never_stored(redis):
         # scope ("aadhaar"/"abha-number"), never the identifier; resends is a
         # counter bounding fresh gateway transactions per desk attempt.
         "login_hint", "resends",
+        # ABDM's OTP system label ("abdm"/"aadhaar") for an ABHA-address login.
+        "otp_system",
         # Enrolment grant identifiers and continuation stage. Never an
         # Aadhaar number, mobile number, OTP, or profile credential.
         "consent_code", "consent_version", "consent_language",

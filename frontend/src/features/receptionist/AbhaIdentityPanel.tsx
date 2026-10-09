@@ -89,6 +89,7 @@ function PatientAbhaIdentity({ patient }: Props) {
   const [enrolPhase, setEnrolPhase] = useState<"aadhaar" | "mobile" | "address">("aadhaar");
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [selectedAddress, setSelectedAddress] = useState("");
+  const [addressOtp, setAddressOtp] = useState<"mobile" | "aadhaar">("mobile");
   const communicationMobile = useRef<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -271,7 +272,7 @@ function PatientAbhaIdentity({ patient }: Props) {
       : usesMobile
         ? { mobile: digits }
         : usesAddress
-          ? { abha_address: identifier.trim() }
+          ? { abha_address: identifier.trim(), address_otp: addressOtp }
           : { abha_number: identifier };
     try {
       // A consent exists only in the new flow, and the new flow cannot reach here without one.
@@ -597,6 +598,12 @@ function PatientAbhaIdentity({ patient }: Props) {
               className={`w-full rounded-md border px-3 py-2 ${identifier && !identifierValid ? "border-danger" : "border-border"}`}
             />
           </label>
+          {usesAddress ? (
+            <div className="flex flex-wrap gap-2" role="group" aria-label="ABHA address OTP">
+              <button type="button" onClick={() => setAddressOtp("mobile")} aria-pressed={addressOtp === "mobile"} className={`rounded-md border px-3 py-1.5 text-xs ${addressOtp === "mobile" ? "border-primary bg-primary/10" : "border-border"}`}>{t("receptionist.abha.methodAbhaMobile")}</button>
+              <button type="button" onClick={() => setAddressOtp("aadhaar")} aria-pressed={addressOtp === "aadhaar"} className={`rounded-md border px-3 py-1.5 text-xs ${addressOtp === "aadhaar" ? "border-primary bg-primary/10" : "border-border"}`}>{t("receptionist.abha.methodAadhaar")}</button>
+            </div>
+          ) : null}
           {usesMobile ? (
             <div className="space-y-2 text-sm" aria-label="Image check">
               {captchaError ? (
