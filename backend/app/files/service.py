@@ -291,6 +291,36 @@ async def get_download_url(
     return url
 
 
+
+class FileContentUnavailable(Exception):
+    """The stored bytes are missing, oversized, or no longer match the upload."""
+
+
+async def read_file_bytes(record: FileRecord, *, max_bytes: int) -> bytes:
+    """The exact bytes uploaded, or FileContentUnavailable.
+
+    For sending a file onward (ABDM transfer), never for display. The SHA-256
+    taken at upload is checked, so a replaced or corrupted object is refused
+    rather than shared; the size cap is checked before the object is read."""
+    if record.is_erased or not record.object_key or not record.sha256:
+        raise FileContentUnavailable("The file has been erased")
+    if record.size_bytes is None or not 0 < record.size_bytes <= max_bytes:
+        raise FileContentUnavailable("The file exceeds the size allowed for sharing")
+
+    def _get() -> bytes:
+        response = get_minio_client().get_object(record.bucket, record.object_key)
+        try:
+            return response.read(max_bytes + 1)
+        finally:
+            response.close()
+            response.release_conn()
+
+    # Blocking MinIO SDK call -- off the event loop, as on upload.
+    data = await asyncio.to_thread(_get)
+    if len(data) > max_bytes or hashlib.sha256(data).hexdigest() != record.sha256:
+        raise FileContentUnavailable("The stored file no longer matches its upload")
+    return data
+
 class FileAlreadyErased(Exception):
     """Erasure is idempotent in intent but not silently repeatable.
 

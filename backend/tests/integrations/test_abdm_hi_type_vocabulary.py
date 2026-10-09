@@ -57,12 +57,14 @@ def test_builder_validator_and_check_name_the_same_hi_types():
     )
 
 
-def test_the_removed_types_are_gone_from_every_vocabulary():
-    """HealthDocumentRecord was removed because the builder cannot populate
-    it. Re-adding it to a single place must fail the test above; this pins the
-    specific regression. ImmunizationRecord came back in 0092 and Invoice in
-    0094, each with a builder, in all three places at once."""
-    removed = {"HealthDocumentRecord"}
-    assert removed.isdisjoint(HI_TYPES)
-    assert removed.isdisjoint(set(RECORD_TYPES))
-    assert removed.isdisjoint(_care_context_check_types())
+def test_all_eight_hmis_types_are_buildable_storable_and_accepted():
+    """NHA's HMIS FAQ (November 2025) asks for eight HI types. Each came back
+    with a builder, in all three places at once: ImmunizationRecord (0092),
+    Invoice (0094), HealthDocumentRecord (0096)."""
+    eight = {
+        "OPConsultation", "Prescription", "DiagnosticReport", "DischargeSummary",
+        "ImmunizationRecord", "HealthDocumentRecord", "WellnessRecord", "Invoice",
+    }
+    assert set(RECORD_TYPES) == eight
+    assert set(HI_TYPES) == eight
+    assert _care_context_check_types() == eight
