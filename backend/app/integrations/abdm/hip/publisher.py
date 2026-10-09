@@ -15,7 +15,7 @@ from app.integrations.abdm.hip.documents import (
     DocumentUnavailable,
     resolve_document,
 )
-from app.integrations.abdm.hip.models import AbdmCareContext
+from app.integrations.abdm.hip.models import AbdmCareContext, AbdmReleasedDocument
 from app.integrations.abdm.jobs import enqueue
 from app.nursing.models import Vitals
 from app.opd.models import Encounter, Visit
@@ -164,6 +164,24 @@ async def publish_invoice(db: AsyncSession, invoice: Invoice, actor_id: uuid.UUI
     return await publish_document(
         db, kind="invoice", source_id=invoice.id, visit=visit, actor_id=actor_id,
         display=f"Invoice — {issued_on.isoformat()} — {invoice.invoice_number}"[:50],
+    )
+
+
+async def publish_released_document(
+    db: AsyncSession, document: AbdmReleasedDocument, actor_id: uuid.UUID
+) -> AbdmCareContext:
+    """Offer a released PDF to the patient's ABHA as a HealthDocumentRecord, in
+    the same transaction that releases it; nothing is sent until linked."""
+    # ABDM cuts a display at 50 characters; the full title travels in the document.
+    return await _publish(
+        db,
+        kind="document",
+        source_id=document.id,
+        patient_id=document.patient_id,
+        facility_id=document.facility_id,
+        visit_id=None,
+        actor_id=actor_id,
+        display=f"Document — {document.document_date.isoformat()} — {document.title}"[:50],
     )
 
 

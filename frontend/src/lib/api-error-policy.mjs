@@ -47,6 +47,14 @@ export function userFacingApiError(code, payload) {
     // NHA's own wording for VRFY_ABHA_302 and VRFY_ABHA_403.
     abha_not_found_for_mobile: "ABHA Number not found. We did not find any ABHA number linked to this mobile number. Please use ABHA linked mobile number.",
     abha_not_found_for_aadhaar: "No ABHA user is registered with this Aadhaar number.",
+    // Releasing a chart PDF as a Health Document (HealthDocumentRecord).
+    document_not_pdf: "Only a PDF can be released. Convert an image to PDF and upload that.",
+    document_too_large: "A released document must be 1 MB or smaller.",
+    document_already_released: "This file has already been released.",
+    document_date_in_future: "The document date cannot be in the future.",
+    document_title_required: "Give the document a title.",
+    file_erased: "This file has been erased and cannot be released.",
+    file_not_found: "That file is not on this patient's chart.",
     aadhaar_invalid: "ABDM did not accept this Aadhaar number. Check the 12 digits and try again.",
     abdm_auth_failed: "ABDM did not accept this OTP. It may be wrong, expired or over the attempt limit. Check the code and try again, or request a new OTP.",
     abha_mobile_required: "Enter the patient's 10-digit mobile number. ABDM needs it to create the ABHA.",

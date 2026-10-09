@@ -214,6 +214,7 @@ do not merge out of order.**
 | 0093 | abdm_hfr_registrations | abdm_hfr_registrations | What HealthDoc sent HFR for each facility it registered (M4), image content excluded, so an edit (HFR-064 to 114) reopens it: HFR returns no saved details. Purely additive. |
 | 0094 | abdm_invoice_record | ALTER abdm_care_contexts: hi_type CHECK adds Invoice; ALTER invoices: issued_at | An issued invoice is shared as an NRCeS InvoiceRecord, the eighth HI type. `issued_at` is its document date, set on issue and frozen by `trg_invoices_freeze` so a payment never moves it; invoices issued earlier stay NULL and are not offered. Downgrade refuses while any invoice context exists. |
 | 0095 | abha_unique_per_facility | ALTER patients: abha_number, abha_address | One ABHA per chart per facility, not per installation: each facility is its own HIP and one person may hold a linked chart at each. Downgrade refuses while an ABHA is linked at two facilities. |
+| 0096 | abdm_health_document_record | ALTER abdm_care_contexts: hi_type CHECK adds HealthDocumentRecord; CREATE abdm_released_documents | A doctor releases one uploaded PDF on a chart as an NRCeS HealthDocumentRecord, the last of the eight HMIS HI types. The upload alone shares nothing; one file is released at most once. Downgrade refuses while any HealthDocumentRecord context exists. |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -2168,21 +2169,34 @@ checksum, context identity and page count. A crash after remote acceptance but
 before local acknowledgement can replay a page: the receiver must deduplicate
 transaction/page/entry. The payload is excluded from the append-only audit log.
 
-**abdm_care_contexts** (0055, 0062, 0092, 0094) — one finalized document that can be offered to an ABHA
+**abdm_care_contexts** (0055, 0062, 0092, 0094, 0096) — one finalized document that can be offered to an ABHA
 ```
-patient_id UUID NOT NULL → patients · visit_id UUID → visits (NULL for an immunization)
+patient_id UUID NOT NULL → patients · visit_id UUID → visits (NULL for an immunization or a released document)
 reference varchar(100) NOT NULL                   -- quoted back by ABDM forever; never recomputed
 display varchar(200) NOT NULL
-hi_type varchar(50) NOT NULL                      -- OPConsultation|Prescription|DiagnosticReport|DischargeSummary|WellnessRecord|ImmunizationRecord|Invoice (narrowed in 0059, ImmunizationRecord back in 0092, Invoice in 0094)
+hi_type varchar(50) NOT NULL                      -- OPConsultation|Prescription|DiagnosticReport|DischargeSummary|WellnessRecord|ImmunizationRecord|Invoice|HealthDocumentRecord (narrowed in 0059, ImmunizationRecord back in 0092, Invoice in 0094, HealthDocumentRecord in 0096)
 document_at timestamptz                          -- finalized source time; NULL legacy rows cannot be shared
 facility_id UUID NOT NULL → facilities
 UNIQUE (patient_id, reference)                    -- two facilities may both hold a context for one person
 ```
 References are canonical `encounter/UUID`, `prescription/UUID`, `lab-result/UUID`,
-`radiology-report/UUID`, `discharge/UUID`, `wellness/UUID`, `immunization/UUID` or `invoice/UUID`. The source must
+`radiology-report/UUID`, `discharge/UUID`, `wellness/UUID`, `immunization/UUID`, `invoice/UUID` or `document/UUID` (an abdm_released_documents row). The source must
 resolve to this patient/facility/visit and its finalized date must match
 `document_at`. Migration 0062 does not infer document identities or dates from
 old visit-level contexts. Discovery and transfer exclude unresolved records.
+
+**abdm_released_documents** (0096) — one uploaded PDF a doctor released for sharing
+```
+facility_id UUID NOT NULL → facilities · patient_id UUID NOT NULL → patients
+file_id UUID NOT NULL → files UNIQUE              -- one release per file; its reference never changes
+title varchar(100) NOT NULL CHECK (trim(title) <> '')
+document_date date NOT NULL                       -- the date printed on the document, not the release
+released_by UUID NOT NULL → users · released_at timestamptz NOT NULL DEFAULT now()
+```
+Releasing publishes `document/UUID` as a HealthDocumentRecord in the same
+transaction. Only PDFs of 1 MB or less (HealthDoc's HIU renders only PDFs).
+The facility authors the record; transfer embeds the exact uploaded bytes and
+refuses an object whose SHA-256 no longer matches. Erasing the file withdraws it.
 
 **abdm_care_context_links** (0055) — an ABHA address's claim on those contexts
 ```

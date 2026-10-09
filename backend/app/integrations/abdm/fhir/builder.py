@@ -15,6 +15,7 @@ rather than a generic generator that silently invents data.
 from __future__ import annotations
 
 import base64
+import hashlib
 import html
 import json
 import uuid
@@ -36,6 +37,7 @@ RECORD_TYPES = (
     "WellnessRecord",
     "ImmunizationRecord",
     "Invoice",
+    "HealthDocumentRecord",
 )
 
 _DOCUMENTS: dict[str, tuple[str, str | None, str]] = {
@@ -49,12 +51,13 @@ _DOCUMENTS: dict[str, tuple[str, str | None, str]] = {
     "ImmunizationRecord": ("ImmunizationRecord", "41000179103", "Immunization record"),
     # InvoiceRecord, like WellnessRecord, fixes only Composition.type.text.
     "Invoice": ("InvoiceRecord", None, "Invoice Record"),
+    "HealthDocumentRecord": ("HealthDocumentRecord", "419891008", "Record artifact"),
 }
 
 #: Every other document is written within a consultation, admission or order.
 #: A vaccine dose is recorded on its own, and a visit's bill may have no
 #: consultation; these two profiles leave Composition.encounter optional.
-_ENCOUNTER_OPTIONAL = frozenset({"ImmunizationRecord", "InvoiceRecord"})
+_ENCOUNTER_OPTIONAL = frozenset({"ImmunizationRecord", "InvoiceRecord", "HealthDocumentRecord"})
 
 BILLING_CODES = "https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-billing-codes"
 PRICE_COMPONENTS = "https://nrces.in/ndhm/fhir/r4/CodeSystem/ndhm-price-components"
@@ -85,6 +88,8 @@ _SECTION_CODES = {
     "care_plan": ("734163000", "Care plan"),
     # ImmunizationRecord fixes its single section's code to the document code.
     "immunizations": ("41000179103", "Immunization record"),
+    # HealthDocumentRecord fixes its single section's code to the document code.
+    "health_document": ("419891008", "Record artifact"),
 }
 
 
@@ -717,6 +722,59 @@ def _invoice(
     return [resource, *charge_items]
 
 
+#: What a released document may be. HealthDoc's own HIU embeds and renders
+#: only PDFs (hiu/records.py), so that is all it shares; an image is released
+#: after converting it to PDF.
+DOCUMENT_CONTENT_TYPES = frozenset({"application/pdf"})
+MAX_DOCUMENT_ATTACHMENT_BYTES = 1024 * 1024
+
+
+def _document_reference(
+    data: Mapping[str, Any],
+    patient: Mapping[str, Any],
+    organization: Mapping[str, Any],
+    authored_at: datetime,
+) -> dict[str, Any]:
+    """One released file as an NRCeS DocumentReference with the bytes embedded."""
+    content: bytes = data["content"]
+    if data["content_type"] not in DOCUMENT_CONTENT_TYPES:
+        raise ValueError("A released document must be a PDF")
+    if not 0 < len(content) <= MAX_DOCUMENT_ATTACHMENT_BYTES:
+        raise ValueError("A released document must be between 1 byte and 1 MB")
+    title = str(data["title"])
+    return {
+        "resourceType": "DocumentReference",
+        "id": _rid("document", data["id"]),
+        "meta": _meta("DocumentReference", authored_at),
+        "text": _narrative(title),
+        "status": "current",
+        "docStatus": "final",
+        "type": {
+            "coding": [{"system": SNOMED, "code": "419891008", "display": "Record artifact"}],
+            "text": title,
+        },
+        "subject": _reference(patient),
+        "date": _iso(authored_at),
+        "author": [_reference(organization)],
+        "custodian": _reference(organization),
+        "content": [
+            {
+                "attachment": {
+                    "contentType": data["content_type"],
+                    "data": base64.b64encode(content).decode(),
+                    "size": len(content),
+                    # FHIR Attachment.hash is the base64 SHA-1 of the data.
+                    "hash": base64.b64encode(
+                        hashlib.sha1(content, usedforsecurity=False).digest()
+                    ).decode(),
+                    "title": title,
+                    "creation": _iso(data["document_date"]),
+                }
+            }
+        ],
+    }
+
+
 def _section(
     key: str,
     resources: Sequence[Mapping[str, Any]],
@@ -758,6 +816,7 @@ def build_clinical_bundle(
     care_plan: str | None = None,
     immunizations: Sequence[Mapping[str, Any]] = (),
     invoice: Mapping[str, Any] | None = None,
+    document: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build one transfer-ready FHIR document from explicit clinical facts."""
     if record_type not in _DOCUMENTS:
@@ -782,6 +841,14 @@ def build_clinical_bundle(
         raise ValueError("Invoice has no invoice to transfer")
     if invoice and not invoice_record:
         raise ValueError(f"{record_type} cannot carry an invoice")
+    document_record = record_type == "HealthDocumentRecord"
+    # HealthDocumentRecord has exactly one section, holding the released file.
+    if document_record and (any(other_content) or care_plan or immunizations or invoice):
+        raise ValueError("HealthDocumentRecord carries the released document only")
+    if document_record and not document:
+        raise ValueError("HealthDocumentRecord has no document to transfer")
+    if document and not document_record:
+        raise ValueError(f"{record_type} cannot carry a released document")
     # A bill is issued by the facility, not written by a health professional;
     # InvoiceRecord lets the Organization author it. Every other document
     # names its practitioner.
@@ -789,7 +856,9 @@ def build_clinical_bundle(
     lab_only = record_type == "DiagnosticReport" and bool(diagnostic_reports) and all(
         item.get("kind") == "lab" for item in diagnostic_reports
     ) and not any((chief_complaints, diagnoses, allergies, observations, medications))
-    if practitioner is None and not invoice_record and not lab_only:
+    # A released document was written elsewhere or earlier; the facility that
+    # holds and shares it authors the record, as with a bill.
+    if practitioner is None and not invoice_record and not lab_only and not document_record:
         raise ValueError(f"{record_type} requires a practitioner")
     profile, document_code, document_title = _DOCUMENTS[record_type]
     # Preserve the registered document label (including explicit test warnings)
@@ -858,7 +927,17 @@ def build_clinical_bundle(
         else []
     )
 
+    document_resources: list[dict[str, Any]] = (
+        [_document_reference(document, patient_resource, organization_resource, authored_at)]
+        if document_record and document
+        else []
+    )
+
     sections: list[dict[str, Any]] = []
+    if document_resources:
+        sections.append(
+            _section("health_document", document_resources, title=str(document["title"]))
+        )
     if invoice_resources:
         sections.append({"title": "Invoice details", "entry": [_reference(invoice_resources[0])]})
     candidates = (
@@ -927,6 +1006,7 @@ def build_clinical_bundle(
         *([encounter_resource] if encounter_resource is not None else []),
         *immunization_resources,
         *invoice_resources,
+        *document_resources,
         *complaints,
         *conditions,
         *observation_resources,
@@ -999,6 +1079,15 @@ def build_bundle(
         }
         if record_type == "Invoice"
         else {
+            "encounter": None,
+            "document": {
+                "id": "shape-test", "title": "FHIR bundle shape test",
+                "content_type": "application/pdf", "document_date": now.date(),
+                "content": b"%PDF-1.4\n%%EOF\n",
+            },
+        }
+        if record_type == "HealthDocumentRecord"
+        else {
             "encounter": {"id": care_context_id or "shape-test", "status": "closed"},
             "care_plan": "FHIR bundle shape test",
         }
@@ -1012,7 +1101,7 @@ def build_bundle(
             "gender": "unknown",
         },
         practitioner=None
-        if record_type == "Invoice"
+        if record_type in {"Invoice", "HealthDocumentRecord"}
         else {
             "id": author_hpr_id,
             "name": author_hpr_id,
