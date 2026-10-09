@@ -613,10 +613,12 @@ async def seed_monitors(monitors) -> None:
                 text(
                     """
                     INSERT INTO monitor_scopes (id, keycloak_sub, username, state_code, district, granted_by_sub)
-                    SELECT :id, :sub, :username, :state, NULL, 'dev_setup'
+                    SELECT CAST(:id AS uuid), CAST(:sub AS varchar), CAST(:username AS varchar),
+                           CAST(:state AS varchar), NULL, 'dev_setup'
                      WHERE NOT EXISTS (
                         SELECT 1 FROM monitor_scopes
-                         WHERE keycloak_sub = :sub AND state_code = :state AND district IS NULL)
+                         WHERE keycloak_sub = CAST(:sub AS varchar) AND state_code = CAST(:state AS varchar)
+                           AND district IS NULL)
                     """
                 ),
                 {"id": uuid.uuid4(), "sub": subject, "username": username, "state": state},
@@ -640,8 +642,13 @@ def main() -> None:
         help="Application username and Keycloak subject: USERNAME=SUB",
     )
     args = parser.parse_args()
-    asyncio.run(seed(args.user))
-    asyncio.run(seed_monitors(args.monitor))
+    # One event loop: SessionLocal's pool is bound to the loop that first used
+    # it, so a second asyncio.run() fails with "attached to a different loop".
+    async def _seed_all() -> None:
+        await seed(args.user)
+        await seed_monitors(args.monitor)
+
+    asyncio.run(_seed_all())
     print(f"Seeded development facility and {len(args.user)} authenticated users")
     if args.monitor:
         print(f"Granted {len(args.monitor)} control-room officer(s) the dev facility's state")
