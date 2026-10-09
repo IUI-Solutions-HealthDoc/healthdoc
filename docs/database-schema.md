@@ -216,6 +216,7 @@ do not merge out of order.**
 | 0095 | abha_unique_per_facility | ALTER patients: abha_number, abha_address | One ABHA per chart per facility, not per installation: each facility is its own HIP and one person may hold a linked chart at each. Downgrade refuses while an ABHA is linked at two facilities. |
 | 0096 | abdm_health_document_record | ALTER abdm_care_contexts: hi_type CHECK adds HealthDocumentRecord; CREATE abdm_released_documents | A doctor releases one uploaded PDF on a chart as an NRCeS HealthDocumentRecord, the last of the eight HMIS HI types. The upload alone shares nothing; one file is released at most once. Downgrade refuses while any HealthDocumentRecord context exists. |
 | 0097 | monitor_control_room | CREATE monitor_scopes, facility_pulse | State/district control room (realm role `monitor`): which area each officer may see, and a 15-minute count capture per facility. Counts only, no patient identifiers. See docs/control-room-design-2026-10-10.md. |
+| 0098 | facility_pulse_detail | ALTER facility_pulse: add detail column | Control-room drill-down kept with each capture: beds by ward, medicines below reorder level, batches expiring in 30 days (each at most 50, no patient data). |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -2221,6 +2222,7 @@ lab_pending integer NOT NULL CHECK (>= 0)
 stock_below_reorder integer NOT NULL CHECK (>= 0)
 batches_expiring_30d integer NOT NULL CHECK (>= 0)
 staff_rostered_today integer NOT NULL CHECK (>= 0)
+detail jsonb NOT NULL DEFAULT '{}'                -- 0098: wards[], stock_short[], expiring[]; bounded, no patient data
 INDEX (facility_id, captured_at)
 ```
 Written by `scripts.run_monitor_capture`; rows older than 90 days are deleted.

@@ -217,6 +217,15 @@ async def test_capture_counts_from_the_source_tables(db):
     assert pulse.stock_below_reorder == 1
     assert pulse.batches_expiring_30d == 1
     assert pulse.staff_rostered_today == 1
+    # The drill-down: names an officer can act on, no patients.
+    assert pulse.detail["wards"] == [
+        {"ward": "General", "department": None, "beds": 3, "occupied": 1, "free": 2, "maintenance": 1}
+    ]
+    [short] = pulse.detail["stock_short"]
+    assert (short["available"], short["reorder_level"]) == ("30.00", "100.00")
+    [expiring] = pulse.detail["expiring"]
+    assert expiring["expiry"] == (today_ist + timedelta(days=10)).isoformat()
+    assert "Pulse Patient" not in str(pulse.detail)
 
 
 # ---------------------------------------------------------------- granting areas (superadmin)
@@ -278,3 +287,35 @@ async def test_removing_the_last_area_closes_the_board(db):
     with pytest.raises(HTTPException) as refused:
         await _board(db, "kc-officer-3")
     assert refused.value.status_code == 403
+
+
+# ---------------------------------------------------------------- drill-down
+
+
+async def test_the_drill_down_is_404_outside_the_grant(db):
+    mine = await _facility(db, district="Patna")
+    theirs = await _facility(db, district="Gaya")
+    await _pulse(db, mine)
+    sub = str(uuid.uuid4())
+    await _grant(db, sub, "BR", "Patna")
+    detail = await monitor_router.get_facility_detail(mine.id, user=_officer(sub), db=db)
+    assert detail.facility.facility_id == mine.id
+    for other in (theirs.id, uuid.uuid4()):
+        with pytest.raises(HTTPException) as refused:
+            await monitor_router.get_facility_detail(other, user=_officer(sub), db=db)
+        assert refused.value.status_code == 404
+
+
+async def test_a_silent_facility_shows_no_stale_lists(db):
+    facility = await _facility(db, district="Patna")
+    db.add(FacilityPulse(
+        id=uuid.uuid4(), facility_id=facility.id, captured_at=NOW - timedelta(hours=2),
+        opd_today=0, queue_waiting=0, emergency_open=0, admitted_now=0, beds_total=0, lab_pending=0,
+        stock_below_reorder=1, batches_expiring_30d=0, staff_rostered_today=0,
+        detail={"stock_short": [{"item": "Old", "strength": None, "available": "0", "reorder_level": "5"}]},
+    ))
+    await db.flush()
+    sub = str(uuid.uuid4())
+    await _grant(db, sub, "BR")
+    detail = await monitor_router.get_facility_detail(facility.id, user=_officer(sub), db=db)
+    assert detail.facility.status == "grey" and detail.stock_short == []

@@ -61,3 +61,15 @@ export function getMonitorBoard(district: string | null): Promise<MonitorBoard> 
   if (district) query.set("district", district);
   return api<MonitorBoard>(`/monitor/board?${query.toString()}`);
 }
+
+export interface MonitorFacilityDetail {
+  facility: MonitorFacilityRow;
+  wards: { ward: string; department: string | null; beds: number; occupied: number; free: number; maintenance: number }[];
+  stock_short: { item: string; strength: string | null; available: string; reorder_level: string }[];
+  expiring: { item: string; batch: string; expiry: string; quantity: string }[];
+  list_limit: number;
+}
+
+export function getMonitorFacility(facilityId: string): Promise<MonitorFacilityDetail> {
+  return api<MonitorFacilityDetail>(`/monitor/facilities/${facilityId}`);
+}

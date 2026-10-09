@@ -13,7 +13,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.common.db import Base
@@ -78,3 +78,5 @@ class FacilityPulse(Base, UUIDPk):
     stock_below_reorder: Mapped[int] = mapped_column(Integer, nullable=False)
     batches_expiring_30d: Mapped[int] = mapped_column(Integer, nullable=False)
     staff_rostered_today: Mapped[int] = mapped_column(Integer, nullable=False)
+    #: wards / stock_short / expiring, bounded lists, no patient data (0098).
+    detail: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default=text("'{}'"))

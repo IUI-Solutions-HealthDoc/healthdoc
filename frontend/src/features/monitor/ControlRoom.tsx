@@ -13,6 +13,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiError, formatDateTime } from "@/lib/api";
 import { useLocale } from "@/lib/i18n";
 
+import { FacilityDetail } from "./FacilityDetail";
 import { getMonitorBoard, type MonitorBoard, type MonitorFacilityRow, type MonitorStatus } from "./api";
 
 const REFRESH_MS = 60_000;
@@ -52,6 +53,7 @@ export function ControlRoom() {
   const [board, setBoard] = useState<MonitorBoard | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [onlyProblems, setOnlyProblems] = useState(false);
+  const [selected, setSelected] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -166,11 +168,15 @@ export function ControlRoom() {
                 </td>
               </tr>
             ) : (
-              rows.map((row) => <FacilityRow key={row.facility_id} row={row} />)
+              rows.map((row) => (
+                <FacilityRow key={row.facility_id} row={row} onOpen={() => setSelected(row.facility_id)} />
+              ))
             )}
           </tbody>
         </table>
       </div>
+
+      {selected ? <FacilityDetail facilityId={selected} onClose={() => setSelected(null)} /> : null}
 
       <p className="text-xs text-muted-foreground">
         {t("monitor.thresholds", {
@@ -184,7 +190,7 @@ export function ControlRoom() {
   );
 }
 
-function FacilityRow({ row }: { row: MonitorFacilityRow }) {
+function FacilityRow({ row, onOpen }: { row: MonitorFacilityRow; onOpen: () => void }) {
   const { t } = useLocale();
   const beds =
     row.beds_total === null
@@ -199,7 +205,9 @@ function FacilityRow({ row }: { row: MonitorFacilityRow }) {
         {row.reasons.length ? <p className="mt-1 max-w-48 text-xs text-muted-foreground">{row.reasons.join("; ")}</p> : null}
       </td>
       <td className="px-3 py-2">
-        <p className="font-medium">{row.name}</p>
+        <button type="button" onClick={onOpen} className="text-left font-medium underline-offset-2 hover:underline">
+          {row.name}
+        </button>
         <p className="text-xs text-muted-foreground">{[row.code, row.facility_type].filter(Boolean).join(" · ")}</p>
       </td>
       <td className="px-3 py-2">{row.district ?? "—"}</td>

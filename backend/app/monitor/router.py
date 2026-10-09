@@ -150,3 +150,55 @@ async def get_board(
         ),
         facilities=rows,
     )
+
+
+class WardOut(BaseModel):
+    ward: str
+    department: str | None
+    beds: int
+    occupied: int
+    free: int
+    maintenance: int
+
+
+class StockShortOut(BaseModel):
+    item: str
+    strength: str | None
+    available: str
+    reorder_level: str
+
+
+class ExpiringOut(BaseModel):
+    item: str
+    batch: str
+    expiry: str
+    quantity: str
+
+
+class FacilityDetailOut(BaseModel):
+    facility: FacilityRowOut
+    wards: list[WardOut]
+    stock_short: list[StockShortOut]
+    expiring: list[ExpiringOut]
+    list_limit: int = service.DETAIL_LIMIT
+
+
+@router.get("/facilities/{facility_id}", response_model=FacilityDetailOut)
+async def get_facility_detail(
+    facility_id: uuid.UUID,
+    user: AuthUser = Depends(require_roles("monitor")),
+    db: AsyncSession = Depends(get_db),
+) -> FacilityDetailOut:
+    found = await service.facility_in_scope(db, await service.scope_for(db, user.sub), facility_id)
+    if found is None:
+        raise HTTPException(404, {"code": "facility_not_found", "message": "Facility not found"})
+    facility, pulse = found
+    now = service.utcnow()
+    detail = pulse.detail if pulse is not None and service.status_of(pulse, now=now)[0] != "grey" else {}
+    log.info("monitor facility read", extra={"monitor_sub": user.sub, "facility_id": str(facility.id)})
+    return FacilityDetailOut(
+        facility=_row(facility, pulse, now=now),
+        wards=detail.get("wards", []),
+        stock_short=detail.get("stock_short", []),
+        expiring=detail.get("expiring", []),
+    )
