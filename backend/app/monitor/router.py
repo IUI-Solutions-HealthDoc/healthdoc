@@ -56,6 +56,8 @@ class FacilityRowOut(BaseModel):
     stock_below_reorder: int | None
     batches_expiring_30d: int | None
     staff_rostered_today: int | None
+    equipment_down: int | None
+    critical_equipment_down: int | None
 
 
 class TotalsOut(BaseModel):
@@ -70,6 +72,7 @@ class TotalsOut(BaseModel):
     admitted_now: int
     beds_total: int
     stock_below_reorder: int
+    equipment_down: int
 
 
 class BoardOut(BaseModel):
@@ -88,6 +91,7 @@ def _row(facility, pulse, *, now: datetime) -> FacilityRowOut:
         for name in (
             "opd_today", "queue_waiting", "emergency_open", "admitted_now", "beds_total",
             "lab_pending", "stock_below_reorder", "batches_expiring_30d", "staff_rostered_today",
+            "equipment_down", "critical_equipment_down",
         )
     }
     return FacilityRowOut(
@@ -147,6 +151,7 @@ async def get_board(
             admitted_now=sum(r.admitted_now or 0 for r in reporting),
             beds_total=sum(r.beds_total or 0 for r in reporting),
             stock_below_reorder=sum(r.stock_below_reorder or 0 for r in reporting),
+            equipment_down=sum(r.equipment_down or 0 for r in reporting),
         ),
         facilities=rows,
     )
@@ -184,8 +189,19 @@ class StaffOut(BaseModel):
     waiting: int
 
 
+class EquipmentDownOut(BaseModel):
+    name: str
+    category: str
+    location: str | None
+    critical: bool
+    status: str
+    since: str
+    reason: str | None
+
+
 class FacilityDetailOut(BaseModel):
     facility: FacilityRowOut
+    equipment: list[EquipmentDownOut]
     staff: list[StaffOut]
     wards: list[WardOut]
     stock_short: list[StockShortOut]
@@ -208,6 +224,7 @@ async def get_facility_detail(
     log.info("monitor facility read", extra={"monitor_sub": user.sub, "facility_id": str(facility.id)})
     return FacilityDetailOut(
         facility=_row(facility, pulse, now=now),
+        equipment=detail.get("equipment", []),
         staff=detail.get("staff", []),
         wards=detail.get("wards", []),
         stock_short=detail.get("stock_short", []),

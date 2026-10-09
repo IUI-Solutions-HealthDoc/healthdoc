@@ -28,6 +28,8 @@ export interface MonitorFacilityRow {
   stock_below_reorder: number | null;
   batches_expiring_30d: number | null;
   staff_rostered_today: number | null;
+  equipment_down: number | null;
+  critical_equipment_down: number | null;
 }
 
 export interface MonitorBoard {
@@ -52,6 +54,7 @@ export interface MonitorBoard {
     admitted_now: number;
     beds_total: number;
     stock_below_reorder: number;
+    equipment_down: number;
   };
   facilities: MonitorFacilityRow[];
 }
@@ -64,6 +67,7 @@ export function getMonitorBoard(district: string | null): Promise<MonitorBoard> 
 
 export interface MonitorFacilityDetail {
   facility: MonitorFacilityRow;
+  equipment: { name: string; category: string; location: string | null; critical: boolean; status: string; since: string; reason: string | null }[];
   staff: { name: string; designation: string | null; department: string | null; shift: string | null; active_today: boolean; waiting: number }[];
   wards: { ward: string; department: string | null; beds: number; occupied: number; free: number; maintenance: number }[];
   stock_short: { item: string; strength: string | null; available: string; reorder_level: string }[];

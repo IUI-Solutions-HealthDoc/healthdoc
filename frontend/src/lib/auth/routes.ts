@@ -41,10 +41,10 @@ const ROUTE_PREFIXES: Record<Role, readonly string[]> = {
   // job, not a side effect of registering a patient. The registration
   // invoice is still created server-side by create_visit.
   [ROLES.RECEPTIONIST]: ["/receptionist", "/consent"],
-  [ROLES.DOCTOR]: ["/doctor", "/consent", "/ipd", "/lab", "/radiology", "/ot", "/programs", "/immunization", "/blood-bank", "/forms"],
-  [ROLES.NURSE]: ["/nurse", "/ipd", "/consent", "/ot", "/programs", "/immunization", "/forms"],
-  [ROLES.LAB_TECH]: ["/lab", "/blood-bank", "/admin/maintenance"],
-  [ROLES.RADIOLOGY_TECH]: ["/radiology", "/admin/maintenance"],
+  [ROLES.DOCTOR]: ["/doctor", "/consent", "/ipd", "/lab", "/radiology", "/ot", "/programs", "/immunization", "/blood-bank", "/forms", "/equipment"],
+  [ROLES.NURSE]: ["/nurse", "/ipd", "/consent", "/ot", "/programs", "/immunization", "/forms", "/equipment"],
+  [ROLES.LAB_TECH]: ["/lab", "/blood-bank", "/admin/maintenance", "/equipment"],
+  [ROLES.RADIOLOGY_TECH]: ["/radiology", "/admin/maintenance", "/equipment"],
   [ROLES.PHARMACIST]: ["/pharmacy", "/inventory"],
   [ROLES.EMERGENCY]: ["/emergency"],
   // The existing /emergency page registers a new THID and its POST endpoint
@@ -55,12 +55,12 @@ const ROUTE_PREFIXES: Record<Role, readonly string[]> = {
   [ROLES.BILLING]: ["/billing", "/reports"],
   // The backend accepts admin on some HOD reads for operational support, but
   // that does not make a department-operating dashboard part of the admin UI.
-  [ROLES.ADMIN]: ["/admin", "/billing", "/reports", "/audit-viewer", "/ot", "/programs", "/immunization", "/blood-bank", "/forms"],
+  [ROLES.ADMIN]: ["/admin", "/billing", "/reports", "/audit-viewer", "/ot", "/programs", "/immunization", "/blood-bank", "/forms", "/equipment"],
   // /inventory is NOT decoration here. Indent approval is gated
   // `require_roles("hod")` — HOD ONLY — and the approve/reject buttons live on
   // Inventory -> Indents. Without this prefix the one action only a department
   // head can perform was unreachable by every department head.
-  [ROLES.HOD]: ["/hod", "/queue-display", "/inventory"],
+  [ROLES.HOD]: ["/hod", "/queue-display", "/inventory", "/equipment"],
   [ROLES.AUDITOR]: ["/audit-viewer", "/reports", "/admin/data-protection", "/admin/integration"],
   [ROLES.PATIENT]: ["/patient-portal"],
   [ROLES.SUPERADMIN]: ["/superadmin"],

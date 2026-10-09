@@ -20,6 +20,8 @@ from app.admissions.models import Admission, Bed, Ward
 from app.audit.models import AuditLog
 from app.common.patient_scope import facility_timezone
 from app.departments.models import Department
+from app.equipment.models import Equipment
+from app.equipment.service import NOT_WORKING
 from app.inventory.models import InventoryBatch, InventoryItem, StockLocation
 from app.monitor.models import DiagnosisDailyCount, FacilityPulse, MonitorScope
 from app.opd.models import Diagnosis, Encounter, IcdCode, Visit
@@ -142,6 +144,7 @@ async def capture_facility(db: AsyncSession, facility: Facility, *, now: datetim
         "stock_short": await _stock_short(db, on_hand),
         "expiring": await _expiring(db, facility.id, local_today),
         "staff": await _staff(db, facility.id, local_today, day_start),
+        "equipment": await _equipment_not_working(db, facility.id),
     }
     pulse = FacilityPulse(
         id=uuid.uuid4(),
@@ -156,6 +159,8 @@ async def capture_facility(db: AsyncSession, facility: Facility, *, now: datetim
         stock_below_reorder=stock_below_reorder,
         batches_expiring_30d=batches_expiring_30d,
         staff_rostered_today=staff_rostered_today,
+        equipment_down=len(detail["equipment"]),
+        critical_equipment_down=sum(item["critical"] for item in detail["equipment"]),
         detail=detail,
     )
     db.add(pulse)
@@ -349,6 +354,28 @@ async def _staff(db: AsyncSession, facility_id, local_today, day_start) -> list[
     ]
 
 
+async def _equipment_not_working(db: AsyncSession, facility_id) -> list[dict]:
+    """Machines down or in maintenance, critical first, longest out first.
+
+    Not bounded by DETAIL_LIMIT: the counts on the board are taken from this
+    list, and a count that stopped at 50 would understate a real outage.
+    """
+    rows = (
+        await db.execute(
+            select(Equipment)
+            .where(Equipment.facility_id == facility_id, Equipment.status.in_(NOT_WORKING))
+            .order_by(Equipment.is_critical.desc(), Equipment.status_since)
+        )
+    ).scalars().all()
+    return [
+        {
+            "name": e.name, "category": e.category, "location": e.location, "critical": e.is_critical,
+            "status": e.status, "since": e.status_since.isoformat(), "reason": (e.status_reason or "")[:200] or None,
+        }
+        for e in rows
+    ]
+
+
 async def capture_all(db: AsyncSession, *, now: datetime | None = None) -> int:
     """Capture every active facility. One facility's failure does not stop the rest."""
     now = now or datetime.now(UTC)
@@ -418,6 +445,10 @@ def status_of(pulse: FacilityPulse | None, *, now: datetime) -> tuple[str, list[
         )
     if pulse.staff_rostered_today == 0 and pulse.opd_today > 0:
         flag("amber", "patients seen but no staff on today's roster")
+    if pulse.critical_equipment_down:
+        flag("red", f"{pulse.critical_equipment_down} critical machines not working")
+    elif pulse.equipment_down:
+        flag("amber", f"{pulse.equipment_down} machines not working")
     uncovered = [s for s in (pulse.detail or {}).get("staff", []) if s["waiting"] and not s["active_today"]]
     if uncovered:
         waiting = sum(s["waiting"] for s in uncovered)

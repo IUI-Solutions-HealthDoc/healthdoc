@@ -132,7 +132,7 @@ export function ControlRoom() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-8">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-5 lg:grid-cols-9">
         <Tile label={t("monitor.facilities")} value={`${totals.reporting}/${totals.facilities}`} />
         <Tile label={t("monitor.red")} value={totals.red} tone="text-red-700" />
         <Tile label={t("monitor.amber")} value={totals.amber} tone="text-amber-700" />
@@ -141,6 +141,7 @@ export function ControlRoom() {
         <Tile label={t("monitor.emergencyNow")} value={totals.emergency_open} />
         <Tile label={t("monitor.admittedBeds")} value={`${totals.admitted_now}/${totals.beds_total}`} />
         <Tile label={t("monitor.stockShort")} value={totals.stock_below_reorder} />
+        <Tile label={t("monitor.machinesDown")} value={totals.equipment_down} />
       </div>
 
       <div className="overflow-x-auto rounded border border-border">
@@ -158,13 +159,14 @@ export function ControlRoom() {
               <th className="px-3 py-2 text-right">{t("monitor.stockShort")}</th>
               <th className="px-3 py-2 text-right">{t("monitor.colExpiring")}</th>
               <th className="px-3 py-2 text-right">{t("monitor.colStaff")}</th>
+              <th className="px-3 py-2 text-right">{t("monitor.machinesDown")}</th>
               <th className="px-3 py-2">{t("monitor.colLastReport")}</th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={12} className="px-3 py-6 text-center text-muted-foreground">
+                <td colSpan={13} className="px-3 py-6 text-center text-muted-foreground">
                   {onlyProblems ? t("monitor.noProblems") : t("monitor.noFacilities")}
                 </td>
               </tr>
@@ -222,6 +224,9 @@ function FacilityRow({ row, onOpen }: { row: MonitorFacilityRow; onOpen: () => v
       <td className="px-3 py-2 text-right tabular-nums">{n(row.stock_below_reorder)}</td>
       <td className="px-3 py-2 text-right tabular-nums">{n(row.batches_expiring_30d)}</td>
       <td className="px-3 py-2 text-right tabular-nums">{n(row.staff_rostered_today)}</td>
+      <td className={`px-3 py-2 text-right tabular-nums ${row.critical_equipment_down ? "font-semibold text-red-700" : ""}`}>
+        {n(row.equipment_down)}
+      </td>
       <td className="px-3 py-2 text-xs text-muted-foreground">
         {row.captured_at ? formatDateTime(row.captured_at) : t("monitor.never")}
       </td>

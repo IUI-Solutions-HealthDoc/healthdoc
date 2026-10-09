@@ -80,6 +80,9 @@ class FacilityPulse(Base, UUIDPk):
     stock_below_reorder: Mapped[int] = mapped_column(Integer, nullable=False)
     batches_expiring_30d: Mapped[int] = mapped_column(Integer, nullable=False)
     staff_rostered_today: Mapped[int] = mapped_column(Integer, nullable=False)
+    #: 0100: machines down now, and how many of those are marked critical.
+    equipment_down: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    critical_equipment_down: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     #: wards / stock_short / expiring, bounded lists, no patient data (0098).
     detail: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default=text("'{}'"))
 

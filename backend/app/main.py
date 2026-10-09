@@ -37,6 +37,7 @@ MODULES = [
     "dpdp",
     "emergency",
     "encounters",
+    "equipment",
     "files",
     "forms",
     "immunization",
