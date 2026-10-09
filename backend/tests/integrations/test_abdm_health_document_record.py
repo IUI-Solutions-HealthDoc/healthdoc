@@ -11,6 +11,7 @@ import base64
 import hashlib
 import uuid
 from datetime import date, timedelta
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
@@ -19,8 +20,13 @@ from sqlalchemy import select
 from app.files import service as files_service
 from app.files.models import FileRecord
 from app.integrations.abdm.fhir.builder import build_clinical_bundle, validate_min
+from app.integrations.abdm.hip import service as hip_service
 from app.integrations.abdm.hip.documents import DocumentUnavailable, resolve_context_document
-from app.integrations.abdm.hip.models import AbdmCareContext, AbdmReleasedDocument
+from app.integrations.abdm.hip.models import (
+    AbdmCareContext,
+    AbdmCareContextLink,
+    AbdmReleasedDocument,
+)
 from app.integrations.abdm.hip.router import (
     ReleaseDocumentIn,
     list_released_documents,
@@ -186,6 +192,41 @@ async def test_the_transfer_embeds_the_uploaded_bytes_authored_by_the_facility(
     assert base64.b64decode(attachment["data"]) == PDF
     assert attachment["size"] == len(PDF)
     assert attachment["title"] == out.title
+
+
+async def test_a_consented_document_is_selected_for_transfer_without_a_visit(db, chart):
+    # Live run 9 Oct: a consent covering a discharge summary and a released
+    # document delivered only the discharge summary, because the selection let
+    # only an immunization stand without a visit.
+    facility, doctor, patient = chart
+    await _released(db, chart)
+    context = (
+        await db.execute(select(AbdmCareContext).where(AbdmCareContext.patient_id == patient.id))
+    ).scalar_one()
+    stray = AbdmCareContext(
+        id=uuid.uuid4(), facility_id=facility.id, patient_id=patient.id, visit_id=None,
+        reference=f"encounter/{uuid.uuid4()}", display="Visitless consultation",
+        hi_type="OPConsultation", document_at=context.document_at, created_by=doctor.id,
+    )
+    db.add(stray)
+    address = "document.holder@sbx"
+    db.add(AbdmCareContextLink(
+        id=uuid.uuid4(), facility_id=facility.id, patient_id=patient.id, abha_address=address,
+        status="confirmed", care_context_references=[context.reference, stray.reference],
+    ))
+    await db.flush()
+    artefact = SimpleNamespace(raw_artefact={"notification": {"consentDetail": {
+        "careContexts": [{"careContextReference": r} for r in (context.reference, stray.reference)]
+    }}})
+    selected = await hip_service.list_care_contexts_for_transfer(
+        db, facility_id=facility.id, abha_address=address,
+        authorisation=hip_service.Authorisation(
+            artefact=artefact, hi_types=["HealthDocumentRecord", "OPConsultation"],
+            date_range_from=None, date_range_to=None,
+        ),
+    )
+    # A consultation still has to sit in this patient's visit at this facility.
+    assert [row.id for row in selected] == [context.id]
 
 
 async def test_a_changed_stored_object_is_refused_not_shared(db, chart, monkeypatch):
