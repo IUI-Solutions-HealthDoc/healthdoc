@@ -226,6 +226,38 @@ Source: [Copy_of_M1_ABHA_CREATION_AND_VERIFICATION_WITH_APIS_UPDATED_V1_2_7_Aug_
 | 98 | TAGGING_UNIQUEPATIENTID_UNIQUEABHANUMBER | Verify one ABHA Number is linked to the unique patient ID in HIMS | Mandatory | PARTIAL | Positive bind on first chart (mobile OTP). Duplicate bind on second chart refused (`409 duplicate_abha`). New-ABHA enrolment then bound a different ABHA onto the participant-approved new chart (`identity_status=verified`; chart identifier withheld). |
 | 100 | SHARE _PATIENT_PROFILE_701 | Share Patient Profile | Mandatory | NOT RUN | — |
 
+## M1 sweep — 7 October 2026 (supersedes the M1 rows above where they overlap)
+
+Facility DEV002 (HFR `IN2710005985`), reception desk `dev2.reception`, chart of the
+consenting participant (identifiers withheld; ABHA address only shown on the
+evidence screenshots, which stay out of the repository). Participant entered
+every Aadhaar number and OTP; the operator never typed either. Times UTC, from
+the backend access log. Screenshots: `abdm-evidence/M1/` beside the project,
+named by case ID. Code: WIP commits `c11d4f21`, `6aa6d77f`, `2b05859f`
+(PR pending).
+
+| Case | Result | Time | Evidence / note |
+|---|---|---|---|
+| VRFY_ABHA_201 (ABHA number, linked-mobile OTP) | PASS | 08:04:52 request 200; 08:05:49 wrong OTP 400; 08:07:32 resend 200; 08:08:49 verify 200 | `VRFY_ABHA_201_*`. Wrong OTP now says ABDM did not accept the OTP (was 502 "temporarily unavailable" at 07:56; ABDM answers HTTP 200 `authResult: failed`). |
+| CRT_ABHA_114/115 (NHA ABHA card) | PASS | 08:09:06 card 200 | `VRFY_ABHA_201_d_nha_card.png` (sandbox "Specimen Copy"). Contains participant photo/DOB/mobile: do not attach unredacted. |
+| VRFY_ABHA_101 / 401 / 404 (Aadhaar OTP, ABHA exists) | PASS | 08:11:13 request 200; 08:12:44 verify 200 | `VRFY_ABHA_401_*`; verified and linked. |
+| VRFY_ABHA_402 (incorrect OTP) | PASS | 08:11:57 400 | `VRFY_ABHA_402_wrong_otp.png` |
+| VRFY_ABHA_405 (resend) | PASS | 08:12:14 200 | `VRFY_ABHA_405_resend.png` |
+| VRFY_ABHA_301 / 303 (communication mobile + captcha, ABHA exists) | PASS | 08:14:18 request 200; 08:15:24 verify 200 | `VRFY_ABHA_301_*`, `VRFY_ABHA_303_verified.png`. Captcha solved by the participant. |
+| VRFY_ABHA_304 (incorrect OTP) | PASS | 08:14:51 400 | `VRFY_ABHA_304_wrong_otp.png` |
+| VRFY_ABHA_305 (resend) | PASS | 08:15:09 200 | `VRFY_ABHA_305_resend.png` |
+| VRFY_ABHA_302 (no ABHA for the mobile) | PASS after fix | 09:29:11 ABDM 404 `ABDM-1115` (REQUEST-ID `2dcd6cfa-28d0-44bb-a22a-213497c14904`) → 502 "declined"; 09:32:19 same (`54393392-0b00-4e28-b31a-f7fc7f7431e6`) → **404 `abha_not_found_for_mobile`** | `VRFY_ABHA_302_*`. ABDM refuses the OTP request outright and sends no OTP; the desk now shows NHA's wording. Participant-supplied mobile with no ABHA. 09:27:43 attempt hit an ABDM session 500 (transient; three session probes then succeeded). |
+| CRT_ABHA_102 / 103 (consent, Hindi) | PASS (display) | — | NHA declaration with English/हिन्दी toggle and both confirmations on the Create ABHA screen (`CRT_ABHA_104_0_start.png`). |
+| CRT_ABHA_104 (invalid Aadhaar) | PASS after fix | 08:17:59 ABDM 422 `ABDM-1204` (REQUEST-ID `7eacbae3-b47b-482a-87e6-427dfcb3f0c0`) → 502; 08:29:10 ABDM 400 keyed `loginId` (`0e2b180c-537a-4d1c-aca1-e8327a6c7ed8`) → 502; 08:31:06 same (`3f5b4e4d-06a3-476d-94af-91931670233d`) → **400 `aadhaar_invalid`** | `CRT_ABHA_104_1_before_fix.png`, `CRT_ABHA_104_2_after_fix.png`. ABDM uses two refusal shapes for one mistake; both now map to "ABDM did not accept this Aadhaar number". |
+| CRT_ABHA_105 / 106 (Aadhaar OTP sent, resend) | PASS | 08:33:52 request 200; 08:34:45 resend 200 | `CRT_ABHA_106_*`. OTP deliberately not entered: the Aadhaar already holds an ABHA. |
+| CRT_ABHA_301–309 (demographic authentication) | DEFERRED | 08:37:43, 08:50:38 local 400 `abdm_demographic_not_enabled` | `CRT_ABHA_301_*`. NHA restricts `demo_auth` to approved government-programme integrations; needs the HidIntegratedProgram role and a registered `BENEFIT_NAME` (ABDM-1094 when absent). HealthDoc will register as government; request enablement when programme approval/tender is held. Screen previously showed a generic "check the highlighted fields"; now names the cause. |
+| SHARE_PATIENT_PROFILE_701 (Scan & Share) | PASS on HealthDoc; token not returned to the app (sandbox delay) | QR scanned ~08:55; share delivered 09:12:30 (~17 min late), 202; ticket 2 bound to the chart; `on-share` 09:13:24 refused by ABDM `ABDM-1015` "Request Timed out"; desk check-in OPD1 09:23:16 | Counter QR `https://phrsbx.abdm.gov.in/share-profile?hip-id=IN2710005985&counter-id=OPD1`. `SHARE_701_0`–`_3`. The PHR app timed out ("taking longer than expected") because NHA delivered the share after its own reply window; HealthDoc replied within a minute of receipt (the session runner had stopped with the Docker restart and was restarted with its original cutoff). Full success on DEV001, 29 Sep 11:58:53, desk token 187. |
+
+Other observations: 08:02:08 request-otp 503 (ABDM session endpoint, intermittent);
+07:56 two verify 502s were the pre-fix wrong-OTP handling, not outages. Docker
+Desktop stopped when the host disk filled (~08:21) and was restarted at 08:26;
+the public callback GET returned 405 afterwards.
+
 ## M2
 
 Source: [M2_BUILDING_HIP_WITH_APIS_UPDATED_22_Aug_871c2f7fcd.xlsx](../ABDM%20DOCS/M2_BUILDING_HIP_WITH_APIS_UPDATED_22_Aug_871c2f7fcd.xlsx), sheet **Building HIP**.
@@ -291,6 +323,41 @@ Source: [M3_BUILDING_HIU_WITH_APIS_UPDATED_22_August_de6a02460a.xlsx](../ABDM%20
 | 22 | HIU_FLOW_201 | Revoke Consent | Mandatory | NOT RUN | — |
 | 23 | HIU_FLOW_202 | Revoke Consent | Mandatory | NOT RUN | — |
 | 25 | HIU_FLOW_301 | Consent Expiry | Not specified on this row; see source section | NOT RUN | — |
+
+## M2 and M3 — 6–7 October 2026 (supersedes the NOT RUN rows above where they overlap)
+
+Times UTC. Participants: the owner (`kandol007@sbx`), a second consenting
+participant (`suprabhakumari1009@sbx`) and a third, Aryan Raj, registered with
+his agreement for the SMS case (`rajaryan25200225@sbx`). Every consent was
+granted, denied or revoked by the participant in the ABHA app. Screenshots:
+`abdm-evidence/M2/` and `abdm-evidence/M3/` beside the project.
+
+### M2
+
+| Case | Result | Correlation / time | Evidence / note |
+|---|---|---|---|
+| Health_RECORD_CREATION_101 | PASS | 7 Oct 10:04:07 OPConsultation `encounter/b1c488d0-…` (dev2.doctor, DEV002); 6 Oct OPConsultation, Prescription, 2× DiagnosticReport, Invoice | Finalized through the consultation, lab and billing workflows. |
+| HIP_INIT_NOTIFY_HIECM | PASS | Patient with mobile and no ABHA; `sms/notify2` accepted 10:04:09; SMS on the phone at 10:04 ("Your HealthDoc Sandbox Test Hospital reports are now ready … phrsbx.abdm.gov.in/phr/v3/uhi?hipId=IN2710005985") | `HIP_INIT_NOTIFY_HIECM_1_sms_received.png`. NHA's `sms/on-notify` acknowledgement never arrived (watched 25 min). |
+| USER_INIT_LINK_601–606 | PASS | Discover 10:57:43 (on-discover 1 s); link init 10:57:47, HealthDoc OTP by MSG91, on-init accepted 10:57:48; confirm 11:00:46, link `confirmed` | `HIP_INIT_NOTIFY_HIECM_2_record_found.png`, `_3_linked_facility.png`. Matched on verified mobile, gender, birth year and name. A first link at 10:11:50 discovered the record but NHA never delivered its init. |
+| USER_INIT_LINK_607 / HIP_INIT_SHARE_CARECONTEXT | PASS (participant 2); BLOCKED (participant 3) | 7 Oct 07:37:25–07:37:39 DEV002 delivered 5 bundles to the PHR (`90764936`); participant 3: consents 11:17/11:20/11:26, HI request 11:42:34 (~25 min after consent), ack refused 401 → no push | NHA delivered the PHR's HI request after closing it; HealthDoc correctly declines to push on an unacknowledged request. Same pattern 07:13:29 (`14528869`). |
+| HIP_INIT_GRANT/REVOKE/EXPIRE_CONSENT | N/A | — | Apply only to HIP-initiated linking by Direct Auth; HealthDoc links by demographics (501–506). |
+
+### M3 (HealthDoc as HIU)
+
+| Case | Result | Correlation / time | Evidence |
+|---|---|---|---|
+| HIU_FLOW_101 / 102 | PASS | Patient found with verified ABHA address; request `8d1cf1af` 05:14 (DEV002 ← DEV001) | `HIU_FLOW_101_102_patient_and_request_form.png` |
+| HIU_FLOW_103 / 104 | PASS | Requests listed in the PHR with status | `HIU_FLOW_103_104_phr_consent_list.png` |
+| HIU_FLOW_105 (denied) | PASS | `af25f1d7` 06:05 → denied 06:21 | `HIU_FLOW_105_phr_denied.png`, `HIU_FLOW_105_denied_and_201_revoked_7of7.png` |
+| HIU_FLOW_106 (approved) | PASS | `8d1cf1af` granted 05:15; `7c4da967` (DEV001 ← DEV002) granted 07:43 | `HIU_FLOW_106_approved_received_5of5.png` |
+| HIU_FLOW_107 / 108 / 110 / 111 / 113 (+ Invoice) | PASS | DEV002 received 7/7 05:52:57–05:53:11 (DiagnosticReport ×2, Prescription, OPConsultation, ImmunizationRecord, WellnessRecord, Invoice); DEV001 received 5/5 07:43:49–07:43:59 | `HIU_FLOW_107_diagnosticreport_viewed.png`, `_108_prescription_viewed.png`, `_110_opconsultation_viewed.png` (decrypted, NRCeS profiles) |
+| HIU_FLOW_109 / 112 | NOT RUN | No DischargeSummary or HealthDocumentRecord in the source facility's finalized records | — |
+| HIU_FLOW_201 / 202 (revoke) | PASS | `8d1cf1af` revoked 06:26; fetch, view and share refused afterwards | `HIU_FLOW_201_202_phr_revoked.png`; every View/Request control disabled |
+| HIU_FLOW_301 (expiry) | PASS | `19356a77` WellnessRecord granted 06:51, 1/1 received 06:52:54, expired 07:25 | `HIU_FLOW_301_phr_expired.png`, `HIU_FLOW_301_consent_expired.png` |
+
+Operator error, not a case: `0670e88f` (DEV001) asked for records up to a
+future time and NHA refused it (`ABDM-9999`); resent correctly as `7c4da967`.
+HealthDoc should refuse a future "to" date before sending (follow-up).
 
 ## M1 product-path wiring — 21 September 2026
 

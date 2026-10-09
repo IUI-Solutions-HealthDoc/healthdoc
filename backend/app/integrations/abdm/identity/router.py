@@ -432,8 +432,17 @@ class AbhaIssuedOut(BaseModel):
     #: stored encrypted server-side, and a browser has no use for it.
 
 
+# ABDM answers an Aadhaar number that fails UIDAI validation with 422
+# ABDM-1204 (live, 7 Oct 2026; workbook CRT_ABHA_104). The desk mistyped it;
+# a 502 "declined" sent them to support instead of back to the field.
+_AADHAAR_INVALID_CODE = "ABDM-1204"
+_NO_ABHA_CODE = "ABDM-1115"
+
 _CLIENT_IDENTITY_CODES = {
     "abdm_identifier_required",
+    # ABDM answers a wrong OTP with HTTP 200 and authResult "failed" (live,
+    # 7 Oct 2026). That is the desk's to correct, not a gateway outage.
+    "abdm_auth_failed",
     "enrolment_consent_required",
     "enrolment_consent_refused",
     "enrolment_consent_mismatch",
@@ -509,6 +518,61 @@ def _otp_rejected(exc: AbdmRejected, leg: str) -> HTTPException:
             "over the attempt limit. Check the code and try again, or request a new OTP.",
         },
     )
+
+
+def _login_hint(payload: AbhaLoginOtpRequest) -> str:
+    """Which identifier a login OTP request carried; exactly one is present."""
+    if payload.aadhaar is not None:
+        return "aadhaar"
+    if payload.mobile is not None:
+        return "mobile"
+    if payload.abha_address is not None:
+        return "abha-address"
+    return "abha-number"
+
+
+def _otp_request_rejected(exc: AbdmRejected, leg: str, *, login_hint: str) -> HTTPException:
+    """A refusal to send an OTP. An Aadhaar number ABDM rejects is the desk's
+    to correct; anything else stays a gateway decline. Status only is logged:
+    the body can echo the identifier just sent."""
+    log.warning("ABDM declined %s OTP request (%s)", leg, exc.status_code)
+    # Two live shapes for one mistake (7 Oct 2026): 422 ABDM-1204, and a 400
+    # keyed by loginId with no code at all.
+    aadhaar_refused = _AADHAAR_INVALID_CODE in identity_service.rejection_codes(exc.detail) or (
+        login_hint in {"aadhaar", "enrol-aadhaar"}
+        and "loginId" in identity_service.rejection_fields(exc.detail)
+    )
+    # ABDM refuses the OTP request outright, 404 ABDM-1115, when no ABHA stands
+    # behind the identifier (live, 7 Oct 2026; VRFY_ABHA_302/403). That is a
+    # real answer, not a decline, and no OTP was sent.
+    if _NO_ABHA_CODE in identity_service.rejection_codes(exc.detail) or exc.status_code == 404:
+        if login_hint == "mobile":
+            return HTTPException(
+                404,
+                {
+                    "code": "abha_not_found_for_mobile",
+                    "message": "ABHA Number not found. We did not find any ABHA number linked "
+                    "to this mobile number. Please use ABHA linked mobile number",
+                },
+            )
+        if login_hint == "aadhaar":
+            return HTTPException(
+                404,
+                {
+                    "code": "abha_not_found_for_aadhaar",
+                    "message": "NO ABHA user registered with this Aadhaar Number",
+                },
+            )
+    if aadhaar_refused:
+        return HTTPException(
+            400,
+            {
+                "code": "aadhaar_invalid",
+                "message": "ABDM did not accept this Aadhaar number. "
+                "Check the 12 digits and try again.",
+            },
+        )
+    return HTTPException(502, {"code": "abdm_rejected", "message": "ABDM declined the request"})
 
 
 async def _resend(
@@ -799,15 +863,7 @@ async def enrol_request_otp(
     except AbdmUnavailable as exc:
         raise _abdm_down(exc) from None
     except AbdmRejected as exc:
-        # Status only. The gateway's body can echo the identifier we just sent.
-        log.warning("ABDM declined an enrolment OTP request (%s)", exc.status_code)
-        raise HTTPException(
-            502,
-            {
-                "code": "abdm_rejected",
-                "message": "ABDM declined the request",
-            },
-        ) from exc
+        raise _otp_request_rejected(exc, "an enrolment", login_hint="enrol-aadhaar") from exc
     except identity_service.AbdmIdentityError as exc:
         raise _identity_error(exc) from exc
 
@@ -1899,14 +1955,7 @@ async def login_request_otp(
     except AbdmUnavailable as exc:
         raise _abdm_down(exc) from None
     except AbdmRejected as exc:
-        log.warning("ABDM declined a login OTP request (%s)", exc.status_code)
-        raise HTTPException(
-            502,
-            {
-                "code": "abdm_rejected",
-                "message": "ABDM declined the request",
-            },
-        ) from exc
+        raise _otp_request_rejected(exc, "a login", login_hint=_login_hint(payload)) from exc
     except identity_service.AbdmIdentityError as exc:
         raise _identity_error(exc) from exc
 

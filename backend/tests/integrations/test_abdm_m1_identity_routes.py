@@ -145,6 +145,82 @@ async def test_a_refused_otp_is_a_correctable_400_and_keeps_the_session(desk):
     assert AADHAAR not in verify.text and AADHAAR not in json.dumps(list(desk["redis"].store.values()))
 
 
+
+async def test_an_otp_abdm_reports_as_failed_is_a_correctable_400(desk):
+    # ABDM answers a wrong OTP with HTTP 200 and authResult "failed" (live,
+    # 7 Oct 2026); a 502 "temporarily unavailable" sent the desk to wait.
+    desk["gateway"].responses = [{"txnId": "abdm-txn-1"}, {"authResult": "failed", "message": "x"}]
+    requested = await desk["client"].post("/abdm/abha/login/request-otp", json={
+        "patient_id": str(desk["patient"].id), "aadhaar": AADHAAR})
+    assert requested.status_code == 200, requested.text
+    verify = await desk["client"].post("/abdm/abha/login/verify-otp",
+                                       json={"session_id": requested.json()["session_id"], "otp": "000000"})
+    assert verify.status_code == 400, verify.text
+    assert verify.json()["detail"]["code"] == "abdm_auth_failed"
+
+
+@pytest.mark.parametrize("refusal", [
+    AbdmRejected(422, {"error": {"code": "ABDM-1204", "message": "Invalid"}}, "rid"),
+    AbdmRejected(422, {"error": {"code": "ABDM-1204: ", "message": "Invalid"}}, "rid"),
+    AbdmRejected(400, {"loginId": "Invalid LoginId", "timestamp": "t"}, "rid"),
+], ids=["code", "code-separator", "loginId-field"])
+@pytest.mark.parametrize("route", ["enrol", "login"])
+async def test_an_aadhaar_abdm_refuses_is_a_correctable_400(desk, route, refusal):
+    # CRT_ABHA_104: ABDM refuses an invalid Aadhaar in both shapes (live, 7 Oct 2026).
+    desk["gateway"].responses = [refusal]
+    if route == "enrol":
+        response = await desk["client"].post("/abdm/abha/enrol/aadhaar/request-otp", json={
+            "patient_id": str(desk["patient"].id), "aadhaar": AADHAAR, "consent": await consent_for(desk)})
+    else:
+        response = await desk["client"].post("/abdm/abha/login/request-otp", json={
+            "patient_id": str(desk["patient"].id), "aadhaar": AADHAAR})
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"]["code"] == "aadhaar_invalid"
+    assert AADHAAR not in response.text
+
+
+async def test_a_refused_abha_number_is_not_called_an_invalid_aadhaar(desk):
+    desk["gateway"].responses = [AbdmRejected(400, {"loginId": "Invalid LoginId"}, "rid")]
+    response = await desk["client"].post("/abdm/abha/login/request-otp", json={
+        "patient_id": str(desk["patient"].id), "abha_number": "91111122223333"})
+    assert response.status_code == 502, response.text
+    assert response.json()["detail"]["code"] == "abdm_rejected"
+
+
+@pytest.mark.parametrize(("body", "expected"), [
+    ({"mobile": "9876543210"}, "abha_not_found_for_mobile"),
+    ({"aadhaar": AADHAAR}, "abha_not_found_for_aadhaar"),
+])
+async def test_no_abha_behind_the_identifier_is_a_not_found_not_a_decline(desk, monkeypatch, body, expected):
+    # VRFY_ABHA_302/403: ABDM refuses the OTP request with 404 ABDM-1115 and
+    # sends no OTP (live, 7 Oct 2026).
+    from app.common import captcha
+    async def _ok(*_args):
+        return True
+    monkeypatch.setattr(captcha, "check", _ok)
+    desk["gateway"].responses = [AbdmRejected(404, {"error": {"code": "ABDM-1115", "message": "x"}}, "rid")]
+    response = await desk["client"].post("/abdm/abha/login/request-otp", json={
+        "patient_id": str(desk["patient"].id), "captcha_id": "c", "captcha_answer": "a", **body})
+    assert response.status_code == 404, response.text
+    assert response.json()["detail"]["code"] == expected
+    assert "9876543210" not in response.text and AADHAAR not in response.text
+
+
+async def test_an_enrolment_404_is_not_reported_as_no_abha(desk):
+    desk["gateway"].responses = [AbdmRejected(404, {"error": {"code": "ABDM-1115"}}, "rid")]
+    response = await desk["client"].post("/abdm/abha/enrol/aadhaar/request-otp", json={
+        "patient_id": str(desk["patient"].id), "aadhaar": AADHAAR, "consent": await consent_for(desk)})
+    assert response.status_code == 502, response.text
+    assert response.json()["detail"]["code"] == "abdm_rejected"
+
+
+async def test_any_other_otp_request_refusal_stays_a_gateway_decline(desk):
+    desk["gateway"].responses = [AbdmRejected(422, {"error": {"code": "ABDM-1999"}}, "rid")]
+    response = await desk["client"].post("/abdm/abha/enrol/aadhaar/request-otp", json={
+        "patient_id": str(desk["patient"].id), "aadhaar": AADHAAR, "consent": await consent_for(desk)})
+    assert response.status_code == 502, response.text
+    assert response.json()["detail"]["code"] == "abdm_rejected"
+
 async def test_login_request_refuses_zero_or_two_identifiers(desk):
     for body in ({"patient_id": str(desk["patient"].id)},
                  {"patient_id": str(desk["patient"].id), "aadhaar": AADHAAR, "abha_number": "91111122223333"}):

@@ -38,6 +38,17 @@ export function userFacingApiError(code, payload) {
     abha_address_refused: "ABDM did not accept this ABHA address. Choose another suggestion.",
     abha_address_invalid: "That is not a valid ABHA address. Choose one of the addresses ABDM suggested.",
     otp_rejected: "ABDM did not accept this OTP. It may be wrong, expired or over the attempt limit. Check the code and try again, or request a new OTP.",
+    // Demographic creation (CRT_ABHA_301-309): refusals the desk cannot see
+    // as a highlighted field, so each needs its own words.
+    abdm_demographic_not_enabled: "Creating an ABHA from Aadhaar demographics is not enabled for this facility. NHA must grant the demographic-authentication role and benefit name first. Use Create ABHA (Aadhaar OTP) instead.",
+    abdm_demographic_not_permitted: "ABDM refused demographic ABHA creation for this facility. Contact your ABDM administrator.",
+    abha_demographics_rejected: "ABDM did not accept these details for this Aadhaar number. Check name, date of birth and gender against the Aadhaar card.",
+    lgd_code_unknown: "Choose the state and district again from the lists.",
+    // NHA's own wording for VRFY_ABHA_302 and VRFY_ABHA_403.
+    abha_not_found_for_mobile: "ABHA Number not found. We did not find any ABHA number linked to this mobile number. Please use ABHA linked mobile number.",
+    abha_not_found_for_aadhaar: "No ABHA user is registered with this Aadhaar number.",
+    aadhaar_invalid: "ABDM did not accept this Aadhaar number. Check the 12 digits and try again.",
+    abdm_auth_failed: "ABDM did not accept this OTP. It may be wrong, expired or over the attempt limit. Check the code and try again, or request a new OTP.",
     abha_mobile_required: "Enter the patient's 10-digit mobile number. ABDM needs it to create the ABHA.",
     abha_mobile_rejected: "ABDM did not accept this mobile number for the ABHA. Check the 10-digit number and try again.",
     // ABDM-1206: ABDM is up but cannot reach UIDAI, so no Aadhaar OTP can be sent.
