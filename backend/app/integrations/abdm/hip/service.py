@@ -268,6 +268,10 @@ async def record_consent_notification(
     return artefact
 
 
+# HI types whose care context belongs to no visit.
+VISITLESS_HI_TYPES = ("ImmunizationRecord", "HealthDocumentRecord")
+
+
 async def list_care_contexts_for_transfer(
     db: AsyncSession,
     *,
@@ -319,12 +323,13 @@ async def list_care_contexts_for_transfer(
         .outerjoin(Visit, Visit.id == AbdmCareContext.visit_id)
         .where(
             AbdmCareContext.facility_id == facility_id,
-            # A vaccine dose is recorded outside any visit. Every other
-            # document must still sit in this patient's visit at this facility.
+            # A vaccine dose and a released document are recorded outside any
+            # visit; the confirmed link above binds them to the patient. Every
+            # other document must still sit in this patient's visit here.
             or_(
                 and_(
                     AbdmCareContext.visit_id.is_(None),
-                    AbdmCareContext.hi_type == "ImmunizationRecord",
+                    AbdmCareContext.hi_type.in_(VISITLESS_HI_TYPES),
                 ),
                 and_(
                     Visit.facility_id == facility_id,
