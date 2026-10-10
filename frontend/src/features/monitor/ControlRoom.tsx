@@ -15,6 +15,7 @@ import { useLocale } from "@/lib/i18n";
 
 import { DigitalAdoption } from "./DigitalAdoption";
 import { DiseaseTrends } from "./DiseaseTrends";
+import { MaternalCare } from "./MaternalCare";
 import { FacilityDetail } from "./FacilityDetail";
 import { getMonitorBoard, type MonitorBoard, type MonitorFacilityRow, type MonitorStatus } from "./api";
 
@@ -183,6 +184,8 @@ export function ControlRoom() {
       {selected ? <FacilityDetail facilityId={selected} onClose={() => setSelected(null)} /> : null}
 
       <DiseaseTrends district={district} />
+
+      <MaternalCare board={board} />
 
       <DigitalAdoption board={board} />
 

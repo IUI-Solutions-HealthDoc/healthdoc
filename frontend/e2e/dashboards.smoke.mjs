@@ -98,6 +98,7 @@ const ROLE_DASHBOARDS = [
     username: "dev.doctor",
     landingPath: "/doctor/dashboard",
     dashboards: [
+      { path: "/mch", expectCalls: false, expectedText: "Maternal and child health" },
       { path: "/equipment", expectCalls: true, requiredRequests: [{ method: "GET", path: "/api/v1/equipment" }] },
       { path: "/doctor/dashboard", expectCalls: true },
       {
@@ -137,6 +138,7 @@ const ROLE_DASHBOARDS = [
     username: "dev.nurse",
     landingPath: "/nurse/ward-dashboard",
     dashboards: [
+      { path: "/mch", expectCalls: false, expectedText: "Maternal and child health" },
       { path: "/equipment", expectCalls: true, requiredRequests: [{ method: "GET", path: "/api/v1/equipment" }] },
       { path: "/nurse/ward-dashboard", expectCalls: true },
       { path: "/nurse/emar", expectCalls: true },

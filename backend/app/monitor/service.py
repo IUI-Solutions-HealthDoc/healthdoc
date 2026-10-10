@@ -27,6 +27,7 @@ from app.equipment.service import NOT_WORKING
 from app.integrations.abdm.hip.models import AbdmCareContext
 from app.integrations.abdm.models import ScanShareTicket
 from app.inventory.models import InventoryBatch, InventoryItem, StockLocation
+from app.mch.models import AncVisit, Delivery, Pregnancy
 from app.monitor.models import DiagnosisDailyCount, FacilityPulse, MonitorScope
 from app.opd.models import Diagnosis, Encounter, IcdCode, Visit
 from app.orders.models import Order, Prescription
@@ -152,6 +153,7 @@ async def capture_facility(db: AsyncSession, facility: Facility, *, now: datetim
         "equipment": await _equipment_not_working(db, facility.id),
         "blood": await _blood_available(db, facility.id, local_today),
         "adoption": await _adoption_today(db, facility.id, day_start),
+        "mch": await _mch(db, facility.id, local_today, day_start),
     }
     pulse = FacilityPulse(
         id=uuid.uuid4(),
@@ -359,6 +361,24 @@ async def _staff(db: AsyncSession, facility_id, local_today, day_start) -> list[
         }
         for user_id, name, designation, department, shifts in rostered
     ]
+
+
+async def _mch(db: AsyncSession, facility_id, local_today, day_start) -> dict[str, int]:
+    """Maternal care counts. High risk is the clinician's flag, never computed."""
+    async def count(stmt) -> int:
+        return int((await db.execute(stmt)).scalar_one() or 0)
+
+    active = (Pregnancy.facility_id == facility_id, Pregnancy.status == "active")
+    return {
+        "active_pregnancies": await count(select(func.count(Pregnancy.id)).where(*active)),
+        "high_risk": await count(select(func.count(Pregnancy.id)).where(*active, Pregnancy.high_risk.is_(True))),
+        "anc_visits_today": await count(
+            select(func.count(AncVisit.id)).where(AncVisit.facility_id == facility_id, AncVisit.visit_date == local_today)
+        ),
+        "deliveries_today": await count(
+            select(func.count(Delivery.id)).where(Delivery.facility_id == facility_id, Delivery.delivered_at >= day_start)
+        ),
+    }
 
 
 async def _adoption_today(db: AsyncSession, facility_id, day_start) -> dict[str, int]:

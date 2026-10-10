@@ -565,6 +565,8 @@ REPOINTED_ON_MERGE: frozenset[str] = frozenset(
         "visits",
         "appointments",
         "appointment_requests",
+        "mch_pregnancies",
+        "mch_newborns",
         "clinical_dispositions",
         "orders",
         "prescriptions",
@@ -910,6 +912,11 @@ async def _repoint_appointments(db: AsyncSession, *, source: Patient, target: Pa
     await db.execute(
         update(AppointmentRequest).where(AppointmentRequest.patient_id == source.id).values(patient_id=target.id)
     )
+    # Maternal records follow the mother's chart, and a newborn's link its own (0103).
+    from app.mch.models import Newborn, Pregnancy
+
+    await db.execute(update(Pregnancy).where(Pregnancy.patient_id == source.id).values(patient_id=target.id))
+    await db.execute(update(Newborn).where(Newborn.patient_id == source.id).values(patient_id=target.id))
     await db.flush()
 
 
