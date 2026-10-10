@@ -27,6 +27,7 @@ const DEFAULT_ROUTES: Record<Role, string> = {
   [ROLES.AUDITOR]: "/audit-viewer",
   [ROLES.PATIENT]: "/patient-portal",
   [ROLES.SUPERADMIN]: "/superadmin",
+  [ROLES.MONITOR]: "/monitor",
 };
 
 /**
@@ -40,10 +41,10 @@ const ROUTE_PREFIXES: Record<Role, readonly string[]> = {
   // job, not a side effect of registering a patient. The registration
   // invoice is still created server-side by create_visit.
   [ROLES.RECEPTIONIST]: ["/receptionist", "/consent"],
-  [ROLES.DOCTOR]: ["/doctor", "/consent", "/ipd", "/lab", "/radiology", "/ot", "/programs", "/immunization", "/blood-bank", "/forms"],
-  [ROLES.NURSE]: ["/nurse", "/ipd", "/consent", "/ot", "/programs", "/immunization", "/forms"],
-  [ROLES.LAB_TECH]: ["/lab", "/blood-bank", "/admin/maintenance"],
-  [ROLES.RADIOLOGY_TECH]: ["/radiology", "/admin/maintenance"],
+  [ROLES.DOCTOR]: ["/doctor", "/consent", "/ipd", "/lab", "/radiology", "/ot", "/programs", "/immunization", "/blood-bank", "/forms", "/equipment", "/mch"],
+  [ROLES.NURSE]: ["/nurse", "/ipd", "/consent", "/ot", "/programs", "/immunization", "/forms", "/equipment", "/mch"],
+  [ROLES.LAB_TECH]: ["/lab", "/blood-bank", "/admin/maintenance", "/equipment"],
+  [ROLES.RADIOLOGY_TECH]: ["/radiology", "/admin/maintenance", "/equipment"],
   [ROLES.PHARMACIST]: ["/pharmacy", "/inventory"],
   [ROLES.EMERGENCY]: ["/emergency"],
   // The existing /emergency page registers a new THID and its POST endpoint
@@ -54,15 +55,16 @@ const ROUTE_PREFIXES: Record<Role, readonly string[]> = {
   [ROLES.BILLING]: ["/billing", "/reports"],
   // The backend accepts admin on some HOD reads for operational support, but
   // that does not make a department-operating dashboard part of the admin UI.
-  [ROLES.ADMIN]: ["/admin", "/billing", "/reports", "/audit-viewer", "/ot", "/programs", "/immunization", "/blood-bank", "/forms"],
+  [ROLES.ADMIN]: ["/admin", "/billing", "/reports", "/audit-viewer", "/ot", "/programs", "/immunization", "/blood-bank", "/forms", "/equipment"],
   // /inventory is NOT decoration here. Indent approval is gated
   // `require_roles("hod")` — HOD ONLY — and the approve/reject buttons live on
   // Inventory -> Indents. Without this prefix the one action only a department
   // head can perform was unreachable by every department head.
-  [ROLES.HOD]: ["/hod", "/queue-display", "/inventory"],
+  [ROLES.HOD]: ["/hod", "/queue-display", "/inventory", "/equipment"],
   [ROLES.AUDITOR]: ["/audit-viewer", "/reports", "/admin/data-protection", "/admin/integration"],
   [ROLES.PATIENT]: ["/patient-portal"],
   [ROLES.SUPERADMIN]: ["/superadmin"],
+  [ROLES.MONITOR]: ["/monitor"],
 };
 
 /**
@@ -74,8 +76,11 @@ const ROUTE_PREFIXES: Record<Role, readonly string[]> = {
  * and its payload carries only token, doctor name and room, never a patient
  * identifier. Requiring a session here would mean a shared credential taped to
  * a TV in a public corridor, which is worse than no credential at all.
+ *
+ * `/availability` is the public bed and blood page: counts for facilities that
+ * opted in, no patient or staff data, read from the 15-minute capture.
  */
-const PUBLIC_PREFIXES: readonly string[] = ["/login", "/queue-display"];
+const PUBLIC_PREFIXES: readonly string[] = ["/login", "/queue-display", "/availability"];
 
 export function isPublicPath(pathname: string): boolean {
   return PUBLIC_PREFIXES.some(

@@ -10,6 +10,7 @@ out/
 .env.*
 !.env.example
 !.env.production.example
+!.env.control-room.example
 *.log
 .DS_Store
 postgres-data/

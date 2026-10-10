@@ -9,6 +9,7 @@ encounter, identity-merge or clinical joins here.
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime
 from typing import Literal
@@ -20,11 +21,15 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import AuthUser, require_roles
+from app.common.config import get_settings
 from app.common.db import get_db
+from app.monitor.models import MonitorScope
 from app.platform import onboarding
 from app.users.models import Facility, User
 from app.users.schemas import StaffUsername
 from app.users.service import KeycloakAdmin
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/platform",
@@ -46,6 +51,7 @@ class PlatformFacilityOut(BaseModel):
     hfr_facility_id: str | None
     timezone: str
     is_active: bool
+    publish_availability: bool = False
 
 
 class PlatformFacilityListOut(BaseModel):
@@ -118,6 +124,8 @@ class PlatformFacilityUpdate(BaseModel):
     ownership: Literal["government", "private"] | None = None
     hfr_facility_id: str | None = None
     is_active: bool | None = None
+    #: List free beds and blood stock on the public /availability page.
+    publish_availability: bool | None = None
 
 
 class PlatformAdminCreate(BaseModel):
@@ -206,3 +214,112 @@ async def copy_platform_facility_setup(
     except onboarding.OnboardingError as exc:
         raise _refused(exc) from exc
     return {"facility_id": str(target.id), "copied_from": str(source.id), **counts}
+
+
+# =============================================================================
+# Control-room officers (realm role `monitor`, docs/control-room-design-2026-10-10.md)
+# =============================================================================
+
+class MonitorAreaIn(BaseModel):
+    state_code: str = Field(min_length=2, max_length=5)
+    #: Omit for the whole state.
+    district: str | None = Field(default=None, min_length=1, max_length=100)
+
+
+class PlatformMonitorCreate(MonitorAreaIn):
+    username: StaffUsername
+    full_name: str = Field(min_length=1, max_length=200)
+    email: EmailStr | None = None
+    temporary_password: str = Field(min_length=8, repr=False)
+
+
+class MonitorScopeOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    keycloak_sub: str
+    username: str
+    state_code: str
+    district: str | None
+
+
+async def _grant(
+    db: AsyncSession, *, sub: str, username: str, area: MonitorAreaIn, granted_by: str
+) -> MonitorScope:
+    district = area.district.strip() if area.district else None
+    clash = await db.execute(
+        select(MonitorScope.id).where(
+            MonitorScope.keycloak_sub == sub,
+            MonitorScope.state_code == area.state_code,
+            MonitorScope.district.is_(None) if district is None else MonitorScope.district == district,
+        )
+    )
+    if clash.first() is not None:
+        raise HTTPException(409, {"code": "monitor_scope_exists", "message": "This area is already granted"})
+    scope = MonitorScope(
+        id=uuid.uuid4(), keycloak_sub=sub, username=username, state_code=area.state_code,
+        district=district, granted_by_sub=granted_by,
+    )
+    db.add(scope)
+    await db.flush()
+    return scope
+
+
+@router.get("/monitors", response_model=list[MonitorScopeOut])
+async def list_monitor_scopes(db: AsyncSession = Depends(get_db)) -> list[MonitorScopeOut]:
+    rows = (
+        await db.execute(select(MonitorScope).order_by(MonitorScope.username, MonitorScope.state_code))
+    ).scalars().all()
+    return [MonitorScopeOut.model_validate(row) for row in rows]
+
+
+@router.post("/monitors", status_code=201, response_model=MonitorScopeOut)
+async def create_platform_monitor(
+    payload: PlatformMonitorCreate,
+    user: AuthUser = Depends(require_roles("superadmin")),
+    db: AsyncSession = Depends(get_db),
+) -> MonitorScopeOut:
+    """A state or district officer: a Keycloak account with only the monitor
+    role, and no users row, because they work for no hospital."""
+    # Officers sign in to the control room's own realm in production, never the
+    # hospital staff realm (docs/control-room-design-2026-10-10.md, Deployment).
+    sub = await KeycloakAdmin(realm=get_settings().keycloak_monitor_realm).create_user(
+        username=payload.username, full_name=payload.full_name, email=payload.email,
+        temporary_password=payload.temporary_password, roles=["monitor"],
+    )
+    scope = await _grant(db, sub=sub, username=payload.username, area=payload, granted_by=user.sub)
+    return MonitorScopeOut.model_validate(scope)
+
+
+@router.post("/monitors/{keycloak_sub}/scopes", status_code=201, response_model=MonitorScopeOut)
+async def add_monitor_scope(
+    keycloak_sub: str,
+    payload: MonitorAreaIn,
+    user: AuthUser = Depends(require_roles("superadmin")),
+    db: AsyncSession = Depends(get_db),
+) -> MonitorScopeOut:
+    existing = (
+        await db.execute(select(MonitorScope).where(MonitorScope.keycloak_sub == keycloak_sub).limit(1))
+    ).scalar_one_or_none()
+    if existing is None:
+        raise HTTPException(404, {"code": "monitor_not_found", "message": "No such control-room account"})
+    scope = await _grant(db, sub=keycloak_sub, username=existing.username, area=payload, granted_by=user.sub)
+    return MonitorScopeOut.model_validate(scope)
+
+
+@router.delete("/monitors/scopes/{scope_id}", status_code=204)
+async def remove_monitor_scope(
+    scope_id: uuid.UUID,
+    user: AuthUser = Depends(require_roles("superadmin")),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Grants are platform-wide, like facilities: the superadmin is the scope."""
+    scope = await db.get(MonitorScope, scope_id)
+    if scope is None:
+        raise HTTPException(404, {"code": "monitor_scope_not_found", "message": "No such grant"})
+    log.info(
+        "monitor scope removed",
+        extra={"scope_id": str(scope.id), "monitor_sub": scope.keycloak_sub, "removed_by": user.sub},
+    )
+    await db.delete(scope)
+    await db.flush()

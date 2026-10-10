@@ -190,3 +190,47 @@ def test_the_dev_realm_carries_no_password_policy() -> None:
         "time, so this leaves all fourteen accounts unusable. Put production "
         "password rules in scripts/deploy/render_keycloak_realm.py instead."
     )
+
+
+CONTROL_REALM = Path(__file__).parents[2] / "infra" / "keycloak" / "realm-healthdoc-control.json"
+
+
+def test_the_control_room_realm_renders_at_its_own_address_with_totp(tmp_path: Path) -> None:
+    """BHAVYA keeps its command centre on its own host; so does HealthDoc's.
+
+    The control realm's login pages, cookies and issuer belong to the control
+    room's address (frontendUrl), it carries only the monitor role, and it is
+    held to the same production controls as the staff realm.
+    """
+    out = tmp_path / "control.json"
+    renderer.render(
+        CONTROL_REALM, out, "https://control.health.example",
+        client_id="healthdoc-control-frontend", own_frontend_url=True,
+    )
+    realm = json.loads(out.read_text())
+    assert realm["realm"] == "healthdoc-control"
+    assert realm["attributes"]["frontendUrl"] == "https://control.health.example/auth"
+    [client] = realm["clients"]
+    assert client["clientId"] == "healthdoc-control-frontend"
+    assert client["redirectUris"] == ["https://control.health.example/*"]
+    assert client["directAccessGrantsEnabled"] is False
+    assert [role["name"] for role in realm["roles"]["realm"]] == ["monitor"]
+    totp = next(a for a in realm["requiredActions"] if a["alias"] == "CONFIGURE_TOTP")
+    assert totp["enabled"] and totp["defaultAction"]
+    assert realm["sslRequired"] == "all"
+
+
+def test_the_staff_realm_keeps_the_pinned_hostname(tmp_path: Path) -> None:
+    out = tmp_path / "staff.json"
+    renderer.render(REAL_REALM, out, "https://hims.health.example")
+    assert "frontendUrl" not in json.loads(out.read_text()).get("attributes", {})
+
+
+def test_production_never_imports_the_dev_accounts(tmp_path: Path) -> None:
+    """The shipped realm holds the dev.* logins and their shared password.
+    Rendered for production they made Keycloak 25 refuse to start (the
+    password fails the imposed policy); they must simply not be there."""
+    assert json.loads(REAL_REALM.read_text())["users"], "the dev realm should still carry them"
+    out = tmp_path / "staff.json"
+    renderer.render(REAL_REALM, out, "https://hims.health.example")
+    assert "users" not in json.loads(out.read_text())

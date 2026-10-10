@@ -136,6 +136,20 @@ export function FacilityOnboarding({ facilities, onChanged }: {
               }, "The HFR id could not be saved.")}>Save HFR id</button>
           </div>
 
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={Boolean(target.publish_availability)} disabled={busy}
+              onChange={(e) => {
+                const publish = e.target.checked;
+                void run(async () => {
+                  await updatePlatformFacility(target.id, { publish_availability: publish });
+                  return publish
+                    ? `${target.name}'s free beds and blood stock are now on the public availability page.`
+                    : `${target.name} is no longer on the public availability page.`;
+                }, "The publishing choice could not be saved.");
+              }} />
+            Publish free beds and blood stock on the public availability page (counts only, no patient data)
+          </label>
+
           <div className="grid gap-3 sm:grid-cols-4">
             <div className="space-y-1">
               <input aria-label="Admin username" placeholder="Admin username" className={input} value={admin.username}

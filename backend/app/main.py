@@ -29,6 +29,7 @@ MODULES = [
     "allergies",
     "appointments",
     "audit",
+    "availability",
     "billing",
     "blood_bank",
     "consent",
@@ -37,6 +38,7 @@ MODULES = [
     "dpdp",
     "emergency",
     "encounters",
+    "equipment",
     "files",
     "forms",
     "immunization",
@@ -44,6 +46,8 @@ MODULES = [
     "ipd",
     "notifications",
     "maintenance",
+    "mch",
+    "monitor",
     "nursing",
     "opd",
     "orders",
@@ -184,6 +188,11 @@ async def health_deep() -> dict:
         checks["postgres"] = "ok"
     except Exception as exc:  # noqa: BLE001
         checks["postgres"] = f"error: {exc}"
+    if settings.api_mode == "control_room":
+        # The control-room server runs no Mongo or Redis: its API reads
+        # PostgreSQL only, so those are not its health.
+        status = "ok" if checks["postgres"] == "ok" else "degraded"
+        return {"status": status, "checks": checks}
     try:
         await get_mongo().command("ping")
         checks["mongo"] = "ok"
@@ -233,51 +242,70 @@ def _include(module_path: str, *, optional_name: str | None = None) -> None:
     app.include_router(module.router, prefix=settings.api_prefix)
 
 
-# Registered BEFORE the MODULES loop, and the order is load-bearing.
-# app.users.router declares GET /users/{user_id}; whichever of the two is
-# included first wins the match for "/users/me". Registered after, "me" is
-# parsed as a UUID and the endpoint 422s — a failure that reads like a
-# validation bug rather than a routing one. Keep this above the loop.
-_include("app.users.me")
-_include("app.users.account_request_router")
+#: Served by the separate control-room server (settings.api_mode == "control_room").
+#: Nothing clinical, financial or administrative: a compromised or overloaded
+#: control room can reach no hospital workflow, as BHAVYA keeps its command
+#: centre on its own host. See docs/control-room-design-2026-10-10.md.
+CONTROL_ROOM_MODULES = ("monitor",)
 
-for name in MODULES:
-    _include(f"app.{name}.router", optional_name=name)
 
-# B1-owned routers that don't live at app/<name>/router.py — included explicitly.
-_B1_ROUTERS = [
-    # The four compliance ledgers that had no read path — see the module docstring.
-    "app.audit.compliance_router",
-    "app.common.capabilities_router",
-    # facility_modules (0027) had no ORM model and no write path at all — module
-    # gating was configurable only by direct SQL. See app/common/facility_modules.py.
-    "app.common.facility_modules",
-    "app.integrations.abdm.identity.router",  # ABHA capture (W6-01)
-    # ABDM M2/M3. Mounted even though the gateway credentials are absent:
-    # the staff routes work locally, and the callback routes must EXIST and
-    # refuse (503, callback_auth.py) rather than 404. A 404 tells the gateway
-    # this HIP does not implement the callback; a 503 tells it we are not
-    # ready, which is the true statement and the one it retries against.
-    "app.integrations.abdm.hip.router",
-    "app.integrations.abdm.hiu.router",
-    "app.integrations.abdm.operations",
-    "app.integrations.abdm.hfr.router",  # Health Facility Registry (M4)
-    "app.integrations.abdm.hfr.hpr_router",  # Healthcare Professionals Registry (M4)
-    "app.patients.portal_router",  # verified account-to-patient identity boundary (#228)
-    "app.patients.portal_self_router",  # bound patient self-service reads (#228)
-    # Break-glass (#391). This sat unregistered behind a note saying
-    # break_glass_grants / data_access_log (0004) and notification_history (0020)
-    # were unmerged and would 500 with UndefinedTable. All three merged — staging
-    # is at 0041c — so the blocker was stale, not real. Emergency access is a NABH
-    # DHS and DPDP control; having the audit tables without the enforcement path
-    # is the worse half to be missing.
-    "app.integrations.abdm.scan_share_router",
-    "app.security_audit.breakglass",
-]
-for path in _B1_ROUTERS:
-    _include(path)
+def _mount_hospital_api(*, with_control_room: bool) -> None:
+    # Registered BEFORE the MODULES loop, and the order is load-bearing.
+    # app.users.router declares GET /users/{user_id}; whichever of the two is
+    # included first wins the match for "/users/me". Registered after, "me" is
+    # parsed as a UUID and the endpoint 422s — a failure that reads like a
+    # validation bug rather than a routing one. Keep this above the loop.
+    _include("app.users.me")
+    _include("app.users.account_request_router")
 
-# ABDM calls these exact public v3 paths. Mounting them through `_include`
-# would prepend `/api/v1` and produce `/api/v1/api/v3/...`, which is the route
-# mismatch that kept every real sandbox callback at 404.
-app.include_router(abdm_external_router)
+    for name in MODULES:
+        if name in CONTROL_ROOM_MODULES and not with_control_room:
+            continue
+        _include(f"app.{name}.router", optional_name=name)
+
+    # B1-owned routers that don't live at app/<name>/router.py — included explicitly.
+    _B1_ROUTERS = [
+        # The four compliance ledgers that had no read path — see the module docstring.
+        "app.audit.compliance_router",
+        "app.common.capabilities_router",
+        # facility_modules (0027) had no ORM model and no write path at all — module
+        # gating was configurable only by direct SQL. See app/common/facility_modules.py.
+        "app.common.facility_modules",
+        "app.integrations.abdm.identity.router",  # ABHA capture (W6-01)
+        # ABDM M2/M3. Mounted even though the gateway credentials are absent:
+        # the staff routes work locally, and the callback routes must EXIST and
+        # refuse (503, callback_auth.py) rather than 404. A 404 tells the gateway
+        # this HIP does not implement the callback; a 503 tells it we are not
+        # ready, which is the true statement and the one it retries against.
+        "app.integrations.abdm.hip.router",
+        "app.integrations.abdm.hiu.router",
+        "app.integrations.abdm.operations",
+        "app.integrations.abdm.hfr.router",  # Health Facility Registry (M4)
+        "app.integrations.abdm.hfr.hpr_router",  # Healthcare Professionals Registry (M4)
+        "app.patients.portal_router",  # verified account-to-patient identity boundary (#228)
+        "app.patients.portal_self_router",  # bound patient self-service reads (#228)
+        # Break-glass (#391). This sat unregistered behind a note saying
+        # break_glass_grants / data_access_log (0004) and notification_history (0020)
+        # were unmerged and would 500 with UndefinedTable. All three merged — staging
+        # is at 0041c — so the blocker was stale, not real. Emergency access is a NABH
+        # DHS and DPDP control; having the audit tables without the enforcement path
+        # is the worse half to be missing.
+        "app.integrations.abdm.scan_share_router",
+        "app.security_audit.breakglass",
+    ]
+    for path in _B1_ROUTERS:
+        _include(path)
+
+    # ABDM calls these exact public v3 paths. Mounting them through `_include`
+    # would prepend `/api/v1` and produce `/api/v1/api/v3/...`, which is the route
+    # mismatch that kept every real sandbox callback at 404.
+    app.include_router(abdm_external_router)
+
+
+# Session start/end audit: both deployments sign people in.
+_include("app.audit.session_router")
+if settings.api_mode == "control_room":
+    for name in CONTROL_ROOM_MODULES:
+        _include(f"app.{name}.router")
+else:
+    _mount_hospital_api(with_control_room=settings.api_mode == "all")
