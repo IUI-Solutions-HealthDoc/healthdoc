@@ -112,12 +112,16 @@ officer account cannot sign in to the hospital address at all.
 
 ### Setting it up
 
-1. Hospital server, `.env.production`: set `CONTROL_ROOM_HOST` and
-   `PRIVATE_BIND_ADDRESS` (its private-network address). PostgreSQL (5432) and
-   Keycloak (8080) then listen on that address: **firewall both to the
-   control-room server only**. Traffic between the two servers is plain
-   PostgreSQL and HTTP, so the private network must be one you trust (same
-   VPC or a WireGuard link); otherwise put TLS on both before going live.
+1. Make the private-link certificates (any machine with openssl):
+   `infra/control-room/make-private-certs.sh <dir> <hospital private IP>`.
+   Hospital server gets `private-server.crt` and `.key`; the control-room server
+   gets `private-ca.crt` only; keep `private-ca.key` offline.
+   Hospital server, `.env.production`: set `CONTROL_ROOM_HOST`,
+   `PRIVATE_BIND_ADDRESS` (its private-network address) and
+   `PRIVATE_TLS_CERT_PATH` / `PRIVATE_TLS_KEY_PATH`. PostgreSQL (5432) and
+   Keycloak's HTTPS (8443) then listen on that address: **firewall both to the
+   control-room server only.** Both links are encrypted and verified (see
+   Encryption below), so this firewall is defence in depth, not the only lock.
 2. Hospital server, once, as the database owner:
    `psql -f infra/control-room/db-role.sql`, then
    `ALTER ROLE healthdoc_control_room LOGIN PASSWORD '<random>'`.
@@ -140,8 +144,38 @@ The production realm render now also drops the `dev.*` accounts the source
 realm carries. Before this, Keycloak 25 refused to start on a fresh production
 install: their shared dev password fails the production password policy.
 
-Not done here: TLS between the two servers (see step 1), and a second
-Keycloak instance for full separation of the identity store. BHAVYA's public
+### Encryption between the servers
+
+Both links from the control-room server to the hospital server are TLS, with
+the server's certificate checked against a private CA and its name checked:
+
+| Link | Encrypted by | Verified by | Refused |
+|---|---|---|---|
+| Control-room API → PostgreSQL | `ssl=on` (TLS 1.2+) | `DATABASE_SSL_CA_FILE`: chain + host name (verify-full) | Control-room role without TLS (`infra/control-room/pg_hba.conf`) |
+| Control-room API → Keycloak signing keys | Keycloak HTTPS on 8443 | `JWT_JWKS_CA_FILE`, for that fetch only | Plain `http://` keys URL (the server will not start) |
+| Control-room nginx → Keycloak login | Keycloak HTTPS on 8443 | `proxy_ssl_verify` against the CA, name `PRIVATE_TLS_NAME` | Any certificate not from the CA or not for that name (502) |
+
+The control-room API refuses to start in production if either link is not
+configured for verified TLS. Containers on the hospital server keep talking to
+PostgreSQL and Keycloak inside its own Docker network, as before.
+
+Checked end to end on 10 October 2026 with the production Compose services
+(PostgreSQL 16, Keycloak 25 in `start` mode) and the control-room nginx:
+the app's own engine connected as the control-room role over TLS 1.3; the
+same role without TLS was refused by `pg_hba.conf`; a certificate from another
+CA and a name not in the certificate were both refused; the hospital's own
+plaintext connection inside Docker still worked; the signing-key fetch worked
+with the private CA and failed with another CA or the public trust store;
+nginx returned the control realm with the right certificate and 502 for a wrong
+name or another CA.
+
+Rotating: run the script into a new directory, put the new server certificate
+on the hospital server and the new CA on the control-room server, run
+`docker compose up -d --force-recreate private-tls-init postgres keycloak`, then
+recreate the control-room stack.
+The script's certificates last 825 days (`DAYS=` to change).
+
+Not done here: a second Keycloak instance for full separation of the identity store. BHAVYA's public
 material does not say whether its command centre has its own identity store;
 one Keycloak with a separate realm keeps one place to patch and back up.
 
