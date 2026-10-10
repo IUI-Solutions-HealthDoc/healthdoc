@@ -11,6 +11,10 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
       POSTGRES_DB: ${POSTGRES_DB:?required}
     volumes: [postgres-data:/var/lib/postgresql/data]
+    # The control-room server connects here over the private network as the
+    # least-privileged role in control-room/db-role.sql. Loopback until the
+    # operator sets PRIVATE_BIND_ADDRESS to this host's private-network address.
+    ports: ["${PRIVATE_BIND_ADDRESS:-127.0.0.1}:5432:5432"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
@@ -59,9 +63,19 @@ services:
   realm-init:
     image: python:3.12-alpine
     environment: {PUBLIC_BASE_URL: "https://${PUBLIC_HOST:?required}"}
-    command: ["python", "/tools/render_keycloak_realm.py", "/source/realm-healthdoc.json", "/import/realm-healthdoc.json", "--public-base-url", "https://${PUBLIC_HOST:?required}"]
+    # Two realms: hospital staff at PUBLIC_HOST, control-room officers at their
+    # own CONTROL_ROOM_HOST (frontendUrl), as BHAVYA separates hims.* from its
+    # command centre. docs/control-room-design-2026-10-10.md, "Deployment".
+    entrypoint: ["sh", "-c"]
+    command:
+      - >-
+        python /tools/render_keycloak_realm.py /source/realm-healthdoc.json /import/realm-healthdoc.json
+        --public-base-url https://${PUBLIC_HOST:?required} &&
+        python /tools/render_keycloak_realm.py /source/realm-healthdoc-control.json /import/realm-healthdoc-control.json
+        --public-base-url https://${CONTROL_ROOM_HOST:?required} --client-id healthdoc-control-frontend --own-frontend-url
     volumes:
       - ./keycloak/realm-healthdoc.json:/source/realm-healthdoc.json:ro
+      - ./keycloak/realm-healthdoc-control.json:/source/realm-healthdoc-control.json:ro
       - ../scripts/deploy/render_keycloak_realm.py:/tools/render_keycloak_realm.py:ro
       - keycloak-import:/import
 
@@ -78,6 +92,8 @@ services:
       KC_PROXY_HEADERS: xforwarded
       KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:?required}
       KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?required}
+    # The control-room server's nginx proxies the healthdoc-control realm here.
+    ports: ["${PRIVATE_BIND_ADDRESS:-127.0.0.1}:8080:8080"]
     volumes:
       - keycloak-import:/opt/keycloak/data/import:ro
       - ./keycloak/themes/healthdoc:/opt/keycloak/themes/healthdoc:ro
@@ -129,6 +145,10 @@ services:
     env_file: ../${HEALTHDOC_ENV_FILE:-.env.production}
     environment:
       ENVIRONMENT: production
+      # The hospitals' API: everything except the control room, which runs on
+      # its own server (docker-compose.control-room.yml).
+      API_MODE: hospital
+      KEYCLOAK_MONITOR_REALM: healthdoc-control
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       MONGO_URI: mongodb://${MONGO_ROOT_USER}:${MONGO_ROOT_PASSWORD}@mongo:27017/healthdoc?authSource=admin
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
@@ -149,6 +169,9 @@ services:
 
   # Control room (docs/control-room-design-2026-10-10.md): every 15 minutes,
   # counts per facility for the state/district board. Same image as backend.
+  # It stays on the hospital server, which already has full access: the
+  # control-room server only reads what it writes, as a role that cannot read
+  # patients (infra/control-room/db-role.sql).
   monitor-capture:
     <<: *restart
     image: ${HEALTHDOC_BACKEND_IMAGE:?required}
