@@ -409,6 +409,55 @@ async def test_a_case_is_a_distinct_patient_with_a_non_differential_diagnosis(db
     await db.flush()
     again_rows = (await db.execute(sa.select(DiagnosisDailyCount).where(DiagnosisDailyCount.facility_id == fid))).scalars().all()
     assert len(again_rows) == 2
+
+
+# ---------------------------------------------------------------- staff and cover
+
+
+async def test_rostered_staff_with_waiting_patients_and_no_activity_turn_the_row_amber(db):
+    facility = await _facility(db)
+    fid, dept = facility.id, uuid.uuid4()
+    await db.execute(sa.text("INSERT INTO departments (id, name, code, facility_id) VALUES (:d, 'Medicine', :c, :f)"),
+                     {"d": dept, "c": f"MED{uuid.uuid4().hex[:4]}", "f": fid})
+    doctors = {}
+    for name in ("Dr Active", "Dr Quiet"):
+        doctors[name] = uuid.uuid4()
+        await db.execute(sa.text("INSERT INTO users (id, keycloak_sub, username, full_name, designation, facility_id) "
+                                 "VALUES (:u, :s, :n, :full, 'Medical Officer', :f)"),
+                         {"u": doctors[name], "s": str(uuid.uuid4()), "n": f"d{uuid.uuid4().hex[:8]}", "full": name, "f": fid})
+        await db.execute(sa.text("INSERT INTO rosters (id, staff_user_id, department_id, shift, roster_date) "
+                                 "VALUES (:r, :u, :d, 'morning', :day)"),
+                         {"r": uuid.uuid4(), "u": doctors[name], "d": dept, "day": date(2026, 10, 10)})
+    # Dr Active did something this morning; Dr Quiet has a queue and nothing else.
+    await db.execute(sa.text("INSERT INTO audit_logs (id, created_at, facility_id, user_id, action, resource_type) "
+                             "VALUES (:id, :at, :f, :u, 'read', 'patients')"),
+                     {"id": uuid.uuid4(), "at": NOW - timedelta(hours=2), "f": fid, "u": doctors["Dr Active"]})
+    patient = uuid.uuid4()
+    await db.execute(sa.text("INSERT INTO patients (id, full_name, sex, identity_path, facility_id, created_by, age_years, uhid) "
+                             "VALUES (:p, 'Waiting Patient', 'other', 'demographics_only', :f, :u, 30, :h)"),
+                     {"p": patient, "f": fid, "u": doctors["Dr Active"], "h": f"IN-BR-{uuid.uuid4().hex[:10]}"})
+    queue = uuid.uuid4()
+    await db.execute(sa.text("INSERT INTO queues (id, facility_id, department_id, doctor_user_id, service_date) "
+                             "VALUES (:q, :f, :d, :u, :day)"),
+                     {"q": queue, "f": fid, "d": dept, "u": doctors["Dr Quiet"], "day": date(2026, 10, 10)})
+    for seq in (1, 2):
+        visit = uuid.uuid4()
+        await db.execute(sa.text("INSERT INTO visits (id, visit_number, patient_id, facility_id, visit_type, visit_date, created_by) "
+                                 "VALUES (:v, :n, :p, :f, 'opd', :at, :u)"),
+                         {"v": visit, "n": f"V-{uuid.uuid4().hex[:10]}", "p": patient, "f": fid, "at": NOW, "u": doctors["Dr Active"]})
+        await db.execute(sa.text("INSERT INTO queue_tokens (id, facility_id, queue_id, visit_id, sequence, token_display, initial_priority) "
+                                 "VALUES (:t, :f, :q, :v, :s, :d, 'normal')"),
+                         {"t": uuid.uuid4(), "f": fid, "q": queue, "v": visit, "s": seq, "d": f"MED-{seq:03d}"})
+    await db.flush()
+
+    pulse = await service.capture_facility(db, facility, now=NOW)
+    staff = {s["name"]: s for s in pulse.detail["staff"]}
+    assert staff["Dr Active"]["active_today"] is True and staff["Dr Active"]["waiting"] == 0
+    assert staff["Dr Quiet"]["active_today"] is False and staff["Dr Quiet"]["waiting"] == 2
+    assert staff["Dr Quiet"]["department"] == "Medicine" and staff["Dr Quiet"]["shift"] == "morning"
+    colour, reasons = service.status_of(pulse, now=NOW)
+    assert colour == "amber"
+    assert "2 patients waiting for 1 rostered staff with no activity yet" in reasons
 # ---------------------------------------------------------------- session audit for officers
 
 

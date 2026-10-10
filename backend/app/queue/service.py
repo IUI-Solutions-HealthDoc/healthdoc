@@ -1530,6 +1530,53 @@ async def reassign_token(
     return new_token
 
 
+async def hand_over_queue(
+    db: AsyncSession,
+    source_queue_id: uuid.UUID,
+    target_queue_id: uuid.UUID,
+    caller_facility_id: uuid.UUID,
+    caller_roles: list[str],
+    caller_department_id: uuid.UUID | None,
+) -> int:
+    """Cover for an absent doctor: every waiting patient moves to the covering
+    doctor's queue, in the order they would have been seen, and the source
+    queue closes so no new token lands there.
+
+    Each move is reassign_token, so the same checks apply to every patient
+    (same facility, same department, HOD only in their own department). A
+    repeat finds nothing waiting and moves nothing, so retrying is safe.
+    """
+    source = await _get_scoped_queue(db, source_queue_id, caller_facility_id, for_update=True)
+    waiting = (
+        await db.execute(
+            select(QueueToken.id)
+            .where(QueueToken.queue_id == source.id, QueueToken.status == QueueTokenStatus.WAITING.value)
+            .order_by(QueueToken.priority_rank, QueueToken.sequence)
+        )
+    ).scalars().all()
+    for token_id in waiting:
+        await reassign_token(
+            db,
+            token_id=token_id,
+            target_queue_id=target_queue_id,
+            caller_facility_id=caller_facility_id,
+            caller_roles=caller_roles,
+            caller_department_id=caller_department_id,
+        )
+    if not waiting:
+        # Still enforce the same department and role rules on an empty queue.
+        target = await _get_scoped_queue(db, target_queue_id, caller_facility_id)
+        if not ({"hod", "admin"} & set(caller_roles)):
+            raise HTTPException(403, "Only hod or admin may hand over a queue")
+        if target.department_id != source.department_id or target.id == source.id:
+            raise HTTPException(422, "Hand over only to another queue in the same department")
+        if "hod" in caller_roles and caller_department_id != source.department_id:
+            raise HTTPException(403, "hod may only act within their own department")
+    source.is_open = False
+    await db.flush()
+    return len(waiting)
+
+
 _ELEVATION_ALERT_THRESHOLD = 5  # per §schema: ">5/day by one user is an alert, not a block"
  
  

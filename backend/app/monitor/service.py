@@ -17,6 +17,7 @@ from sqlalchemy import and_, case, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admissions.models import Admission, Bed, Ward
+from app.audit.models import AuditLog
 from app.common.patient_scope import facility_timezone
 from app.departments.models import Department
 from app.inventory.models import InventoryBatch, InventoryItem, StockLocation
@@ -24,8 +25,8 @@ from app.monitor.models import DiagnosisDailyCount, FacilityPulse, MonitorScope
 from app.opd.models import Diagnosis, Encounter, IcdCode, Visit
 from app.orders.models import Order
 from app.pathology.models import LabOrderItem
-from app.queue.models import QueueToken, Roster
-from app.users.models import Facility
+from app.queue.models import Queue, QueueToken, Roster
+from app.users.models import Facility, User
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -140,6 +141,7 @@ async def capture_facility(db: AsyncSession, facility: Facility, *, now: datetim
         "wards": await _wards(db, facility.id),
         "stock_short": await _stock_short(db, on_hand),
         "expiring": await _expiring(db, facility.id, local_today),
+        "staff": await _staff(db, facility.id, local_today, day_start),
     }
     pulse = FacilityPulse(
         id=uuid.uuid4(),
@@ -284,6 +286,69 @@ async def _expiring(db: AsyncSession, facility_id, local_today) -> list[dict]:
     ]
 
 
+async def _staff(db: AsyncSession, facility_id, local_today, day_start) -> list[dict]:
+    """Who is on today's roster, whether they have done anything yet, and how
+    many patients wait for them. Staff names are not patient data: they are
+    what a district officer needs to arrange cover.
+
+    "Active" is any audited action at this facility since local midnight, or a
+    consultation they began. Absence of activity is not proof of absence, so
+    the board says "no activity yet", never "absent".
+    """
+    rostered = (
+        await db.execute(
+            select(Roster.staff_user_id, User.full_name, User.designation, Department.name,
+                   func.string_agg(func.distinct(Roster.shift), ", "))
+            .join(Department, Department.id == Roster.department_id)
+            .join(User, User.id == Roster.staff_user_id)
+            .where(Department.facility_id == facility_id, Roster.roster_date == local_today,
+                   Roster.is_available.is_(True))
+            .group_by(Roster.staff_user_id, User.full_name, User.designation, Department.name)
+            .order_by(Department.name, User.full_name)
+            .limit(DETAIL_LIMIT)
+        )
+    ).all()
+    if not rostered:
+        return []
+    ids = [row[0] for row in rostered]
+    active = set(
+        (
+            await db.execute(
+                select(AuditLog.user_id).where(
+                    AuditLog.facility_id == facility_id, AuditLog.user_id.in_(ids), AuditLog.created_at >= day_start
+                ).distinct()
+            )
+        ).scalars()
+    ) | set(
+        (
+            await db.execute(
+                select(Encounter.provider_user_id).where(
+                    Encounter.facility_id == facility_id, Encounter.provider_user_id.in_(ids),
+                    Encounter.started_at >= day_start,
+                ).distinct()
+            )
+        ).scalars()
+    )
+    waiting = dict(
+        (
+            await db.execute(
+                select(Queue.doctor_user_id, func.count(QueueToken.id))
+                .join(QueueToken, QueueToken.queue_id == Queue.id)
+                .where(Queue.facility_id == facility_id, Queue.service_date == local_today,
+                       Queue.doctor_user_id.in_(ids), QueueToken.status == "waiting")
+                .group_by(Queue.doctor_user_id)
+            )
+        ).all()
+    )
+    return [
+        {
+            "name": name, "designation": designation, "department": department, "shift": shifts,
+            "active_today": user_id in active, "waiting": int(waiting.get(user_id, 0)),
+        }
+        for user_id, name, designation, department, shifts in rostered
+    ]
+
+
 async def capture_all(db: AsyncSession, *, now: datetime | None = None) -> int:
     """Capture every active facility. One facility's failure does not stop the rest."""
     now = now or datetime.now(UTC)
@@ -353,6 +418,10 @@ def status_of(pulse: FacilityPulse | None, *, now: datetime) -> tuple[str, list[
         )
     if pulse.staff_rostered_today == 0 and pulse.opd_today > 0:
         flag("amber", "patients seen but no staff on today's roster")
+    uncovered = [s for s in (pulse.detail or {}).get("staff", []) if s["waiting"] and not s["active_today"]]
+    if uncovered:
+        waiting = sum(s["waiting"] for s in uncovered)
+        flag("amber", f"{waiting} patients waiting for {len(uncovered)} rostered staff with no activity yet")
     return level, reasons
 
 
