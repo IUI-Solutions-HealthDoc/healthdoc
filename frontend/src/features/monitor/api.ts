@@ -100,3 +100,25 @@ export function getMonitorTrends(district: string | null): Promise<MonitorTrends
   if (district) query.set("district", district);
   return api<MonitorTrends>(`/monitor/trends?${query.toString()}`);
 }
+
+export interface MonitorActivity {
+  facility_id: string;
+  facility_name: string;
+  day: string;
+  first_patient: string | null;
+  first_at: string | null;
+  last_patient: string | null;
+  last_at: string | null;
+  patients: number;
+  counts: Record<string, number>;
+  truncated: boolean;
+  events: { at: string; kind: string; patient: string; detail: string; staff: string | null }[];
+  privacy_note: string;
+}
+
+/** Each call is written to the facility's audit log: load it on request only. */
+export function getMonitorActivity(facilityId: string, day: string | null): Promise<MonitorActivity> {
+  const query = new URLSearchParams();
+  if (day) query.set("day", day);
+  return api<MonitorActivity>(`/monitor/facilities/${facilityId}/activity?${query.toString()}`);
+}
