@@ -27,6 +27,7 @@ const DEFAULT_ROUTES: Record<Role, string> = {
   [ROLES.AUDITOR]: "/audit-viewer",
   [ROLES.PATIENT]: "/patient-portal",
   [ROLES.SUPERADMIN]: "/superadmin",
+  [ROLES.MONITOR]: "/monitor",
 };
 
 /**
@@ -63,6 +64,7 @@ const ROUTE_PREFIXES: Record<Role, readonly string[]> = {
   [ROLES.AUDITOR]: ["/audit-viewer", "/reports", "/admin/data-protection", "/admin/integration"],
   [ROLES.PATIENT]: ["/patient-portal"],
   [ROLES.SUPERADMIN]: ["/superadmin"],
+  [ROLES.MONITOR]: ["/monitor"],
 };
 
 /**

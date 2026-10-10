@@ -215,6 +215,7 @@ do not merge out of order.**
 | 0094 | abdm_invoice_record | ALTER abdm_care_contexts: hi_type CHECK adds Invoice; ALTER invoices: issued_at | An issued invoice is shared as an NRCeS InvoiceRecord, the eighth HI type. `issued_at` is its document date, set on issue and frozen by `trg_invoices_freeze` so a payment never moves it; invoices issued earlier stay NULL and are not offered. Downgrade refuses while any invoice context exists. |
 | 0095 | abha_unique_per_facility | ALTER patients: abha_number, abha_address | One ABHA per chart per facility, not per installation: each facility is its own HIP and one person may hold a linked chart at each. Downgrade refuses while an ABHA is linked at two facilities. |
 | 0096 | abdm_health_document_record | ALTER abdm_care_contexts: hi_type CHECK adds HealthDocumentRecord; CREATE abdm_released_documents | A doctor releases one uploaded PDF on a chart as an NRCeS HealthDocumentRecord, the last of the eight HMIS HI types. The upload alone shares nothing; one file is released at most once. Downgrade refuses while any HealthDocumentRecord context exists. |
+| 0097 | monitor_control_room | CREATE monitor_scopes, facility_pulse | State/district control room (realm role `monitor`): which area each officer may see, and a 15-minute count capture per facility. Counts only, no patient identifiers. See docs/control-room-design-2026-10-10.md. |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -2197,6 +2198,34 @@ Releasing publishes `document/UUID` as a HealthDocumentRecord in the same
 transaction. Only PDFs of 1 MB or less (HealthDoc's HIU renders only PDFs).
 The facility authors the record; transfer embeds the exact uploaded bytes and
 refuses an object whose SHA-256 no longer matches. Erasing the file withdraws it.
+
+**monitor_scopes** (0097) — the area a control-room officer may see
+```
+keycloak_sub varchar(64) NOT NULL                 -- officers have no users row: they work for no hospital
+username varchar(100) NOT NULL · granted_by_sub varchar(64) NOT NULL
+state_code varchar(5) NOT NULL
+district varchar(100)                             -- NULL = whole state; CHECK trim(district) <> ''
+UNIQUE (keycloak_sub, state_code, district); UNIQUE (keycloak_sub, state_code) WHERE district IS NULL
+```
+With no row, GET /monitor/board is refused (403 monitor_scope_missing), never shown empty.
+
+**facility_pulse** (0097) — one 15-minute capture of a facility's counts
+```
+facility_id UUID NOT NULL → facilities ON DELETE CASCADE · captured_at timestamptz NOT NULL
+opd_today integer NOT NULL CHECK (>= 0)
+queue_waiting integer NOT NULL CHECK (>= 0)
+emergency_open integer NOT NULL CHECK (>= 0)
+admitted_now integer NOT NULL CHECK (>= 0)
+beds_total integer NOT NULL CHECK (>= 0)
+lab_pending integer NOT NULL CHECK (>= 0)
+stock_below_reorder integer NOT NULL CHECK (>= 0)
+batches_expiring_30d integer NOT NULL CHECK (>= 0)
+staff_rostered_today integer NOT NULL CHECK (>= 0)
+INDEX (facility_id, captured_at)
+```
+Written by `scripts.run_monitor_capture`; rows older than 90 days are deleted.
+admitted_now counts admissions with status 'admitted' (beds.status is a mirror);
+beds_total excludes beds in maintenance and inactive wards; stock counts exclude expired batches.
 
 **abdm_care_context_links** (0055) — an ABHA address's claim on those contexts
 ```

@@ -23,6 +23,7 @@ const ROLE_KEYS: Partial<Record<Role, MessageKey>> = {
   auditor: "role.auditor",
   patient: "role.patient",
   superadmin: "role.superadmin",
+  monitor: "role.monitor",
 };
 
 interface NavbarProps {

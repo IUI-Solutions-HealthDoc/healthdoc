@@ -64,6 +64,7 @@ export const REALM_ROLES: RealmRole[] = [
   "auditor",
   "patient",
   "superadmin",
+  "monitor",
 ];
 
 export const REALM_ROLE_LABELS: Record<RealmRole, string> = {
@@ -81,6 +82,7 @@ export const REALM_ROLE_LABELS: Record<RealmRole, string> = {
   auditor: "Auditor",
   patient: "Patient",
   superadmin: "Superadmin",
+  monitor: "Control room",
 };
 
 /**
@@ -162,6 +164,8 @@ export const ROLE_CAPABILITY_MAP: Record<RealmRole, MatrixCapability[]> = {
   auditor: ["audit", "consent", "billing"],
   patient: ["patients"],
   superadmin: ["facilities"],
+  //: Counts per facility in a granted state or district; no patient data.
+  monitor: ["facilities"],
 };
 
 export const APPROVAL_STATUS_LABELS: Record<"pending" | "approved" | "rejected", string> = {

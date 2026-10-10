@@ -71,10 +71,12 @@ const ROLE_KEYS: Partial<Record<Role, MessageKey>> = {
   [ROLES.AUDITOR]: "role.auditor",
   [ROLES.PATIENT]: "role.patient",
   [ROLES.SUPERADMIN]: "role.superadmin",
+  [ROLES.MONITOR]: "role.monitor",
 };
 
 const NAV_ITEMS: readonly NavItem[] = [
   { href: "/superadmin", labelKey: "sidebar.facilities", icon: Building2, area: "platform", roles: [ROLES.SUPERADMIN] },
+  { href: "/monitor", labelKey: "sidebar.controlRoom", icon: LayoutDashboard, area: "platform", roles: [ROLES.MONITOR] },
   { href: "/hod", labelKey: "sidebar.hodDashboard", icon: LayoutDashboard, area: "clinical", roles: [ROLES.HOD] },
   { href: "/receptionist/registration", labelKey: "sidebar.registration", icon: UserRound, area: "front_desk", roles: [ROLES.RECEPTIONIST] },
   { href: "/receptionist/appointments", labelKey: "sidebar.appointments", icon: Calendar, area: "front_desk", roles: [ROLES.RECEPTIONIST] },

@@ -27,7 +27,7 @@ test("native PKCE login uses current origin and does not save tokens or collect 
     async login(options) { calls.push(["login", options]); }
   }
   try {
-    const roles = ["SUPERADMIN", "ADMIN", "HOD", "SUPERVISOR", "AUDITOR", "DOCTOR", "NURSE", "PHARMACIST", "LAB_TECH", "RADIOLOGY_TECH", "EMERGENCY", "BILLING", "RECEPTIONIST", "PATIENT"];
+    const roles = ["SUPERADMIN", "ADMIN", "HOD", "SUPERVISOR", "AUDITOR", "DOCTOR", "NURSE", "PHARMACIST", "LAB_TECH", "RADIOLOGY_TECH", "EMERGENCY", "BILLING", "RECEPTIONIST", "PATIENT", "MONITOR"];
     const auth = compile(source("lib/auth/keycloak.ts"), {
       "keycloak-js": { default: Keycloak }, "@/config/roles": { ROLES: Object.fromEntries(roles.map((r) => [r, r.toLowerCase()])) },
       "@/lib/api": { setAccessToken() {} }, "@/lib/auth/return-url": returnUrls,
