@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 
 import { listDepartments, type Department } from "@/features/admin/api/departments";
+import { OnlineAppointmentRequests } from "@/features/receptionist/OnlineAppointmentRequests";
 import {
   checkInAppointment,
   createAppointment,
@@ -547,6 +548,8 @@ export default function AppointmentsPage() {
           </button>
         </div>
       )}
+
+      <OnlineAppointmentRequests onBooked={() => void loadAppointments()} />
 
       {/* Notifications */}
       {feedback && (

@@ -220,6 +220,7 @@ do not merge out of order.**
 | 0099 | diagnosis_daily_counts | CREATE diagnosis_daily_counts | Control-room disease trends: distinct patients per normalised ICD code per facility per local day (provisional and final; not differential). Small counts are suppressed when read. |
 | 0100 | equipment_register | CREATE equipment, equipment_status_events; ALTER facility_pulse: add equipment counts | Equipment register with status history (working, down, maintenance, retired; reason required unless working). The control room counts machines not working; a critical one turns the facility red. |
 | 0101 | facility_publish_availability | ALTER facilities: add publish_availability | A facility opts in to the public bed and blood availability page (no login, counts from the 15-minute capture). Off by default. |
+| 0102 | appointment_requests | CREATE appointment_requests | Patient-portal appointment requests: department, day, morning or afternoon, in person or teleconsultation. Reception confirms (creating a normal appointment through the desk's checks) or declines with a reason the patient reads. No clock-time slots: HealthDoc records shift names, not clinic hours. |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -2247,6 +2248,23 @@ UNIQUE (facility_id, day, icd_version, icd_code); INDEX (day)
 ```
 Rewritten for today and yesterday on every capture. GET /monitor/trends shows counts
 below 5 as "<5"; titles come from icd_codes, never from diagnosis free text.
+
+**appointment_requests** (0102) — a patient's request from the portal, before reception books it
+```
+facility_id UUID NOT NULL → facilities · patient_id UUID NOT NULL → patients
+requested_by UUID NOT NULL → users               -- the portal account (may be a guardian)
+department_id UUID NOT NULL → departments
+preferred_date date NOT NULL                      -- today to 60 days ahead
+session varchar(50) NOT NULL                      -- morning|afternoon
+is_teleconsult boolean NOT NULL DEFAULT false
+reason text                                       -- the patient's words; reception only
+status varchar(50) NOT NULL DEFAULT 'requested'   -- requested|confirmed|declined|withdrawn
+appointment_id UUID → appointments                -- set exactly when confirmed (CHECK)
+decided_by UUID → users
+decline_reason text                               -- required when declined (CHECK)
+INDEX (facility_id, status, preferred_date) and one per foreign key
+```
+At most 3 open requests per patient. Audited (resource type `appointment_requests`).
 
 **equipment** (0100) — a facility's machines and whether they work
 ```
