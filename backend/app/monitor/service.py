@@ -18,6 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admissions.models import Admission, Bed, Ward
 from app.audit.models import AuditLog
+from app.blood_bank.models import BloodUnit
+from app.blood_bank.service import donor_scope
 from app.common.patient_scope import facility_timezone
 from app.departments.models import Department
 from app.equipment.models import Equipment
@@ -145,6 +147,7 @@ async def capture_facility(db: AsyncSession, facility: Facility, *, now: datetim
         "expiring": await _expiring(db, facility.id, local_today),
         "staff": await _staff(db, facility.id, local_today, day_start),
         "equipment": await _equipment_not_working(db, facility.id),
+        "blood": await _blood_available(db, facility.id, local_today),
     }
     pulse = FacilityPulse(
         id=uuid.uuid4(),
@@ -352,6 +355,26 @@ async def _staff(db: AsyncSession, facility_id, local_today, day_start) -> list[
         }
         for user_id, name, designation, department, shifts in rostered
     ]
+
+
+async def _blood_available(db: AsyncSession, facility_id, local_today) -> dict[str, int]:
+    """Units that could be issued now, by group: available, screened as passed,
+    not expired (the same test blood_bank.service applies before an issue).
+    Blood tables have no facility column; scope through the donor's recorder,
+    as blood_bank.service.donor_scope does."""
+    rows = (
+        await db.execute(
+            select(BloodUnit.blood_group, func.count(BloodUnit.id))
+            .where(
+                BloodUnit.donor_id.in_(donor_scope(facility_id)),
+                BloodUnit.status == "available",
+                BloodUnit.screening_status == "passed",
+                BloodUnit.expiry_date >= local_today,
+            )
+            .group_by(BloodUnit.blood_group)
+        )
+    ).all()
+    return {group: int(n) for group, n in rows}
 
 
 async def _equipment_not_working(db: AsyncSession, facility_id) -> list[dict]:
