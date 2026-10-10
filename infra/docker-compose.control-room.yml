@@ -20,12 +20,19 @@ services:
       API_MODE: control_room
       # postgresql+asyncpg://healthdoc_control_room:<password>@<private address>:5432/<db>
       DATABASE_URL: ${CONTROL_ROOM_DATABASE_URL:?required}
+      # Both links to the hospital server are TLS, verified against the private
+      # CA (control-room/make-private-certs.sh): an impostor on the private
+      # network is refused, not merely encrypted to.
+      DATABASE_SSL_CA_FILE: /tls/private-ca.crt
+      JWT_JWKS_CA_FILE: /tls/private-ca.crt
       # Only tokens from the control realm, issued at this address.
       JWT_ISSUER: https://${CONTROL_ROOM_HOST:?required}/auth/realms/healthdoc-control
       JWT_JWKS_URL: ${KEYCLOAK_UPSTREAM:?required}/auth/realms/healthdoc-control/protocol/openid-connect/certs
       # The control client's audience mapper emits it; production refuses to boot without it.
       JWT_AUDIENCE: healthdoc-backend
       CORS_ORIGINS: https://${CONTROL_ROOM_HOST}
+    volumes:
+      - ${PRIVATE_CA_PATH:?required}:/tls/private-ca.crt:ro
 
   control-room-frontend:
     <<: *restart
@@ -44,13 +51,16 @@ services:
     <<: *restart
     image: nginx:1.27-alpine
     environment:
-      # Where this host reaches the central Keycloak, e.g. http://10.0.0.5:8080
+      # Where this host reaches the central Keycloak over HTTPS, e.g. https://10.0.0.5:8443
       KEYCLOAK_UPSTREAM: ${KEYCLOAK_UPSTREAM:?required}
-      NGINX_ENVSUBST_FILTER: "^KEYCLOAK_UPSTREAM$"
+      # The DNS name in the hospital's private certificate (nginx verifies names).
+      PRIVATE_TLS_NAME: ${PRIVATE_TLS_NAME:-healthdoc-private}
+      NGINX_ENVSUBST_FILTER: "^(KEYCLOAK_UPSTREAM|PRIVATE_TLS_NAME)$"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./control-room/nginx/control-room.conf:/etc/nginx/templates/default.conf.template:ro
       - ${CONTROL_ROOM_TLS_CERT_PATH:?required}:/etc/nginx/certs/tls.crt:ro
       - ${CONTROL_ROOM_TLS_KEY_PATH:?required}:/etc/nginx/certs/tls.key:ro
+      - ${PRIVATE_CA_PATH:?required}:/etc/nginx/certs/private-ca.crt:ro
     ports: ["80:80", "443:443"]
     depends_on: {control-room-frontend: {condition: service_started}}
