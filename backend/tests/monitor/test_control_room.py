@@ -458,6 +458,28 @@ async def test_rostered_staff_with_waiting_patients_and_no_activity_turn_the_row
     colour, reasons = service.status_of(pulse, now=NOW)
     assert colour == "amber"
     assert "2 patients waiting for 1 rostered staff with no activity yet" in reasons
+
+
+# ---------------------------------------------------------------- equipment
+
+
+async def test_a_critical_machine_down_turns_the_facility_red(db):
+    facility = await _facility(db)
+    user = uuid.uuid4()
+    await db.execute(sa.text("INSERT INTO users (id, keycloak_sub, username, full_name, facility_id) "
+                             "VALUES (:u, :s, :n, 'Engineer', :f)"),
+                     {"u": user, "s": str(uuid.uuid4()), "n": f"e{uuid.uuid4().hex[:8]}", "f": facility.id})
+    for name, critical, status in (("Oxygen plant", True, "down"), ("X-ray", False, "maintenance"),
+                                   ("Centrifuge", False, "working"), ("Old ECG", False, "retired")):
+        await db.execute(sa.text("INSERT INTO equipment (id, facility_id, name, category, is_critical, status, "
+                                 "status_reason, created_by) VALUES (:id, :f, :n, 'other', :c, :s, 'fault', :u)"),
+                         {"id": uuid.uuid4(), "f": facility.id, "n": name, "c": critical, "s": status, "u": user})
+    await db.flush()
+    pulse = await service.capture_facility(db, facility, now=NOW)
+    assert (pulse.equipment_down, pulse.critical_equipment_down) == (2, 1)
+    assert [e["name"] for e in pulse.detail["equipment"]] == ["Oxygen plant", "X-ray"]
+    colour, reasons = service.status_of(pulse, now=NOW)
+    assert colour == "red" and "1 critical machines not working" in reasons
 # ---------------------------------------------------------------- session audit for officers
 
 

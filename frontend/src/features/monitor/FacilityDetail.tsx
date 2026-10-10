@@ -55,6 +55,27 @@ export function FacilityDetail({ facilityId, onClose }: { facilityId: string; on
       {detail && detail.facility.status !== "grey" ? (
         <div className="space-y-4">
         <div>
+          <h3 className="mb-2 text-sm font-medium">{t("monitor.machinesNotWorking")}</h3>
+          {detail.equipment.length === 0 ? (
+            <p className="text-sm text-muted-foreground">{t("monitor.allMachinesWorking")}</p>
+          ) : (
+            <ul className="space-y-1 text-sm">
+              {detail.equipment.map((machine, index) => (
+                <li key={`${machine.name}-${index}`} className="flex flex-wrap justify-between gap-2 border-t border-border py-1">
+                  <span>
+                    <span className={machine.critical ? "font-semibold text-red-700" : ""}>{machine.name}</span>
+                    {machine.location ? <span className="text-xs text-muted-foreground"> · {machine.location}</span> : null}
+                    {machine.reason ? <span className="block text-xs text-muted-foreground">{machine.reason}</span> : null}
+                  </span>
+                  <span className="text-xs">
+                    {machine.status} · {t("monitor.since")} {formatDateTime(machine.since)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <div>
           <h3 className="mb-2 text-sm font-medium">{t("monitor.staffToday")}</h3>
           {detail.staff.length === 0 ? (
             <p className="text-sm text-muted-foreground">{t("monitor.noStaff")}</p>
