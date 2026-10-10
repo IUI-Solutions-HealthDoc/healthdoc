@@ -221,6 +221,7 @@ do not merge out of order.**
 | 0100 | equipment_register | CREATE equipment, equipment_status_events; ALTER facility_pulse: add equipment counts | Equipment register with status history (working, down, maintenance, retired; reason required unless working). The control room counts machines not working; a critical one turns the facility red. |
 | 0101 | facility_publish_availability | ALTER facilities: add publish_availability | A facility opts in to the public bed and blood availability page (no login, counts from the 15-minute capture). Off by default. |
 | 0102 | appointment_requests | CREATE appointment_requests | Patient-portal appointment requests: department, day, morning or afternoon, in person or teleconsultation. Reception confirms (creating a normal appointment through the desk's checks) or declines with a reason the patient reads. No clock-time slots: HealthDoc records shift names, not clinic hours. |
+| 0103 | mch_records | CREATE mch_pregnancies, mch_anc_visits, mch_deliveries, mch_newborns | Maternal and child health, record only (owner decision 10 Oct 2026): no schedule, computed due date or inferred risk. High risk is a clinician's flag with a reason. Range checks catch mistyped values; they are not clinical thresholds. The control room counts these per facility. |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -2248,6 +2249,62 @@ UNIQUE (facility_id, day, icd_version, icd_code); INDEX (day)
 ```
 Rewritten for today and yesterday on every capture. GET /monitor/trends shows counts
 below 5 as "<5"; titles come from icd_codes, never from diagnosis free text.
+
+**mch_pregnancies** (0103) — one pregnancy, as the clinician records it
+```
+facility_id UUID NOT NULL → facilities · patient_id UUID NOT NULL → patients
+lmp_date date
+edd date                                          -- as entered; HealthDoc does not compute it
+gravida integer CHECK (1..20)
+para integer CHECK (0..20)
+rch_id varchar(30)                                -- state RCH portal id, when one exists
+status varchar(50) NOT NULL DEFAULT 'active'      -- active|delivered|ended
+high_risk boolean NOT NULL DEFAULT false          -- a clinician's flag; reason required (CHECK)
+high_risk_reason text
+end_reason text                                   -- required when ended (CHECK)
+created_by UUID NOT NULL → users
+UNIQUE (facility_id, patient_id) WHERE status = 'active'; INDEX (facility_id, status), (patient_id), (created_by)
+```
+
+**mch_anc_visits** (0103) — one antenatal visit
+```
+pregnancy_id UUID NOT NULL → mch_pregnancies · facility_id UUID NOT NULL → facilities
+visit_date date NOT NULL                          -- not in the future
+gestation_weeks integer CHECK (1..45)
+weight_kg numeric(5,1) CHECK (20..250)
+bp_systolic integer CHECK (50..260)
+bp_diastolic integer CHECK (20..180)              -- both or neither (API)
+hemoglobin_g_dl numeric(4,1) CHECK (2..22)
+fundal_height_cm integer CHECK (5..50)
+fetal_heart_rate integer CHECK (50..240)
+urine_albumin varchar(50)                         -- nil|trace|+|++|+++
+urine_sugar varchar(50)                           -- nil|trace|+|++|+++
+ifa_tablets integer CHECK (0..400)
+notes text
+recorded_by UUID NOT NULL → users
+INDEX (pregnancy_id, visit_date), (facility_id, visit_date), (recorded_by)
+```
+
+**mch_deliveries** (0103) — the delivery that closes a pregnancy
+```
+pregnancy_id UUID NOT NULL → mch_pregnancies UNIQUE · facility_id UUID NOT NULL → facilities
+delivered_at timestamptz NOT NULL                 -- not in the future
+mode varchar(50) NOT NULL                         -- normal|assisted|caesarean
+notes text
+recorded_by UUID NOT NULL → users
+INDEX (facility_id, delivered_at), (recorded_by)
+```
+
+**mch_newborns** (0103) — each baby of a delivery
+```
+delivery_id UUID NOT NULL → mch_deliveries · facility_id UUID NOT NULL → facilities
+outcome varchar(50) NOT NULL                      -- live_birth|still_birth
+sex varchar(50) NOT NULL                          -- male|female|other|unknown
+birth_weight_g integer CHECK (200..7000)
+patient_id UUID → patients                        -- the baby's own chart, once registered
+INDEX (delivery_id), (facility_id), (patient_id)
+```
+All four are audited and repointed on patient merge. Doctors and nurses write; admin reads.
 
 **appointment_requests** (0102) — a patient's request from the portal, before reception books it
 ```

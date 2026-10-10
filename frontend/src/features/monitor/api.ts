@@ -31,7 +31,10 @@ export interface MonitorFacilityRow {
   equipment_down: number | null;
   critical_equipment_down: number | null;
   adoption?: Partial<Record<AdoptionKey, number>> | null;
+  mch?: Partial<Record<MchKey, number>> | null;
 }
+
+export type MchKey = "active_pregnancies" | "high_risk" | "anc_visits_today" | "deliveries_today";
 
 export type AdoptionKey = "registrations" | "abha_linked" | "scan_share" | "prescriptions" | "abdm_records";
 
@@ -59,6 +62,7 @@ export interface MonitorBoard {
     stock_below_reorder: number;
     equipment_down: number;
     adoption?: Partial<Record<AdoptionKey, number>>;
+    mch?: Partial<Record<MchKey, number>>;
   };
   facilities: MonitorFacilityRow[];
 }

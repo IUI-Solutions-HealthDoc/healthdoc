@@ -28,6 +28,7 @@ import {
   X,
   type LucideIcon,
   Wrench,
+  Baby,
 } from "lucide-react";
 
 import { ROLES, type Role } from "@/config/roles";
@@ -77,6 +78,7 @@ const ROLE_KEYS: Partial<Record<Role, MessageKey>> = {
 
 const NAV_ITEMS: readonly NavItem[] = [
   { href: "/superadmin", labelKey: "sidebar.facilities", icon: Building2, area: "platform", roles: [ROLES.SUPERADMIN] },
+  { href: "/mch", labelKey: "sidebar.mch", icon: Baby, area: "clinical", roles: [ROLES.DOCTOR, ROLES.NURSE] },
   {
     href: "/equipment", labelKey: "sidebar.equipment", icon: Wrench, area: "clinical",
     roles: [ROLES.ADMIN, ROLES.HOD, ROLES.DOCTOR, ROLES.NURSE, ROLES.LAB_TECH, ROLES.RADIOLOGY_TECH],
