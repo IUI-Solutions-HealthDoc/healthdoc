@@ -13,6 +13,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiError, formatDateTime } from "@/lib/api";
 import { useLocale } from "@/lib/i18n";
 
+import { DiseaseTrends } from "./DiseaseTrends";
+import { FacilityDetail } from "./FacilityDetail";
 import { getMonitorBoard, type MonitorBoard, type MonitorFacilityRow, type MonitorStatus } from "./api";
 
 const REFRESH_MS = 60_000;
@@ -52,6 +54,7 @@ export function ControlRoom() {
   const [board, setBoard] = useState<MonitorBoard | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [onlyProblems, setOnlyProblems] = useState(false);
+  const [selected, setSelected] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -129,7 +132,7 @@ export function ControlRoom() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-8">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-5 lg:grid-cols-9">
         <Tile label={t("monitor.facilities")} value={`${totals.reporting}/${totals.facilities}`} />
         <Tile label={t("monitor.red")} value={totals.red} tone="text-red-700" />
         <Tile label={t("monitor.amber")} value={totals.amber} tone="text-amber-700" />
@@ -138,6 +141,7 @@ export function ControlRoom() {
         <Tile label={t("monitor.emergencyNow")} value={totals.emergency_open} />
         <Tile label={t("monitor.admittedBeds")} value={`${totals.admitted_now}/${totals.beds_total}`} />
         <Tile label={t("monitor.stockShort")} value={totals.stock_below_reorder} />
+        <Tile label={t("monitor.machinesDown")} value={totals.equipment_down} />
       </div>
 
       <div className="overflow-x-auto rounded border border-border">
@@ -155,22 +159,29 @@ export function ControlRoom() {
               <th className="px-3 py-2 text-right">{t("monitor.stockShort")}</th>
               <th className="px-3 py-2 text-right">{t("monitor.colExpiring")}</th>
               <th className="px-3 py-2 text-right">{t("monitor.colStaff")}</th>
+              <th className="px-3 py-2 text-right">{t("monitor.machinesDown")}</th>
               <th className="px-3 py-2">{t("monitor.colLastReport")}</th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={12} className="px-3 py-6 text-center text-muted-foreground">
+                <td colSpan={13} className="px-3 py-6 text-center text-muted-foreground">
                   {onlyProblems ? t("monitor.noProblems") : t("monitor.noFacilities")}
                 </td>
               </tr>
             ) : (
-              rows.map((row) => <FacilityRow key={row.facility_id} row={row} />)
+              rows.map((row) => (
+                <FacilityRow key={row.facility_id} row={row} onOpen={() => setSelected(row.facility_id)} />
+              ))
             )}
           </tbody>
         </table>
       </div>
+
+      {selected ? <FacilityDetail facilityId={selected} onClose={() => setSelected(null)} /> : null}
+
+      <DiseaseTrends district={district} />
 
       <p className="text-xs text-muted-foreground">
         {t("monitor.thresholds", {
@@ -184,7 +195,7 @@ export function ControlRoom() {
   );
 }
 
-function FacilityRow({ row }: { row: MonitorFacilityRow }) {
+function FacilityRow({ row, onOpen }: { row: MonitorFacilityRow; onOpen: () => void }) {
   const { t } = useLocale();
   const beds =
     row.beds_total === null
@@ -199,7 +210,9 @@ function FacilityRow({ row }: { row: MonitorFacilityRow }) {
         {row.reasons.length ? <p className="mt-1 max-w-48 text-xs text-muted-foreground">{row.reasons.join("; ")}</p> : null}
       </td>
       <td className="px-3 py-2">
-        <p className="font-medium">{row.name}</p>
+        <button type="button" onClick={onOpen} className="text-left font-medium underline-offset-2 hover:underline">
+          {row.name}
+        </button>
         <p className="text-xs text-muted-foreground">{[row.code, row.facility_type].filter(Boolean).join(" · ")}</p>
       </td>
       <td className="px-3 py-2">{row.district ?? "—"}</td>
@@ -211,6 +224,9 @@ function FacilityRow({ row }: { row: MonitorFacilityRow }) {
       <td className="px-3 py-2 text-right tabular-nums">{n(row.stock_below_reorder)}</td>
       <td className="px-3 py-2 text-right tabular-nums">{n(row.batches_expiring_30d)}</td>
       <td className="px-3 py-2 text-right tabular-nums">{n(row.staff_rostered_today)}</td>
+      <td className={`px-3 py-2 text-right tabular-nums ${row.critical_equipment_down ? "font-semibold text-red-700" : ""}`}>
+        {n(row.equipment_down)}
+      </td>
       <td className="px-3 py-2 text-xs text-muted-foreground">
         {row.captured_at ? formatDateTime(row.captured_at) : t("monitor.never")}
       </td>

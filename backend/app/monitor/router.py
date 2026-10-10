@@ -10,15 +10,16 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit.service import write_audit_log
 from app.auth.deps import AuthUser, require_roles
 from app.common.db import get_db
-from app.monitor import service
+from app.monitor import activity, service
 
 log = logging.getLogger(__name__)
 
@@ -56,6 +57,8 @@ class FacilityRowOut(BaseModel):
     stock_below_reorder: int | None
     batches_expiring_30d: int | None
     staff_rostered_today: int | None
+    equipment_down: int | None
+    critical_equipment_down: int | None
 
 
 class TotalsOut(BaseModel):
@@ -70,6 +73,7 @@ class TotalsOut(BaseModel):
     admitted_now: int
     beds_total: int
     stock_below_reorder: int
+    equipment_down: int
 
 
 class BoardOut(BaseModel):
@@ -88,6 +92,7 @@ def _row(facility, pulse, *, now: datetime) -> FacilityRowOut:
         for name in (
             "opd_today", "queue_waiting", "emergency_open", "admitted_now", "beds_total",
             "lab_pending", "stock_below_reorder", "batches_expiring_30d", "staff_rostered_today",
+            "equipment_down", "critical_equipment_down",
         )
     }
     return FacilityRowOut(
@@ -147,6 +152,201 @@ async def get_board(
             admitted_now=sum(r.admitted_now or 0 for r in reporting),
             beds_total=sum(r.beds_total or 0 for r in reporting),
             stock_below_reorder=sum(r.stock_below_reorder or 0 for r in reporting),
+            equipment_down=sum(r.equipment_down or 0 for r in reporting),
         ),
         facilities=rows,
+    )
+
+
+class WardOut(BaseModel):
+    ward: str
+    department: str | None
+    beds: int
+    occupied: int
+    free: int
+    maintenance: int
+
+
+class StockShortOut(BaseModel):
+    item: str
+    strength: str | None
+    available: str
+    reorder_level: str
+
+
+class ExpiringOut(BaseModel):
+    item: str
+    batch: str
+    expiry: str
+    quantity: str
+
+
+class StaffOut(BaseModel):
+    name: str
+    designation: str | None
+    department: str | None
+    shift: str | None
+    active_today: bool
+    waiting: int
+
+
+class EquipmentDownOut(BaseModel):
+    name: str
+    category: str
+    location: str | None
+    critical: bool
+    status: str
+    since: str
+    reason: str | None
+
+
+class FacilityDetailOut(BaseModel):
+    facility: FacilityRowOut
+    equipment: list[EquipmentDownOut]
+    staff: list[StaffOut]
+    wards: list[WardOut]
+    stock_short: list[StockShortOut]
+    expiring: list[ExpiringOut]
+    list_limit: int = service.DETAIL_LIMIT
+
+
+@router.get("/facilities/{facility_id}", response_model=FacilityDetailOut)
+async def get_facility_detail(
+    facility_id: uuid.UUID,
+    user: AuthUser = Depends(require_roles("monitor")),
+    db: AsyncSession = Depends(get_db),
+) -> FacilityDetailOut:
+    found = await service.facility_in_scope(db, await service.scope_for(db, user.sub), facility_id)
+    if found is None:
+        raise HTTPException(404, {"code": "facility_not_found", "message": "Facility not found"})
+    facility, pulse = found
+    now = service.utcnow()
+    detail = pulse.detail if pulse is not None and service.status_of(pulse, now=now)[0] != "grey" else {}
+    log.info("monitor facility read", extra={"monitor_sub": user.sub, "facility_id": str(facility.id)})
+    return FacilityDetailOut(
+        facility=_row(facility, pulse, now=now),
+        equipment=detail.get("equipment", []),
+        staff=detail.get("staff", []),
+        wards=detail.get("wards", []),
+        stock_short=detail.get("stock_short", []),
+        expiring=detail.get("expiring", []),
+    )
+
+
+class TrendOut(BaseModel):
+    district: str | None
+    icd_version: str
+    icd_code: str
+    title: str | None
+    #: A number, or "<5" when fewer patients than that: never a small exact count.
+    this_week: str
+    last_week: str
+    spike: bool
+
+
+class TrendsOut(BaseModel):
+    week_ending: str
+    small_cell_below: int = service.SMALL_CELL
+    spike_rule: str = f"this week ≥ {service.SPIKE_RATIO}× last week and ≥ {service.SPIKE_MIN} patients"
+    trends: list[TrendOut]
+
+
+def _cell(n: int) -> str:
+    return f"<{service.SMALL_CELL}" if 0 < n < service.SMALL_CELL else str(n)
+
+
+@router.get("/trends", response_model=TrendsOut)
+async def get_disease_trends(
+    user: AuthUser = Depends(require_roles("monitor")),
+    db: AsyncSession = Depends(get_db),
+    district: str | None = Query(None, max_length=100),
+) -> TrendsOut:
+    areas = await service.scope_for(db, user.sub)
+    if not areas:
+        raise HTTPException(
+            403,
+            {"code": "monitor_scope_missing", "message": "No state or district has been granted to this account."},
+        )
+    # Weeks are reckoned in IST, the business day every HealthDoc facility uses.
+    today = service.utcnow().astimezone(service.IST).date()
+    trends = await service.disease_trends(db, areas, today=today, district=district)
+    log.info("monitor trends read", extra={"monitor_sub": user.sub, "district": district})
+    return TrendsOut(
+        week_ending=today.isoformat(),
+        trends=[
+            TrendOut(
+                district=t.district, icd_version=t.icd_version, icd_code=t.icd_code, title=t.title,
+                this_week=_cell(t.this_week), last_week=_cell(t.last_week),
+                # A spike is only flagged on a count large enough to show.
+                spike=t.spike,
+            )
+            for t in trends
+        ],
+    )
+
+
+class ActivityEventOut(BaseModel):
+    at: datetime
+    kind: str
+    patient: str
+    detail: str
+    staff: str | None
+
+
+class ActivityOut(BaseModel):
+    facility_id: uuid.UUID
+    facility_name: str
+    day: str
+    first_patient: str | None
+    first_at: datetime | None
+    last_patient: str | None
+    last_at: datetime | None
+    patients: int
+    counts: dict[str, int]
+    truncated: bool
+    events: list[ActivityEventOut]
+    privacy_note: str = (
+        "Patients are shown as day codes, the same for one patient all day at this facility. "
+        "Names are not shown. This view is recorded in the facility's audit log."
+    )
+
+
+@router.get("/facilities/{facility_id}/activity", response_model=ActivityOut)
+async def get_facility_activity(
+    facility_id: uuid.UUID,
+    user: AuthUser = Depends(require_roles("monitor")),
+    db: AsyncSession = Depends(get_db),
+    day: date | None = Query(None, description="Facility-local date; default today"),
+) -> ActivityOut:
+    found = await service.facility_in_scope(db, await service.scope_for(db, user.sub), facility_id)
+    if found is None:
+        raise HTTPException(404, {"code": "facility_not_found", "message": "Facility not found"})
+    facility, _pulse = found
+    today = service.utcnow().astimezone(service.IST).date()
+    day = day or today
+    if day > today or day < today - timedelta(days=activity.MAX_DAYS_BACK):
+        raise HTTPException(
+            422, {"code": "day_out_of_range", "message": f"Choose a day within the last {activity.MAX_DAYS_BACK} days"}
+        )
+    events, truncated = await activity.day_trail(db, facility.id, day)
+    # The officer has no users row; the subject and day go in the audit entry
+    # so the facility can see who looked at its day, and when.
+    await write_audit_log(
+        db, facility_id=facility.id, action="read", resource_type="monitor_activity", role="monitor",
+        new_value={"monitor_sub": user.sub, "monitor_username": user.username, "day": day.isoformat(),
+                   "events": len(events)},
+    )
+    registrations = [e for e in events if e.kind == "registered"]
+    counts: dict[str, int] = {}
+    for event in events:
+        counts[event.kind] = counts.get(event.kind, 0) + 1
+    return ActivityOut(
+        facility_id=facility.id, facility_name=facility.name, day=day.isoformat(),
+        first_patient=registrations[0].patient if registrations else None,
+        first_at=registrations[0].at if registrations else None,
+        last_patient=registrations[-1].patient if registrations else None,
+        last_at=registrations[-1].at if registrations else None,
+        patients=len({e.patient for e in events}),
+        counts=counts, truncated=truncated,
+        events=[ActivityEventOut(**e.__dict__) for e in events],
     )

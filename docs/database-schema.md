@@ -216,6 +216,9 @@ do not merge out of order.**
 | 0095 | abha_unique_per_facility | ALTER patients: abha_number, abha_address | One ABHA per chart per facility, not per installation: each facility is its own HIP and one person may hold a linked chart at each. Downgrade refuses while an ABHA is linked at two facilities. |
 | 0096 | abdm_health_document_record | ALTER abdm_care_contexts: hi_type CHECK adds HealthDocumentRecord; CREATE abdm_released_documents | A doctor releases one uploaded PDF on a chart as an NRCeS HealthDocumentRecord, the last of the eight HMIS HI types. The upload alone shares nothing; one file is released at most once. Downgrade refuses while any HealthDocumentRecord context exists. |
 | 0097 | monitor_control_room | CREATE monitor_scopes, facility_pulse | State/district control room (realm role `monitor`): which area each officer may see, and a 15-minute count capture per facility. Counts only, no patient identifiers. See docs/control-room-design-2026-10-10.md. |
+| 0098 | facility_pulse_detail | ALTER facility_pulse: add detail column | Control-room drill-down kept with each capture: beds by ward, medicines below reorder level, batches expiring in 30 days (each at most 50, no patient data). |
+| 0099 | diagnosis_daily_counts | CREATE diagnosis_daily_counts | Control-room disease trends: distinct patients per normalised ICD code per facility per local day (provisional and final; not differential). Small counts are suppressed when read. |
+| 0100 | equipment_register | CREATE equipment, equipment_status_events; ALTER facility_pulse: add equipment counts | Equipment register with status history (working, down, maintenance, retired; reason required unless working). The control room counts machines not working; a critical one turns the facility red. |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -2221,11 +2224,54 @@ lab_pending integer NOT NULL CHECK (>= 0)
 stock_below_reorder integer NOT NULL CHECK (>= 0)
 batches_expiring_30d integer NOT NULL CHECK (>= 0)
 staff_rostered_today integer NOT NULL CHECK (>= 0)
+equipment_down integer NOT NULL DEFAULT 0          -- 0100: down or in maintenance
+critical_equipment_down integer NOT NULL DEFAULT 0 -- 0100: of those, marked critical
+detail jsonb NOT NULL DEFAULT '{}'                -- 0098: wards[], stock_short[], expiring[]; bounded, no patient data
 INDEX (facility_id, captured_at)
 ```
 Written by `scripts.run_monitor_capture`; rows older than 90 days are deleted.
 admitted_now counts admissions with status 'admitted' (beds.status is a mirror);
 beds_total excludes beds in maintenance and inactive wards; stock counts exclude expired batches.
+
+**diagnosis_daily_counts** (0099) — patients per diagnosis code per facility per day
+```
+facility_id UUID NOT NULL → facilities ON DELETE CASCADE
+day date NOT NULL                                 -- facility-local date
+icd_version varchar(30) NOT NULL
+icd_code varchar(30) NOT NULL                     -- upper-cased, trimmed
+patients integer NOT NULL CHECK (patients > 0)    -- distinct patients; differentials excluded
+updated_at timestamptz NOT NULL DEFAULT now()
+UNIQUE (facility_id, day, icd_version, icd_code); INDEX (day)
+```
+Rewritten for today and yesterday on every capture. GET /monitor/trends shows counts
+below 5 as "<5"; titles come from icd_codes, never from diagnosis free text.
+
+**equipment** (0100) — a facility's machines and whether they work
+```
+facility_id UUID NOT NULL → facilities
+name varchar(120) NOT NULL CHECK (trim(name) <> '')
+category varchar(50) NOT NULL                      -- imaging|laboratory|life_support|monitoring|surgical|sterilisation|power|cold_chain|other
+location varchar(120)
+asset_tag varchar(60)                              -- UNIQUE (facility_id, asset_tag)
+is_critical boolean NOT NULL DEFAULT false         -- critical and not working turns the control-room row red
+status varchar(50) NOT NULL DEFAULT 'working'      -- working|down|maintenance|retired
+status_since timestamptz NOT NULL DEFAULT now()
+status_reason text                                 -- required for any status but working
+created_by UUID NOT NULL → users
+INDEX (facility_id, status); INDEX (created_by)
+```
+Audited (resource type `equipment`). Register and retire: admin. Report down/back: admin, hod, doctor, nurse, lab_tech, radiology_tech. Retired is final.
+
+**equipment_status_events** (0100) — append-only history of every status change
+```
+equipment_id UUID NOT NULL → equipment · facility_id UUID NOT NULL → facilities
+from_status varchar(50)                            -- NULL on registration
+to_status varchar(50) NOT NULL
+reason text
+changed_by UUID NOT NULL → users
+changed_at timestamptz NOT NULL DEFAULT now()
+INDEX (equipment_id, changed_at); INDEX (facility_id); INDEX (changed_by)
+```
 
 **abdm_care_context_links** (0055) — an ABHA address's claim on those contexts
 ```

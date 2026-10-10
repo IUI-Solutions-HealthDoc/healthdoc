@@ -98,6 +98,7 @@ const ROLE_DASHBOARDS = [
     username: "dev.doctor",
     landingPath: "/doctor/dashboard",
     dashboards: [
+      { path: "/equipment", expectCalls: true, requiredRequests: [{ method: "GET", path: "/api/v1/equipment" }] },
       { path: "/doctor/dashboard", expectCalls: true },
       {
         path: "/doctor/consultation",
@@ -136,6 +137,7 @@ const ROLE_DASHBOARDS = [
     username: "dev.nurse",
     landingPath: "/nurse/ward-dashboard",
     dashboards: [
+      { path: "/equipment", expectCalls: true, requiredRequests: [{ method: "GET", path: "/api/v1/equipment" }] },
       { path: "/nurse/ward-dashboard", expectCalls: true },
       { path: "/nurse/emar", expectCalls: true },
       { path: "/ipd", expectCalls: true },
@@ -157,6 +159,7 @@ const ROLE_DASHBOARDS = [
     username: "dev.labtech",
     landingPath: "/lab",
     dashboards: [
+      { path: "/equipment", expectCalls: true, requiredRequests: [{ method: "GET", path: "/api/v1/equipment" }] },
       { path: "/lab", expectCalls: true },
       // Maintenance is explicitly writable by lab technicians; testing only
       // the admin path would leave that advertised role unproved.
@@ -169,6 +172,7 @@ const ROLE_DASHBOARDS = [
     username: "dev.radiology",
     landingPath: "/radiology",
     dashboards: [
+      { path: "/equipment", expectCalls: true, requiredRequests: [{ method: "GET", path: "/api/v1/equipment" }] },
       { path: "/radiology", expectCalls: true },
       { path: "/admin/maintenance", expectCalls: true },
     ],
@@ -219,6 +223,7 @@ const ROLE_DASHBOARDS = [
     username: "dev.hod",
     landingPath: "/hod",
     dashboards: [
+      { path: "/equipment", expectCalls: true, requiredRequests: [{ method: "GET", path: "/api/v1/equipment" }] },
       // Dashboard summary reads plus the roster manager. Before this screen
       // existed the role had no landing page and these endpoints were unreachable.
       {
@@ -244,6 +249,7 @@ const ROLE_DASHBOARDS = [
     username: "dev.admin",
     landingPath: "/admin",
     dashboards: [
+      { path: "/equipment", expectCalls: true, requiredRequests: [{ method: "GET", path: "/api/v1/equipment" }] },
       { path: "/admin", expectCalls: false },
       { path: "/admin/users", expectCalls: true },
       { path: "/admin/departments", expectCalls: true },

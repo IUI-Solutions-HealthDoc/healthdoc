@@ -217,6 +217,15 @@ async def test_capture_counts_from_the_source_tables(db):
     assert pulse.stock_below_reorder == 1
     assert pulse.batches_expiring_30d == 1
     assert pulse.staff_rostered_today == 1
+    # The drill-down: names an officer can act on, no patients.
+    assert pulse.detail["wards"] == [
+        {"ward": "General", "department": None, "beds": 3, "occupied": 1, "free": 2, "maintenance": 1}
+    ]
+    [short] = pulse.detail["stock_short"]
+    assert (short["available"], short["reorder_level"]) == ("30.00", "100.00")
+    [expiring] = pulse.detail["expiring"]
+    assert expiring["expiry"] == (today_ist + timedelta(days=10)).isoformat()
+    assert "Pulse Patient" not in str(pulse.detail)
 
 
 # ---------------------------------------------------------------- granting areas (superadmin)
@@ -280,6 +289,267 @@ async def test_removing_the_last_area_closes_the_board(db):
     assert refused.value.status_code == 403
 
 
+# ---------------------------------------------------------------- drill-down
+
+
+async def test_the_drill_down_is_404_outside_the_grant(db):
+    mine = await _facility(db, district="Patna")
+    theirs = await _facility(db, district="Gaya")
+    await _pulse(db, mine)
+    sub = str(uuid.uuid4())
+    await _grant(db, sub, "BR", "Patna")
+    detail = await monitor_router.get_facility_detail(mine.id, user=_officer(sub), db=db)
+    assert detail.facility.facility_id == mine.id
+    for other in (theirs.id, uuid.uuid4()):
+        with pytest.raises(HTTPException) as refused:
+            await monitor_router.get_facility_detail(other, user=_officer(sub), db=db)
+        assert refused.value.status_code == 404
+
+
+async def test_a_silent_facility_shows_no_stale_lists(db):
+    facility = await _facility(db, district="Patna")
+    db.add(FacilityPulse(
+        id=uuid.uuid4(), facility_id=facility.id, captured_at=NOW - timedelta(hours=2),
+        opd_today=0, queue_waiting=0, emergency_open=0, admitted_now=0, beds_total=0, lab_pending=0,
+        stock_below_reorder=1, batches_expiring_30d=0, staff_rostered_today=0,
+        detail={"stock_short": [{"item": "Old", "strength": None, "available": "0", "reorder_level": "5"}]},
+    ))
+    await db.flush()
+    sub = str(uuid.uuid4())
+    await _grant(db, sub, "BR")
+    detail = await monitor_router.get_facility_detail(facility.id, user=_officer(sub), db=db)
+    assert detail.facility.status == "grey" and detail.stock_short == []
+
+
+# ---------------------------------------------------------------- disease trends
+
+
+from app.monitor.models import DiagnosisDailyCount  # noqa: E402
+
+
+async def _counts(db, facility, code, *, this_week, last_week, today=date(2026, 10, 10), version="icd10"):
+    # Spread over two days per week so the weekly sum is what is asserted.
+    for day, n in ((today, this_week), (today - timedelta(days=9), last_week)):
+        if n:
+            db.add(DiagnosisDailyCount(id=uuid.uuid4(), facility_id=facility.id, day=day,
+                                       icd_version=version, icd_code=code, patients=n))
+    await db.flush()
+
+
+async def test_trends_hide_small_counts_and_flag_spikes(db):
+    patna = await _facility(db, district="Patna")
+    await _counts(db, patna, "A09", this_week=24, last_week=6)     # spike
+    await _counts(db, patna, "J18", this_week=3, last_week=12)     # small this week
+    await _counts(db, patna, "B54", this_week=9, last_week=1)      # doubled but too few to call
+    sub = str(uuid.uuid4())
+    await _grant(db, sub, "BR")
+    out = await monitor_router.get_disease_trends(user=_officer(sub), db=db, district=None)
+    by_code = {t.icd_code: t for t in out.trends}
+    assert (by_code["A09"].this_week, by_code["A09"].spike) == ("24", True)
+    assert (by_code["J18"].this_week, by_code["J18"].last_week) == ("<5", "12")
+    assert by_code["B54"].spike is False
+    assert out.week_ending == "2026-10-10"
+
+
+async def test_trends_stay_inside_the_grant(db):
+    patna = await _facility(db, district="Patna")
+    gaya = await _facility(db, district="Gaya")
+    await _counts(db, patna, "A09", this_week=10, last_week=0)
+    await _counts(db, gaya, "A01", this_week=40, last_week=0)
+    sub = str(uuid.uuid4())
+    await _grant(db, sub, "BR", "Patna")
+    codes = {t.icd_code for t in (await monitor_router.get_disease_trends(user=_officer(sub), db=db, district=None)).trends}
+    assert "A09" in codes and "A01" not in codes
+
+
+async def test_a_case_is_a_distinct_patient_with_a_non_differential_diagnosis(db):
+    facility = await _facility(db)
+    fid, user = facility.id, uuid.uuid4()
+    await db.execute(sa.text("INSERT INTO users (id, keycloak_sub, username, full_name, facility_id) "
+                             "VALUES (:u, :s, :n, 'Doctor', :f)"),
+                     {"u": user, "s": str(uuid.uuid4()), "n": f"d{uuid.uuid4().hex[:8]}", "f": fid})
+    async def encounter(patient, at):
+        visit, enc = uuid.uuid4(), uuid.uuid4()
+        await db.execute(sa.text("INSERT INTO visits (id, visit_number, patient_id, facility_id, visit_type, "
+                                 "visit_date, created_by) VALUES (:id, :n, :p, :f, 'opd', :d, :u)"),
+                         {"id": visit, "n": f"V-{uuid.uuid4().hex[:10]}", "p": patient, "f": fid, "d": at, "u": user})
+        await db.execute(sa.text("INSERT INTO encounters (id, visit_id, facility_id, provider_user_id, created_by) "
+                                 "VALUES (:e, :v, :f, :u, :u)"), {"e": enc, "v": visit, "f": fid, "u": user})
+        return enc
+    async def diagnose(enc, code, kind, at):
+        await db.execute(sa.text("INSERT INTO diagnoses (id, encounter_id, facility_id, icd_code, icd_version, "
+                                 "diagnosis_text, diagnosis_type, created_by, created_at) "
+                                 "VALUES (:id, :e, :f, :c, 'icd10', 'free text', :t, :u, :at)"),
+                         {"id": uuid.uuid4(), "e": enc, "f": fid, "c": code, "t": kind, "u": user, "at": at})
+    patients = []
+    for i in range(3):
+        pid = uuid.uuid4()
+        patients.append(pid)
+        await db.execute(sa.text("INSERT INTO patients (id, full_name, sex, identity_path, facility_id, created_by, "
+                                 "age_years, uhid) VALUES (:p, :n, 'other', 'demographics_only', :f, :u, 30, :h)"),
+                         {"p": pid, "n": f"Trend {i}", "f": fid, "u": user, "h": f"IN-BR-{uuid.uuid4().hex[:10]}"})
+    today = NOW - timedelta(hours=1)
+    first = await encounter(patients[0], today)
+    again = await encounter(patients[0], today)                      # same patient twice
+    await diagnose(first, "a09", "final", today)                     # code normalised
+    await diagnose(again, "A09", "provisional", today)
+    await diagnose(await encounter(patients[1], today), "A09", "final", today)
+    await diagnose(await encounter(patients[2], today), "A09", "differential", today)   # not a case
+    yesterday = NOW - timedelta(days=1)
+    await diagnose(await encounter(patients[2], yesterday), "J18", "final", yesterday)
+    await db.flush()
+
+    await service.capture_facility(db, facility, now=NOW)
+    await db.flush()
+    rows = (await db.execute(sa.select(DiagnosisDailyCount).where(DiagnosisDailyCount.facility_id == fid))).scalars().all()
+    got = {(r.day.isoformat(), r.icd_code): r.patients for r in rows}
+    assert got == {("2026-10-10", "A09"): 2, ("2026-10-09", "J18"): 1}
+    # A second capture replaces, never adds.
+    await service.capture_facility(db, facility, now=NOW)
+    await db.flush()
+    again_rows = (await db.execute(sa.select(DiagnosisDailyCount).where(DiagnosisDailyCount.facility_id == fid))).scalars().all()
+    assert len(again_rows) == 2
+
+
+# ---------------------------------------------------------------- staff and cover
+
+
+async def test_rostered_staff_with_waiting_patients_and_no_activity_turn_the_row_amber(db):
+    facility = await _facility(db)
+    fid, dept = facility.id, uuid.uuid4()
+    await db.execute(sa.text("INSERT INTO departments (id, name, code, facility_id) VALUES (:d, 'Medicine', :c, :f)"),
+                     {"d": dept, "c": f"MED{uuid.uuid4().hex[:4]}", "f": fid})
+    doctors = {}
+    for name in ("Dr Active", "Dr Quiet"):
+        doctors[name] = uuid.uuid4()
+        await db.execute(sa.text("INSERT INTO users (id, keycloak_sub, username, full_name, designation, facility_id) "
+                                 "VALUES (:u, :s, :n, :full, 'Medical Officer', :f)"),
+                         {"u": doctors[name], "s": str(uuid.uuid4()), "n": f"d{uuid.uuid4().hex[:8]}", "full": name, "f": fid})
+        await db.execute(sa.text("INSERT INTO rosters (id, staff_user_id, department_id, shift, roster_date) "
+                                 "VALUES (:r, :u, :d, 'morning', :day)"),
+                         {"r": uuid.uuid4(), "u": doctors[name], "d": dept, "day": date(2026, 10, 10)})
+    # Dr Active did something this morning; Dr Quiet has a queue and nothing else.
+    await db.execute(sa.text("INSERT INTO audit_logs (id, created_at, facility_id, user_id, action, resource_type) "
+                             "VALUES (:id, :at, :f, :u, 'read', 'patients')"),
+                     {"id": uuid.uuid4(), "at": NOW - timedelta(hours=2), "f": fid, "u": doctors["Dr Active"]})
+    patient = uuid.uuid4()
+    await db.execute(sa.text("INSERT INTO patients (id, full_name, sex, identity_path, facility_id, created_by, age_years, uhid) "
+                             "VALUES (:p, 'Waiting Patient', 'other', 'demographics_only', :f, :u, 30, :h)"),
+                     {"p": patient, "f": fid, "u": doctors["Dr Active"], "h": f"IN-BR-{uuid.uuid4().hex[:10]}"})
+    queue = uuid.uuid4()
+    await db.execute(sa.text("INSERT INTO queues (id, facility_id, department_id, doctor_user_id, service_date) "
+                             "VALUES (:q, :f, :d, :u, :day)"),
+                     {"q": queue, "f": fid, "d": dept, "u": doctors["Dr Quiet"], "day": date(2026, 10, 10)})
+    for seq in (1, 2):
+        visit = uuid.uuid4()
+        await db.execute(sa.text("INSERT INTO visits (id, visit_number, patient_id, facility_id, visit_type, visit_date, created_by) "
+                                 "VALUES (:v, :n, :p, :f, 'opd', :at, :u)"),
+                         {"v": visit, "n": f"V-{uuid.uuid4().hex[:10]}", "p": patient, "f": fid, "at": NOW, "u": doctors["Dr Active"]})
+        await db.execute(sa.text("INSERT INTO queue_tokens (id, facility_id, queue_id, visit_id, sequence, token_display, initial_priority) "
+                                 "VALUES (:t, :f, :q, :v, :s, :d, 'normal')"),
+                         {"t": uuid.uuid4(), "f": fid, "q": queue, "v": visit, "s": seq, "d": f"MED-{seq:03d}"})
+    await db.flush()
+
+    pulse = await service.capture_facility(db, facility, now=NOW)
+    staff = {s["name"]: s for s in pulse.detail["staff"]}
+    assert staff["Dr Active"]["active_today"] is True and staff["Dr Active"]["waiting"] == 0
+    assert staff["Dr Quiet"]["active_today"] is False and staff["Dr Quiet"]["waiting"] == 2
+    assert staff["Dr Quiet"]["department"] == "Medicine" and staff["Dr Quiet"]["shift"] == "morning"
+    colour, reasons = service.status_of(pulse, now=NOW)
+    assert colour == "amber"
+    assert "2 patients waiting for 1 rostered staff with no activity yet" in reasons
+
+
+# ---------------------------------------------------------------- equipment
+
+
+async def test_a_critical_machine_down_turns_the_facility_red(db):
+    facility = await _facility(db)
+    user = uuid.uuid4()
+    await db.execute(sa.text("INSERT INTO users (id, keycloak_sub, username, full_name, facility_id) "
+                             "VALUES (:u, :s, :n, 'Engineer', :f)"),
+                     {"u": user, "s": str(uuid.uuid4()), "n": f"e{uuid.uuid4().hex[:8]}", "f": facility.id})
+    for name, critical, status in (("Oxygen plant", True, "down"), ("X-ray", False, "maintenance"),
+                                   ("Centrifuge", False, "working"), ("Old ECG", False, "retired")):
+        await db.execute(sa.text("INSERT INTO equipment (id, facility_id, name, category, is_critical, status, "
+                                 "status_reason, created_by) VALUES (:id, :f, :n, 'other', :c, :s, 'fault', :u)"),
+                         {"id": uuid.uuid4(), "f": facility.id, "n": name, "c": critical, "s": status, "u": user})
+    await db.flush()
+    pulse = await service.capture_facility(db, facility, now=NOW)
+    assert (pulse.equipment_down, pulse.critical_equipment_down) == (2, 1)
+    assert [e["name"] for e in pulse.detail["equipment"]] == ["Oxygen plant", "X-ray"]
+    colour, reasons = service.status_of(pulse, now=NOW)
+    assert colour == "red" and "1 critical machines not working" in reasons
+
+
+# ---------------------------------------------------------------- activity trail (masked)
+
+
+from app.monitor import activity  # noqa: E402
+
+
+async def test_the_trail_shows_who_did_what_with_patients_masked_and_audited(db):
+    facility = await _facility(db, district="Patna")
+    fid, doctor, ward = facility.id, uuid.uuid4(), uuid.uuid4()
+    await db.execute(sa.text("INSERT INTO users (id, keycloak_sub, username, full_name, facility_id) "
+                             "VALUES (:u, :s, :n, 'Dr Meera Sinha', :f)"),
+                     {"u": doctor, "s": str(uuid.uuid4()), "n": f"d{uuid.uuid4().hex[:8]}", "f": fid})
+    patients = {}
+    for name in ("Ramesh Kumar", "Sita Devi"):
+        patients[name] = uuid.uuid4()
+        await db.execute(sa.text("INSERT INTO patients (id, full_name, sex, identity_path, facility_id, created_by, age_years, uhid) "
+                                 "VALUES (:p, :n, 'other', 'demographics_only', :f, :u, 40, :h)"),
+                         {"p": patients[name], "n": name, "f": fid, "u": doctor, "h": f"IN-BR-{uuid.uuid4().hex[:10]}"})
+    visits = {}
+    for name, hour in (("Ramesh Kumar", 3), ("Sita Devi", 5)):          # 08:30 and 10:30 IST
+        visits[name] = uuid.uuid4()
+        at = datetime(2026, 10, 10, hour, 0, tzinfo=UTC)
+        await db.execute(sa.text("INSERT INTO visits (id, visit_number, patient_id, facility_id, visit_type, visit_date, created_by) "
+                                 "VALUES (:v, :n, :p, :f, 'opd', :at, :u)"),
+                         {"v": visits[name], "n": f"V-{uuid.uuid4().hex[:10]}", "p": patients[name], "f": fid, "at": at, "u": doctor})
+        await db.execute(sa.text("INSERT INTO encounters (id, visit_id, facility_id, provider_user_id, created_by, started_at) "
+                                 "VALUES (:e, :v, :f, :u, :u, :at)"),
+                         {"e": uuid.uuid4(), "v": visits[name], "f": fid, "u": doctor, "at": at + timedelta(minutes=20)})
+    await db.execute(sa.text("INSERT INTO wards (id, name, facility_id) VALUES (:w, 'Female Ward', :f)"), {"w": ward, "f": fid})
+    bed = uuid.uuid4()
+    await db.execute(sa.text("INSERT INTO beds (id, ward_id, bed_number) VALUES (:b, :w, 'F1')"), {"b": bed, "w": ward})
+    await db.execute(sa.text("INSERT INTO admissions (id, visit_id, patient_id, ward_id, bed_id, admitted_at, created_by) "
+                             "VALUES (:a, :v, :p, :w, :b, :at, :u)"),
+                     {"a": uuid.uuid4(), "v": visits["Sita Devi"], "p": patients["Sita Devi"], "w": ward, "b": bed,
+                      "at": datetime(2026, 10, 10, 6, 0, tzinfo=UTC), "u": doctor})
+    await db.flush()
+    sub = str(uuid.uuid4())
+    await _grant(db, sub, "BR", "Patna")
+
+    trail = await monitor_router.get_facility_activity(fid, user=_officer(sub), db=db, day=date(2026, 10, 10))
+    assert [e.kind for e in trail.events] == ["registered", "consultation", "registered", "consultation", "admitted"]
+    sita = activity.patient_ref(fid, date(2026, 10, 10), patients["Sita Devi"])
+    assert trail.last_patient == sita and trail.events[-1].patient == sita
+    assert trail.first_patient == trail.events[0].patient != sita
+    assert trail.events[1].staff == "Dr Meera Sinha" and trail.events[-1].detail == "Female Ward"
+    assert trail.patients == 2
+    flat = trail.model_dump_json()
+    assert "Ramesh" not in flat and "Sita" not in flat and str(patients["Sita Devi"]) not in flat
+    # A new day, a new code: the reference does not become a standing identifier.
+    assert activity.patient_ref(fid, date(2026, 10, 11), patients["Sita Devi"]) != sita
+    logged = (await db.execute(sa.text(
+        "SELECT new_value FROM audit_logs WHERE facility_id = :f AND resource_type = 'monitor_activity'"),
+        {"f": fid})).scalars().all()
+    assert len(logged) == 1 and logged[0]["monitor_sub"] == sub and logged[0]["day"] == "2026-10-10"
+
+
+async def test_the_trail_is_404_outside_the_grant_and_bounded_in_time(db):
+    mine = await _facility(db, district="Patna")
+    theirs = await _facility(db, district="Gaya")
+    sub = str(uuid.uuid4())
+    await _grant(db, sub, "BR", "Patna")
+    with pytest.raises(HTTPException) as refused:
+        await monitor_router.get_facility_activity(theirs.id, user=_officer(sub), db=db, day=None)
+    assert refused.value.status_code == 404
+    for day in (date(2026, 10, 11), date(2026, 7, 1)):
+        with pytest.raises(HTTPException) as refused:
+            await monitor_router.get_facility_activity(mine.id, user=_officer(sub), db=db, day=day)
+        assert refused.value.status_code == 422
 # ---------------------------------------------------------------- session audit for officers
 
 
