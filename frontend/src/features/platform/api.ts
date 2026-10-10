@@ -57,3 +57,35 @@ export function copyPlatformFacilitySetup(id: string, sourceFacilityId: string):
     method: "POST", body: JSON.stringify({ source_facility_id: sourceFacilityId }), idempotencyKey: null,
   });
 }
+
+/** One granted area of a control-room officer (realm role `monitor`). */
+export type MonitorScope = {
+  id: string;
+  keycloak_sub: string;
+  username: string;
+  state_code: string;
+  /** null = the whole state. */
+  district: string | null;
+};
+
+export function listMonitorScopes(): Promise<MonitorScope[]> {
+  return api<MonitorScope[]>("/platform/monitors");
+}
+
+/** Creates the Keycloak account with only the monitor role, and its first area. */
+export function createMonitor(body: {
+  username: string; full_name: string; email?: string | null; temporary_password: string;
+  state_code: string; district: string | null;
+}): Promise<MonitorScope> {
+  return api<MonitorScope>("/platform/monitors", { method: "POST", body: JSON.stringify(body), idempotencyKey: null });
+}
+
+export function addMonitorScope(keycloakSub: string, body: { state_code: string; district: string | null }): Promise<MonitorScope> {
+  return api<MonitorScope>(`/platform/monitors/${encodeURIComponent(keycloakSub)}/scopes`, {
+    method: "POST", body: JSON.stringify(body), idempotencyKey: null,
+  });
+}
+
+export function removeMonitorScope(scopeId: string): Promise<void> {
+  return api<void>(`/platform/monitors/scopes/${scopeId}`, { method: "DELETE", idempotencyKey: null });
+}
