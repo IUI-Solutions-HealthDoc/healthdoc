@@ -21,6 +21,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import AuthUser, require_roles
+from app.common.config import get_settings
 from app.common.db import get_db
 from app.monitor.models import MonitorScope
 from app.platform import onboarding
@@ -280,7 +281,9 @@ async def create_platform_monitor(
 ) -> MonitorScopeOut:
     """A state or district officer: a Keycloak account with only the monitor
     role, and no users row, because they work for no hospital."""
-    sub = await KeycloakAdmin().create_user(
+    # Officers sign in to the control room's own realm in production, never the
+    # hospital staff realm (docs/control-room-design-2026-10-10.md, Deployment).
+    sub = await KeycloakAdmin(realm=get_settings().keycloak_monitor_realm).create_user(
         username=payload.username, full_name=payload.full_name, email=payload.email,
         temporary_password=payload.temporary_password, roles=["monitor"],
     )

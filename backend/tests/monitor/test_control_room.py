@@ -240,6 +240,9 @@ async def test_a_new_officer_gets_only_the_monitor_role_and_an_area(db, monkeypa
     created = {}
 
     class _Keycloak:
+        def __init__(self, realm=None):
+            created["realm"] = realm
+
         async def create_user(self, **kwargs):
             created.update(kwargs)
             return "kc-officer-1"
@@ -253,6 +256,7 @@ async def test_a_new_officer_gets_only_the_monitor_role_and_an_area(db, monkeypa
         user=PLATFORM, db=db,
     )
     assert created["roles"] == ["monitor"]
+    assert created["realm"] is None  # development: officers share the staff realm
     assert (out.keycloak_sub, out.state_code, out.district) == ("kc-officer-1", "BR", "Patna")
 
 
@@ -555,7 +559,7 @@ async def test_the_trail_is_404_outside_the_grant_and_bounded_in_time(db):
 
 from types import SimpleNamespace  # noqa: E402
 
-from app.audit import router as audit_router  # noqa: E402
+from app.audit import session_router as audit_router  # noqa: E402
 
 _REQUEST = SimpleNamespace(client=SimpleNamespace(host="203.0.113.7"))
 
@@ -627,3 +631,26 @@ async def test_adoption_counts_todays_digital_activity(db):
     assert pulse.detail["adoption"] == {
         "registrations": 2, "abha_linked": 1, "scan_share": 1, "prescriptions": 1, "abdm_records": 0,
     }
+
+
+async def test_production_creates_officers_in_the_control_realm(db, monkeypatch):
+    from app.common.config import get_settings
+
+    seen = {}
+
+    class _Keycloak:
+        def __init__(self, realm=None):
+            seen["realm"] = realm
+
+        async def create_user(self, **kwargs):
+            return "kc-control-officer"
+
+    monkeypatch.setattr(platform_router, "KeycloakAdmin", _Keycloak)
+    monkeypatch.setattr(get_settings(), "keycloak_monitor_realm", "healthdoc-control")
+    await platform_router.create_platform_monitor(
+        platform_router.PlatformMonitorCreate(
+            username="gaya.officer", full_name="Gaya Officer", temporary_password="Temp#12345", state_code="BR",
+        ),
+        user=PLATFORM, db=db,
+    )
+    assert seen["realm"] == "healthdoc-control"

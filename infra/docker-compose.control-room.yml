@@ -1,0 +1,56 @@
+# The control-room server: runs on its own machine and address, like BHAVYA's
+# command centre (docs/control-room-design-2026-10-10.md, "Deployment").
+#
+#   docker compose --env-file .env.control-room -f infra/docker-compose.control-room.yml up -d
+#
+# It shares the central PostgreSQL (over the private network, as the least-
+# privileged role in infra/control-room/db-role.sql, which cannot read
+# patients) and the central Keycloak (healthdoc-control realm only). It serves
+# no hospital route. The 15-minute capture runs on the hospital server.
+x-restart: &restart
+  restart: unless-stopped
+
+services:
+  control-room-api:
+    <<: *restart
+    image: ${HEALTHDOC_BACKEND_IMAGE:?required}
+    env_file: ../${CONTROL_ROOM_ENV_FILE:-.env.control-room}
+    environment:
+      ENVIRONMENT: production
+      API_MODE: control_room
+      # postgresql+asyncpg://healthdoc_control_room:<password>@<private address>:5432/<db>
+      DATABASE_URL: ${CONTROL_ROOM_DATABASE_URL:?required}
+      # Only tokens from the control realm, issued at this address.
+      JWT_ISSUER: https://${CONTROL_ROOM_HOST:?required}/auth/realms/healthdoc-control
+      JWT_JWKS_URL: ${KEYCLOAK_UPSTREAM:?required}/auth/realms/healthdoc-control/protocol/openid-connect/certs
+      # The control client's audience mapper emits it; production refuses to boot without it.
+      JWT_AUDIENCE: healthdoc-backend
+      CORS_ORIGINS: https://${CONTROL_ROOM_HOST}
+
+  control-room-frontend:
+    <<: *restart
+    image: ${HEALTHDOC_CONTROL_ROOM_FRONTEND_IMAGE:?required}
+    build:
+      context: ../frontend
+      target: prod
+      args:
+        NEXT_PUBLIC_API_BASE_URL: /api/v1
+        NEXT_PUBLIC_KEYCLOAK_URL: /auth
+        NEXT_PUBLIC_KEYCLOAK_REALM: healthdoc-control
+        NEXT_PUBLIC_OIDC_CLIENT_ID: healthdoc-control-frontend
+    depends_on: {control-room-api: {condition: service_started}}
+
+  nginx:
+    <<: *restart
+    image: nginx:1.27-alpine
+    environment:
+      # Where this host reaches the central Keycloak, e.g. http://10.0.0.5:8080
+      KEYCLOAK_UPSTREAM: ${KEYCLOAK_UPSTREAM:?required}
+      NGINX_ENVSUBST_FILTER: "^KEYCLOAK_UPSTREAM$"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./control-room/nginx/control-room.conf:/etc/nginx/templates/default.conf.template:ro
+      - ${CONTROL_ROOM_TLS_CERT_PATH:?required}:/etc/nginx/certs/tls.crt:ro
+      - ${CONTROL_ROOM_TLS_KEY_PATH:?required}:/etc/nginx/certs/tls.key:ro
+    ports: ["80:80", "443:443"]
+    depends_on: {control-room-frontend: {condition: service_started}}

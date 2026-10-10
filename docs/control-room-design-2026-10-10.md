@@ -1,6 +1,6 @@
 # Control room (state / district monitoring) — design
 
-Date: 10 October 2026. Status: slices 1–6 built (PRs #676–#681, stacked); slice 7 waits for DPO approval.
+Date: 10 October 2026. Status: slices 1–6 built (PRs #676–#681); runs on its own server (see Deployment); slice 7 waits for DPO approval.
 Context: the BHAVYA comparison (`docs/BHAVYA-vs-HealthDoc-comparison-2026-10-09.docx`)
 found that HealthDoc has per-facility KPIs but no view across hospitals.
 
@@ -69,6 +69,81 @@ Status 10 Oct: 1 #676, 2 #677, 3 #678, 4 #679, 5 #680, 6 #681 (stacked in that o
 | 5 | Equipment | Equipment register per facility, working/down/maintenance status, down-time alerts |
 | 6 | Activity drill-down | Pseudonymous event trail per facility: first/last patient of the day, medicines dispensed, procedures, staff involved |
 | 7 | Break-glass patient view | Only after DPO approval of purposes |
+
+## Deployment: its own server, address and login (owner, 10 Oct)
+
+BHAVYA runs its Command and Control Center apart from the HIMS: the HIMS is
+`hims.bhavyabiharhealth.in`, the command centre `dashboard-1.bhavyabiharhealth.in`
+with its own OTP login, and the ASHA dashboard a third host. The owner chose the
+same shape: the control room on its own machine and address, with its own login.
+
+| Piece | Hospital server (`PUBLIC_HOST`) | Control-room server (`CONTROL_ROOM_HOST`) |
+|---|---|---|
+| Compose file | `infra/docker-compose.prod.yml` | `infra/docker-compose.control-room.yml` |
+| API | `API_MODE=hospital`: every hospital route, **no** `/monitor` | `API_MODE=control_room`: health, session login/logout and the four `/monitor` reads, nothing else (pinned by `tests/test_api_mode.py`) |
+| Login | Keycloak realm `healthdoc` (staff) | Realm `healthdoc-control`: only the `monitor` role, client `healthdoc-control-frontend`, TOTP forced, served at this address (`frontendUrl`) |
+| nginx | `/monitor` and the control realm answer 404 | Only `/monitor`, `/login`, assets, `/api/` and the control realm; the staff realm, the Keycloak admin console and every hospital page answer 404 |
+| Database | Owner role | `healthdoc_control_room` (`infra/control-room/db-role.sql`) |
+| 15-minute capture | Runs here, with full access | Not run here |
+
+Why the capture stays on the hospital server: counting needs the clinical
+tables, patients included (ABHA-linked visits for the adoption figures). The
+control-room role therefore never needs `patients` and has no access to it. It
+reads the snapshots, the officers' areas, ICD titles, and for the audited
+activity trail the event tables, plus staff names (not their email or mobile).
+It can insert its trail-audit rows but not read the audit log, and has no
+UPDATE or DELETE anywhere. `tests/monitor/test_control_room_db_role.py` reruns
+every control-room test with the officer endpoints executing as that role, and
+checks that patients, ABHA numbers, staff contacts, consent, the audit history
+and clinical writes are all refused.
+
+One Keycloak, two realms: both realms live in the central Keycloak. The control
+server's nginx proxies only `/auth/realms/healthdoc-control/` (and theme
+assets, GET only) to it over the private network. `KC_HOSTNAME` stays pinned to
+the hospital address; the control realm's `frontendUrl` overrides it for that
+realm alone. This was checked on Keycloak 25 configured like production: the
+control realm's issuer is `https://<CONTROL_ROOM_HOST>/auth/realms/healthdoc-control`
+whichever host a request arrives on, and the staff realm keeps the hospital's.
+The control API trusts only that issuer and audience.
+
+Officers are created by the hospital server's superadmin
+(`KEYCLOAK_MONITOR_REALM=healthdoc-control`), in the control realm, so an
+officer account cannot sign in to the hospital address at all.
+
+### Setting it up
+
+1. Hospital server, `.env.production`: set `CONTROL_ROOM_HOST` and
+   `PRIVATE_BIND_ADDRESS` (its private-network address). PostgreSQL (5432) and
+   Keycloak (8080) then listen on that address: **firewall both to the
+   control-room server only**. Traffic between the two servers is plain
+   PostgreSQL and HTTP, so the private network must be one you trust (same
+   VPC or a WireGuard link); otherwise put TLS on both before going live.
+2. Hospital server, once, as the database owner:
+   `psql -f infra/control-room/db-role.sql`, then
+   `ALTER ROLE healthdoc_control_room LOGIN PASSWORD '<random>'`.
+3. Redeploy the hospital stack: realm-init renders both realms; the backend
+   now runs in hospital mode; `monitor-capture` keeps running there.
+4. Control-room server: copy `.env.control-room.example` to `.env.control-room`
+   (same PII key as the hospital server, since the trail's day codes derive
+   from it), add a TLS certificate for `CONTROL_ROOM_HOST`, build the
+   control-room frontend image (its realm and client are build arguments) and
+   `docker compose --env-file .env.control-room -f infra/docker-compose.control-room.yml up -d`.
+5. Superadmin creates officers on the hospital address (Platform → Control-room
+   officers); officers sign in at `https://<CONTROL_ROOM_HOST>/monitor` and
+   enrol their OTP at first sign-in.
+
+An existing deployment's Keycloak already holds the staff realm, and import
+skips realms that exist, so the control realm is imported on the next restart
+without touching staff accounts.
+
+The production realm render now also drops the `dev.*` accounts the source
+realm carries. Before this, Keycloak 25 refused to start on a fresh production
+install: their shared dev password fails the production password policy.
+
+Not done here: TLS between the two servers (see step 1), and a second
+Keycloak instance for full separation of the identity store. BHAVYA's public
+material does not say whether its command centre has its own identity store;
+one Keycloak with a separate realm keeps one place to patch and back up.
 
 ## Out of scope for now
 
