@@ -13,6 +13,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiError, formatDateTime } from "@/lib/api";
 import { useLocale } from "@/lib/i18n";
 
+import { DiseaseTrends } from "./DiseaseTrends";
 import { FacilityDetail } from "./FacilityDetail";
 import { getMonitorBoard, type MonitorBoard, type MonitorFacilityRow, type MonitorStatus } from "./api";
 
@@ -177,6 +178,8 @@ export function ControlRoom() {
       </div>
 
       {selected ? <FacilityDetail facilityId={selected} onClose={() => setSelected(null)} /> : null}
+
+      <DiseaseTrends district={district} />
 
       <p className="text-xs text-muted-foreground">
         {t("monitor.thresholds", {

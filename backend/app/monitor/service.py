@@ -10,21 +10,24 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, case, func, or_, select
+from sqlalchemy import and_, case, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admissions.models import Admission, Bed, Ward
 from app.common.patient_scope import facility_timezone
 from app.departments.models import Department
 from app.inventory.models import InventoryBatch, InventoryItem, StockLocation
-from app.monitor.models import FacilityPulse, MonitorScope
-from app.opd.models import Visit
+from app.monitor.models import DiagnosisDailyCount, FacilityPulse, MonitorScope
+from app.opd.models import Diagnosis, Encounter, IcdCode, Visit
 from app.orders.models import Order
 from app.pathology.models import LabOrderItem
 from app.queue.models import QueueToken, Roster
 from app.users.models import Facility
+
+IST = ZoneInfo("Asia/Kolkata")
 
 
 def utcnow() -> datetime:
@@ -154,7 +157,45 @@ async def capture_facility(db: AsyncSession, facility: Facility, *, now: datetim
         detail=detail,
     )
     db.add(pulse)
+    for day in (local_today - timedelta(days=1), local_today):
+        await _count_diagnoses(db, facility.id, day, tz)
     return pulse
+
+
+async def _count_diagnoses(db: AsyncSession, facility_id, day, tz) -> None:
+    """Replace one facility-day of diagnosis counts. Recounting yesterday too
+    catches diagnoses coded after midnight for a patient seen the day before."""
+    start = datetime.combine(day, time.min, tzinfo=tz).astimezone(UTC)
+    end = start + timedelta(days=1)
+    # Normalise before grouping: "a09" and "A09" are one code, and one patient
+    # coded both ways is one case.
+    code = func.upper(func.trim(Diagnosis.icd_code))
+    rows = (
+        await db.execute(
+            select(Diagnosis.icd_version, code, func.count(func.distinct(Visit.patient_id)))
+            .join(Encounter, Encounter.id == Diagnosis.encounter_id)
+            .join(Visit, Visit.id == Encounter.visit_id)
+            .where(
+                Diagnosis.facility_id == facility_id,
+                Diagnosis.diagnosis_type != "differential",
+                Diagnosis.created_at >= start,
+                Diagnosis.created_at < end,
+            )
+            .group_by(Diagnosis.icd_version, code)
+        )
+    ).all()
+    await db.execute(
+        delete(DiagnosisDailyCount).where(
+            DiagnosisDailyCount.facility_id == facility_id, DiagnosisDailyCount.day == day
+        )
+    )
+    db.add_all(
+        DiagnosisDailyCount(
+            id=uuid.uuid4(), facility_id=facility_id, day=day, icd_version=version,
+            icd_code=normalised, patients=patients,
+        )
+        for version, normalised, patients in rows
+    )
 
 
 def _qty(value) -> str:
@@ -376,3 +417,62 @@ async def board(
         )
     ).all()
     return [(facility, pulse) for facility, pulse in rows]
+
+
+# ------------------------------------------------------------------ disease trends
+
+#: Below this many patients a cell is shown as "<5": a rare diagnosis in one
+#: block could otherwise point at a person the officer may know.
+SMALL_CELL = 5
+#: A spike: this week at least double last week, and at least this many cases.
+SPIKE_RATIO = 2
+SPIKE_MIN = 10
+TREND_LIMIT = 30
+
+
+@dataclass(frozen=True)
+class Trend:
+    district: str | None
+    icd_version: str
+    icd_code: str
+    title: str | None
+    this_week: int
+    last_week: int
+
+    @property
+    def spike(self) -> bool:
+        return self.this_week >= SPIKE_MIN and self.this_week >= SPIKE_RATIO * max(self.last_week, 1)
+
+
+async def disease_trends(
+    db: AsyncSession, areas: list[Area], *, today: date, district: str | None = None
+) -> list[Trend]:
+    """This week (the 7 days to today) against the 7 days before, per district and code."""
+    if not areas:
+        return []
+    week_start = today - timedelta(days=6)
+    previous_start = week_start - timedelta(days=7)
+    this_week = func.coalesce(func.sum(DiagnosisDailyCount.patients).filter(DiagnosisDailyCount.day >= week_start), 0)
+    last_week = func.coalesce(func.sum(DiagnosisDailyCount.patients).filter(DiagnosisDailyCount.day < week_start), 0)
+    filters = [Facility.is_active.is_(True), _in_scope(areas), DiagnosisDailyCount.day >= previous_start,
+               DiagnosisDailyCount.day <= today]
+    if district:
+        filters.append(func.lower(func.trim(Facility.district)) == district.strip().lower())
+    rows = (
+        await db.execute(
+            select(
+                Facility.district, DiagnosisDailyCount.icd_version, DiagnosisDailyCount.icd_code,
+                func.max(IcdCode.title), this_week, last_week,
+            )
+            .join(Facility, Facility.id == DiagnosisDailyCount.facility_id)
+            .outerjoin(
+                IcdCode,
+                and_(IcdCode.version == DiagnosisDailyCount.icd_version, IcdCode.code == DiagnosisDailyCount.icd_code),
+            )
+            .where(*filters)
+            .group_by(Facility.district, DiagnosisDailyCount.icd_version, DiagnosisDailyCount.icd_code)
+            .order_by(this_week.desc(), DiagnosisDailyCount.icd_code)
+            .limit(TREND_LIMIT)
+        )
+    ).all()
+    return [Trend(d, v, c, title, int(now_), int(before)) for d, v, c, title, now_, before in rows]

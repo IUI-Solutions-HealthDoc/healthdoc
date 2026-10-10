@@ -1,16 +1,18 @@
-"""Control-room tables (migration 0097). See docs/control-room-design-2026-10-10.md."""
+"""Control-room tables (migrations 0097–0099). See docs/control-room-design-2026-10-10.md."""
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     Index,
     Integer,
     String,
     UniqueConstraint,
+    func,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -80,3 +82,26 @@ class FacilityPulse(Base, UUIDPk):
     staff_rostered_today: Mapped[int] = mapped_column(Integer, nullable=False)
     #: wards / stock_short / expiring, bounded lists, no patient data (0098).
     detail: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default=text("'{}'"))
+
+
+class DiagnosisDailyCount(Base, UUIDPk):
+    """Distinct patients per diagnosis code per facility per local day (0099).
+
+    Counts only; the label is read from icd_codes, never from free text.
+    """
+
+    __tablename__ = "diagnosis_daily_counts"
+    __table_args__ = (
+        UniqueConstraint("facility_id", "day", "icd_version", "icd_code", name="uq_diagnosis_daily_counts"),
+        CheckConstraint("patients > 0", name="ck_diagnosis_daily_counts_patients"),
+        Index("ix_diagnosis_daily_counts_day", "day"),
+    )
+
+    facility_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="CASCADE"), nullable=False
+    )
+    day: Mapped[date] = mapped_column(Date, nullable=False)
+    icd_version: Mapped[str] = mapped_column(String(30), nullable=False)
+    icd_code: Mapped[str] = mapped_column(String(30), nullable=False)
+    patients: Mapped[int] = mapped_column(Integer, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())

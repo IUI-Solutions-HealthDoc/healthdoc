@@ -319,6 +319,96 @@ async def test_a_silent_facility_shows_no_stale_lists(db):
     await _grant(db, sub, "BR")
     detail = await monitor_router.get_facility_detail(facility.id, user=_officer(sub), db=db)
     assert detail.facility.status == "grey" and detail.stock_short == []
+
+
+# ---------------------------------------------------------------- disease trends
+
+
+from app.monitor.models import DiagnosisDailyCount  # noqa: E402
+
+
+async def _counts(db, facility, code, *, this_week, last_week, today=date(2026, 10, 10), version="icd10"):
+    # Spread over two days per week so the weekly sum is what is asserted.
+    for day, n in ((today, this_week), (today - timedelta(days=9), last_week)):
+        if n:
+            db.add(DiagnosisDailyCount(id=uuid.uuid4(), facility_id=facility.id, day=day,
+                                       icd_version=version, icd_code=code, patients=n))
+    await db.flush()
+
+
+async def test_trends_hide_small_counts_and_flag_spikes(db):
+    patna = await _facility(db, district="Patna")
+    await _counts(db, patna, "A09", this_week=24, last_week=6)     # spike
+    await _counts(db, patna, "J18", this_week=3, last_week=12)     # small this week
+    await _counts(db, patna, "B54", this_week=9, last_week=1)      # doubled but too few to call
+    sub = str(uuid.uuid4())
+    await _grant(db, sub, "BR")
+    out = await monitor_router.get_disease_trends(user=_officer(sub), db=db, district=None)
+    by_code = {t.icd_code: t for t in out.trends}
+    assert (by_code["A09"].this_week, by_code["A09"].spike) == ("24", True)
+    assert (by_code["J18"].this_week, by_code["J18"].last_week) == ("<5", "12")
+    assert by_code["B54"].spike is False
+    assert out.week_ending == "2026-10-10"
+
+
+async def test_trends_stay_inside_the_grant(db):
+    patna = await _facility(db, district="Patna")
+    gaya = await _facility(db, district="Gaya")
+    await _counts(db, patna, "A09", this_week=10, last_week=0)
+    await _counts(db, gaya, "A01", this_week=40, last_week=0)
+    sub = str(uuid.uuid4())
+    await _grant(db, sub, "BR", "Patna")
+    codes = {t.icd_code for t in (await monitor_router.get_disease_trends(user=_officer(sub), db=db, district=None)).trends}
+    assert "A09" in codes and "A01" not in codes
+
+
+async def test_a_case_is_a_distinct_patient_with_a_non_differential_diagnosis(db):
+    facility = await _facility(db)
+    fid, user = facility.id, uuid.uuid4()
+    await db.execute(sa.text("INSERT INTO users (id, keycloak_sub, username, full_name, facility_id) "
+                             "VALUES (:u, :s, :n, 'Doctor', :f)"),
+                     {"u": user, "s": str(uuid.uuid4()), "n": f"d{uuid.uuid4().hex[:8]}", "f": fid})
+    async def encounter(patient, at):
+        visit, enc = uuid.uuid4(), uuid.uuid4()
+        await db.execute(sa.text("INSERT INTO visits (id, visit_number, patient_id, facility_id, visit_type, "
+                                 "visit_date, created_by) VALUES (:id, :n, :p, :f, 'opd', :d, :u)"),
+                         {"id": visit, "n": f"V-{uuid.uuid4().hex[:10]}", "p": patient, "f": fid, "d": at, "u": user})
+        await db.execute(sa.text("INSERT INTO encounters (id, visit_id, facility_id, provider_user_id, created_by) "
+                                 "VALUES (:e, :v, :f, :u, :u)"), {"e": enc, "v": visit, "f": fid, "u": user})
+        return enc
+    async def diagnose(enc, code, kind, at):
+        await db.execute(sa.text("INSERT INTO diagnoses (id, encounter_id, facility_id, icd_code, icd_version, "
+                                 "diagnosis_text, diagnosis_type, created_by, created_at) "
+                                 "VALUES (:id, :e, :f, :c, 'icd10', 'free text', :t, :u, :at)"),
+                         {"id": uuid.uuid4(), "e": enc, "f": fid, "c": code, "t": kind, "u": user, "at": at})
+    patients = []
+    for i in range(3):
+        pid = uuid.uuid4()
+        patients.append(pid)
+        await db.execute(sa.text("INSERT INTO patients (id, full_name, sex, identity_path, facility_id, created_by, "
+                                 "age_years, uhid) VALUES (:p, :n, 'other', 'demographics_only', :f, :u, 30, :h)"),
+                         {"p": pid, "n": f"Trend {i}", "f": fid, "u": user, "h": f"IN-BR-{uuid.uuid4().hex[:10]}"})
+    today = NOW - timedelta(hours=1)
+    first = await encounter(patients[0], today)
+    again = await encounter(patients[0], today)                      # same patient twice
+    await diagnose(first, "a09", "final", today)                     # code normalised
+    await diagnose(again, "A09", "provisional", today)
+    await diagnose(await encounter(patients[1], today), "A09", "final", today)
+    await diagnose(await encounter(patients[2], today), "A09", "differential", today)   # not a case
+    yesterday = NOW - timedelta(days=1)
+    await diagnose(await encounter(patients[2], yesterday), "J18", "final", yesterday)
+    await db.flush()
+
+    await service.capture_facility(db, facility, now=NOW)
+    await db.flush()
+    rows = (await db.execute(sa.select(DiagnosisDailyCount).where(DiagnosisDailyCount.facility_id == fid))).scalars().all()
+    got = {(r.day.isoformat(), r.icd_code): r.patients for r in rows}
+    assert got == {("2026-10-10", "A09"): 2, ("2026-10-09", "J18"): 1}
+    # A second capture replaces, never adds.
+    await service.capture_facility(db, facility, now=NOW)
+    await db.flush()
+    again_rows = (await db.execute(sa.select(DiagnosisDailyCount).where(DiagnosisDailyCount.facility_id == fid))).scalars().all()
+    assert len(again_rows) == 2
 # ---------------------------------------------------------------- session audit for officers
 
 

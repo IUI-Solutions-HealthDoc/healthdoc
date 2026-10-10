@@ -217,6 +217,7 @@ do not merge out of order.**
 | 0096 | abdm_health_document_record | ALTER abdm_care_contexts: hi_type CHECK adds HealthDocumentRecord; CREATE abdm_released_documents | A doctor releases one uploaded PDF on a chart as an NRCeS HealthDocumentRecord, the last of the eight HMIS HI types. The upload alone shares nothing; one file is released at most once. Downgrade refuses while any HealthDocumentRecord context exists. |
 | 0097 | monitor_control_room | CREATE monitor_scopes, facility_pulse | State/district control room (realm role `monitor`): which area each officer may see, and a 15-minute count capture per facility. Counts only, no patient identifiers. See docs/control-room-design-2026-10-10.md. |
 | 0098 | facility_pulse_detail | ALTER facility_pulse: add detail column | Control-room drill-down kept with each capture: beds by ward, medicines below reorder level, batches expiring in 30 days (each at most 50, no patient data). |
+| 0099 | diagnosis_daily_counts | CREATE diagnosis_daily_counts | Control-room disease trends: distinct patients per normalised ICD code per facility per local day (provisional and final; not differential). Small counts are suppressed when read. |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -2228,6 +2229,19 @@ INDEX (facility_id, captured_at)
 Written by `scripts.run_monitor_capture`; rows older than 90 days are deleted.
 admitted_now counts admissions with status 'admitted' (beds.status is a mirror);
 beds_total excludes beds in maintenance and inactive wards; stock counts exclude expired batches.
+
+**diagnosis_daily_counts** (0099) — patients per diagnosis code per facility per day
+```
+facility_id UUID NOT NULL → facilities ON DELETE CASCADE
+day date NOT NULL                                 -- facility-local date
+icd_version varchar(30) NOT NULL
+icd_code varchar(30) NOT NULL                     -- upper-cased, trimmed
+patients integer NOT NULL CHECK (patients > 0)    -- distinct patients; differentials excluded
+updated_at timestamptz NOT NULL DEFAULT now()
+UNIQUE (facility_id, day, icd_version, icd_code); INDEX (day)
+```
+Rewritten for today and yesterday on every capture. GET /monitor/trends shows counts
+below 5 as "<5"; titles come from icd_codes, never from diagnosis free text.
 
 **abdm_care_context_links** (0055) — an ABHA address's claim on those contexts
 ```

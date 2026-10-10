@@ -202,3 +202,55 @@ async def get_facility_detail(
         stock_short=detail.get("stock_short", []),
         expiring=detail.get("expiring", []),
     )
+
+
+class TrendOut(BaseModel):
+    district: str | None
+    icd_version: str
+    icd_code: str
+    title: str | None
+    #: A number, or "<5" when fewer patients than that: never a small exact count.
+    this_week: str
+    last_week: str
+    spike: bool
+
+
+class TrendsOut(BaseModel):
+    week_ending: str
+    small_cell_below: int = service.SMALL_CELL
+    spike_rule: str = f"this week ≥ {service.SPIKE_RATIO}× last week and ≥ {service.SPIKE_MIN} patients"
+    trends: list[TrendOut]
+
+
+def _cell(n: int) -> str:
+    return f"<{service.SMALL_CELL}" if 0 < n < service.SMALL_CELL else str(n)
+
+
+@router.get("/trends", response_model=TrendsOut)
+async def get_disease_trends(
+    user: AuthUser = Depends(require_roles("monitor")),
+    db: AsyncSession = Depends(get_db),
+    district: str | None = Query(None, max_length=100),
+) -> TrendsOut:
+    areas = await service.scope_for(db, user.sub)
+    if not areas:
+        raise HTTPException(
+            403,
+            {"code": "monitor_scope_missing", "message": "No state or district has been granted to this account."},
+        )
+    # Weeks are reckoned in IST, the business day every HealthDoc facility uses.
+    today = service.utcnow().astimezone(service.IST).date()
+    trends = await service.disease_trends(db, areas, today=today, district=district)
+    log.info("monitor trends read", extra={"monitor_sub": user.sub, "district": district})
+    return TrendsOut(
+        week_ending=today.isoformat(),
+        trends=[
+            TrendOut(
+                district=t.district, icd_version=t.icd_version, icd_code=t.icd_code, title=t.title,
+                this_week=_cell(t.this_week), last_week=_cell(t.last_week),
+                # A spike is only flagged on a count large enough to show.
+                spike=t.spike,
+            )
+            for t in trends
+        ],
+    )
