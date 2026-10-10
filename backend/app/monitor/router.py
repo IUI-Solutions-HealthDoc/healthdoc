@@ -59,6 +59,9 @@ class FacilityRowOut(BaseModel):
     staff_rostered_today: int | None
     equipment_down: int | None
     critical_equipment_down: int | None
+    #: Today's digital-adoption counts (registrations, abha_linked, scan_share,
+    #: prescriptions, abdm_records); None when the facility is not reporting.
+    adoption: dict[str, int] | None = None
 
 
 class TotalsOut(BaseModel):
@@ -74,6 +77,7 @@ class TotalsOut(BaseModel):
     beds_total: int
     stock_below_reorder: int
     equipment_down: int
+    adoption: dict[str, int] = {}
 
 
 class BoardOut(BaseModel):
@@ -105,6 +109,7 @@ def _row(facility, pulse, *, now: datetime) -> FacilityRowOut:
         reasons=reasons,
         captured_at=pulse.captured_at if pulse is not None else None,
         bed_occupancy_percent=service.occupancy_percent(pulse) if pulse is not None else None,
+        adoption=(pulse.detail or {}).get("adoption") if pulse is not None and status != "grey" else None,
         **counts,
     )
 
@@ -153,6 +158,10 @@ async def get_board(
             beds_total=sum(r.beds_total or 0 for r in reporting),
             stock_below_reorder=sum(r.stock_below_reorder or 0 for r in reporting),
             equipment_down=sum(r.equipment_down or 0 for r in reporting),
+            adoption={
+                key: sum((r.adoption or {}).get(key, 0) for r in reporting)
+                for key in ("registrations", "abha_linked", "scan_share", "prescriptions", "abdm_records")
+            },
         ),
         facilities=rows,
     )

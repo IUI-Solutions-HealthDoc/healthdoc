@@ -589,3 +589,41 @@ async def test_an_unprovisioned_non_officer_is_still_refused(db):
             _REQUEST, jwt_user=AuthUser(sub=str(uuid.uuid4()), username="x", roles=["doctor"]), db=db
         )
     assert refused.value.status_code == 403
+
+
+# ---------------------------------------------------------------- digital adoption
+
+
+async def test_adoption_counts_todays_digital_activity(db):
+    facility = await _facility(db)
+    fid, user = facility.id, uuid.uuid4()
+    run = db.execute
+    await run(sa.text("INSERT INTO users (id, keycloak_sub, username, full_name, facility_id) VALUES (:u, :s, :n, 'Dr A', :f)"),
+              {"u": user, "s": str(uuid.uuid4()), "n": f"a{uuid.uuid4().hex[:8]}", "f": fid})
+    with_abha, without = uuid.uuid4(), uuid.uuid4()
+    for pid, abha in ((with_abha, "someone@sbx"), (without, None)):
+        await run(sa.text("INSERT INTO patients (id, full_name, sex, identity_path, facility_id, created_by, age_years, uhid, abha_address) "
+                          "VALUES (:p, 'Adoption Patient', 'other', 'demographics_only', :f, :u, 30, :h, :a)"),
+                  {"p": pid, "f": fid, "u": user, "h": f"IN-BR-{uuid.uuid4().hex[:10]}", "a": abha})
+    visit = None
+    for pid, at in ((with_abha, NOW - timedelta(hours=1)), (without, NOW - timedelta(hours=2)),
+                    (without, NOW - timedelta(days=1))):  # yesterday: not counted
+        vid = uuid.uuid4()
+        visit = visit or vid
+        await run(sa.text("INSERT INTO visits (id, visit_number, patient_id, facility_id, visit_type, visit_date, created_by) "
+                          "VALUES (:v, :n, :p, :f, 'opd', :at, :u)"),
+                  {"v": vid, "n": f"V-{uuid.uuid4().hex[:10]}", "p": pid, "f": fid, "at": at, "u": user})
+    enc = uuid.uuid4()
+    await run(sa.text("INSERT INTO encounters (id, visit_id, facility_id, provider_user_id, created_by) VALUES (:e, :v, :f, :u, :u)"),
+              {"e": enc, "v": visit, "f": fid, "u": user})
+    await run(sa.text("INSERT INTO prescriptions (id, encounter_id, patient_id, created_by, facility_id, created_at) "
+                      "VALUES (:id, :e, :p, :u, :f, :at)"),
+              {"id": uuid.uuid4(), "e": enc, "p": with_abha, "u": user, "f": fid, "at": NOW - timedelta(minutes=30)})
+    await run(sa.text("INSERT INTO scan_share_tickets (id, facility_id, token_number, abha_address, expires_at, checked_in_at, status) "
+                      "VALUES (:id, :f, 'T1', 'someone@sbx', :exp, :at, 'checked_in')"),
+              {"id": uuid.uuid4(), "f": fid, "exp": NOW + timedelta(hours=1), "at": NOW - timedelta(hours=1)})
+    await db.flush()
+    pulse = await service.capture_facility(db, facility, now=NOW)
+    assert pulse.detail["adoption"] == {
+        "registrations": 2, "abha_linked": 1, "scan_share": 1, "prescriptions": 1, "abdm_records": 0,
+    }

@@ -24,11 +24,14 @@ from app.common.patient_scope import facility_timezone
 from app.departments.models import Department
 from app.equipment.models import Equipment
 from app.equipment.service import NOT_WORKING
+from app.integrations.abdm.hip.models import AbdmCareContext
+from app.integrations.abdm.models import ScanShareTicket
 from app.inventory.models import InventoryBatch, InventoryItem, StockLocation
 from app.monitor.models import DiagnosisDailyCount, FacilityPulse, MonitorScope
 from app.opd.models import Diagnosis, Encounter, IcdCode, Visit
-from app.orders.models import Order
+from app.orders.models import Order, Prescription
 from app.pathology.models import LabOrderItem
+from app.patients.models import Patient
 from app.queue.models import Queue, QueueToken, Roster
 from app.users.models import Facility, User
 
@@ -148,6 +151,7 @@ async def capture_facility(db: AsyncSession, facility: Facility, *, now: datetim
         "staff": await _staff(db, facility.id, local_today, day_start),
         "equipment": await _equipment_not_working(db, facility.id),
         "blood": await _blood_available(db, facility.id, local_today),
+        "adoption": await _adoption_today(db, facility.id, day_start),
     }
     pulse = FacilityPulse(
         id=uuid.uuid4(),
@@ -355,6 +359,45 @@ async def _staff(db: AsyncSession, facility_id, local_today, day_start) -> list[
         }
         for user_id, name, designation, department, shifts in rostered
     ]
+
+
+async def _adoption_today(db: AsyncSession, facility_id, day_start) -> dict[str, int]:
+    """Digital-health adoption since local midnight: the figures a state reports
+    under ABDM's Digital Health Incentive Scheme. Counts only.
+
+    registrations     visits of any type started today
+    abha_linked       those visits whose patient has an ABHA number or address
+    scan_share        Scan-and-Share tickets checked in today
+    prescriptions     e-prescriptions written today
+    abdm_records      records offered to the patient's ABHA today (care contexts)
+    """
+    async def count(stmt) -> int:
+        return int((await db.execute(stmt)).scalar_one() or 0)
+
+    visits_today = (Visit.facility_id == facility_id, Visit.visit_date >= day_start)
+    return {
+        "registrations": await count(select(func.count(Visit.id)).where(*visits_today)),
+        "abha_linked": await count(
+            select(func.count(Visit.id))
+            .join(Patient, Patient.id == Visit.patient_id)
+            .where(*visits_today, or_(Patient.abha_number.is_not(None), Patient.abha_address.is_not(None)))
+        ),
+        "scan_share": await count(
+            select(func.count(ScanShareTicket.id)).where(
+                ScanShareTicket.facility_id == facility_id, ScanShareTicket.checked_in_at >= day_start
+            )
+        ),
+        "prescriptions": await count(
+            select(func.count(Prescription.id)).where(
+                Prescription.facility_id == facility_id, Prescription.created_at >= day_start
+            )
+        ),
+        "abdm_records": await count(
+            select(func.count(AbdmCareContext.id)).where(
+                AbdmCareContext.facility_id == facility_id, AbdmCareContext.created_at >= day_start
+            )
+        ),
+    }
 
 
 async def _blood_available(db: AsyncSession, facility_id, local_today) -> dict[str, int]:
