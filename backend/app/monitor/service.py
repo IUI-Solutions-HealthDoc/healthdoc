@@ -37,6 +37,9 @@ CAPTURE_INTERVAL = timedelta(minutes=15)
 STALE_AFTER = timedelta(minutes=45)
 EXPIRY_HORIZON_DAYS = 30
 
+#: Bounds on the drill-down lists: enough to act on, small enough to keep every capture.
+DETAIL_LIMIT = 50
+
 _ED_CLOSED = ("completed", "cancelled", "lwbs", "closed")
 _LAB_OPEN = ("placed", "accepted", "in_progress")
 
@@ -130,6 +133,11 @@ async def capture_facility(db: AsyncSession, facility: Facility, *, now: datetim
             Roster.is_available.is_(True),
         )
     )
+    detail = {
+        "wards": await _wards(db, facility.id),
+        "stock_short": await _stock_short(db, on_hand),
+        "expiring": await _expiring(db, facility.id, local_today),
+    }
     pulse = FacilityPulse(
         id=uuid.uuid4(),
         facility_id=facility.id,
@@ -143,9 +151,96 @@ async def capture_facility(db: AsyncSession, facility: Facility, *, now: datetim
         stock_below_reorder=stock_below_reorder,
         batches_expiring_30d=batches_expiring_30d,
         staff_rostered_today=staff_rostered_today,
+        detail=detail,
     )
     db.add(pulse)
     return pulse
+
+
+def _qty(value) -> str:
+    """Quantities travel as decimal strings (a float cannot be reconciled with the ledger)."""
+    return format(value or 0, "f")
+
+
+async def _wards(db: AsyncSession, facility_id) -> list[dict]:
+    occupied = (
+        select(Admission.ward_id, func.count(Admission.id).label("n"))
+        .where(Admission.status == "admitted")
+        .group_by(Admission.ward_id)
+        .subquery()
+    )
+    rows = (
+        await db.execute(
+            select(
+                Ward.name,
+                Department.name,
+                func.count(Bed.id).filter(Bed.status != "maintenance"),
+                func.count(Bed.id).filter(Bed.status == "maintenance"),
+                func.coalesce(func.max(occupied.c.n), 0),
+            )
+            .join(Bed, Bed.ward_id == Ward.id)
+            .outerjoin(Department, Department.id == Ward.department_id)
+            .outerjoin(occupied, occupied.c.ward_id == Ward.id)
+            .where(Ward.facility_id == facility_id, Ward.is_active.is_(True))
+            .group_by(Ward.id, Ward.name, Department.name)
+            .order_by(Ward.name)
+            .limit(DETAIL_LIMIT)
+        )
+    ).all()
+    return [
+        {
+            "ward": ward,
+            "department": department,
+            "beds": usable,
+            "occupied": int(admitted),
+            "free": max(usable - int(admitted), 0),
+            "maintenance": maintenance,
+        }
+        for ward, department, usable, maintenance, admitted in rows
+    ]
+
+
+async def _stock_short(db: AsyncSession, on_hand) -> list[dict]:
+    rows = (
+        await db.execute(
+            select(InventoryItem.name, InventoryItem.strength, on_hand.c.available, InventoryItem.reorder_level)
+            .join(on_hand, on_hand.c.item_id == InventoryItem.id)
+            .where(
+                InventoryItem.is_active.is_(True),
+                InventoryItem.reorder_level > 0,
+                on_hand.c.available < InventoryItem.reorder_level,
+            )
+            # Worst first: the share of the reorder level still on the shelf.
+            .order_by((on_hand.c.available / InventoryItem.reorder_level).asc(), InventoryItem.name)
+            .limit(DETAIL_LIMIT)
+        )
+    ).all()
+    return [
+        {"item": name, "strength": strength, "available": _qty(available), "reorder_level": _qty(level)}
+        for name, strength, available, level in rows
+    ]
+
+
+async def _expiring(db: AsyncSession, facility_id, local_today) -> list[dict]:
+    rows = (
+        await db.execute(
+            select(InventoryItem.name, InventoryBatch.batch_number, InventoryBatch.expiry_date, InventoryBatch.quantity)
+            .join(InventoryItem, InventoryItem.id == InventoryBatch.item_id)
+            .join(StockLocation, StockLocation.id == InventoryBatch.stock_location_id)
+            .where(
+                StockLocation.facility_id == facility_id,
+                InventoryBatch.quantity > 0,
+                InventoryBatch.expiry_date >= local_today,
+                InventoryBatch.expiry_date <= local_today + timedelta(days=EXPIRY_HORIZON_DAYS),
+            )
+            .order_by(InventoryBatch.expiry_date, InventoryItem.name)
+            .limit(DETAIL_LIMIT)
+        )
+    ).all()
+    return [
+        {"item": name, "batch": batch, "expiry": expiry.isoformat(), "quantity": _qty(quantity)}
+        for name, batch, expiry, quantity in rows
+    ]
 
 
 async def capture_all(db: AsyncSession, *, now: datetime | None = None) -> int:
@@ -224,6 +319,34 @@ def occupancy_percent(pulse: FacilityPulse) -> int | None:
     if pulse.beds_total <= 0:
         return None
     return round(100 * pulse.admitted_now / pulse.beds_total)
+
+
+async def facility_in_scope(
+    db: AsyncSession, areas: list[Area], facility_id
+) -> tuple[Facility, FacilityPulse | None] | None:
+    """One facility and its latest capture, or None when it is outside the grant.
+
+    None, not a refusal naming the facility: outside the area it does not exist
+    for this officer (404, never 403, as everywhere else in HealthDoc).
+    """
+    if not areas:
+        return None
+    facility = (
+        await db.execute(
+            select(Facility).where(Facility.id == facility_id, Facility.is_active.is_(True), _in_scope(areas))
+        )
+    ).scalar_one_or_none()
+    if facility is None:
+        return None
+    pulse = (
+        await db.execute(
+            select(FacilityPulse)
+            .where(FacilityPulse.facility_id == facility.id)
+            .order_by(FacilityPulse.captured_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    return facility, pulse
 
 
 async def board(
