@@ -30,7 +30,10 @@ export interface MonitorFacilityRow {
   staff_rostered_today: number | null;
   equipment_down: number | null;
   critical_equipment_down: number | null;
+  adoption?: Partial<Record<AdoptionKey, number>> | null;
 }
+
+export type AdoptionKey = "registrations" | "abha_linked" | "scan_share" | "prescriptions" | "abdm_records";
 
 export interface MonitorBoard {
   areas: { state_code: string; district: string | null }[];
@@ -55,6 +58,7 @@ export interface MonitorBoard {
     beds_total: number;
     stock_below_reorder: number;
     equipment_down: number;
+    adoption?: Partial<Record<AdoptionKey, number>>;
   };
   facilities: MonitorFacilityRow[];
 }
