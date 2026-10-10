@@ -564,6 +564,7 @@ REPOINTED_ON_MERGE: frozenset[str] = frozenset(
         "patient_identifiers",
         "visits",
         "appointments",
+        "appointment_requests",
         "clinical_dispositions",
         "orders",
         "prescriptions",
@@ -900,11 +901,14 @@ async def _repoint_visits(db: AsyncSession, *, source: Patient, target: Patient)
 
 
 async def _repoint_appointments(db: AsyncSession, *, source: Patient, target: Patient) -> None:
-    """Repoints source's appointments rows onto target."""
-    from app.appointments.models import Appointment
+    """Repoints source's appointments and portal appointment requests onto target."""
+    from app.appointments.models import Appointment, AppointmentRequest
 
     await db.execute(
         update(Appointment).where(Appointment.patient_id == source.id).values(patient_id=target.id)
+    )
+    await db.execute(
+        update(AppointmentRequest).where(AppointmentRequest.patient_id == source.id).values(patient_id=target.id)
     )
     await db.flush()
 
