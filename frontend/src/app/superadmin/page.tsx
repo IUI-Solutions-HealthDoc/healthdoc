@@ -8,6 +8,7 @@ import {
   listPlatformFacilities,
   type PlatformFacility,
 } from "@/features/platform/api";
+import { ControlRoomOfficers } from "@/features/platform/ControlRoomOfficers";
 import { FacilityOnboarding } from "@/features/platform/FacilityOnboarding";
 
 export default function Page() {
@@ -88,6 +89,8 @@ export default function Page() {
       ) : null}
 
       <FacilityOnboarding facilities={facilities} onChanged={() => void load(query)} />
+
+      <ControlRoomOfficers facilities={facilities} />
 
       <section className="surface-card overflow-hidden">
         <div className="border-b border-border px-5 py-4">
