@@ -29,6 +29,7 @@ MODULES = [
     "allergies",
     "appointments",
     "audit",
+    "availability",
     "billing",
     "blood_bank",
     "consent",

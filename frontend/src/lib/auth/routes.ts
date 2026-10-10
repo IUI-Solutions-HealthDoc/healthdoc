@@ -76,8 +76,11 @@ const ROUTE_PREFIXES: Record<Role, readonly string[]> = {
  * and its payload carries only token, doctor name and room, never a patient
  * identifier. Requiring a session here would mean a shared credential taped to
  * a TV in a public corridor, which is worse than no credential at all.
+ *
+ * `/availability` is the public bed and blood page: counts for facilities that
+ * opted in, no patient or staff data, read from the 15-minute capture.
  */
-const PUBLIC_PREFIXES: readonly string[] = ["/login", "/queue-display"];
+const PUBLIC_PREFIXES: readonly string[] = ["/login", "/queue-display", "/availability"];
 
 export function isPublicPath(pathname: string): boolean {
   return PUBLIC_PREFIXES.some(

@@ -50,6 +50,7 @@ class PlatformFacilityOut(BaseModel):
     hfr_facility_id: str | None
     timezone: str
     is_active: bool
+    publish_availability: bool = False
 
 
 class PlatformFacilityListOut(BaseModel):
@@ -122,6 +123,8 @@ class PlatformFacilityUpdate(BaseModel):
     ownership: Literal["government", "private"] | None = None
     hfr_facility_id: str | None = None
     is_active: bool | None = None
+    #: List free beds and blood stock on the public /availability page.
+    publish_availability: bool | None = None
 
 
 class PlatformAdminCreate(BaseModel):

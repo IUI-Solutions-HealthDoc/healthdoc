@@ -11,6 +11,8 @@ export type PlatformFacility = {
   hfr_facility_id: string | null;
   timezone: string;
   is_active: boolean;
+  /** Listed on the public /availability page. */
+  publish_availability?: boolean;
 };
 
 export type PlatformFacilityList = {
@@ -37,7 +39,7 @@ export function createPlatformFacility(body: PlatformFacilityCreate): Promise<Pl
 }
 
 export function updatePlatformFacility(
-  id: string, body: { hfr_facility_id?: string | null; name?: string; is_active?: boolean },
+  id: string, body: { hfr_facility_id?: string | null; name?: string; is_active?: boolean; publish_availability?: boolean },
 ): Promise<PlatformFacility> {
   return api<PlatformFacility>(`/platform/facilities/${id}`, { method: "PATCH", body: JSON.stringify(body) });
 }

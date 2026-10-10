@@ -58,6 +58,10 @@ async def test_platform_lists_only_facility_metadata(db) -> None:
         "hfr_facility_id",
         "timezone",
         "is_active",
+        # 0101: whether the facility publishes its bed and blood counts on the
+        # public availability page. A facility setting the superadmin toggles,
+        # not a count and not patient or clinical data.
+        "publish_availability",
     }
 
 

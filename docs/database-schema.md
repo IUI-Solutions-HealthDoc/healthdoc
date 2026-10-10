@@ -219,6 +219,7 @@ do not merge out of order.**
 | 0098 | facility_pulse_detail | ALTER facility_pulse: add detail column | Control-room drill-down kept with each capture: beds by ward, medicines below reorder level, batches expiring in 30 days (each at most 50, no patient data). |
 | 0099 | diagnosis_daily_counts | CREATE diagnosis_daily_counts | Control-room disease trends: distinct patients per normalised ICD code per facility per local day (provisional and final; not differential). Small counts are suppressed when read. |
 | 0100 | equipment_register | CREATE equipment, equipment_status_events; ALTER facility_pulse: add equipment counts | Equipment register with status history (working, down, maintenance, retired; reason required unless working). The control room counts machines not working; a critical one turns the facility red. |
+| 0101 | facility_publish_availability | ALTER facilities: add publish_availability | A facility opts in to the public bed and blood availability page (no login, counts from the 15-minute capture). Off by default. |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -327,6 +328,7 @@ timezone        varchar(50) NOT NULL DEFAULT 'Asia/Kolkata'  -- IANA tz; drives 
                                                  -- TZ-DATE fix references this column, so it
                                                  -- must land before 0004. (Found v3.15.)
 is_active       boolean NOT NULL DEFAULT true
+publish_availability boolean NOT NULL DEFAULT false  -- 0101: list free beds and blood on public /availability
 ```
 
 **users** (credentials live in Keycloak — this row is the app-side profile)

@@ -10,7 +10,7 @@ const BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api/v1";
  * Subscribe to one department's queue display stream.
  *
  * Uses `EventSource` rather than the shared `api()` client on purpose: this is
- * the only unauthenticated endpoint in the application, and `EventSource`
+ * an unauthenticated endpoint (with /public/availability), and `EventSource`
  * cannot send an Authorization header anyway. It also reconnects on its own,
  * which is exactly what a screen left running for a fortnight needs.
  *
