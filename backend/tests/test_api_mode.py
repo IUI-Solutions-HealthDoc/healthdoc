@@ -64,15 +64,41 @@ with TestClient(app) as client:   # runs the lifespan: key checks, production au
 """
 
 
-def test_the_control_room_server_boots_in_production_with_only_its_modules():
+def _control_room_env(**overrides) -> dict:
+    import certifi  # any valid CA bundle: these tests check wiring, not trust
+
     env = {
         **os.environ, "PYTHONPATH": str(BACKEND), "API_MODE": "control_room", "ENVIRONMENT": "production",
         "JWT_AUDIENCE": "healthdoc-backend",
         "JWT_ISSUER": "https://control.example/auth/realms/healthdoc-control",
+        "JWT_JWKS_URL": "https://10.0.0.5:8443/auth/realms/healthdoc-control/protocol/openid-connect/certs",
+        "JWT_JWKS_CA_FILE": certifi.where(),
+        "DATABASE_SSL_CA_FILE": certifi.where(),
     }
-    out = subprocess.run([sys.executable, "-c", _BOOT], cwd=BACKEND, env=env,
+    for key, value in overrides.items():
+        if value is None:
+            env.pop(key, None)
+        else:
+            env[key] = value
+    return env
+
+
+def test_the_control_room_server_boots_in_production_with_only_its_modules():
+    out = subprocess.run([sys.executable, "-c", _BOOT], cwd=BACKEND, env=_control_room_env(),
                          capture_output=True, text=True, timeout=120)
     assert out.returncode == 0, out.stderr[-3000:]
     assert json.loads(out.stdout.strip().splitlines()[-1]) == {
         "health": 200, "board": 401, "patients": 404, "deep_checks": ["postgres"],
     }
+
+
+@pytest.mark.parametrize("overrides, named", [
+    ({"DATABASE_SSL_CA_FILE": None}, "DATABASE_SSL_CA_FILE"),
+    ({"JWT_JWKS_CA_FILE": None}, "JWT_JWKS_URL"),
+    ({"JWT_JWKS_URL": "http://10.0.0.5:8080/auth/realms/healthdoc-control/protocol/openid-connect/certs"}, "JWT_JWKS_URL"),
+])
+def test_the_control_room_server_refuses_plaintext_links_in_production(overrides, named):
+    out = subprocess.run([sys.executable, "-c", _BOOT], cwd=BACKEND, env=_control_room_env(**overrides),
+                         capture_output=True, text=True, timeout=120)
+    assert out.returncode != 0
+    assert "Refusing to start in production" in out.stderr and named in out.stderr

@@ -21,6 +21,7 @@ lab dual-verification silently never matched (#260), and two FK violations on
 writes (#310, #311). Anything that records "who did this" wants CurrentDbUser.
 """
 import logging
+import ssl
 import time
 import uuid
 from typing import Annotated
@@ -61,7 +62,9 @@ async def _get_jwks() -> dict:
     url = settings.jwt_jwks_url or (
         f"{settings.jwt_issuer}/protocol/openid-connect/certs"
     )
-    async with httpx.AsyncClient(timeout=5) as client:
+    # A private CA, when configured, is trusted for this fetch only.
+    verify = ssl.create_default_context(cafile=settings.jwt_jwks_ca_file) if settings.jwt_jwks_ca_file else True
+    async with httpx.AsyncClient(timeout=5, verify=verify) as client:
         resp = await client.get(url)
         resp.raise_for_status()
     _jwks_cache.update(keys=resp.json(), fetched_at=time.time())
