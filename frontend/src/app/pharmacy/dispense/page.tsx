@@ -1,5 +1,6 @@
 "use client";
 
+import { PaediatricDoseNotice } from "@/components/common/PaediatricDoseNotice";
 import Link from "next/link";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
@@ -510,6 +511,7 @@ function Dispense() {
             ) : (
               <p className="text-danger">{t("pharmacy.dispense.patientUnknown")}</p>
             )}
+            <div className="mt-2"><PaediatricDoseNotice ageYears={prescription.patient_age_years} /></div>
             {prescription.notes ? (
               <p className="mt-2">
                 {t("pharmacy.dispense.notes")} {prescription.notes}

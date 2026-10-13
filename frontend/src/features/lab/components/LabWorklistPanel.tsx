@@ -568,6 +568,14 @@ export function LabWorklistPanel() {
                 {selected.accession_number} · {selected.sample_type}
               </p>
               <p className="text-sm"><PatientIdentityCell row={selected} /></p>
+              {selected.patient_age_years == null || selected.patient_age_years < 18 ? (
+                <p role="note" className="mt-1 text-xs font-medium text-amber-800">
+                  {/* No approved age-specific ranges exist yet (QA 12 Oct 2026):
+                      say so rather than flag a child against adult values silently. */}
+                  Reference ranges and flags here are adult ranges. Interpret this result against
+                  {selected.patient_age_years == null ? " the patient's age" : " paediatric ranges"}.
+                </p>
+              ) : null}
             </div>
             <StatusChip status={selected.status} />
           </div>
