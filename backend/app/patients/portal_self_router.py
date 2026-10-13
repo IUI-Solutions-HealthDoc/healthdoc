@@ -700,6 +700,8 @@ class MyAppointmentRequestOut(BaseModel):
     start_time: str | None = None
     doctor_name: str | None = None
     teleconsult_status: str | None = None
+    appointment_status: str | None = None
+    cancellation_reason: str | None = None
 
 
 def _refused(exc: appointment_requests.RequestError) -> HTTPException:
@@ -728,6 +730,8 @@ async def _my_requests(db: DbSession, patient_id: uuid.UUID, only: uuid.UUID | N
             start_time=appt.start_time if appt else None,
             doctor_name=doctor_name,
             teleconsult_status=appt.teleconsult_status if appt else None,
+            appointment_status=appt.status if appt else None,
+            cancellation_reason=appt.cancellation_reason if appt else None,
         )
         for req, dept, appt, doctor_name in (await db.execute(stmt)).all()
     ]
@@ -769,6 +773,28 @@ async def request_appointment(
         raise _refused(exc) from None
     [out] = await _my_requests(db, binding.patient_id, only=created.id)
     await record_idempotent_response(db, idempotency_key, endpoint, 201, out.model_dump(mode="json"), caller.id)
+    return out
+
+
+class MyAppointmentCancelIn(BaseModel):
+    reason: str | None = Field(default=None, max_length=300)
+
+
+@router.post("/appointment-requests/{request_id}/cancel-appointment", response_model=MyAppointmentRequestOut)
+async def cancel_my_appointment(
+    request_id: uuid.UUID, binding: ActivePatientBinding, db: DbSession,
+    payload: MyAppointmentCancelIn | None = None,
+) -> MyAppointmentRequestOut:
+    """Cancelling twice is refused rather than repeated, so a retry is harmless."""
+    try:
+        await appointment_requests.cancel_by_patient(
+            db, request_id, patient_id=binding.patient_id, facility_id=binding.facility_id,
+            reason=payload.reason if payload else None,
+            today=await facility_today(db, binding.facility_id),
+        )
+    except appointment_requests.RequestError as exc:
+        raise _refused(exc) from None
+    [out] = await _my_requests(db, binding.patient_id, only=request_id)
     return out
 
 

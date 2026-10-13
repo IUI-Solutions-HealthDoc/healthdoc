@@ -7,7 +7,7 @@ from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.appointments.models import Appointment, AppointmentService
@@ -244,7 +244,7 @@ async def list_appointments(
         select(
             Appointment,
             Patient.full_name.label("patient_name"),
-            Patient.uhid.label("patient_uhid"),
+            func.coalesce(Patient.uhid, Patient.thid).label("patient_uhid"),
             User.full_name.label("doctor_name"),
             Department.name.label("department_name"),
             Department.name_hi.label("department_name_hi"),

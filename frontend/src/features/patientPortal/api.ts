@@ -132,6 +132,8 @@ export interface PortalAppointmentRequest {
   start_time: string | null;
   doctor_name: string | null;
   teleconsult_status: string | null;
+  appointment_status?: string | null;
+  cancellation_reason?: string | null;
 }
 
 export function listPortalDepartments(): Promise<PortalDepartment[]> {
@@ -148,6 +150,12 @@ export function requestPortalAppointment(
 ): Promise<PortalAppointmentRequest> {
   return api<PortalAppointmentRequest>("/patient-portal/me/appointment-requests", {
     method: "POST", idempotencyKey, body: JSON.stringify(body),
+  });
+}
+
+export function cancelPortalAppointment(id: string, reason: string | null): Promise<PortalAppointmentRequest> {
+  return api<PortalAppointmentRequest>(`/patient-portal/me/appointment-requests/${id}/cancel-appointment`, {
+    method: "POST", idempotencyKey: null, body: JSON.stringify({ reason }),
   });
 }
 
