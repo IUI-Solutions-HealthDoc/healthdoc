@@ -124,8 +124,9 @@ export type Payment = {
   currency: string;
   mode: PaymentMode;
   status: PaymentStatus;
-  /** Write-path / audit actor — not on PaymentOut; kept for receipt print */
-  collected_by: string;
+  /** Who took the payment: users.id and that staff member's name, for the receipt. */
+  collected_by?: string | null;
+  collected_by_name?: string | null;
   collected_at: string;
   sensitivity: "critical";
 };

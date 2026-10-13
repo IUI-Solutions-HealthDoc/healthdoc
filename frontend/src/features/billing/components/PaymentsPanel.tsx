@@ -148,7 +148,7 @@ export function PaymentsPanel({
                       <PaymentStatusChip status={p.status} />
                     </Stack>
                     <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary }}>
-                      {formatINR(p.amount)} · {paymentModeLabel(t, p.mode)} · {p.collected_by}
+                      {formatINR(p.amount)} · {paymentModeLabel(t, p.mode)} · {p.collected_by_name ?? "—"}
                     </Typography>
                   </Box>
                   <Stack direction="row" useFlexGap sx={{ gap: 1, flexWrap: "wrap" }}>

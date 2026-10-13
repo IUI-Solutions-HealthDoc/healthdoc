@@ -123,6 +123,10 @@ class PaymentOut(BaseModel):
     mode: PaymentMode
     status: PaymentStatus
     collected_at: str
+    # Who took the money, by name: the printed receipt's "Collected by" was
+    # blank because the response never carried it (QA 12 Oct 2026).
+    collected_by: uuid.UUID | None = None
+    collected_by_name: str | None = None
 
 
 class RefundOnPaymentOut(BaseModel):
