@@ -151,7 +151,7 @@ export default function Page() {
                         {occupied ? <span className="text-muted-foreground">Patient admitted</span> : (
                           <input value={reasons[bed.bed_id] ?? ""} maxLength={300}
                             onChange={(e) => setReasons((r) => ({ ...r, [bed.bed_id]: e.target.value }))}
-                            placeholder="Required" className="w-full rounded-md border border-border px-2 py-1" />
+                            placeholder="Required" aria-label={`Reason for changing bed ${bed.bed_number}`} className="w-full rounded-md border border-border px-2 py-1" />
                         )}
                       </td>
                       <td className="px-3 py-2">

@@ -231,6 +231,7 @@ export function AppointmentRequestsTab() {
                     {pending.action === "cancel" ? (
                       <input value={cancelReason} maxLength={300} onChange={(e) => setCancelReason(e.target.value)}
                         placeholder={t("patientPortal.appt.cancelReason")}
+                        aria-label={t("patientPortal.appt.cancelReason")}
                         className="w-full rounded-md border border-border px-2 py-1" />
                     ) : null}
                     <div className="flex gap-3">

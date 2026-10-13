@@ -162,8 +162,8 @@ function RequestRow({ item, onDone }: { item: AppointmentRequest; onDone: () => 
         </div>
       ) : (
         <div className="mt-2 flex flex-wrap items-center gap-2">
-          <input type="date" value={day} onChange={(e) => setDay(e.target.value)} className="rounded-md border border-border px-2 py-1 text-xs" />
-          <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="rounded-md border border-border px-2 py-1 text-xs" />
+          <input type="date" aria-label="Appointment date" value={day} onChange={(e) => setDay(e.target.value)} className="rounded-md border border-border px-2 py-1 text-xs" />
+          <input type="time" aria-label="Appointment time" value={time} onChange={(e) => setTime(e.target.value)} className="rounded-md border border-border px-2 py-1 text-xs" />
           <select value={doctor} onChange={(e) => setDoctor(e.target.value)} aria-label="Doctor"
             className="rounded-md border border-border px-2 py-1 text-xs">
             <option value="">{doctors === null ? t("common.loading") : doctors.length ? "Choose doctor…" : "No doctor rostered that day"}</option>

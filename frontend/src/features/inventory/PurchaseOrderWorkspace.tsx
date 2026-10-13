@@ -178,7 +178,7 @@ export function PurchaseOrderWorkspace() {
             {/* No supplier could be added anywhere (QA 10 Oct 2026). */}
             <span className="mt-2 flex gap-2">
               <input value={newSupplier} maxLength={200} onChange={(e) => setNewSupplier(e.target.value)}
-                placeholder="New supplier name" className="flex-1 rounded border border-gray-300 p-2" />
+                placeholder="New supplier name" aria-label="New supplier name" className="flex-1 rounded border border-gray-300 p-2" />
               <button type="button" disabled={newSupplier.trim().length < 2}
                 onClick={() => void api<Supplier>("/pharmacy/suppliers", {
                   method: "POST", body: JSON.stringify({ name: newSupplier.trim() }), idempotencyKey: null,

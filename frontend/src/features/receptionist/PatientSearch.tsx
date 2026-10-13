@@ -241,6 +241,7 @@ export function PatientSearch({ onSelect, selectLabel }: Props) {
             {ageMode === "dob" ? (
               <input
                 type="date"
+                aria-label={t("field.dob")}
                 className={inputClass(nameNeedsDob)}
                 aria-invalid={nameNeedsDob}
                 value={criteria.dob ?? ""}
@@ -253,6 +254,7 @@ export function PatientSearch({ onSelect, selectLabel }: Props) {
                 inputMode="numeric"
                 maxLength={3}
                 placeholder="About how old (years)"
+                aria-label={t("field.age")}
                 className={inputClass(nameNeedsDob || ageInvalid)}
                 aria-invalid={nameNeedsDob || ageInvalid}
                 value={criteria.age_years ?? ""}
