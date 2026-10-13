@@ -1,5 +1,6 @@
 "use client";
 
+import { PatientIdentityCell } from "@/components/common/PatientIdentityCell";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { ModuleCapabilityGate } from "@/components/common/ModuleCapabilityGate";
@@ -38,6 +39,7 @@ const WORKFLOW: { status: string; labelKey: MessageKey; hint: string }[] = [
 
 const RADIOLOGY_COLUMNS: MessageKey[] = [
   "radiology.col.accession",
+  "field.patient",
   "radiology.col.scan",
   "radiology.col.slot",
   "radiology.col.status",
@@ -326,6 +328,7 @@ function RadiologyPageContent() {
                     }`}
                   >
                     <td className="px-4 py-3 font-mono text-xs">{item.accession_number}</td>
+                    <td className="px-4 py-3 text-sm"><PatientIdentityCell row={item} /></td>
                     <td className="px-4 py-3">
                       <div className="text-sm font-medium">{item.scan_type}</div>
                       <div className="text-xs uppercase text-muted-foreground">
@@ -358,6 +361,7 @@ function RadiologyPageContent() {
                 <p className="text-xs text-muted-foreground">
                   {selected.accession_number} · <StatusChip status={selected.status} />
                 </p>
+                <p className="mt-1 text-sm"><PatientIdentityCell row={selected} /></p>
               </div>
 
               {!canOperate && (selected.status === "placed" || selected.status === "scheduled") && (

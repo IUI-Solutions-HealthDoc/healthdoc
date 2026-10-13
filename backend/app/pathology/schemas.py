@@ -33,6 +33,12 @@ class LabOrderItemOut(BaseModel):
     specimen_status: str = "pending_collection"
     rejection_reason: str | None = None
     recollected_from_id: uuid.UUID | None = None
+    # Joined for the worklist (app.common.patient_brief); absent on writes.
+    patient_id: uuid.UUID | None = None
+    patient_name: str | None = None
+    patient_uhid: str | None = None
+    patient_age_years: int | None = None
+    patient_sex: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

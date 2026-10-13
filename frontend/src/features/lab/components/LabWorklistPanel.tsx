@@ -1,5 +1,6 @@
 "use client";
 
+import { PatientIdentityCell } from "@/components/common/PatientIdentityCell";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
@@ -45,6 +46,7 @@ const STATUS_FILTERS: { value: string; labelKey: MessageKey }[] = [
 
 const WORKLIST_COLUMNS: MessageKey[] = [
   "lab.col.accession",
+  "field.patient",
   "lab.col.test",
   "lab.col.sample",
   "lab.col.barcode",
@@ -483,6 +485,7 @@ export function LabWorklistPanel() {
                   {rows.map((row) => (
                     <tr key={row.id} className="border-b border-border last:border-none">
                       <td className="px-4 py-3 font-mono">{row.accession_number}</td>
+                      <td className="px-4 py-3"><PatientIdentityCell row={row} /></td>
                       <td className="px-4 py-3 font-medium">{row.test_name}</td>
                       <td className="px-4 py-3">{row.sample_type}</td>
                       <td className="px-4 py-3">{row.barcode ?? t("lab.notCollected")}</td>
@@ -539,6 +542,7 @@ export function LabWorklistPanel() {
               <p className="text-sm text-muted-foreground">
                 {selected.accession_number} · {selected.sample_type}
               </p>
+              <p className="text-sm"><PatientIdentityCell row={selected} /></p>
             </div>
             <StatusChip status={selected.status} />
           </div>

@@ -1763,6 +1763,10 @@ export const hi = {
   "pharmacy.dispense.allowPartial": "आंशिक पूर्ति की अनुमति दें।",
   "pharmacy.dispense.allowPartialHint":
     "स्टॉक कम हो तो उपलब्ध मात्रा जारी करें और शेष आंशिक दर्ज करें।",
+  "pharmacy.dispense.patientUnknown": "इस पर्चे का रोगी नहीं मिला — देने से पहले जाँचें।",
+  "patient.identityUnavailable": "रोगी की पहचान नहीं — आदेश जाँचें",
+  "patient.ageUnknown": "आयु अज्ञात",
+  "field.patient": "रोगी",
   "pharmacy.dispense.patientId": "मरीज़ ID:",
   "pharmacy.dispense.notes": "नोट:",
   "pharmacy.dispense.daysUnit": "{count} दिन",

@@ -1854,6 +1854,10 @@ export const en = {
   "pharmacy.dispense.allowPartial": "Allow partial fulfillment.",
   "pharmacy.dispense.allowPartialHint":
     "If stock is short, issue available quantities and record the remainder as partial.",
+  "pharmacy.dispense.patientUnknown": "Patient not found for this prescription — check before dispensing.",
+  "patient.identityUnavailable": "Patient not identified — check the order",
+  "patient.ageUnknown": "Age unknown",
+  "field.patient": "Patient",
   "pharmacy.dispense.patientId": "Patient ID:",
   "pharmacy.dispense.notes": "Notes:",
   "pharmacy.dispense.daysUnit": "{count} days",

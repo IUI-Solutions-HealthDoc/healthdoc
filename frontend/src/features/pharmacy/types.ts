@@ -85,6 +85,10 @@ export interface PrescriptionDetail {
   updated_at: string;
   items: PrescriptionItem[];
   interaction_warnings: string[];
+  patient_name?: string | null;
+  patient_uhid?: string | null;
+  patient_age_years?: number | null;
+  patient_sex?: string | null;
 }
 
 export interface DispenseItemInput {

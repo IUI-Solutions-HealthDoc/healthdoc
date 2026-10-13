@@ -483,10 +483,22 @@ function Dispense() {
       {prescription && (
         <>
           <section className="surface-card p-4 text-sm">
-            <p>
-              <span className="text-muted-foreground">{t("pharmacy.dispense.patientId")}</span>{" "}
-              <span className="font-mono">{prescription.patient_id}</span>
-            </p>
+            {prescription.patient_name ? (
+              <p>
+                <span className="text-muted-foreground">{t("field.patient")}</span>{" "}
+                <span className="font-semibold">{prescription.patient_name}</span>
+                <span className="text-muted-foreground">
+                  {" · "}
+                  {[
+                    prescription.patient_uhid,
+                    prescription.patient_age_years != null ? `${prescription.patient_age_years} y` : t("patient.ageUnknown"),
+                    prescription.patient_sex,
+                  ].filter(Boolean).join(" · ")}
+                </span>
+              </p>
+            ) : (
+              <p className="text-danger">{t("pharmacy.dispense.patientUnknown")}</p>
+            )}
             {prescription.notes ? (
               <p className="mt-2">
                 {t("pharmacy.dispense.notes")} {prescription.notes}

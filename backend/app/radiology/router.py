@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit.service import write_audit_log
 from app.auth.deps import CurrentDbUser, require_roles
 from app.common.accession import RADIOLOGY, allocate_accession_number
+from app.common.patient_brief import patient_briefs
 from app.common.db import get_db
 from app.common.idempotency import check_idempotency, hash_request_body, record_idempotent_response
 from app.files.minio_client import ensure_bucket, get_minio_client
@@ -358,7 +359,7 @@ async def list_radiology_order_items(
     # the deployment, paged and filterable by status — a worklist of every
     # hospital's scans, with accession numbers.
     query = (
-        select(RadiologyOrderItem)
+        select(RadiologyOrderItem, Order.patient_id)
         .join(Order, Order.id == RadiologyOrderItem.order_id)
         .where(Order.facility_id == current_db_user.facility_id)
     )
@@ -370,8 +371,15 @@ async def list_radiology_order_items(
         query.order_by(RadiologyOrderItem.created_at.desc())
         .offset((page - 1) * page_size).limit(page_size)
     )
-    rows = result.scalars().all()
-    return RadiologyOrderItemListOut(items=rows, page=page, page_size=page_size, total=total)
+    rows = result.all()
+    briefs = await patient_briefs(db, (pid for _, pid in rows), current_db_user.facility_id)
+    items = []
+    for item, pid in rows:
+        out = RadiologyOrderItemOut.model_validate(item)
+        if pid in briefs:
+            out = out.model_copy(update=briefs[pid].model_dump())
+        items.append(out)
+    return RadiologyOrderItemListOut(items=items, page=page, page_size=page_size, total=total)
 
 
 @router.get("/order-items/{item_id}/reports", response_model=RadiologyReportHistoryOut)
