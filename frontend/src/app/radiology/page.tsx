@@ -46,6 +46,7 @@ const RADIOLOGY_COLUMNS: MessageKey[] = [
 ];
 
 function StatusChip({ status }: { status: string }) {
+  const { t } = useLocale();
   const tone =
     status === "released"
       ? "bg-success-muted text-success"
@@ -54,7 +55,14 @@ function StatusChip({ status }: { status: string }) {
         : status === "cancelled"
           ? "bg-danger-muted text-danger"
           : "bg-muted text-muted-foreground";
-  return <span className={`rounded-full px-2 py-1 text-xs font-medium ${tone}`}>{status}</span>;
+  // The same words as the stage tabs above: the chip said "reporting" while
+  // the tab said "Preliminary" for the same scan (QA 12 Oct 2026).
+  const stage = WORKFLOW.find((s) => s.status === status);
+  return (
+    <span className={`rounded-full px-2 py-1 text-xs font-medium ${tone}`}>
+      {stage ? t(stage.labelKey) : status.replaceAll("_", " ")}
+    </span>
+  );
 }
 
 function RadiologyPageContent() {
