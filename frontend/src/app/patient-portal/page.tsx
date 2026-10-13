@@ -6,6 +6,7 @@ import {
   getPortalDashboard,
   type PortalDashboard,
 } from "@/features/patientPortal/api";
+import { AppointmentRequestsTab } from "@/features/patientPortal/components/AppointmentRequestsTab";
 import { ReleasedDocumentsTab } from "@/features/patientPortal/components/ReleasedDocumentsTab";
 import { ApiError, formatDateTime } from "@/lib/api";
 import { useLocale } from "@/lib/i18n";
@@ -36,7 +37,7 @@ export default function Page() {
   const verificationLabel = (method: "abha_otp" | "in_person_document") =>
     method === "abha_otp" ? t("patientPortal.verify.abhaOtp") : t("patientPortal.verify.inPerson");
   const [view, setView] = useState<ViewState>({ status: "loading" });
-  const [activeTab, setActiveTab] = useState<"documents" | "permissions" | "identity">("documents");
+  const [activeTab, setActiveTab] = useState<"documents" | "appointments" | "permissions" | "identity">("documents");
   const [historyPage, setHistoryPage] = useState(1);
   const [consentPage, setConsentPage] = useState(1);
   const HISTORY_PAGE_SIZE = 6;
@@ -119,6 +120,21 @@ export default function Page() {
               {t("patientPortal.tab.documents")}
             </button>
             <button
+              id="portal-tab-appointments"
+              role="tab"
+              aria-selected={activeTab === "appointments"}
+              aria-controls="portal-panel-appointments"
+              type="button"
+              onClick={() => setActiveTab("appointments")}
+              className={`border-b-2 px-5 py-3 text-sm font-semibold transition-colors ${
+                activeTab === "appointments"
+                  ? "border-primary text-primary"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {t("patientPortal.tab.appointments")}
+            </button>
+            <button
               id="portal-tab-permissions"
               role="tab"
               aria-selected={activeTab === "permissions"}
@@ -154,6 +170,12 @@ export default function Page() {
           {activeTab === "documents" && (
             <div id="portal-panel-documents" role="tabpanel" aria-labelledby="portal-tab-documents">
               <ReleasedDocumentsTab />
+            </div>
+          )}
+
+          {activeTab === "appointments" && (
+            <div id="portal-panel-appointments" role="tabpanel" aria-labelledby="portal-tab-appointments">
+              <AppointmentRequestsTab />
             </div>
           )}
 

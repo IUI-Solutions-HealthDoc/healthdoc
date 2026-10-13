@@ -215,6 +215,13 @@ do not merge out of order.**
 | 0094 | abdm_invoice_record | ALTER abdm_care_contexts: hi_type CHECK adds Invoice; ALTER invoices: issued_at | An issued invoice is shared as an NRCeS InvoiceRecord, the eighth HI type. `issued_at` is its document date, set on issue and frozen by `trg_invoices_freeze` so a payment never moves it; invoices issued earlier stay NULL and are not offered. Downgrade refuses while any invoice context exists. |
 | 0095 | abha_unique_per_facility | ALTER patients: abha_number, abha_address | One ABHA per chart per facility, not per installation: each facility is its own HIP and one person may hold a linked chart at each. Downgrade refuses while an ABHA is linked at two facilities. |
 | 0096 | abdm_health_document_record | ALTER abdm_care_contexts: hi_type CHECK adds HealthDocumentRecord; CREATE abdm_released_documents | A doctor releases one uploaded PDF on a chart as an NRCeS HealthDocumentRecord, the last of the eight HMIS HI types. The upload alone shares nothing; one file is released at most once. Downgrade refuses while any HealthDocumentRecord context exists. |
+| 0097 | monitor_control_room | CREATE monitor_scopes, facility_pulse | State/district control room (realm role `monitor`): which area each officer may see, and a 15-minute count capture per facility. Counts only, no patient identifiers. See docs/control-room-design-2026-10-10.md. |
+| 0098 | facility_pulse_detail | ALTER facility_pulse: add detail column | Control-room drill-down kept with each capture: beds by ward, medicines below reorder level, batches expiring in 30 days (each at most 50, no patient data). |
+| 0099 | diagnosis_daily_counts | CREATE diagnosis_daily_counts | Control-room disease trends: distinct patients per normalised ICD code per facility per local day (provisional and final; not differential). Small counts are suppressed when read. |
+| 0100 | equipment_register | CREATE equipment, equipment_status_events; ALTER facility_pulse: add equipment counts | Equipment register with status history (working, down, maintenance, retired; reason required unless working). The control room counts machines not working; a critical one turns the facility red. |
+| 0101 | facility_publish_availability | ALTER facilities: add publish_availability | A facility opts in to the public bed and blood availability page (no login, counts from the 15-minute capture). Off by default. |
+| 0102 | appointment_requests | CREATE appointment_requests | Patient-portal appointment requests: department, day, morning or afternoon, in person or teleconsultation. Reception confirms (creating a normal appointment through the desk's checks) or declines with a reason the patient reads. No clock-time slots: HealthDoc records shift names, not clinic hours. |
+| 0103 | mch_records | CREATE mch_pregnancies, mch_anc_visits, mch_deliveries, mch_newborns | Maternal and child health, record only (owner decision 10 Oct 2026): no schedule, computed due date or inferred risk. High risk is a clinician's flag with a reason. Range checks catch mistyped values; they are not clinical thresholds. The control room counts these per facility. |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -323,6 +330,7 @@ timezone        varchar(50) NOT NULL DEFAULT 'Asia/Kolkata'  -- IANA tz; drives 
                                                  -- TZ-DATE fix references this column, so it
                                                  -- must land before 0004. (Found v3.15.)
 is_active       boolean NOT NULL DEFAULT true
+publish_availability boolean NOT NULL DEFAULT false  -- 0101: list free beds and blood on public /availability
 ```
 
 **users** (credentials live in Keycloak — this row is the app-side profile)
@@ -2197,6 +2205,150 @@ Releasing publishes `document/UUID` as a HealthDocumentRecord in the same
 transaction. Only PDFs of 1 MB or less (HealthDoc's HIU renders only PDFs).
 The facility authors the record; transfer embeds the exact uploaded bytes and
 refuses an object whose SHA-256 no longer matches. Erasing the file withdraws it.
+
+**monitor_scopes** (0097) — the area a control-room officer may see
+```
+keycloak_sub varchar(64) NOT NULL                 -- officers have no users row: they work for no hospital
+username varchar(100) NOT NULL · granted_by_sub varchar(64) NOT NULL
+state_code varchar(5) NOT NULL
+district varchar(100)                             -- NULL = whole state; CHECK trim(district) <> ''
+UNIQUE (keycloak_sub, state_code, district); UNIQUE (keycloak_sub, state_code) WHERE district IS NULL
+```
+With no row, GET /monitor/board is refused (403 monitor_scope_missing), never shown empty.
+
+**facility_pulse** (0097) — one 15-minute capture of a facility's counts
+```
+facility_id UUID NOT NULL → facilities ON DELETE CASCADE · captured_at timestamptz NOT NULL
+opd_today integer NOT NULL CHECK (>= 0)
+queue_waiting integer NOT NULL CHECK (>= 0)
+emergency_open integer NOT NULL CHECK (>= 0)
+admitted_now integer NOT NULL CHECK (>= 0)
+beds_total integer NOT NULL CHECK (>= 0)
+lab_pending integer NOT NULL CHECK (>= 0)
+stock_below_reorder integer NOT NULL CHECK (>= 0)
+batches_expiring_30d integer NOT NULL CHECK (>= 0)
+staff_rostered_today integer NOT NULL CHECK (>= 0)
+equipment_down integer NOT NULL DEFAULT 0          -- 0100: down or in maintenance
+critical_equipment_down integer NOT NULL DEFAULT 0 -- 0100: of those, marked critical
+detail jsonb NOT NULL DEFAULT '{}'                -- 0098: wards[], stock_short[], expiring[]; bounded, no patient data
+INDEX (facility_id, captured_at)
+```
+Written by `scripts.run_monitor_capture`; rows older than 90 days are deleted.
+admitted_now counts admissions with status 'admitted' (beds.status is a mirror);
+beds_total excludes beds in maintenance and inactive wards; stock counts exclude expired batches.
+
+**diagnosis_daily_counts** (0099) — patients per diagnosis code per facility per day
+```
+facility_id UUID NOT NULL → facilities ON DELETE CASCADE
+day date NOT NULL                                 -- facility-local date
+icd_version varchar(30) NOT NULL
+icd_code varchar(30) NOT NULL                     -- upper-cased, trimmed
+patients integer NOT NULL CHECK (patients > 0)    -- distinct patients; differentials excluded
+updated_at timestamptz NOT NULL DEFAULT now()
+UNIQUE (facility_id, day, icd_version, icd_code); INDEX (day)
+```
+Rewritten for today and yesterday on every capture. GET /monitor/trends shows counts
+below 5 as "<5"; titles come from icd_codes, never from diagnosis free text.
+
+**mch_pregnancies** (0103) — one pregnancy, as the clinician records it
+```
+facility_id UUID NOT NULL → facilities · patient_id UUID NOT NULL → patients
+lmp_date date
+edd date                                          -- as entered; HealthDoc does not compute it
+gravida integer CHECK (1..20)
+para integer CHECK (0..20)
+rch_id varchar(30)                                -- state RCH portal id, when one exists
+status varchar(50) NOT NULL DEFAULT 'active'      -- active|delivered|ended
+high_risk boolean NOT NULL DEFAULT false          -- a clinician's flag; reason required (CHECK)
+high_risk_reason text
+end_reason text                                   -- required when ended (CHECK)
+created_by UUID NOT NULL → users
+UNIQUE (facility_id, patient_id) WHERE status = 'active'; INDEX (facility_id, status), (patient_id), (created_by)
+```
+
+**mch_anc_visits** (0103) — one antenatal visit
+```
+pregnancy_id UUID NOT NULL → mch_pregnancies · facility_id UUID NOT NULL → facilities
+visit_date date NOT NULL                          -- not in the future
+gestation_weeks integer CHECK (1..45)
+weight_kg numeric(5,1) CHECK (20..250)
+bp_systolic integer CHECK (50..260)
+bp_diastolic integer CHECK (20..180)              -- both or neither (API)
+hemoglobin_g_dl numeric(4,1) CHECK (2..22)
+fundal_height_cm integer CHECK (5..50)
+fetal_heart_rate integer CHECK (50..240)
+urine_albumin varchar(50)                         -- nil|trace|+|++|+++
+urine_sugar varchar(50)                           -- nil|trace|+|++|+++
+ifa_tablets integer CHECK (0..400)
+notes text
+recorded_by UUID NOT NULL → users
+INDEX (pregnancy_id, visit_date), (facility_id, visit_date), (recorded_by)
+```
+
+**mch_deliveries** (0103) — the delivery that closes a pregnancy
+```
+pregnancy_id UUID NOT NULL → mch_pregnancies UNIQUE · facility_id UUID NOT NULL → facilities
+delivered_at timestamptz NOT NULL                 -- not in the future
+mode varchar(50) NOT NULL                         -- normal|assisted|caesarean
+notes text
+recorded_by UUID NOT NULL → users
+INDEX (facility_id, delivered_at), (recorded_by)
+```
+
+**mch_newborns** (0103) — each baby of a delivery
+```
+delivery_id UUID NOT NULL → mch_deliveries · facility_id UUID NOT NULL → facilities
+outcome varchar(50) NOT NULL                      -- live_birth|still_birth
+sex varchar(50) NOT NULL                          -- male|female|other|unknown
+birth_weight_g integer CHECK (200..7000)
+patient_id UUID → patients                        -- the baby's own chart, once registered
+INDEX (delivery_id), (facility_id), (patient_id)
+```
+All four are audited and repointed on patient merge. Doctors and nurses write; admin reads.
+
+**appointment_requests** (0102) — a patient's request from the portal, before reception books it
+```
+facility_id UUID NOT NULL → facilities · patient_id UUID NOT NULL → patients
+requested_by UUID NOT NULL → users               -- the portal account (may be a guardian)
+department_id UUID NOT NULL → departments
+preferred_date date NOT NULL                      -- today to 60 days ahead
+session varchar(50) NOT NULL                      -- morning|afternoon
+is_teleconsult boolean NOT NULL DEFAULT false
+reason text                                       -- the patient's words; reception only
+status varchar(50) NOT NULL DEFAULT 'requested'   -- requested|confirmed|declined|withdrawn
+appointment_id UUID → appointments                -- set exactly when confirmed (CHECK)
+decided_by UUID → users
+decline_reason text                               -- required when declined (CHECK)
+INDEX (facility_id, status, preferred_date) and one per foreign key
+```
+At most 3 open requests per patient. Audited (resource type `appointment_requests`).
+
+**equipment** (0100) — a facility's machines and whether they work
+```
+facility_id UUID NOT NULL → facilities
+name varchar(120) NOT NULL CHECK (trim(name) <> '')
+category varchar(50) NOT NULL                      -- imaging|laboratory|life_support|monitoring|surgical|sterilisation|power|cold_chain|other
+location varchar(120)
+asset_tag varchar(60)                              -- UNIQUE (facility_id, asset_tag)
+is_critical boolean NOT NULL DEFAULT false         -- critical and not working turns the control-room row red
+status varchar(50) NOT NULL DEFAULT 'working'      -- working|down|maintenance|retired
+status_since timestamptz NOT NULL DEFAULT now()
+status_reason text                                 -- required for any status but working
+created_by UUID NOT NULL → users
+INDEX (facility_id, status); INDEX (created_by)
+```
+Audited (resource type `equipment`). Register and retire: admin. Report down/back: admin, hod, doctor, nurse, lab_tech, radiology_tech. Retired is final.
+
+**equipment_status_events** (0100) — append-only history of every status change
+```
+equipment_id UUID NOT NULL → equipment · facility_id UUID NOT NULL → facilities
+from_status varchar(50)                            -- NULL on registration
+to_status varchar(50) NOT NULL
+reason text
+changed_by UUID NOT NULL → users
+changed_at timestamptz NOT NULL DEFAULT now()
+INDEX (equipment_id, changed_at); INDEX (facility_id); INDEX (changed_by)
+```
 
 **abdm_care_context_links** (0055) — an ABHA address's claim on those contexts
 ```

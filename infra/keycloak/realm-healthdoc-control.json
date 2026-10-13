@@ -1,0 +1,92 @@
+{
+  "realm": "healthdoc-control",
+  "displayName": "HealthDoc Control Room",
+  "displayNameHtml": "HealthDoc Control Room",
+  "loginTheme": "healthdoc",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "bruteForceProtected": true,
+  "failureFactor": 5,
+  "waitIncrementSeconds": 900,
+  "maxFailureWaitSeconds": 900,
+  "permanentLockout": false,
+  "minimumQuickLoginWaitSeconds": 60,
+  "quickLoginCheckMilliSeconds": 1000,
+  "maxDeltaTimeSeconds": 43200,
+  "accessTokenLifespan": 900,
+  "ssoSessionIdleTimeout": 1800,
+  "otpPolicyType": "totp",
+  "otpPolicyAlgorithm": "HmacSHA1",
+  "otpPolicyDigits": 6,
+  "otpPolicyPeriod": 30,
+  "otpPolicyLookAheadWindow": 1,
+  "otpPolicyCodeReusable": false,
+  "requiredActions": [
+    {
+      "alias": "CONFIGURE_TOTP",
+      "name": "Configure OTP",
+      "providerId": "CONFIGURE_TOTP",
+      "enabled": true,
+      "defaultAction": false,
+      "priority": 10,
+      "config": {}
+    }
+  ],
+  "roles": {
+    "realm": [
+      {
+        "name": "monitor",
+        "description": "State or district control room: counts per facility inside the granted area. No patient identifiers."
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "healthdoc-control-frontend",
+      "name": "HealthDoc Control Room",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "protocol": "openid-connect",
+      "redirectUris": [
+        "https://localhost/*",
+        "http://localhost:3000/*",
+        "https://192.168.7.106/*"
+      ],
+      "webOrigins": [
+        "https://localhost",
+        "http://localhost:3000",
+        "https://192.168.7.106"
+      ],
+      "protocolMappers": [
+        {
+          "name": "Authentication Method Reference",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-amr-mapper",
+          "consentRequired": false,
+          "config": {
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "lightweight.claim": "false"
+          }
+        },
+        {
+          "name": "healthdoc-backend-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "healthdoc-backend",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "+"
+      }
+    }
+  ]
+}

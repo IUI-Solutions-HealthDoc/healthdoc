@@ -97,18 +97,43 @@ def _harden(realm: dict) -> None:
     # request that reached the container over plain HTTP through.
     realm["sslRequired"] = "all"
 
+    # The source realm carries the dev.* accounts with their shared dev
+    # password. A production realm must not: Keycloak 25 refuses to import
+    # them under the policy above and the server does not start, and under a
+    # weaker policy they would be live logins. Production staff are created by
+    # the platform and facility admins, never imported.
+    realm.pop("users", None)
 
-def render(source: Path, destination: Path, public_base_url: str) -> None:
+
+def render(
+    source: Path,
+    destination: Path,
+    public_base_url: str,
+    *,
+    client_id: str = "healthdoc-frontend",
+    own_frontend_url: bool = False,
+) -> None:
+    """Render one realm for production.
+
+    The staff realm (healthdoc) is served at the hospital address Keycloak is
+    pinned to. The control-room realm (healthdoc-control) is served at the
+    control room's own address, like BHAVYA's separate command-centre host:
+    `own_frontend_url` sets the realm's frontendUrl there, so its login pages,
+    cookies and token issuer all belong to that address and never to the
+    hospital's.
+    """
     base = public_base_url.rstrip("/")
     parsed = urlsplit(base)
     if parsed.scheme != "https" or not parsed.netloc or parsed.path or parsed.query:
         raise ValueError("PUBLIC_BASE_URL must be an HTTPS origin without a path or query")
     realm = json.loads(source.read_text(encoding="utf-8"))
-    clients = [item for item in realm["clients"] if item.get("clientId") == "healthdoc-frontend"]
+    clients = [item for item in realm["clients"] if item.get("clientId") == client_id]
     if len(clients) != 1:
-        raise ValueError("realm must contain exactly one healthdoc-frontend client")
+        raise ValueError(f"realm must contain exactly one {client_id} client")
     clients[0]["redirectUris"] = [f"{base}/*"]
     clients[0]["webOrigins"] = [base]
+    if own_frontend_url:
+        realm.setdefault("attributes", {})["frontendUrl"] = f"{base}/auth"
     _harden(realm)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(json.dumps(realm, indent=2) + "\n", encoding="utf-8")
@@ -119,5 +144,13 @@ if __name__ == "__main__":
     parser.add_argument("source", type=Path)
     parser.add_argument("destination", type=Path)
     parser.add_argument("--public-base-url", required=True)
+    parser.add_argument("--client-id", default="healthdoc-frontend")
+    parser.add_argument(
+        "--own-frontend-url", action="store_true",
+        help="serve this realm's login at --public-base-url (the control-room realm)",
+    )
     args = parser.parse_args()
-    render(args.source, args.destination, args.public_base_url)
+    render(
+        args.source, args.destination, args.public_base_url,
+        client_id=args.client_id, own_frontend_url=args.own_frontend_url,
+    )

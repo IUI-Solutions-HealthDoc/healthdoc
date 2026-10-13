@@ -111,3 +111,48 @@ export async function getPortalDocumentDetail(
   );
 }
 
+
+export interface PortalDepartment {
+  id: string;
+  name: string;
+  name_hi: string | null;
+}
+
+export interface PortalAppointmentRequest {
+  id: string;
+  department_name: string;
+  preferred_date: string;
+  session: "morning" | "afternoon";
+  is_teleconsult: boolean;
+  reason: string | null;
+  status: "requested" | "confirmed" | "declined" | "withdrawn";
+  decline_reason: string | null;
+  created_at: string;
+  appointment_date: string | null;
+  start_time: string | null;
+  doctor_name: string | null;
+  teleconsult_status: string | null;
+}
+
+export function listPortalDepartments(): Promise<PortalDepartment[]> {
+  return api<PortalDepartment[]>("/patient-portal/me/appointment-departments");
+}
+
+export function listPortalAppointmentRequests(): Promise<PortalAppointmentRequest[]> {
+  return api<PortalAppointmentRequest[]>("/patient-portal/me/appointment-requests");
+}
+
+export function requestPortalAppointment(
+  body: { department_id: string; preferred_date: string; session: "morning" | "afternoon"; is_teleconsult: boolean; reason: string | null },
+  idempotencyKey: string,
+): Promise<PortalAppointmentRequest> {
+  return api<PortalAppointmentRequest>("/patient-portal/me/appointment-requests", {
+    method: "POST", idempotencyKey, body: JSON.stringify(body),
+  });
+}
+
+export function withdrawPortalAppointmentRequest(id: string): Promise<PortalAppointmentRequest> {
+  return api<PortalAppointmentRequest>(`/patient-portal/me/appointment-requests/${id}/withdraw`, {
+    method: "POST", idempotencyKey: null,
+  });
+}

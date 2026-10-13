@@ -123,3 +123,18 @@ export function setRosterAvailability(
     body: JSON.stringify({ is_available: isAvailable }),
   });
 }
+
+/**
+ * Cover for an absent doctor: every waiting patient in `queueId` moves to
+ * the covering doctor's queue, in turn, and `queueId` closes. Safe to retry:
+ * a repeat finds nobody waiting and moves nobody.
+ */
+export function handOverQueue(
+  queueId: string,
+  targetQueueId: string,
+): Promise<{ queue_id: string; target_queue_id: string; moved: number; closed: boolean }> {
+  return api(`/queue/${queueId}/hand-over`, {
+    method: "POST",
+    body: JSON.stringify({ target_queue_id: targetQueueId }),
+  });
+}

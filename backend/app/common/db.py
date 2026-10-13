@@ -1,4 +1,5 @@
 """Async SQLAlchemy session + declarative base. Modules define models on Base."""
+import ssl
 from collections.abc import AsyncGenerator
 
 from sqlalchemy import MetaData
@@ -21,7 +22,22 @@ class Base(DeclarativeBase):
     metadata = MetaData(naming_convention=NAMING_CONVENTION)
 
 
-engine = create_async_engine(get_settings().database_url, pool_pre_ping=True)
+def _connect_args(ca_file: str | None) -> dict:
+    """TLS to the database when a CA is configured (the control-room server).
+
+    A default context verifies the chain AND the host name, i.e. libpq's
+    verify-full. "require" alone would encrypt to whoever answers on the
+    private address, which is the attack TLS is there to stop.
+    """
+    if not ca_file:
+        return {}
+    return {"ssl": ssl.create_default_context(cafile=ca_file)}
+
+
+engine = create_async_engine(
+    get_settings().database_url, pool_pre_ping=True,
+    connect_args=_connect_args(get_settings().database_ssl_ca_file),
+)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 

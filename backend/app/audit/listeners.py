@@ -374,6 +374,10 @@ AUDITABLE_MODULE_PREFIXES: tuple[str, ...] = (
     # packages carries a facility_id column and can opt in.
     "app.integrations.abdm.hip",
     "app.integrations.abdm.hiu",
+    # Equipment status changes are what a control room acts on (0100).
+    "app.equipment",
+    # Maternal records (0103).
+    "app.mch",
 )
 
 

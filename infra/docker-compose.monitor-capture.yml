@@ -1,0 +1,18 @@
+# Control-room capture: records every active facility's counts every 15 minutes.
+# Read-only on clinical tables; writes only facility_pulse and diagnosis_daily_counts.
+# docker compose --env-file .env -f infra/docker-compose.yml -f infra/docker-compose.monitor-capture.yml up -d --no-deps monitor-capture
+services:
+  monitor-capture:
+    build:
+      context: ../backend
+      target: dev
+    env_file: ../.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    volumes:
+      - ../backend:/code
+    command: ["python", "-m", "scripts.run_monitor_capture"]
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy

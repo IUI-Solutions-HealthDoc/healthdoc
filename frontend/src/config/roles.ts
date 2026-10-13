@@ -30,6 +30,7 @@ export const ROLES = {
   AUDITOR: "auditor",
   PATIENT: "patient",
   SUPERADMIN: "superadmin",
+  MONITOR: "monitor",
 } as const;
 
 export type Role = (typeof ROLES)[keyof typeof ROLES];

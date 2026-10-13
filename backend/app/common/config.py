@@ -13,10 +13,23 @@ class Settings(BaseSettings):
 
     environment: str = "dev"
     api_prefix: str = "/api/v1"
+    #: Which routes this API process serves (docs/control-room-design-2026-10-10.md,
+    #: "Deployment"). Like BHAVYA's separate command-centre host:
+    #:   all           development and single-host installs: everything
+    #:   hospital      the hospitals' API: everything except the control room
+    #:   control_room  the state/district control-room server: only /monitor,
+    #:                 session audit and health; no clinical, billing or admin route
+    api_mode: Literal["all", "hospital", "control_room"] = "all"
     # Enable after migration 0073; Compose enables this on upgraded deployments.
     abdm_callback_evidence_enabled: bool = False
 
     database_url: str = "postgresql+asyncpg://healthdoc:change-me@localhost:5432/healthdoc"
+    #: CA certificate to verify the database server against. Set on the
+    #: control-room server, which reaches the hospital's PostgreSQL across the
+    #: private network: the connection is then TLS with the certificate and
+    #: its host name verified, and a server that cannot prove itself is refused.
+    #: Unset: a plain connection, as inside one host's Docker network.
+    database_ssl_ca_file: str | None = None
     mongo_uri: str = "mongodb://localhost:27017/healthdoc"
     redis_url: str = "redis://localhost:6379/0"
 
@@ -37,6 +50,10 @@ class Settings(BaseSettings):
     #: deployments strict.
     jwt_additional_issuers: str = ""
     jwt_jwks_url: str | None = None
+    #: CA certificate for jwt_jwks_url when Keycloak is reached over HTTPS with a
+    #: private certificate (the control-room server). Only this fetch trusts it;
+    #: the process's other HTTPS calls keep the public trust store.
+    jwt_jwks_ca_file: str | None = None
     #: Expected `aud` on every access token. Unset disables the check.
     #:
     #: Keycloak only emits a resource-server audience when a client has an
@@ -48,6 +65,11 @@ class Settings(BaseSettings):
     oidc_audience: str = "account"
     keycloak_base_url: str = "http://keycloak:8080/auth"
     keycloak_realm: str = "healthdoc"
+    #: Realm control-room officers live in. Production sets healthdoc-control, a
+    #: separate realm served at the control room's own address, so officers and
+    #: hospital staff never share a login (as BHAVYA's command centre). Unset,
+    #: officers are created in keycloak_realm: development's single-host stack.
+    keycloak_monitor_realm: str | None = None
     keycloak_admin: str = "admin"
     keycloak_admin_password: str = "change-me"
 

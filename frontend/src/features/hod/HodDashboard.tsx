@@ -35,6 +35,7 @@ import {
   listPendingApprovals,
   listPendingLabOrders,
 } from "./api";
+import { QueueHandOver } from "./QueueHandOver";
 import { RosterManager } from "./RosterManager";
 import type {
   DepartmentWorkload,
@@ -232,6 +233,7 @@ export function HodDashboard() {
                 {q.waiting_count} waiting
                 {q.now_serving ? ` · now serving ${q.now_serving}` : " · none called yet"}
               </p>
+              <QueueHandOver queue={q} others={overview.queues} onDone={() => void load()} />
             </li>
           ))}
         </ul>

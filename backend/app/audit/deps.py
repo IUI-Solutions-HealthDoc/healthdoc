@@ -67,6 +67,7 @@ _ROLE_PRIORITY: tuple[str, ...] = (
     "hod",
     "supervisor",
     "auditor",
+    "monitor",
     "doctor",
     "nurse",
     "lab_tech",

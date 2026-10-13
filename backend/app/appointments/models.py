@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date
+
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
@@ -100,4 +101,64 @@ class Appointment(Base, UUIDPk, Timestamps, Blame):
         Index("ix_appointments_follow_up_from_visit_id", "follow_up_from_visit_id"),
         Index("ix_appointments_created_by", "created_by"),
         Index("ix_appointments_updated_by", "updated_by"),
+    )
+
+
+#: Patient-portal requests (0102). A request is not an appointment: reception
+#: confirms it with a time (and doctor), which creates an Appointment through
+#: the same create path and checks as a desk booking, or declines it with a reason.
+REQUEST_STATUSES = ("requested", "confirmed", "declined", "withdrawn")
+REQUEST_SESSIONS = ("morning", "afternoon")
+
+
+class AppointmentRequest(Base, UUIDPk, Timestamps):
+    __tablename__ = "appointment_requests"
+    __audit_resource_type__ = "appointment_requests"
+    __audit_facility_id_field__ = "facility_id"
+
+    facility_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="RESTRICT"), nullable=False
+    )
+    patient_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("patients.id", ondelete="RESTRICT"), nullable=False
+    )
+    #: The portal account that asked: a guardian may hold the binding, not the patient.
+    requested_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    department_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("departments.id", ondelete="RESTRICT"), nullable=False
+    )
+    preferred_date: Mapped[date] = mapped_column(Date, nullable=False)
+    session: Mapped[str] = mapped_column(String(50), nullable=False)
+    is_teleconsult: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    #: In the patient's words; shown to reception only.
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(50), nullable=False, server_default="requested")
+    appointment_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("appointments.id", ondelete="RESTRICT"), nullable=True
+    )
+    decided_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=True
+    )
+    decline_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('requested', 'confirmed', 'declined', 'withdrawn')", name="appointment_request_status"
+        ),
+        CheckConstraint("session IN ('morning', 'afternoon')", name="appointment_request_session"),
+        CheckConstraint(
+            "(status = 'confirmed') = (appointment_id IS NOT NULL)", name="appointment_request_confirmed_has_appointment"
+        ),
+        CheckConstraint(
+            "status <> 'declined' OR (decline_reason IS NOT NULL AND trim(decline_reason) <> '')",
+            name="appointment_request_decline_reason",
+        ),
+        Index("ix_appointment_requests_facility_status", "facility_id", "status", "preferred_date"),
+        Index("ix_appointment_requests_patient_id", "patient_id"),
+        Index("ix_appointment_requests_requested_by", "requested_by"),
+        Index("ix_appointment_requests_department_id", "department_id"),
+        Index("ix_appointment_requests_appointment_id", "appointment_id"),
+        Index("ix_appointment_requests_decided_by", "decided_by"),
     )

@@ -92,6 +92,9 @@ const ROLE_RANK: Record<Role, number> = {
   [ROLES.BILLING]: 11,
   [ROLES.RECEPTIONIST]: 12,
   [ROLES.PATIENT]: 13,
+  // A control-room officer holds no other role; ranked last so it never
+  // displaces a clinical workspace if one is ever added.
+  [ROLES.MONITOR]: 14,
 };
 
 const ROLE_PRECEDENCE: readonly Role[] = (Object.keys(ROLE_RANK) as Role[]).sort(

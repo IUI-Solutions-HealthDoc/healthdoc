@@ -242,6 +242,12 @@ class TokenReassign(BaseModel):
     target_queue_id: uuid.UUID
 
 
+class QueueHandOver(BaseModel):
+    """Cover for an absent doctor: the queue whose patients the covering doctor takes."""
+
+    target_queue_id: uuid.UUID
+
+
 class DepartmentWorkloadOut(BaseModel):
     department_id: uuid.UUID
     date: date

@@ -1,0 +1,110 @@
+"""Control-room tables (migrations 0097–0099). See docs/control-room-design-2026-10-10.md."""
+
+import uuid
+from datetime import date, datetime
+
+from sqlalchemy import (
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+    func,
+    text,
+)
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.common.db import Base
+from app.common.models import Timestamps, UUIDPk
+
+
+class MonitorScope(Base, UUIDPk, Timestamps):
+    """Which facilities a `monitor` may see: a whole state, or one district of it.
+
+    Keyed by Keycloak subject, not users.id: a state or district officer belongs
+    to no hospital, so has no users row (the same reason platform uses the JWT).
+    """
+
+    __tablename__ = "monitor_scopes"
+    __table_args__ = (
+        UniqueConstraint("keycloak_sub", "state_code", "district", name="uq_monitor_scopes_sub_area"),
+        CheckConstraint("district IS NULL OR trim(district) <> ''", name="ck_monitor_scopes_district"),
+        # NULL <> NULL: the unique constraint does not stop two whole-state grants.
+        Index(
+            "uq_monitor_scopes_sub_whole_state", "keycloak_sub", "state_code", unique=True,
+            postgresql_where=text("district IS NULL"), sqlite_where=text("district IS NULL"),
+        ),
+    )
+
+    keycloak_sub: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    username: Mapped[str] = mapped_column(String(100), nullable=False)
+    state_code: Mapped[str] = mapped_column(String(5), nullable=False)
+    #: NULL means the whole state.
+    district: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    granted_by_sub: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class FacilityPulse(Base, UUIDPk):
+    """One capture of a facility's live state, taken every 15 minutes.
+
+    Counts only. Nothing here identifies a patient, so the board can be shown
+    to an officer outside the facility without a care relationship.
+    """
+
+    __tablename__ = "facility_pulse"
+    __table_args__ = (
+        Index("ix_facility_pulse_facility_captured", "facility_id", "captured_at"),
+        *(
+            CheckConstraint(f"{name} >= 0", name=f"ck_facility_pulse_{name}")
+            for name in (
+                "opd_today", "queue_waiting", "emergency_open", "admitted_now", "beds_total",
+                "lab_pending", "stock_below_reorder", "batches_expiring_30d", "staff_rostered_today",
+            )
+        ),
+    )
+
+    facility_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="CASCADE"), nullable=False
+    )
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    opd_today: Mapped[int] = mapped_column(Integer, nullable=False)
+    queue_waiting: Mapped[int] = mapped_column(Integer, nullable=False)
+    emergency_open: Mapped[int] = mapped_column(Integer, nullable=False)
+    admitted_now: Mapped[int] = mapped_column(Integer, nullable=False)
+    beds_total: Mapped[int] = mapped_column(Integer, nullable=False)
+    lab_pending: Mapped[int] = mapped_column(Integer, nullable=False)
+    stock_below_reorder: Mapped[int] = mapped_column(Integer, nullable=False)
+    batches_expiring_30d: Mapped[int] = mapped_column(Integer, nullable=False)
+    staff_rostered_today: Mapped[int] = mapped_column(Integer, nullable=False)
+    #: 0100: machines down now, and how many of those are marked critical.
+    equipment_down: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    critical_equipment_down: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    #: wards / stock_short / expiring, bounded lists, no patient data (0098).
+    detail: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default=text("'{}'"))
+
+
+class DiagnosisDailyCount(Base, UUIDPk):
+    """Distinct patients per diagnosis code per facility per local day (0099).
+
+    Counts only; the label is read from icd_codes, never from free text.
+    """
+
+    __tablename__ = "diagnosis_daily_counts"
+    __table_args__ = (
+        UniqueConstraint("facility_id", "day", "icd_version", "icd_code", name="uq_diagnosis_daily_counts"),
+        CheckConstraint("patients > 0", name="ck_diagnosis_daily_counts_patients"),
+        Index("ix_diagnosis_daily_counts_day", "day"),
+    )
+
+    facility_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("facilities.id", ondelete="CASCADE"), nullable=False
+    )
+    day: Mapped[date] = mapped_column(Date, nullable=False)
+    icd_version: Mapped[str] = mapped_column(String(30), nullable=False)
+    icd_code: Mapped[str] = mapped_column(String(30), nullable=False)
+    patients: Mapped[int] = mapped_column(Integer, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())

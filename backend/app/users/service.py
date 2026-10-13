@@ -7,10 +7,10 @@ from app.common.config import get_settings
 
 
 class KeycloakAdmin:
-    def __init__(self) -> None:
+    def __init__(self, realm: str | None = None) -> None:
         s = get_settings()
         self.base = s.keycloak_base_url.rstrip("/")
-        self.realm = s.keycloak_realm
+        self.realm = realm or s.keycloak_realm
         self.admin_user = s.keycloak_admin
         self.admin_password = s.keycloak_admin_password
 

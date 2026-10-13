@@ -3,6 +3,29 @@ name: healthdoc-prod
 x-restart: &restart {restart: unless-stopped}
 
 services:
+  # The private-link certificate (control-room/make-private-certs.sh), copied
+  # into a volume owned by each server's user: PostgreSQL refuses a key others
+  # can read, and Keycloak runs as uid 1000.
+  private-tls-init:
+    image: alpine:3.20
+    command:
+      - sh
+      - -ec
+      - |
+        for d in pg:70 kc:1000; do
+          dir=/out/$${d%%:*}; uid=$${d##*:}
+          mkdir -p $$dir
+          cp /in/server.crt $$dir/server.crt
+          cp /in/server.key $$dir/server.key
+          chown $$uid $$dir/server.crt $$dir/server.key
+          chmod 0644 $$dir/server.crt
+          chmod 0600 $$dir/server.key
+        done
+    volumes:
+      - ${PRIVATE_TLS_CERT_PATH:?required}:/in/server.crt:ro
+      - ${PRIVATE_TLS_KEY_PATH:?required}:/in/server.key:ro
+      - private-tls:/out
+
   postgres:
     <<: *restart
     image: postgres:16-alpine
@@ -10,7 +33,31 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:?required}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
       POSTGRES_DB: ${POSTGRES_DB:?required}
-    volumes: [postgres-data:/var/lib/postgresql/data]
+    # TLS for the control-room server, which connects across the private
+    # network as the least-privileged role in control-room/db-role.sql;
+    # pg_hba.conf refuses that role without TLS. Hospital containers on this
+    # host's Docker network connect as before.
+    command:
+      - postgres
+      - -c
+      - ssl=on
+      - -c
+      - ssl_cert_file=/tls/pg/server.crt
+      - -c
+      - ssl_key_file=/tls/pg/server.key
+      - -c
+      - ssl_min_protocol_version=TLSv1.2
+      - -c
+      - hba_file=/etc/postgresql/pg_hba.conf
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - private-tls:/tls:ro
+      - ./control-room/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+    # Loopback until the operator sets PRIVATE_BIND_ADDRESS to this host's
+    # private-network address.
+    ports: ["${PRIVATE_BIND_ADDRESS:-127.0.0.1}:5432:5432"]
+    depends_on:
+      private-tls-init: {condition: service_completed_successfully}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
@@ -59,9 +106,19 @@ services:
   realm-init:
     image: python:3.12-alpine
     environment: {PUBLIC_BASE_URL: "https://${PUBLIC_HOST:?required}"}
-    command: ["python", "/tools/render_keycloak_realm.py", "/source/realm-healthdoc.json", "/import/realm-healthdoc.json", "--public-base-url", "https://${PUBLIC_HOST:?required}"]
+    # Two realms: hospital staff at PUBLIC_HOST, control-room officers at their
+    # own CONTROL_ROOM_HOST (frontendUrl), as BHAVYA separates hims.* from its
+    # command centre. docs/control-room-design-2026-10-10.md, "Deployment".
+    entrypoint: ["sh", "-c"]
+    command:
+      - >-
+        python /tools/render_keycloak_realm.py /source/realm-healthdoc.json /import/realm-healthdoc.json
+        --public-base-url https://${PUBLIC_HOST:?required} &&
+        python /tools/render_keycloak_realm.py /source/realm-healthdoc-control.json /import/realm-healthdoc-control.json
+        --public-base-url https://${CONTROL_ROOM_HOST:?required} --client-id healthdoc-control-frontend --own-frontend-url
     volumes:
       - ./keycloak/realm-healthdoc.json:/source/realm-healthdoc.json:ro
+      - ./keycloak/realm-healthdoc-control.json:/source/realm-healthdoc-control.json:ro
       - ../scripts/deploy/render_keycloak_realm.py:/tools/render_keycloak_realm.py:ro
       - keycloak-import:/import
 
@@ -78,12 +135,21 @@ services:
       KC_PROXY_HEADERS: xforwarded
       KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:?required}
       KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?required}
+      # HTTPS for the control-room server only (its nginx and API fetch the
+      # healthdoc-control realm across the private network). This host's own
+      # nginx keeps using plain 8080 inside the Docker network.
+      KC_HTTPS_CERTIFICATE_FILE: /tls/kc/server.crt
+      KC_HTTPS_CERTIFICATE_KEY_FILE: /tls/kc/server.key
+      KC_HTTPS_PORT: "8443"
+    ports: ["${PRIVATE_BIND_ADDRESS:-127.0.0.1}:8443:8443"]
     volumes:
       - keycloak-import:/opt/keycloak/data/import:ro
       - ./keycloak/themes/healthdoc:/opt/keycloak/themes/healthdoc:ro
+      - private-tls:/tls:ro
     depends_on:
       keycloak-db: {condition: service_healthy}
       realm-init: {condition: service_completed_successfully}
+      private-tls-init: {condition: service_completed_successfully}
 
   minio:
     <<: *restart
@@ -129,6 +195,10 @@ services:
     env_file: ../${HEALTHDOC_ENV_FILE:-.env.production}
     environment:
       ENVIRONMENT: production
+      # The hospitals' API: everything except the control room, which runs on
+      # its own server (docker-compose.control-room.yml).
+      API_MODE: hospital
+      KEYCLOAK_MONITOR_REALM: healthdoc-control
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       MONGO_URI: mongodb://${MONGO_ROOT_USER}:${MONGO_ROOT_PASSWORD}@mongo:27017/healthdoc?authSource=admin
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
@@ -146,6 +216,22 @@ services:
       redis: {condition: service_healthy}
       keycloak: {condition: service_started}
       minio-init: {condition: service_completed_successfully}
+
+  # Control room (docs/control-room-design-2026-10-10.md): every 15 minutes,
+  # counts per facility for the state/district board. Same image as backend.
+  # It stays on the hospital server, which already has full access: the
+  # control-room server only reads what it writes, as a role that cannot read
+  # patients (infra/control-room/db-role.sql).
+  monitor-capture:
+    <<: *restart
+    image: ${HEALTHDOC_BACKEND_IMAGE:?required}
+    env_file: ../${HEALTHDOC_ENV_FILE:-.env.production}
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    command: ["python", "-m", "scripts.run_monitor_capture"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
 
   frontend:
     <<: *restart
@@ -210,6 +296,7 @@ services:
       keycloak: {condition: service_started}
 
 volumes:
+  private-tls:
   postgres-data:
   mongo-data:
   redis-data:

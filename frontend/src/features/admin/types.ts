@@ -20,7 +20,8 @@ export type RealmRole =
   | "hod"
   | "auditor"
   | "patient"
-  | "superadmin";
+  | "superadmin"
+  | "monitor";
 
 export type Facility = {
   id: string;

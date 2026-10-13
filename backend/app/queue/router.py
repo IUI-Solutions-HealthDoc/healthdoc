@@ -31,6 +31,7 @@ from app.queue.schemas import (
     PendingApprovalOut,
     PendingLabOrderOut,
     QueueCreate,
+    QueueHandOver,
     QueueOpeningOptionOut,
     QueueOpeningOptionsOut,
     QueueOut,
@@ -711,6 +712,32 @@ async def reassign_token(
         caller_department_id=caller_department_id,
     )
     return QueueTokenOut.model_validate(new_token).model_dump(mode="json")
+
+
+# ---------------- HOD DASHBOARD: HAND A QUEUE TO A COVERING DOCTOR ----------------
+@router.post(
+    "/{queue_id}/hand-over",
+    dependencies=[Depends(require_roles("hod"))],
+)
+async def hand_over_queue(
+    queue_id: uuid.UUID,
+    payload: QueueHandOver,
+    user: CurrentUser,
+    current_db_user: CurrentDbUser,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    _caller_user_id, _caller_facility_id, caller_department_id = await service.resolve_caller_full_context(
+        db, user.sub
+    )
+    moved = await service.hand_over_queue(
+        db,
+        source_queue_id=queue_id,
+        target_queue_id=payload.target_queue_id,
+        caller_facility_id=current_db_user.facility_id,
+        caller_roles=current_db_user.roles,
+        caller_department_id=caller_department_id,
+    )
+    return {"queue_id": str(queue_id), "target_queue_id": str(payload.target_queue_id), "moved": moved, "closed": True}
 
 
 # ---------------- HOD DASHBOARD: DEPARTMENT WORKLOAD ----------------

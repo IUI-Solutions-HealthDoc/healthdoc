@@ -8,6 +8,7 @@ import pytest
 from scripts.seed_dev_data import (
     DEPARTMENT_ID,
     DISPLAY_NAMES,
+    MONITOR_LOGINS,
     UPDATE_USER,
     UPSERT_USER,
     _assert_exact_bind_parameters,
@@ -61,4 +62,6 @@ def test_all_advertised_development_logins_have_seed_profiles():
     who could log in and had no row in `users` — which presents as a broken
     application, not a broken seed.
     """
-    assert set(DISPLAY_NAMES) == _advertised_logins()
+    # Officers are seeded as a granted area instead (no hospital, no users row).
+    assert not set(DISPLAY_NAMES) & MONITOR_LOGINS
+    assert set(DISPLAY_NAMES) | MONITOR_LOGINS == _advertised_logins()

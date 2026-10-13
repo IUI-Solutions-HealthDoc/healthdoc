@@ -2,20 +2,26 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
-from typing import Annotated, Any
+from datetime import date, datetime
+from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
+from sqlalchemy.orm import aliased
 
+from app.appointments import requests as appointment_requests
+from app.appointments.models import Appointment, AppointmentRequest
 from app.auth.deps import CurrentDbUser, require_roles
 from app.common.enums import AccessChannel
+from app.common.idempotency import check_idempotency, hash_request_body, record_idempotent_response
+from app.common.patient_scope import facility_today
 from app.consent.models import ConsentPurpose, ConsentRecord, DataAccessLog
+from app.departments.models import Department
+from app.opd.models import Encounter, Visit
 from app.patients.models import Patient, PatientPortalBinding
 from app.patients.portal_router import ActivePatientBinding, DbSession
 from app.users.models import Facility, User
-from app.opd.models import Encounter, Visit
 
 router = APIRouter(
     prefix="/patient-portal/me",
@@ -656,3 +662,126 @@ async def get_my_document_detail(
 
     else:
         raise HTTPException(status_code=400, detail={"code": "invalid_doc_type", "message": f"Invalid document type '{doc_type}'"})
+
+
+# ---------------- Appointment requests (0102) ----------------
+#
+# The patient asks; reception books. The patient chooses a department, a date
+# and morning or afternoon, never a clock time: HealthDoc records shift names,
+# not clinic hours (see app/appointments/requests.py).
+
+
+class MyDepartmentOut(BaseModel):
+    id: uuid.UUID
+    name: str
+    name_hi: str | None
+
+
+class MyAppointmentRequestIn(BaseModel):
+    department_id: uuid.UUID
+    preferred_date: date
+    session: Literal["morning", "afternoon"]
+    is_teleconsult: bool = False
+    reason: str | None = Field(default=None, max_length=500)
+
+
+class MyAppointmentRequestOut(BaseModel):
+    id: uuid.UUID
+    department_name: str
+    preferred_date: date
+    session: str
+    is_teleconsult: bool
+    reason: str | None
+    status: str
+    decline_reason: str | None
+    created_at: datetime
+    #: Filled once reception confirms.
+    appointment_date: date | None = None
+    start_time: str | None = None
+    doctor_name: str | None = None
+    teleconsult_status: str | None = None
+
+
+def _refused(exc: appointment_requests.RequestError) -> HTTPException:
+    return HTTPException(exc.status, {"code": exc.code, "message": exc.message})
+
+
+async def _my_requests(db: DbSession, patient_id: uuid.UUID, only: uuid.UUID | None = None) -> list[MyAppointmentRequestOut]:
+    doctor = aliased(User)
+    stmt = (
+        select(AppointmentRequest, Department.name, Appointment, doctor.full_name)
+        .join(Department, Department.id == AppointmentRequest.department_id)
+        .outerjoin(Appointment, Appointment.id == AppointmentRequest.appointment_id)
+        .outerjoin(doctor, doctor.id == Appointment.doctor_user_id)
+        .where(AppointmentRequest.patient_id == patient_id)
+        .order_by(AppointmentRequest.created_at.desc())
+        .limit(50)
+    )
+    if only is not None:
+        stmt = stmt.where(AppointmentRequest.id == only)
+    return [
+        MyAppointmentRequestOut(
+            id=req.id, department_name=dept, preferred_date=req.preferred_date, session=req.session,
+            is_teleconsult=req.is_teleconsult, reason=req.reason, status=req.status,
+            decline_reason=req.decline_reason, created_at=req.created_at,
+            appointment_date=appt.appointment_date if appt else None,
+            start_time=appt.start_time if appt else None,
+            doctor_name=doctor_name,
+            teleconsult_status=appt.teleconsult_status if appt else None,
+        )
+        for req, dept, appt, doctor_name in (await db.execute(stmt)).all()
+    ]
+
+
+@router.get("/appointment-departments", response_model=list[MyDepartmentOut])
+async def my_appointment_departments(binding: ActivePatientBinding, db: DbSession) -> list[MyDepartmentOut]:
+    departments = await appointment_requests.bookable_departments(db, binding.facility_id)
+    return [MyDepartmentOut(id=d.id, name=d.name, name_hi=d.name_hi) for d in departments]
+
+
+@router.get("/appointment-requests", response_model=list[MyAppointmentRequestOut])
+async def my_appointment_requests(binding: ActivePatientBinding, db: DbSession) -> list[MyAppointmentRequestOut]:
+    return await _my_requests(db, binding.patient_id)
+
+
+@router.post("/appointment-requests", status_code=201, response_model=MyAppointmentRequestOut)
+async def request_appointment(
+    payload: MyAppointmentRequestIn,
+    binding: ActivePatientBinding,
+    caller: CurrentDbUser,
+    db: DbSession,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> MyAppointmentRequestOut:
+    if not idempotency_key:
+        raise HTTPException(400, {"code": "missing_idempotency_key", "message": "Idempotency-Key header is required"})
+    endpoint = "POST /patient-portal/me/appointment-requests"
+    cached = await check_idempotency(db, idempotency_key, endpoint, hash_request_body(payload), caller.id)
+    if cached is not None:
+        return MyAppointmentRequestOut.model_validate(cached.response_body)
+    try:
+        created = await appointment_requests.create_request(
+            db, facility_id=binding.facility_id, patient_id=binding.patient_id, requested_by=caller.id,
+            department_id=payload.department_id, preferred_date=payload.preferred_date, session=payload.session,
+            is_teleconsult=payload.is_teleconsult, reason=payload.reason,
+            today=await facility_today(db, binding.facility_id),
+        )
+    except appointment_requests.RequestError as exc:
+        raise _refused(exc) from None
+    [out] = await _my_requests(db, binding.patient_id, only=created.id)
+    await record_idempotent_response(db, idempotency_key, endpoint, 201, out.model_dump(mode="json"), caller.id)
+    return out
+
+
+@router.post("/appointment-requests/{request_id}/withdraw", response_model=MyAppointmentRequestOut)
+async def withdraw_appointment_request(
+    request_id: uuid.UUID, binding: ActivePatientBinding, db: DbSession,
+) -> MyAppointmentRequestOut:
+    """Withdrawing twice is refused rather than repeated, so a retry is harmless."""
+    try:
+        await appointment_requests.withdraw(
+            db, request_id, patient_id=binding.patient_id, facility_id=binding.facility_id
+        )
+    except appointment_requests.RequestError as exc:
+        raise _refused(exc) from None
+    [out] = await _my_requests(db, binding.patient_id, only=request_id)
+    return out

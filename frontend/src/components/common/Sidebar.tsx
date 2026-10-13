@@ -27,6 +27,8 @@ import {
   Users,
   X,
   type LucideIcon,
+  Wrench,
+  Baby,
 } from "lucide-react";
 
 import { ROLES, type Role } from "@/config/roles";
@@ -71,10 +73,17 @@ const ROLE_KEYS: Partial<Record<Role, MessageKey>> = {
   [ROLES.AUDITOR]: "role.auditor",
   [ROLES.PATIENT]: "role.patient",
   [ROLES.SUPERADMIN]: "role.superadmin",
+  [ROLES.MONITOR]: "role.monitor",
 };
 
 const NAV_ITEMS: readonly NavItem[] = [
   { href: "/superadmin", labelKey: "sidebar.facilities", icon: Building2, area: "platform", roles: [ROLES.SUPERADMIN] },
+  { href: "/mch", labelKey: "sidebar.mch", icon: Baby, area: "clinical", roles: [ROLES.DOCTOR, ROLES.NURSE] },
+  {
+    href: "/equipment", labelKey: "sidebar.equipment", icon: Wrench, area: "clinical",
+    roles: [ROLES.ADMIN, ROLES.HOD, ROLES.DOCTOR, ROLES.NURSE, ROLES.LAB_TECH, ROLES.RADIOLOGY_TECH],
+  },
+  { href: "/monitor", labelKey: "sidebar.controlRoom", icon: LayoutDashboard, area: "platform", roles: [ROLES.MONITOR] },
   { href: "/hod", labelKey: "sidebar.hodDashboard", icon: LayoutDashboard, area: "clinical", roles: [ROLES.HOD] },
   { href: "/receptionist/registration", labelKey: "sidebar.registration", icon: UserRound, area: "front_desk", roles: [ROLES.RECEPTIONIST] },
   { href: "/receptionist/appointments", labelKey: "sidebar.appointments", icon: Calendar, area: "front_desk", roles: [ROLES.RECEPTIONIST] },

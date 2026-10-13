@@ -23,6 +23,10 @@
         "description": "Cloud-only platform owner: facilities, facility admins, DPO appointments, cross-facility MIS. NEVER patient/clinical data \u2014 including no merge/unmerge."
       },
       {
+        "name": "monitor",
+        "description": "State or district control room: counts per facility inside the granted area. No patient identifiers."
+      },
+      {
         "name": "receptionist",
         "description": "Registration, one-time payment, queue"
       },

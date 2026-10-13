@@ -36,6 +36,11 @@ class Facility(Base, UUIDPk, Timestamps):
     #: ABHA creation refuses until it is recorded.
     ownership: Mapped[str | None] = mapped_column(String(20))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    #: 0101: list this facility's free beds and blood stock on the public
+    #: /availability page. Off unless the owner turns it on.
+    publish_availability: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
 
     __table_args__ = (
         CheckConstraint(
