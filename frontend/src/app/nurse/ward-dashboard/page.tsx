@@ -69,6 +69,11 @@ function toOrder(task: NursingTask): Order {
     completed_at: task.completed_at,
     completed_by: task.completed_by,
     completion_note: task.completion_note,
+    order_number: task.order_number ?? undefined,
+    patient_name: task.patient_name,
+    patient_uhid: task.patient_uhid,
+    patient_age_years: task.patient_age_years,
+    patient_sex: task.patient_sex,
   };
 }
 

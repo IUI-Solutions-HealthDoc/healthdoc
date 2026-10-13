@@ -586,7 +586,7 @@ async def _write_audit_log(db: AsyncSession, *, table_name: str, row_id: uuid.UU
 @router.post(
     "/orders/{order_id}/attachments",
     response_model=RadiologyAttachmentOut,
-    dependencies=[Depends(require_roles("doctor", "radiologist", "admin"))],
+    dependencies=[Depends(require_roles("doctor", "radiology_tech", "admin"))],
 )
 async def upload_order_attachment(
     current_db_user: CurrentDbUser,
@@ -673,7 +673,7 @@ async def upload_order_attachment(
 @router.get(
     "/orders/{order_id}/attachments",
     response_model=RadiologyAttachmentListOut,
-    dependencies=[Depends(require_roles("doctor", "radiologist", "admin"))],
+    dependencies=[Depends(require_roles("doctor", "radiology_tech", "admin"))],
 )
 async def list_order_attachments(
     current_db_user: CurrentDbUser,
@@ -703,7 +703,7 @@ async def list_order_attachments(
 @router.get(
     "/order-items/{item_id}/attachments",
     response_model=RadiologyAttachmentListOut,
-    dependencies=[Depends(require_roles("doctor", "radiologist", "admin"))],
+    dependencies=[Depends(require_roles("doctor", "radiology_tech", "admin"))],
 )
 async def list_item_attachments(
     current_db_user: CurrentDbUser,
@@ -730,7 +730,7 @@ async def list_item_attachments(
 
 @router.get(
     "/attachments/{attachment_id}/download",
-    dependencies=[Depends(require_roles("doctor", "radiologist", "admin"))],
+    dependencies=[Depends(require_roles("doctor", "radiology_tech", "admin"))],
 )
 async def download_attachment(
     current_db_user: CurrentDbUser,

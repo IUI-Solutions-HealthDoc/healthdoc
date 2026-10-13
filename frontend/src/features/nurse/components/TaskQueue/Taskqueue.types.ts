@@ -28,6 +28,9 @@ export interface Order {
   // Joined display field — not a column on `orders` (comes from
   // patients.full_name).
   patient_name?: string | null;
+  patient_uhid?: string | null;
+  patient_age_years?: number | null;
+  patient_sex?: string | null;
 }
 
 export interface TaskQueueProps {

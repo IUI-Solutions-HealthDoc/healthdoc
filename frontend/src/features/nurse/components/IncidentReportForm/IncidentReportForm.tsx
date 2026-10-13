@@ -4,6 +4,12 @@ import { reportIncident } from "@/features/nurse/api/nursing";
 import { INCIDENT_TYPES, SEVERITIES } from "./constants";
 import { IncidentType, IncidentSeverity, IncidentReportFormProps } from "./IncidentReportForm.types";
 
+/** datetime-local's own format, in this machine's time zone. */
+function localNowMinute(now = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+}
+
 export default function IncidentReportForm({
   patientId,
   admissionId,
@@ -28,6 +34,12 @@ export default function IncidentReportForm({
 
     if (!incidentType || !severity || !occurredAt || !description.trim() || !immediateAction.trim()) {
       setError("Please fill all required fields.");
+      return;
+    }
+    // Reported after it happened: the server refuses a future time, and used
+    // to answer 500 for it (QA 12 Oct 2026).
+    if (new Date(occurredAt).getTime() > Date.now() + 5 * 60_000) {
+      setError("The time the incident occurred cannot be in the future.");
       return;
     }
 
@@ -111,6 +123,7 @@ export default function IncidentReportForm({
           type="datetime-local"
           value={occurredAt}
           onChange={(e) => setOccurredAt(e.target.value)}
+          max={localNowMinute()}
           className="w-full rounded border border-border p-2 text-sm"
           required
         />

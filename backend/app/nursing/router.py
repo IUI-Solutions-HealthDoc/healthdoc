@@ -16,9 +16,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status as http_status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admissions.models import Admission, Ward
+from app.departments.models import Department
 from app.auth.deps import CurrentDbUser, require_roles
 from app.common.db import get_db
 from app.common.idempotency import check_idempotency, hash_request_body, record_idempotent_response
@@ -348,7 +350,27 @@ async def list_pending_tasks(
         patient_id=patient_id,
         order_type=order_type,
     )
-    return [OrderTaskOut.model_validate(r) for r in rows]
+    return await _with_patients(db, rows, current_db_user.facility_id)
+
+
+async def _with_patients(db: AsyncSession, orders, facility_id: UUID) -> list[OrderTaskOut]:
+    ids = {order.patient_id for order in orders}
+    patients = {
+        p.id: p for p in (await db.execute(
+            select(Patient).where(Patient.id.in_(ids), Patient.facility_id == facility_id)
+        )).scalars().all()
+    } if ids else {}
+    out = []
+    for order in orders:
+        task = OrderTaskOut.model_validate(order)
+        patient = patients.get(order.patient_id)
+        if patient is not None:
+            task.patient_name = patient.full_name
+            task.patient_uhid = patient.uhid or patient.thid
+            task.patient_age_years = patient.age_years
+            task.patient_sex = patient.sex
+        out.append(task)
+    return out
 
 
 @router.post(
@@ -373,7 +395,7 @@ async def accept_task(
             http_status.HTTP_409_CONFLICT,
             detail={"code": "order_cancelled", "message": "Cancelled orders cannot be accepted"},
         )
-    return OrderTaskOut.model_validate(order)
+    return (await _with_patients(db, [order], current_db_user.facility_id))[0]
 
 
 @router.post(
@@ -409,7 +431,7 @@ async def complete_task(
             http_status.HTTP_409_CONFLICT,
             detail={
                 "code": "diagnostic_order_requires_fulfillment",
-                "message": f"Diagnostic orders of type '{exc.order_type}' cannot be completed by nursing staff; fulfillment must occur in the diagnostic department.",
+                "message": f"A {exc.order_type} order is completed in the {exc.order_type} department when the result is entered, not from the ward.",
             },
         )
     except service.OrderAlreadyCompleted as exc:
@@ -418,7 +440,7 @@ async def complete_task(
             detail={"code": "already_completed",
                     "message": f"order was completed at {exc.completed_at.isoformat()}"},
         ) from exc
-    return OrderTaskOut.model_validate(order)
+    return (await _with_patients(db, [order], current_db_user.facility_id))[0]
 
 
 # ============================================================ incident register (#236)
@@ -440,12 +462,35 @@ async def report_incident(
     and a leaked record have different reporters, reviewers and statutory
     clocks.
     """
-    incident = await incidents.report_incident(
-        db,
-        facility_id=current_db_user.facility_id,
-        reported_by=current_db_user.id,
-        **payload.model_dump(exclude_none=False),
-    )
+    # Every reference is checked against the reporter's facility first: an id
+    # from elsewhere (or none at all) failed its foreign key as a bare 500.
+    if payload.patient_id is not None:
+        await _require_patient_scope(db, payload.patient_id, current_db_user.facility_id)
+    if payload.admission_id is not None:
+        await _require_admission_scope(
+            db, payload.admission_id, current_db_user.facility_id, patient_id=payload.patient_id)
+    if payload.ward_id is not None:
+        ward = await db.get(Ward, payload.ward_id)
+        if ward is None or ward.facility_id != current_db_user.facility_id:
+            raise HTTPException(http_status.HTTP_404_NOT_FOUND, "ward_not_found")
+    if payload.department_id is not None:
+        department = await db.get(Department, payload.department_id)
+        if department is None or department.facility_id != current_db_user.facility_id:
+            raise HTTPException(http_status.HTTP_404_NOT_FOUND, "department_not_found")
+    try:
+        async with db.begin_nested():
+            incident = await incidents.report_incident(
+                db,
+                facility_id=current_db_user.facility_id,
+                reported_by=current_db_user.id,
+                **payload.model_dump(exclude_none=False),
+            )
+    except IntegrityError:
+        raise HTTPException(
+            http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "incident_rejected",
+                    "message": "The incident could not be recorded. Check the times and the patient, ward and department."},
+        ) from None
     return IncidentOut.model_validate(incident)
 
 

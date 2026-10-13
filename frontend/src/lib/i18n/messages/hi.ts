@@ -1185,6 +1185,8 @@ export const hi = {
   "nurse.taskQueueTitle": "लंबित डॉक्टर ऑर्डर",
   "nurse.taskQueueSubtitle": "स्वीकार करने वाले और समय दर्ज (0045)। पूर्णता प्रमाणित नर्स और समय के साथ।",
   "nurse.taskColOrder": "ऑर्डर #",
+  "nurse.taskPatientUnknown": "रोगी नहीं मिला — कार्य से पहले आदेश जाँचें",
+  "nurse.taskDoneInDepartment": "परिणाम दर्ज होने पर विभाग में पूर्ण होता है",
   "nurse.taskColPatient": "मरीज़",
   "nurse.taskColType": "प्रकार",
   "nurse.taskColPriority": "प्राथमिकता",

@@ -1236,6 +1236,8 @@ export const en = {
   "nurse.taskQueueTitle": "Pending doctor orders",
   "nurse.taskQueueSubtitle": "Accept records who picked up the order and when (0045). Complete records check-off with authenticated nurse and timestamp.",
   "nurse.taskColOrder": "Order #",
+  "nurse.taskPatientUnknown": "Patient not found — check the order before acting",
+  "nurse.taskDoneInDepartment": "Completed in the department when the result is entered",
   "nurse.taskColPatient": "Patient",
   "nurse.taskColType": "Type",
   "nurse.taskColPriority": "Priority",
