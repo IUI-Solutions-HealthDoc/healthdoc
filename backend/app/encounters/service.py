@@ -142,6 +142,10 @@ async def create_encounter(
     )
     db.add(encounter)
     await db.flush()
+    # Opening the consultation is what puts the patient "in service".
+    from app.queue.service import start_service_for_visit
+
+    await start_service_for_visit(db, payload.visit_id)
     return encounter
 
 

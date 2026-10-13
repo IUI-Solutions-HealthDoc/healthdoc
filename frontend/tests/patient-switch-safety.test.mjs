@@ -70,6 +70,8 @@ function harness(kind) {
     dependencies["../panelSx"] = { doctorPanelSx: {}, doctorButtonSx: {} };
     dependencies["./BreakGlassBanner"] = { BreakGlassBanner: "banner" };
     dependencies["./BreakGlassWarningModal"] = { BreakGlassWarningModal: "modal" };
+    dependencies["next/link"] = { default: "a" };
+    dependencies["@/features/consent/handoff"] = { handPatientToConsent() {} };
     // Deliberately no cancellation in the mocked hook: the actual boundary
     // must isolate late hook state and open dialogs between patients.
     dependencies["../hooks/useBreakGlass"] = { useBreakGlass(id) {

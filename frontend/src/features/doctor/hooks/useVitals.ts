@@ -1,6 +1,9 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+
+import type { VitalRecord } from "@/components/VitalsTimeline/VitalsTimeline.types";
+import { getPatientVitals } from "@/features/nurse/api/nursing";
 
 import { toast } from "@/components/ui/toast";
 import { newIdempotencyKey } from "@/lib/api";
@@ -48,6 +51,24 @@ export function useVitals(encounter: ActiveEncounter) {
   const [form, setForm] = useState<VitalsForm>(EMPTY);
   const [saving, setSaving] = useState(false);
   const [idempotencyKey, setIdempotencyKey] = useState(() => newIdempotencyKey());
+  // What has been recorded: the form clears after a save, so without this the
+  // saved values were shown nowhere (QA 12 Oct 2026).
+  const [history, setHistory] = useState<VitalRecord[] | null>(null);
+  const [historyFailed, setHistoryFailed] = useState(false);
+
+  const loadHistory = useCallback(async () => {
+    try {
+      const rows = await getPatientVitals(encounter.patient_id);
+      setHistory([...rows].sort((a, b) => b.measured_at.localeCompare(a.measured_at)));
+      setHistoryFailed(false);
+    } catch {
+      setHistoryFailed(true);
+    }
+  }, [encounter.patient_id]);
+
+  useEffect(() => {
+    void loadHistory();
+  }, [loadHistory]);
 
   const setField = useCallback(
     (field: keyof VitalsForm, value: string) => setForm((f) => ({ ...f, [field]: value })),
@@ -86,12 +107,13 @@ export function useVitals(encounter: ActiveEncounter) {
       setForm(EMPTY);
       setIdempotencyKey(newIdempotencyKey());
       toast.success(t("doctor.toast.vitalsRecorded"));
+      void loadHistory();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("doctor.toast.recordVitalsFailed"));
     } finally {
       setSaving(false);
     }
-  }, [anyEntered, encounter, form, idempotencyKey, t]);
+  }, [anyEntered, encounter, form, idempotencyKey, t, loadHistory]);
 
-  return { form, setField, bmi, whr, anyEntered, saving, record };
+  return { form, setField, bmi, whr, anyEntered, saving, record, history, historyFailed };
 }

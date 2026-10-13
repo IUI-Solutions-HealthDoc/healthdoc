@@ -1,5 +1,7 @@
 "use client";
 
+import { useRef, useState } from "react";
+
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
@@ -60,6 +62,19 @@ export function ConsultationWorkspace({ context }: ConsultationWorkspaceProps) {
   const { t } = useLocale();
 
   const ended = status === "completed";
+  // Save with an empty chief complaint said nothing on the page itself
+  // (QA 10 Oct 2026): the field now says why and takes the focus.
+  const [complaintError, setComplaintError] = useState<string | null>(null);
+  const complaintRef = useRef<HTMLTextAreaElement>(null);
+  const save = () => {
+    if (chiefComplaint.trim() === "") {
+      setComplaintError(t("doctor.toast.chiefComplaintRequired"));
+      complaintRef.current?.focus();
+      return;
+    }
+    setComplaintError(null);
+    void saveEncounter();
+  };
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
@@ -70,9 +85,18 @@ export function ConsultationWorkspace({ context }: ConsultationWorkspaceProps) {
         encounterType={encounterType}
         onEncounterTypeChange={setEncounterType}
       />
-      <ChiefComplaintPanel value={chiefComplaint} onChange={setChiefComplaint} />
+      <ChiefComplaintPanel
+        value={chiefComplaint}
+        onChange={(value) => {
+          setChiefComplaint(value);
+          if (value.trim()) setComplaintError(null);
+        }}
+        error={complaintError}
+        inputRef={complaintRef}
+        readOnly={ended}
+      />
       {conflict && <StaleWritePanel yours={soap} theirs={conflict} />}
-      <SoapNotePanel value={soap} noteStatus={noteStatus} onChange={patchSoap} />
+      <SoapNotePanel value={soap} noteStatus={noteStatus} onChange={patchSoap} readOnly={ended} />
       {canWriteChildren && encounter ? (
         <>
           <VitalsPanel encounter={encounter} />
@@ -114,14 +138,17 @@ export function ConsultationWorkspace({ context }: ConsultationWorkspaceProps) {
             )}
           </Stack>
           <Stack direction="row" spacing={1.5}>
-            <Typography aria-live="polite" sx={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }}>
+            {/* Visually hidden live region. In sx, width: 1 means 100%, so this
+                sat off-screen 735 px wide and gave the page a permanent
+                horizontal scrollbar (QA 10 Oct 2026); 1px is what was meant. */}
+            <Typography aria-live="polite" sx={{ position: "absolute", width: "1px", height: "1px", overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" }}>
               {saving
                 ? t("doctor.a11ySavingConsultation")
                 : dirty
                   ? t("doctor.a11yConsultationUnsaved")
                   : t("doctor.a11yConsultationSaved")}
             </Typography>
-            <Button variant="contained" sx={doctorButtonSx} disabled={loading || saving || ended} onClick={() => void saveEncounter()}>
+            <Button variant="contained" sx={doctorButtonSx} disabled={loading || saving || ended} onClick={save}>
               {saving ? t("doctor.statusSaving") : t("doctor.saveEncounter")}
             </Button>
             <Button variant="outlined" sx={doctorButtonSx} disabled={!canComplete || completing || ended} onClick={complete}>

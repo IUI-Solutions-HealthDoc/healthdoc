@@ -11,9 +11,13 @@ import { doctorPanelSx } from "../panelSx";
 export interface ChiefComplaintPanelProps {
   value: string;
   onChange: (value: string) => void;
+  /** Shown under the field, e.g. after Save with nothing typed. */
+  error?: string | null;
+  inputRef?: React.Ref<HTMLTextAreaElement>;
+  readOnly?: boolean;
 }
 
-export function ChiefComplaintPanel({ value, onChange }: ChiefComplaintPanelProps) {
+export function ChiefComplaintPanel({ value, onChange, error, inputRef, readOnly }: ChiefComplaintPanelProps) {
   const { t } = useLocale();
   return (
     <Box sx={{ ...doctorPanelSx, display: "flex", flexDirection: "column", gap: 1.5 }}>
@@ -30,6 +34,11 @@ export function ChiefComplaintPanel({ value, onChange }: ChiefComplaintPanelProp
         multiline
         minRows={2}
         fullWidth
+        required
+        error={Boolean(error)}
+        helperText={error ?? undefined}
+        inputRef={inputRef}
+        slotProps={{ input: { readOnly } }}
       />
     </Box>
   );
