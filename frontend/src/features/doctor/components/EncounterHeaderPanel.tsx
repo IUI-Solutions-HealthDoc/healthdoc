@@ -78,7 +78,7 @@ export function EncounterHeaderPanel({
           label={t("receptionist.department")}
           value={localizeField(context.department, context.department_hi)}
         />
-        <Meta label={t("doctor.visitId")} value={context.visit_id} />
+        <Meta label={t("doctor.visitId")} value={context.visit_number ?? "—"} />
         <Meta label={t("doctor.startedAt")} value={formatTime(startedAt)} />
       </Stack>
     </Box>

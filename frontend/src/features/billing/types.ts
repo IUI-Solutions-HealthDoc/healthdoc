@@ -106,7 +106,7 @@ export type InvoiceWithItems = Invoice & {
     age_years?: number;
     sex?: PatientSex;
   };
-  visit?: { visit_type: VisitType };
+  visit?: { visit_type: VisitType; visit_number?: string | null };
 };
 
 export type Paginated<T> = {

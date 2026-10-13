@@ -214,6 +214,7 @@ class InvoiceDetailOut(BaseModel):
     total_refunded: Money
     balance_due: Money
     care_setting: str | None = None
+    visit_number: str | None = None
 
 
 

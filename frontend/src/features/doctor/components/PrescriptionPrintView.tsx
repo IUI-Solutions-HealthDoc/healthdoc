@@ -39,7 +39,7 @@ export function PrescriptionPrintView({ context, items, notes, allergyNames = []
         </div>
         <div style={{ textAlign: "right" }}>
           <div>{context.provider_name}</div>
-          <div>Visit: {context.visit_id}</div>
+          <div>Visit: {context.visit_number ?? "—"}</div>
           <div>{now}</div>
         </div>
       </div>

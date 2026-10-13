@@ -397,7 +397,7 @@ async def get_invoice(
 
     row = (
         await db.execute(
-            select(Invoice, Patient.full_name, Patient.uhid, Patient.thid, Visit.visit_type)
+            select(Invoice, Patient.full_name, Patient.uhid, Patient.thid, Visit.visit_type, Visit.visit_number)
             .join(Patient, Patient.id == Invoice.patient_id)
             .outerjoin(Visit, Visit.id == Invoice.visit_id)
             .where(Invoice.id == invoice_id)
@@ -407,7 +407,7 @@ async def get_invoice(
         # _assert_invoice_in_facility already passed, so this is a patient row
         # that vanished — not a scoping failure.
         raise HTTPException(status_code=404, detail={"code": "invoice_not_found"})
-    invoice, patient_full_name, uhid, thid, visit_type = row
+    invoice, patient_full_name, uhid, thid, visit_type, visit_number = row
 
     lines = (
         (
@@ -492,6 +492,7 @@ async def get_invoice(
         total_refunded=total_refunded,
         balance_due=balance_due,
         care_setting=visit_type,
+        visit_number=visit_number,
     )
 
 

@@ -37,7 +37,7 @@ import { useLocale, type MessageKey } from "@/lib/i18n";
 import { useAuth } from "@/providers/auth-provider";
 import { HealthDocBrand } from "./HealthDocBrand";
 
-type NavArea = "front_desk" | "clinical" | "diagnostics" | "finance" | "audit" | "admin" | "platform" | "patient";
+type NavArea = "front_desk" | "clinical" | "diagnostics" | "finance" | "audit" | "admin" | "platform" | "monitoring" | "patient";
 
 type NavItem = {
   href: string;
@@ -55,6 +55,7 @@ const AREA_KEYS: Record<NavArea, MessageKey> = {
   audit: "area.audit",
   admin: "area.admin",
   platform: "area.platform",
+  monitoring: "area.monitoring",
   patient: "area.patient",
 };
 
@@ -83,7 +84,8 @@ const NAV_ITEMS: readonly NavItem[] = [
     href: "/equipment", labelKey: "sidebar.equipment", icon: Wrench, area: "clinical",
     roles: [ROLES.ADMIN, ROLES.HOD, ROLES.DOCTOR, ROLES.NURSE, ROLES.LAB_TECH, ROLES.RADIOLOGY_TECH],
   },
-  { href: "/monitor", labelKey: "sidebar.controlRoom", icon: LayoutDashboard, area: "platform", roles: [ROLES.MONITOR] },
+  // A state/district officer is not a platform administrator (QA 12 Oct 2026).
+  { href: "/monitor", labelKey: "sidebar.controlRoom", icon: LayoutDashboard, area: "monitoring", roles: [ROLES.MONITOR] },
   { href: "/hod", labelKey: "sidebar.hodDashboard", icon: LayoutDashboard, area: "clinical", roles: [ROLES.HOD] },
   { href: "/receptionist/registration", labelKey: "sidebar.registration", icon: UserRound, area: "front_desk", roles: [ROLES.RECEPTIONIST] },
   { href: "/receptionist/appointments", labelKey: "sidebar.appointments", icon: Calendar, area: "front_desk", roles: [ROLES.RECEPTIONIST] },

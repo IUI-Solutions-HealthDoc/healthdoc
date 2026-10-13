@@ -279,3 +279,15 @@ async def test_export_endpoint_writes_an_audit_row_for_the_export_itself(
     assert row.user_id == user_id
     assert str(row.facility_id) == str(facility_id)
     assert "CSV export of audit_logs" in row.reason
+
+
+async def test_the_trail_names_the_user_instead_of_a_uuid(engine: AsyncEngine, session_factory, facility_id, user_id):
+    """QA 12 Oct 2026: the audit trail showed raw UUIDs for the acting user."""
+    await _insert_audit_row(engine, facility_id, user_id=user_id)
+    async with session_factory() as db:
+        name, login = (await db.execute(
+            text("SELECT full_name, username FROM users WHERE id = :u"), {"u": user_id}
+        )).one()
+        caller = DbUser(id=user_id, facility_id=facility_id, keycloak_sub="x", username=login, roles=["auditor"])
+        page = await router_module.list_audit_logs(user=caller, db=db)
+    assert {i["user_display"] for i in page["items"]} == {f"{name} ({login})"}

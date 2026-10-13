@@ -398,6 +398,7 @@ export const hi = {
   "area.audit": "ऑडिट",
   "area.admin": "सुविधा प्रशासन",
   "area.platform": "प्लेटफ़ॉर्म प्रशासन",
+  "area.monitoring": "राज्य / ज़िला निगरानी",
   "area.patient": "मरीज़ पोर्टल",
 
   "sidebar.facilities": "सुविधाएँ",

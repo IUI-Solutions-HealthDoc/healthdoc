@@ -71,9 +71,13 @@ export default function Page() {
             setContext(null);
             return;
           }
+          // The visit number, so the header shows VST-... and not a UUID (QA 12 Oct 2026).
+          const tokenVisit = await api<VisitRecord>(`/visits/${token.visit_id}`).catch(() => null);
+          if (cancelled) return;
           setMessage(null);
           setContext({
             visit_id: token.visit_id,
+            visit_number: tokenVisit?.visit_number ?? null,
             patient_id: token.patient_id,
             patient_name: token.full_name,
             uhid: token.uhid,
@@ -104,6 +108,7 @@ export default function Page() {
           setMessage(null);
           setContext({
             visit_id: visit.id,
+            visit_number: visit.visit_number,
             patient_id: patient.id,
             patient_name: patient.full_name,
             uhid: patient.uhid || patient.thid || "No identifier",

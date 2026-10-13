@@ -403,6 +403,7 @@ export const en = {
   "area.audit": "Audit",
   "area.admin": "Facility admin",
   "area.platform": "Platform admin",
+  "area.monitoring": "State / district monitoring",
   "area.patient": "Patient portal",
 
   // —— sidebar items ——

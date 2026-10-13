@@ -142,6 +142,8 @@ export type EncounterType = "consultation" | "follow_up" | "emergency" | "ward_r
 
 export interface EncounterContext {
   visit_id: string;
+  /** The human visit number (VST-...), shown instead of the id. */
+  visit_number?: string | null;
   patient_id: string;
   patient_name: string;
   uhid: string;
