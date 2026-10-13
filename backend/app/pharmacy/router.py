@@ -1,11 +1,14 @@
 from datetime import date
 from typing import Annotated
+import uuid
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit.actions import AuditAction
+from app.audit.service import write_audit_log
 from app.auth.deps import CurrentDbUser, require_roles
 from app.common.db import get_db
 from app.common.idempotency import check_idempotency, hash_request_body, record_idempotent_response
@@ -16,7 +19,9 @@ from app.pharmacy.schemas import (
     GrnListOut,
     IndentListOut,
     AdjustmentListOut,
+    SupplierCreate,
     SupplierListOut,
+    SupplierOut,
     StockLocationListOut,
     DispenseCreate,
     DispenseItemOut,
@@ -594,6 +599,48 @@ async def list_suppliers_endpoint(
     return await list_suppliers(
         db, facility_id=current_user.facility_id, include_inactive=include_inactive
     )
+
+
+@router.post(
+    "/suppliers",
+    response_model=SupplierOut,
+    status_code=201,
+    dependencies=[
+        Depends(require_module("pharmacy")),
+        Depends(require_roles("pharmacist", "admin")),
+    ],
+)
+async def create_supplier_endpoint(
+    payload: SupplierCreate,
+    current_user: CurrentDbUser,
+    db: DbSession,
+) -> SupplierOut:
+    """Add a supplier. There was no way to: the purchase-order supplier list was
+    empty on every facility and no order could be raised (QA 10 Oct 2026).
+
+    Idempotent by name within the facility (case and spacing ignored), so a
+    double click or a retry returns the existing supplier instead of a twin.
+    """
+    from sqlalchemy import func, select
+
+    from app.inventory.models import Supplier
+
+    name = " ".join(payload.name.split())
+    existing = (await db.execute(
+        select(Supplier).where(Supplier.facility_id == current_user.facility_id,
+                               func.lower(Supplier.name) == name.lower())
+    )).scalars().first()
+    if existing is not None:
+        return SupplierOut.model_validate(existing)
+    supplier = Supplier(id=uuid.uuid4(), facility_id=current_user.facility_id, name=name,
+                        contact_info=payload.contact_info or None, is_active=True)
+    db.add(supplier)
+    await db.flush()
+    await write_audit_log(
+        db, facility_id=current_user.facility_id, action=AuditAction.CREATE, resource_type="suppliers",
+        user_id=current_user.id, resource_id=supplier.id, new_value={"name": name},
+    )
+    return SupplierOut.model_validate(supplier)
 
 
 @router.get(

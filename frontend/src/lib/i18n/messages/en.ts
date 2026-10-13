@@ -1689,6 +1689,7 @@ export const en = {
     "Live reorder thresholds and batch-expiry exposure for this facility.",
   "inventory.hodSubtitle":
     "Review requests awaiting head-of-department approval. Purchasing, receiving, stock transfers and adjustments remain with the store.",
+  "inventory.raiseIndentForLowStock": "Raise an indent for these items",
   "inventory.reorderAlertsTitle": "Reorder alerts",
   "inventory.reorderAlertsHint": "Items at or below their configured reorder level.",
   "inventory.reorderEmpty": "No items are below reorder level.",

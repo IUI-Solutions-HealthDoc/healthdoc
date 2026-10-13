@@ -244,6 +244,21 @@ async def seed(users: list[tuple[str, str]]) -> None:
                 ),
                 {"ward_id": WARD_ID, "number": number},
             )
+        # Suppliers, or no purchase order can be raised: the dropdown was empty
+        # on a fresh setup (QA 10 Oct 2026). Synthetic names, development only.
+        for supplier in ("Dev Medical Supplies (synthetic)", "Dev Surgical Traders (synthetic)"):
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO suppliers (id, facility_id, name, is_active)
+                    SELECT gen_random_uuid(), :facility_id, :name, true
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM suppliers WHERE facility_id = :facility_id AND name = :name
+                    )
+                    """
+                ),
+                {"facility_id": FACILITY_ID, "name": supplier},
+            )
         # Existing stacks may already have a differently-id'd ward (often
         # "General Ward A" / "Demo Ward") created before name_hi existed.
         await session.execute(

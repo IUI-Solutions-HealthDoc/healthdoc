@@ -387,6 +387,13 @@ class SupplierListOut(BaseModel):
     items: list[SupplierOut]
 
 
+class SupplierCreate(BaseModel):
+    model_config = {"str_strip_whitespace": True}
+
+    name: str = Field(min_length=2, max_length=200)
+    contact_info: str | None = Field(default=None, max_length=500)
+
+
 class ApproverCandidateOut(BaseModel):
     """A colleague a pharmacist may nominate as first approver.
 

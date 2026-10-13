@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ModuleCapabilityGate } from "@/components/common/ModuleCapabilityGate";
 import { ExpiryTracker } from "@/features/pharmacy/ExpiryTracker";
@@ -8,7 +8,7 @@ import { AdjustmentWorkspace } from "@/features/inventory/AdjustmentWorkspace";
 import { GrnWorkspace } from "@/features/inventory/GrnWorkspace";
 import { PurchaseOrderWorkspace } from "@/features/inventory/PurchaseOrderWorkspace";
 import { StockTransferWorkspace } from "@/features/inventory/StockTransferWorkspace";
-import { IndentWorkspace } from "@/features/inventory/IndentWorkspace";
+import { IndentWorkspace, type DraftLine } from "@/features/inventory/IndentWorkspace";
 import { listReorderAlerts } from "@/features/pharmacy/api";
 import type { ReorderAlertItem } from "@/features/pharmacy/types";
 import { ApiError } from "@/lib/api";
@@ -20,6 +20,15 @@ type StockTab = "purchase-orders" | "grn" | "transfers" | "indents" | "adjustmen
 // Ordered as the goods move: ordered -> received -> moved between stores ->
 // requested by a ward -> corrected. A storekeeper reading left to right is
 // following the same path the stock takes.
+/** Quantities are decimal strings; whole-number shortfall when both are whole, else the reorder level. */
+function shortfall(reorderLevel: string, current: string): string {
+  if (/^\d+$/.test(reorderLevel) && /^\d+$/.test(current)) {
+    const gap = BigInt(reorderLevel) - BigInt(current);
+    return gap > BigInt(0) ? gap.toString() : reorderLevel;
+  }
+  return reorderLevel;
+}
+
 const STOCK_TABS: Array<{ id: StockTab; labelKey: MessageKey }> = [
   { id: "purchase-orders", labelKey: "inventory.tab.purchaseOrders" },
   { id: "grn", labelKey: "inventory.tab.grn" },
@@ -33,6 +42,8 @@ function Inventory() {
   const { user, isLoading: authLoading } = useAuth();
   const isHod = user?.role === "hod";
   const [tab, setTab] = useState<StockTab>("purchase-orders");
+  const [indentPrefill, setIndentPrefill] = useState<DraftLine[] | undefined>(undefined);
+  const stockMovement = useRef<HTMLElement>(null);
   const [alerts, setAlerts] = useState<ReorderAlertItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -123,6 +134,23 @@ function Inventory() {
                 ))}
               </tbody>
             </table>
+            <div className="border-t border-border p-3">
+              <button
+                type="button"
+                className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-white"
+                onClick={() => {
+                  setIndentPrefill(alerts.map((item) => ({
+                    item_id: item.item_id,
+                    item_name: item.item_name,
+                    quantity_requested: shortfall(item.reorder_level, item.current_stock),
+                  })));
+                  setTab("indents");
+                  stockMovement.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                }}
+              >
+                {t("inventory.raiseIndentForLowStock")}
+              </button>
+            </div>
           </div>
         ) : null}
       </section>
@@ -141,7 +169,7 @@ function Inventory() {
         right. Those six reads now exist, so the panel is replaced by the
         workflows it was standing in for.
       */}
-      <section className="space-y-4">
+      <section ref={stockMovement} className="space-y-4">
         <div>
           <h2 className="text-xl font-semibold">{t("inventory.stockMovementTitle")}</h2>
           <p className="text-sm text-muted-foreground">{t("inventory.stockMovementHint")}</p>
@@ -167,7 +195,7 @@ function Inventory() {
         {tab === "purchase-orders" ? <PurchaseOrderWorkspace /> : null}
         {tab === "grn" ? <GrnWorkspace /> : null}
         {tab === "transfers" ? <StockTransferWorkspace /> : null}
-        {tab === "indents" ? <IndentWorkspace /> : null}
+        {tab === "indents" ? <IndentWorkspace prefill={indentPrefill} /> : null}
         {tab === "adjustments" ? <AdjustmentWorkspace /> : null}
       </section>
     </div>

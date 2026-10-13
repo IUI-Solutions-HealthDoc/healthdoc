@@ -25,13 +25,18 @@ import { useLocale } from "@/lib/i18n";
 import { createIndent, decideIndent, issueIndent, listIndents } from "./api";
 import type { IndentListRow } from "./types";
 
-interface DraftLine {
+export interface DraftLine {
   item_id: string;
   item_name: string;
   quantity_requested: string;
 }
 
-export function IndentWorkspace() {
+/**
+ * `prefill`: lines handed over from the reorder alerts ("Raise indent for low
+ * stock"). The tester looked for a way to raise an indent from the low-stock
+ * list and found none (QA 10 Oct 2026); the form below was a separate tab.
+ */
+export function IndentWorkspace({ prefill }: { prefill?: DraftLine[] } = {}) {
   const { t, localizeField } = useLocale();
   const { user } = useCurrentUser();
   const roles = user?.roles ?? [];
@@ -44,7 +49,10 @@ export function IndentWorkspace() {
   const [busy, setBusy] = useState(false);
 
   const [departmentId, setDepartmentId] = useState("");
-  const [lines, setLines] = useState<DraftLine[]>([]);
+  const [lines, setLines] = useState<DraftLine[]>(() => prefill ?? []);
+  useEffect(() => {
+    if (prefill && prefill.length) setLines(prefill);
+  }, [prefill]);
   const [term, setTerm] = useState("");
   const [matches, setMatches] = useState<MedicineSearchResult[]>([]);
 
