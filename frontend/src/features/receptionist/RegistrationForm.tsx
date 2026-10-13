@@ -4,6 +4,7 @@ import { useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Printer } from "lucide-react";
 
 import { ApiError, newIdempotencyKey } from "@/lib/api";
+import { apiErrorCode } from "@/lib/api-error-policy.mjs";
 import { useLocale } from "@/lib/i18n";
 import { PatientAvatar } from "@/components/ui/PatientAvatar";
 
@@ -34,6 +35,20 @@ const SEX_LABEL_KEYS = {
 const MAX_PHOTO_BYTES = 2 * 1024 * 1024;
 
 type AgeMode = "dob" | "age";
+const ADULT_AGE_YEARS = 18;
+
+interface DuplicateCandidate {
+  patient_id: string;
+  uhid: string | null;
+  full_name: string;
+  age_years: number | null;
+  dob: string | null;
+}
+
+function duplicateCandidates(payload: unknown): DuplicateCandidate[] {
+  const detail = (payload as { detail?: { candidates?: unknown } } | undefined)?.detail;
+  return Array.isArray(detail?.candidates) ? (detail.candidates as DuplicateCandidate[]) : [];
+}
 type PhotoStatus = "idle" | "uploading" | "failed";
 
 const noSubscription = () => () => {};
@@ -74,6 +89,9 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
   const [error, setError] = useState<string | null>(null);
   const [registered, setRegistered] = useState<Patient | null>(null);
   const [showCardModal, setShowCardModal] = useState(false);
+  // The server's possible-duplicate answer: the records that look like this
+  // person. Registering anyway needs an explicit "different person".
+  const [duplicates, setDuplicates] = useState<DuplicateCandidate[]>([]);
 
   /**
    * Generated once when the form mounts, not per submit.
@@ -83,7 +101,8 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
    * patient with the same UHID. A key generated per submit would defeat the
    * whole mechanism and hand the second click a second chart.
    */
-  const idempotencyKey = useMemo(() => newIdempotencyKey(), []);
+  const idempotencyKey = useRef<string>("");
+  if (!idempotencyKey.current) idempotencyKey.current = newIdempotencyKey();
 
   const derivedAge = useMemo(() => (ageMode === "dob" && dob ? deriveAgeFromDob(dob) : null), [ageMode, dob]);
 
@@ -98,9 +117,31 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
       : Boolean(ageYears && Number.isInteger(Number(ageYears)) && Number(ageYears) >= 0 && Number(ageYears) <= 130);
   const pincodeValid = !pincode.trim() || isValidPincodeInput(pincode);
   const stateValid = !stateCode || isValidStateCode(stateCode);
-  const canSubmit =
-    fullNameValid && sex !== "" && ageProvided && ageValid && mobileValid && abhaValid &&
-    pincodeValid && stateValid && !busy;
+  const ageError = !ageProvided || ageValid
+    ? null
+    : ageMode === "dob"
+      ? "Date of birth cannot be in the future."
+      : "Enter an age in whole years between 0 and 130.";
+  const ageInYears = ageMode === "dob" ? derivedAge?.years ?? null : ageValid ? Number(ageYears) : null;
+  const isMinor = ageInYears !== null && ageInYears < ADULT_AGE_YEARS;
+  const guardianNameValid = !guardianName.trim() || isValidPatientName(guardianName);
+  const guardianMissing = isMinor && !guardianName.trim();
+  const relationshipMissing = Boolean(guardianName.trim()) && !guardianRelationship;
+  // What still stops Register, in words: a greyed-out button alone left the
+  // desk guessing (QA 10 Oct 2026).
+  const blockers = [
+    !fullNameValid && "full name",
+    sex === "" && "sex",
+    (!ageProvided || !ageValid) && (ageMode === "dob" ? "date of birth" : "age"),
+    !mobileValid && "mobile number",
+    !abhaValid && "ABHA number",
+    !guardianNameValid && "guardian name",
+    guardianMissing && "guardian (required under 18)",
+    relationshipMissing && "guardian relationship",
+    !pincodeValid && "PIN code",
+    !stateValid && "state",
+  ].filter((item): item is string => Boolean(item));
+  const canSubmit = blockers.length === 0 && !busy;
   const inputClass = (invalid: boolean) =>
     `w-full rounded-md border px-3 py-2 ${invalid ? "border-danger" : "border-border"}`;
 
@@ -155,10 +196,10 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
     setRegistered(await uploadPhoto(registered, photoFile));
   }
 
-  async function submit(event: React.FormEvent) {
+  async function submit(event: React.FormEvent, confirmNotDuplicate = false) {
     event.preventDefault();
-    if (!canSubmit) {
-      setError("Please correct the highlighted registration fields before submitting.");
+    if (!canSubmit || sex === "") {
+      setError(`Complete: ${blockers.join(", ")}.`);
       return;
     }
 
@@ -179,16 +220,28 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
       district: district.trim() || null,
       state_code: stateCode.trim() || null,
       pincode: pincode.trim() || null,
+      ...(confirmNotDuplicate ? { confirm_not_duplicate: true } : {}),
     };
 
     setBusy(true);
     setError(null);
+    setDuplicates([]);
     try {
-      const patient = await registerPatient(payload, idempotencyKey);
+      const patient = await registerPatient(payload, idempotencyKey.current);
       const saved = photoFile ? await uploadPhoto(patient, photoFile) : patient;
       setRegistered(saved);
       onRegistered?.(saved);
     } catch (reason) {
+      const code = reason instanceof ApiError ? apiErrorCode(reason.payload) : undefined;
+      if (code === "possible_duplicate" || code === "duplicate_abha") {
+        // A refusal before anything was written: the next attempt is a new
+        // request and gets its own key.
+        idempotencyKey.current = newIdempotencyKey();
+      }
+      if (code === "possible_duplicate") {
+        setDuplicates(duplicateCandidates((reason as ApiError).payload));
+        return;
+      }
       setError(
         reason instanceof ApiError
           ? reason.message
@@ -373,6 +426,12 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
               />
             )}
           </div>
+          {ageError ? <span className="text-xs text-danger">{ageError}</span> : null}
+          {isMinor ? (
+            <span className="text-xs text-muted-foreground">
+              Under 18: enter the guardian under Additional Demographics.
+            </span>
+          ) : null}
         </div>
 
         <label className="space-y-1 text-sm">
@@ -446,25 +505,35 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
           onClick={() => setShowAddressDetails((shown) => !shown)}
           className="flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
         >
-          <span>{showAddressDetails ? "▼" : "▶"} Additional Demographics & Address (Optional)</span>
+          <span>
+            {showAddressDetails || isMinor ? "▼" : "▶"} Additional Demographics & Address
+            {isMinor ? " (guardian required)" : " (Optional)"}
+          </span>
         </button>
 
-        {showAddressDetails && (
+        {(showAddressDetails || isMinor) && (
           <div className="mt-4 grid gap-4 sm:grid-cols-2 rounded-lg border border-border/60 bg-muted/10 p-4">
             <label className="space-y-1 text-sm">
               <span className="text-muted-foreground">{t("field.guardianName")}</span>
               <input
-                className={inputClass(false)}
+                className={inputClass(!guardianNameValid || guardianMissing)}
+                aria-invalid={!guardianNameValid || guardianMissing}
                 value={guardianName}
                 onChange={(e) => setGuardianName(e.target.value)}
                 placeholder={t("receptionist.phGuardianName")}
               />
+              {!guardianNameValid ? (
+                <span className="text-xs text-danger">Enter a valid name without digits or markup characters.</span>
+              ) : guardianMissing ? (
+                <span className="text-xs text-danger">A patient under 18 needs a guardian.</span>
+              ) : null}
             </label>
 
             <label className="space-y-1 text-sm">
               <span className="text-muted-foreground">{t("field.guardianRelationship")}</span>
               <select
-                className={inputClass(false)}
+                className={inputClass(relationshipMissing)}
+                aria-invalid={relationshipMissing}
                 value={guardianRelationship}
                 onChange={(e) => setGuardianRelationship(e.target.value)}
               >
@@ -475,6 +544,9 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
                 <option value="guardian">Guardian</option>
                 <option value="other">Other</option>
               </select>
+              {relationshipMissing ? (
+                <span className="text-xs text-danger">Choose how the guardian is related to the patient.</span>
+              ) : null}
             </label>
 
             <label className="space-y-1 text-sm sm:col-span-2">
@@ -548,6 +620,30 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
         </p>
       )}
 
+      {duplicates.length > 0 && (
+        <div role="alert" className="space-y-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+          <p className="font-semibold">This patient may already be registered.</p>
+          <p>Same name, age and mobile as:</p>
+          <ul className="list-disc pl-5">
+            {duplicates.map((candidate) => (
+              <li key={candidate.patient_id}>
+                {candidate.full_name} · UHID {candidate.uhid ?? "not issued"}
+                {candidate.dob ? ` · DOB ${candidate.dob}` : candidate.age_years !== null ? ` · ${candidate.age_years} years` : ""}
+              </li>
+            ))}
+          </ul>
+          <p>Search by UHID to open that record. Register only if this is a different person.</p>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={(event) => void submit(event, true)}
+            className="rounded-md border border-amber-400 bg-white px-3 py-1 text-xs font-semibold hover:bg-amber-100 disabled:opacity-50"
+          >
+            Different person: register anyway
+          </button>
+        </div>
+      )}
+
       <button
         type="submit"
         disabled={!canSubmit}
@@ -555,6 +651,9 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
       >
         {busy ? t("forms.saving") : t("receptionist.registerPatient")}
       </button>
+      {!busy && blockers.length > 0 ? (
+        <p className="text-xs text-muted-foreground">Still needed: {blockers.join(", ")}.</p>
+      ) : null}
     </form>
   );
 }

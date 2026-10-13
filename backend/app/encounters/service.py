@@ -324,4 +324,8 @@ async def update_review_status(
         review.signed_off_at = datetime.now(UTC)
 
     await db.flush()
+    # updated_at is set by the database on UPDATE, so the flush expires it;
+    # reading it lazily in the response raised MissingGreenlet (500 on
+    # "Mark as reviewed", QA 12 Oct 2026).
+    await db.refresh(review)
     return review

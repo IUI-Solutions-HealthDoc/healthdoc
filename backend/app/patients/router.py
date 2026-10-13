@@ -6,6 +6,8 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, UploadFile
 from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.actions import AuditAction
@@ -27,7 +29,7 @@ from app.patients.schemas import (
     PatientUpdate,
 )
 from app.patients.service import (
-    approve_merge, build_aadhaar_identifier, find_duplicate_by_aadhaar,
+    approve_merge, build_aadhaar_identifier, find_duplicate_by_aadhaar, find_probable_duplicates,
     generate_uhid, mask_mobile, reject_merge, request_merge,
     search_patients, update_patient,
 )
@@ -121,6 +123,42 @@ async def register_patient(
                 "message": "A patient with this Aadhaar number already exists",
             })
 
+    # An ABHA number belongs to one person: the unique constraint
+    # (facility_id, abha_number) used to surface as a bare 500 (QA 10 Oct 2026).
+    if payload.abha_number:
+        holder = (await db.execute(select(Patient).where(
+            Patient.facility_id == current_db_user.facility_id,
+            Patient.abha_number == payload.abha_number,
+            Patient.deleted_at.is_(None),
+        ))).scalars().first()
+        if holder is not None:
+            raise HTTPException(409, {
+                "code": "duplicate_abha",
+                "candidate_patient_id": str(holder.id),
+                "candidate_uhid": holder.uhid,
+                "message": f"This ABHA number is already linked to patient {holder.uhid or holder.thid}",
+            })
+
+    # Same name, same date of birth (or age) and same mobile is almost always
+    # the same person registered twice, which splits their history across two
+    # UHIDs. Searching first is optional at the desk, so the server asks.
+    if payload.mobile and not payload.confirm_not_duplicate:
+        probable = await find_probable_duplicates(
+            db, facility_id=current_db_user.facility_id, full_name=payload.full_name,
+            mobile=payload.mobile, dob=payload.dob, age_years=payload.age_years,
+        )
+        if probable:
+            raise HTTPException(409, {
+                "code": "possible_duplicate",
+                "message": "A patient with the same name, age and mobile is already registered. "
+                           "Open that record, or confirm this is a different person.",
+                "candidates": [
+                    {"patient_id": str(p.id), "uhid": p.uhid, "full_name": p.full_name,
+                     "age_years": p.age_years, "dob": p.dob.isoformat() if p.dob else None}
+                    for p in probable
+                ],
+            })
+
     # TZ fix: derive year from facility's local timezone, not UTC
     uhid = await generate_uhid(
         db,
@@ -168,7 +206,16 @@ async def register_patient(
         created_by=current_db_user.id,
     )
     db.add(patient)
-    await db.flush()
+    try:
+        async with db.begin_nested():
+            await db.flush()
+    except IntegrityError:
+        # A concurrent registration took the same ABHA number between the
+        # check above and this insert.
+        raise HTTPException(409, {
+            "code": "duplicate_abha",
+            "message": "This ABHA number is already linked to another patient",
+        }) from None
 
     if payload.aadhaar_number:
         db.add(build_aadhaar_identifier(
@@ -257,12 +304,13 @@ async def search_patients_endpoint(
         uhid=payload.uhid,
         aadhaar_number=payload.aadhaar_number,
         abha_number=payload.abha_number,
+        age_years=payload.age_years,
         facility_id=current_db_user.facility_id,  # B4: unconditional, from token
         page=payload.page,
         page_size=payload.page_size,
     )
     items = []
-    for patient, score, matched_on, merged_from in results:
+    for patient, score, matched_on, merged_from, matched_fields in results:
         items.append(
             PatientSearchResult(
                 id=patient.id,
@@ -275,6 +323,7 @@ async def search_patients_endpoint(
                 mobile_masked=mask_mobile(patient.mobile),
                 match_score=round(score, 3),
                 matched_on=matched_on,
+                matched_fields=matched_fields,
                 merged_from_uhid=merged_from,
             )
         )

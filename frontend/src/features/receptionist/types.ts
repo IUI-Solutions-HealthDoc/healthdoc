@@ -23,6 +23,8 @@ export interface PatientCreate {
   district?: string | null;
   state_code?: string | null;
   pincode?: string | null;
+  /** Sent after the desk confirms a possible-duplicate warning names a different person. */
+  confirm_not_duplicate?: boolean;
 }
 
 export interface Patient {
