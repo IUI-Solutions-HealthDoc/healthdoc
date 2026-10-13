@@ -24,6 +24,12 @@ class Settings(BaseSettings):
     abdm_callback_evidence_enabled: bool = False
 
     database_url: str = "postgresql+asyncpg://healthdoc:change-me@localhost:5432/healthdoc"
+    #: CA certificate to verify the database server against. Set on the
+    #: control-room server, which reaches the hospital's PostgreSQL across the
+    #: private network: the connection is then TLS with the certificate and
+    #: its host name verified, and a server that cannot prove itself is refused.
+    #: Unset: a plain connection, as inside one host's Docker network.
+    database_ssl_ca_file: str | None = None
     mongo_uri: str = "mongodb://localhost:27017/healthdoc"
     redis_url: str = "redis://localhost:6379/0"
 
@@ -44,6 +50,10 @@ class Settings(BaseSettings):
     #: deployments strict.
     jwt_additional_issuers: str = ""
     jwt_jwks_url: str | None = None
+    #: CA certificate for jwt_jwks_url when Keycloak is reached over HTTPS with a
+    #: private certificate (the control-room server). Only this fetch trusts it;
+    #: the process's other HTTPS calls keep the public trust store.
+    jwt_jwks_ca_file: str | None = None
     #: Expected `aud` on every access token. Unset disables the check.
     #:
     #: Keycloak only emits a resource-server audience when a client has an

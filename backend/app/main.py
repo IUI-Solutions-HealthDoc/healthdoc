@@ -102,6 +102,13 @@ def _assert_production_auth_hardening() -> None:
             "JWT_AUDIENCE is unset — the `aud` claim is not verified, so a token "
             "issued to any other client in this realm would be accepted"
         )
+    if settings.api_mode == "control_room":
+        # The control-room server reaches the hospital's database and Keycloak
+        # across the private network: both links must be verified TLS.
+        if not settings.database_ssl_ca_file:
+            missing.append("DATABASE_SSL_CA_FILE is unset — the control room's database link would be plaintext")
+        if not settings.jwt_jwks_ca_file or not (settings.jwt_jwks_url or "").startswith("https://"):
+            missing.append("JWT_JWKS_URL must be https:// with JWT_JWKS_CA_FILE set — signing keys would travel unverified")
     if missing:
         raise RuntimeError(
             "Refusing to start in production with development auth settings:\n  - "

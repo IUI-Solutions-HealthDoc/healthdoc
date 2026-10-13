@@ -3,6 +3,29 @@ name: healthdoc-prod
 x-restart: &restart {restart: unless-stopped}
 
 services:
+  # The private-link certificate (control-room/make-private-certs.sh), copied
+  # into a volume owned by each server's user: PostgreSQL refuses a key others
+  # can read, and Keycloak runs as uid 1000.
+  private-tls-init:
+    image: alpine:3.20
+    command:
+      - sh
+      - -ec
+      - |
+        for d in pg:70 kc:1000; do
+          dir=/out/$${d%%:*}; uid=$${d##*:}
+          mkdir -p $$dir
+          cp /in/server.crt $$dir/server.crt
+          cp /in/server.key $$dir/server.key
+          chown $$uid $$dir/server.crt $$dir/server.key
+          chmod 0644 $$dir/server.crt
+          chmod 0600 $$dir/server.key
+        done
+    volumes:
+      - ${PRIVATE_TLS_CERT_PATH:?required}:/in/server.crt:ro
+      - ${PRIVATE_TLS_KEY_PATH:?required}:/in/server.key:ro
+      - private-tls:/out
+
   postgres:
     <<: *restart
     image: postgres:16-alpine
@@ -10,11 +33,31 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:?required}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
       POSTGRES_DB: ${POSTGRES_DB:?required}
-    volumes: [postgres-data:/var/lib/postgresql/data]
-    # The control-room server connects here over the private network as the
-    # least-privileged role in control-room/db-role.sql. Loopback until the
-    # operator sets PRIVATE_BIND_ADDRESS to this host's private-network address.
+    # TLS for the control-room server, which connects across the private
+    # network as the least-privileged role in control-room/db-role.sql;
+    # pg_hba.conf refuses that role without TLS. Hospital containers on this
+    # host's Docker network connect as before.
+    command:
+      - postgres
+      - -c
+      - ssl=on
+      - -c
+      - ssl_cert_file=/tls/pg/server.crt
+      - -c
+      - ssl_key_file=/tls/pg/server.key
+      - -c
+      - ssl_min_protocol_version=TLSv1.2
+      - -c
+      - hba_file=/etc/postgresql/pg_hba.conf
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - private-tls:/tls:ro
+      - ./control-room/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+    # Loopback until the operator sets PRIVATE_BIND_ADDRESS to this host's
+    # private-network address.
     ports: ["${PRIVATE_BIND_ADDRESS:-127.0.0.1}:5432:5432"]
+    depends_on:
+      private-tls-init: {condition: service_completed_successfully}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
@@ -92,14 +135,21 @@ services:
       KC_PROXY_HEADERS: xforwarded
       KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:?required}
       KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?required}
-    # The control-room server's nginx proxies the healthdoc-control realm here.
-    ports: ["${PRIVATE_BIND_ADDRESS:-127.0.0.1}:8080:8080"]
+      # HTTPS for the control-room server only (its nginx and API fetch the
+      # healthdoc-control realm across the private network). This host's own
+      # nginx keeps using plain 8080 inside the Docker network.
+      KC_HTTPS_CERTIFICATE_FILE: /tls/kc/server.crt
+      KC_HTTPS_CERTIFICATE_KEY_FILE: /tls/kc/server.key
+      KC_HTTPS_PORT: "8443"
+    ports: ["${PRIVATE_BIND_ADDRESS:-127.0.0.1}:8443:8443"]
     volumes:
       - keycloak-import:/opt/keycloak/data/import:ro
       - ./keycloak/themes/healthdoc:/opt/keycloak/themes/healthdoc:ro
+      - private-tls:/tls:ro
     depends_on:
       keycloak-db: {condition: service_healthy}
       realm-init: {condition: service_completed_successfully}
+      private-tls-init: {condition: service_completed_successfully}
 
   minio:
     <<: *restart
@@ -246,6 +296,7 @@ services:
       keycloak: {condition: service_started}
 
 volumes:
+  private-tls:
   postgres-data:
   mongo-data:
   redis-data:
