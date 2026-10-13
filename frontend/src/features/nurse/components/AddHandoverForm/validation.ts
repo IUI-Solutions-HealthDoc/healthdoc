@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const addHandoverSchema = z.object({
-  admission_id: z.uuid(),
+  admission_id: z.guid(),
 
   shift: z.enum(["morning", "evening", "night"]),
 
@@ -13,7 +13,7 @@ export const addHandoverSchema = z.object({
 
   recommendation: z.string().min(5),
 
-  handed_over_to: z.uuid(),
+  handed_over_to: z.guid(),
 });
 
 export type AddHandoverSchema = z.infer<typeof addHandoverSchema>;

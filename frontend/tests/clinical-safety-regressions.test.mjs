@@ -134,6 +134,7 @@ test("late consent creation cannot select the previous patient's record in the n
     "./ConsentListPanel": { ConsentListPanel: "ConsentListPanel" },
     "./ConsentRecordDetail": { ConsentRecordDetail: "ConsentRecordDetail" },
     "./ConsentGrantForm": { ConsentGrantForm: "ConsentGrantForm" },
+    "../handoff": { takeConsentHandoff: () => null },
   }).ConsentDashboard);
   let tree = h.render({});
   nodes(tree).find((n) => n.type === "PatientSearch").props.onSelect({ id: "A", full_name: "Test A" });

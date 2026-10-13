@@ -1,0 +1,6 @@
+# Shell scripts run inside Linux containers. A CRLF checkout on Windows
+# (core.autocrlf=true) made nginx crash-loop on 10-persistent-logs.sh and
+# broke every ABDM sandbox helper (QA 10-12 Oct 2026).
+*.sh text eol=lf
+*.bash text eol=lf
+Dockerfile* text eol=lf

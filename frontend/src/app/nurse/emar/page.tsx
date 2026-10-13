@@ -112,6 +112,9 @@ export default function Page() {
       await api(`/nursing/medication-administrations/${medication.id}/acknowledge`, {
         method: "POST",
         body: JSON.stringify({}),
+        // Creates nothing: acknowledging an acknowledged dose changes nothing,
+        // so a retry is already safe without a key.
+        idempotencyKey: null,
       });
       void loadChartAndRecords(selected);
     } catch (reason: unknown) {

@@ -102,6 +102,9 @@ const NAV_ITEMS: readonly NavItem[] = [
   { href: "/emergency", labelKey: "sidebar.emergency", icon: Stethoscope, area: "clinical", roles: [ROLES.EMERGENCY] },
   { href: "/supervisor/merges", labelKey: "sidebar.identityMerges", icon: Shield, area: "audit", roles: [ROLES.SUPERVISOR] },
   { href: "/consent", labelKey: "sidebar.consent", icon: FileText, area: "clinical", roles: [ROLES.RECEPTIONIST, ROLES.DOCTOR, ROLES.NURSE] },
+  // Both pages existed and were reachable only by typing the URL (QA 12 Oct 2026).
+  { href: "/ot", labelKey: "sidebar.operationTheatre", icon: Stethoscope, area: "clinical", roles: [ROLES.DOCTOR, ROLES.NURSE, ROLES.SUPERVISOR, ROLES.ADMIN] },
+  { href: "/programs", labelKey: "sidebar.carePrograms", icon: ClipboardList, area: "clinical", roles: [ROLES.DOCTOR, ROLES.NURSE, ROLES.SUPERVISOR, ROLES.ADMIN] },
   { href: "/immunization", labelKey: "sidebar.immunization", icon: Syringe, area: "clinical", roles: [ROLES.DOCTOR, ROLES.NURSE, ROLES.ADMIN] },
   { href: "/forms", labelKey: "sidebar.clinicalForms", icon: FileText, area: "clinical", roles: [ROLES.DOCTOR, ROLES.NURSE, ROLES.ADMIN] },
   { href: "/lab", labelKey: "sidebar.laboratory", icon: FlaskConical, area: "diagnostics", roles: [ROLES.LAB_TECH, ROLES.DOCTOR] },
@@ -121,6 +124,7 @@ const NAV_ITEMS: readonly NavItem[] = [
   { href: "/admin/account-requests", labelKey: "sidebar.accountRequests", icon: UserRound, area: "admin", roles: [ROLES.ADMIN] },
   { href: "/admin/permissions", labelKey: "sidebar.permissions", icon: Shield, area: "admin", roles: [ROLES.ADMIN] },
   { href: "/admin/departments", labelKey: "sidebar.departmentsRooms", icon: Building2, area: "admin", roles: [ROLES.ADMIN] },
+  { href: "/admin/beds", labelKey: "sidebar.wardsBeds", icon: Bed, area: "admin", roles: [ROLES.ADMIN] },
   { href: "/admin/abdm-sync", labelKey: "sidebar.abdmIdentityLinks", icon: Shield, area: "admin", roles: [ROLES.ADMIN] },
   { href: "/admin/hfr", labelKey: "sidebar.hfr", icon: Building2, area: "admin", roles: [ROLES.ADMIN] },
   { href: "/admin/data-protection", labelKey: "sidebar.dataProtection", icon: Shield, area: "admin", roles: [ROLES.ADMIN, ROLES.AUDITOR] },

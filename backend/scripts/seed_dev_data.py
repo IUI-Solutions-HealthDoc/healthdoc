@@ -232,6 +232,18 @@ async def seed(users: list[tuple[str, str]]) -> None:
                 "facility_id": FACILITY_ID,
             },
         )
+        # Beds, or nobody can be admitted on a fresh `make setup` (QA 10 Oct 2026).
+        for number in ("1", "2", "3", "4", "5", "6"):
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO beds (id, ward_id, bed_number, status)
+                    VALUES (gen_random_uuid(), :ward_id, :number, 'vacant')
+                    ON CONFLICT (ward_id, bed_number) DO NOTHING
+                    """
+                ),
+                {"ward_id": WARD_ID, "number": number},
+            )
         # Existing stacks may already have a differently-id'd ward (often
         # "General Ward A" / "Demo Ward") created before name_hi existed.
         await session.execute(
