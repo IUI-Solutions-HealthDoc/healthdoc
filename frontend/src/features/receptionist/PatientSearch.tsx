@@ -38,10 +38,14 @@ const EMPTY: PatientSearchRequest = {
   mobile: "",
   uhid: "",
   abha_number: "",
+  age_years: "",
 };
 
-function MatchBadge({ matchedOn, score }: { matchedOn: string; score: number }) {
+function MatchBadge({ matchedOn, fields, score }: { matchedOn: string; fields?: string[]; score: number }) {
   const identity = isIdentityMatch(matchedOn);
+  // A mobile hit whose name and DOB also match is a far stronger signal than
+  // the mobile alone, and the desk needs to see that (QA 10 Oct 2026).
+  const all = fields && fields.length ? fields : [matchedOn];
   return (
     <span
       title={`Match score ${score.toFixed(2)}`}
@@ -49,7 +53,7 @@ function MatchBadge({ matchedOn, score }: { matchedOn: string; score: number }) 
         identity ? "bg-success-muted text-success" : "bg-warning-muted text-warning"
       }`}
     >
-      {MATCH_LABELS[matchedOn] ?? matchedOn}
+      {all.map((field) => MATCH_LABELS[field] ?? field).join(" · ")}
     </span>
   );
 }
@@ -58,6 +62,9 @@ export function PatientSearch({ onSelect, selectLabel }: Props) {
   const { t } = useLocale();
   const resolvedSelectLabel = selectLabel ?? t("common.select");
   const [criteria, setCriteria] = useState<PatientSearchRequest>(EMPTY);
+  // Registration accepts an age when the date of birth is unknown, so search
+  // must too, or those patients can only be found by mobile (QA 10 Oct 2026).
+  const [ageMode, setAgeMode] = useState<"dob" | "age">("dob");
   const [results, setResults] = useState<PatientSearchResult[] | null>(null);
   const [total, setTotal] = useState(0);
   const [cardPatient, setCardPatient] = useState<PatientCardData | null>(null);
@@ -104,8 +111,16 @@ export function PatientSearch({ onSelect, selectLabel }: Props) {
   }
 
   async function handleQuickScan(exactIdentifier: string) {
-    const norm = exactIdentifier.trim().toUpperCase();
+    // Scanners commonly add a prefix/suffix character or wrap lines; keep the
+    // identifier itself. Anything that is not a UHID or THID gets told so
+    // rather than an empty "no matches" (QA 12 Oct 2026, Scan & Find).
+    const norm = exactIdentifier.trim().toUpperCase().replace(/^[^A-Z0-9]+|[^A-Z0-9]+$/g, "").replace(/\s+/g, "");
     if (!norm) return;
+    if (!isValidUhidInput(norm)) {
+      setResults(null);
+      setError("Scan & Find takes the UHID or THID printed on the patient card. Use the search form for a name or mobile.");
+      return;
+    }
     if (await runQuery({ uhid: norm }, 1)) setScanValue("");
   }
 
@@ -123,8 +138,12 @@ export function PatientSearch({ onSelect, selectLabel }: Props) {
   );
   const uhidInvalid = Boolean(criteria.uhid?.trim() && !isValidUhidInput(criteria.uhid));
   const nameInvalid = Boolean(criteria.full_name?.trim() && !isValidPatientName(criteria.full_name));
-  const nameNeedsDob = Boolean(criteria.full_name?.trim() && !criteria.dob);
-  const formInvalid = mobileInvalid || abhaInvalid || uhidInvalid || nameInvalid || nameNeedsDob;
+  const ageInvalid = ageMode === "age" && Boolean(criteria.age_years?.trim()) &&
+    !/^\d{1,3}$/.test(criteria.age_years!.trim());
+  const nameNeedsDob = Boolean(
+    criteria.full_name?.trim() && (ageMode === "dob" ? !criteria.dob : !criteria.age_years?.trim()),
+  );
+  const formInvalid = mobileInvalid || abhaInvalid || uhidInvalid || nameInvalid || nameNeedsDob || ageInvalid;
   const inputClass = (invalid: boolean) =>
     `w-full rounded-md border px-3 py-2 ${invalid ? "border-danger" : "border-border"}`;
 
@@ -141,8 +160,9 @@ export function PatientSearch({ onSelect, selectLabel }: Props) {
       );
       return;
     }
+    const sent = ageMode === "dob" ? { ...criteria, age_years: "" } : { ...criteria, dob: "" };
     const trimmed: PatientSearchRequest = Object.fromEntries(
-      Object.entries(criteria)
+      Object.entries(sent)
         .map(([key, value]) => [key, typeof value === "string" ? value.trim() : value])
         .filter(([, value]) => value !== "" && value !== undefined),
     );
@@ -208,18 +228,38 @@ export function PatientSearch({ onSelect, selectLabel }: Props) {
             />
           </label>
 
-          <label className="space-y-1 text-sm">
-            <span className="text-muted-foreground">{t("field.dob")}</span>
-            <input
-              type="date"
-              className={inputClass(nameNeedsDob)}
-              aria-invalid={nameNeedsDob}
-              value={criteria.dob ?? ""}
-              max={today}
-              onChange={(e) => set("dob", e.target.value)}
-              required={Boolean(criteria.full_name?.trim())}
-            />
-          </label>
+          <div className="space-y-1 text-sm">
+            <select
+              aria-label={`${t("field.dob")} / ${t("field.age")}`}
+              className="bg-transparent text-muted-foreground"
+              value={ageMode}
+              onChange={(e) => setAgeMode(e.target.value as "dob" | "age")}
+            >
+              <option value="dob">{t("field.dob")}</option>
+              <option value="age">{t("field.age")}</option>
+            </select>
+            {ageMode === "dob" ? (
+              <input
+                type="date"
+                className={inputClass(nameNeedsDob)}
+                aria-invalid={nameNeedsDob}
+                value={criteria.dob ?? ""}
+                max={today}
+                onChange={(e) => set("dob", e.target.value)}
+                required={Boolean(criteria.full_name?.trim())}
+              />
+            ) : (
+              <input
+                inputMode="numeric"
+                maxLength={3}
+                placeholder="About how old (years)"
+                className={inputClass(nameNeedsDob || ageInvalid)}
+                aria-invalid={nameNeedsDob || ageInvalid}
+                value={criteria.age_years ?? ""}
+                onChange={(e) => set("age_years", e.target.value)}
+              />
+            )}
+          </div>
 
           <label className="space-y-1 text-sm">
             <span className="text-muted-foreground">{t("field.mobile")}</span>
@@ -324,7 +364,7 @@ export function PatientSearch({ onSelect, selectLabel }: Props) {
                       {t("patient.exactMatch")}
                     </h3>
                   </div>
-                  <MatchBadge matchedOn={exactMatch.matched_on} score={exactMatch.match_score} />
+                  <MatchBadge matchedOn={exactMatch.matched_on} fields={exactMatch.matched_fields} score={exactMatch.match_score} />
                 </div>
 
                 {exactMatch.matched_on === "merged_identifier" && (
@@ -425,7 +465,7 @@ export function PatientSearch({ onSelect, selectLabel }: Props) {
                       </td>
                       <td className="px-4 py-3 text-sm">{patient.mobile_masked ?? "—"}</td>
                       <td className="px-4 py-3">
-                        <MatchBadge matchedOn={patient.matched_on} score={patient.match_score} />
+                        <MatchBadge matchedOn={patient.matched_on} fields={patient.matched_fields} score={patient.match_score} />
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="inline-flex items-center justify-end gap-2">

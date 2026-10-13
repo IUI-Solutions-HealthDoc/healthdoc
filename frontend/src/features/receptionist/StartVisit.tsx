@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { ApiError, newIdempotencyKey } from "@/lib/api";
 import { apiErrorCode } from "@/lib/api-error-policy.mjs";
+import { handPatientToConsent } from "@/features/consent/handoff";
 import { canRoleAccessPath } from "@/lib/auth/routes";
 import { useLocale, type MessageKey } from "@/lib/i18n";
 import { useAuth } from "@/providers/auth-provider";
@@ -197,7 +198,11 @@ export function StartVisit({ patient }: { patient: VisitPatient }) {
               {t("startVisit.inpatientAdmission")}
             </Link>
           )}
-          <Link href="/consent" className="font-medium underline">
+          <Link
+            href="/consent"
+            onClick={() => handPatientToConsent({ id: patient.id, full_name: patient.full_name })}
+            className="font-medium underline"
+          >
             {t("consent.recordConsent")}
           </Link>
           {canAccessBilling && (
