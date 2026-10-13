@@ -294,6 +294,7 @@ export function MisDashboard() {
               formats={["csv", "pdf"]}
               size="small"
               disabled={loading || items.length === 0}
+              disabledReason={loading ? "Loading…" : "No KPI snapshots in this period. Choose another range."}
               sx={{
                 bgcolor: "rgb(255 255 255 / 0.95)",
                 color: meridian.brandPrimary,
