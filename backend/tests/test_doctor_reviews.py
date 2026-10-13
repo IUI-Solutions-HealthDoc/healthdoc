@@ -90,3 +90,26 @@ async def test_review_transition_terminal_after_signed_off(db, encounter):
 
     with pytest.raises(service.InvalidReviewTransition):
         await service.update_review_status(db, review, new_status="reviewed", updated_by=doctor.id)
+
+
+async def test_review_audit_rows_name_the_doctor_and_the_patient(db, encounter):
+    """QA 12 Oct 2026: audit trail filtered to doctor_reviews showed three Create
+    entries with "—" as the user and "No patient". The route sets no request
+    actor, and the review has no patient column; the row's own author and the
+    encounter's visit now fill both."""
+    from sqlalchemy import select
+
+    from app.audit.models import AuditLog
+
+    enc, doctor = encounter
+    review = await service.create_review(db, encounter_id=enc.id, reviewed_by=doctor.id, created_by=doctor.id)
+    await service.update_review_status(db, review, new_status="reviewed", updated_by=doctor.id)
+    rows = (await db.execute(
+        select(AuditLog).where(AuditLog.resource_type == "doctor_reviews", AuditLog.resource_id == review.id)
+    )).scalars().all()
+    patient_id = (await db.execute(
+        select(Visit.patient_id).where(Visit.id == enc.visit_id)
+    )).scalar_one()
+    assert sorted(r.action for r in rows) == ["create", "update"]
+    assert {r.user_id for r in rows} == {doctor.id}
+    assert {r.patient_id for r in rows} == {patient_id}

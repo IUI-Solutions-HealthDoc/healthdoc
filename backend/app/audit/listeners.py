@@ -100,11 +100,13 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import event, inspect
+from sqlalchemy import bindparam, event, inspect, text
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Session, attributes
 
 from app.audit.actions import AuditAction
 from app.audit.models import AuditLog
+from app.audit.context import get_current_actor
 from app.audit.service import _build_audit_log
 from app.common.db import Base
 
@@ -145,6 +147,39 @@ def _resolve_related_id(obj: Any, attr_name: str | None) -> UUID | None:
     if not attr_name:
         return None
     return getattr(obj, attr_name, None)
+
+
+def _blame_user(obj: Any) -> UUID | None:
+    """Who made this change, from the row itself (Blame mixin).
+
+    Routes that never set the request's audit actor wrote rows with no user:
+    the auditor saw "—" against three doctor-review entries (QA 12 Oct 2026).
+    The row already records its author; the request context still wins when
+    present, because it also carries the role and address.
+    """
+    return getattr(obj, "updated_by", None) or getattr(obj, "created_by", None)
+
+
+def _resolve_patient(session: Session, obj: Any, patient_field: str | None) -> UUID | None:
+    """The patient, from a column or, for a model with none, a declared lookup.
+
+    `__audit_patient_lookup__ = (sql, column)` resolves the patient through a
+    related row (a doctor review through its encounter's visit), so the audit
+    trail can say whose record was touched.
+    """
+    found = _resolve_related_id(obj, patient_field)
+    if found is not None:
+        return found
+    lookup = getattr(type(obj), "__audit_patient_lookup__", None)
+    if not lookup:
+        return None
+    sql, column = lookup
+    key = getattr(obj, column, None)
+    if key is None:
+        return None
+    statement = text(sql).bindparams(bindparam("key", type_=PG_UUID(as_uuid=True)))
+    found = session.connection().execute(statement, {"key": key}).scalar()
+    return UUID(str(found)) if found is not None and not isinstance(found, UUID) else found
 
 
 def _json_safe(value: Any) -> Any:
@@ -266,9 +301,10 @@ def _capture_audit_diffs(session: Session, flush_context, instances) -> None:
                 "resource_type": resource_type,
                 "resource_id": getattr(obj, "id", None),
                 "facility_id": getattr(obj, facility_field, None),
-                "patient_id": _resolve_related_id(obj, patient_field),
+                "patient_id": _resolve_patient(session, obj, patient_field),
                 "visit_id": _resolve_related_id(obj, visit_field),
                 "department_id": _resolve_related_id(obj, department_field),
+                "blame_user": _blame_user(obj),
                 "old_value": _column_snapshot(obj, want_old=True),
                 "new_value": _column_snapshot(obj, want_old=False),
             }
@@ -320,7 +356,8 @@ def _write_captured_audit_entries(session: Session, flush_context) -> None:
             obj = entry.pop("obj")
             entry["resource_id"] = getattr(obj, "id", None)
             entry["facility_id"] = getattr(obj, entry["facility_field"], None)
-            entry["patient_id"] = _resolve_related_id(obj, entry["patient_field"])
+            entry["patient_id"] = _resolve_patient(session, obj, entry["patient_field"])
+            entry["blame_user"] = _blame_user(obj)
             entry["visit_id"] = _resolve_related_id(obj, entry["visit_field"])
             entry["department_id"] = _resolve_related_id(obj, entry["department_field"])
 
@@ -337,6 +374,7 @@ def _write_captured_audit_entries(session: Session, flush_context) -> None:
 
         audit_log: AuditLog = _build_audit_log(
             facility_id=facility_id,
+            user_id=None if get_current_actor() is not None else entry.get("blame_user"),
             action=entry["phase"],
             resource_type=entry["resource_type"],
             resource_id=entry.get("resource_id"),

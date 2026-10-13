@@ -203,6 +203,11 @@ class DoctorReview(Base, UUIDPk, Timestamps, Blame):
 
     __audit_resource_type__ = "doctor_reviews"
     __audit_facility_id_field__ = "facility_id"
+    # No patient column: the review's encounter's visit names the patient.
+    __audit_patient_lookup__ = (
+        "SELECT v.patient_id FROM encounters e JOIN visits v ON v.id = e.visit_id WHERE e.id = :key",
+        "encounter_id",
+    )
 
     encounter_id = Column(UUID(as_uuid=True), ForeignKey("encounters.id", ondelete="RESTRICT"),
                            nullable=False)
