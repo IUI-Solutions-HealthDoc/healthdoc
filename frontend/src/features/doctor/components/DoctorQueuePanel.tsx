@@ -1,5 +1,6 @@
 "use client";
 
+import { formatAgeSexShort } from "@/lib/format-age";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 
@@ -44,7 +45,7 @@ export function DoctorQueuePanel({
         <Box>
           <Typography sx={{ fontWeight: 600, fontSize: "0.875rem" }}>{row.full_name}</Typography>
           <Typography sx={{ fontSize: "0.75rem", color: "text.secondary" }}>
-            {row.uhid} · {row.age_years}/{row.sex[0].toUpperCase()}
+            {row.uhid} · {formatAgeSexShort(row.age_years, row.sex)}
           </Typography>
         </Box>
       ),

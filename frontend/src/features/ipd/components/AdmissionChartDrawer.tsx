@@ -1,5 +1,6 @@
 "use client";
 
+import { formatAge } from "@/lib/format-age";
 import * as React from "react";
 import Box from "@mui/material/Box";
 import Chip from "@mui/material/Chip";
@@ -100,7 +101,7 @@ export function AdmissionChartDrawer({
               />
             </Stack>
             <Typography sx={{ fontSize: "0.8125rem", color: "#93c5fd", mt: 0.5 }}>
-              UHID: {chart?.patient.uhid || "Pending"} · {chart?.patient.sex || ""} · {chart?.patient.age_years ? `${chart.patient.age_years} yrs` : ""}
+              UHID: {chart?.patient.uhid || "Pending"} · {chart?.patient.sex || ""} · {formatAge(chart?.patient.age_years)}
             </Typography>
           </Box>
           <IconButton

@@ -107,7 +107,7 @@ export default function Page() {
             patient_id: patient.id,
             patient_name: patient.full_name,
             uhid: patient.uhid || patient.thid || "No identifier",
-            age_years: patient.age_years ?? 0,
+            age_years: patient.age_years ?? null,
             sex: patient.sex || "unknown",
             provider_user_id: me.id,
             provider_name: me.full_name || "Attending Doctor",

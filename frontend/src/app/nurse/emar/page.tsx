@@ -1,5 +1,6 @@
 "use client";
 
+import { formatAge } from "@/lib/format-age";
 import { useEffect, useState, useCallback } from "react";
 import { ApiError, api, formatDateTime } from "@/lib/api";
 import EMARTable from "@/components/tables/EMARTable";
@@ -182,7 +183,7 @@ export default function Page() {
             <div>
               <span className="text-xs text-muted-foreground block">{t("nurse.emarLabelDemographics")}</span>
               <span className="font-medium text-foreground">
-                {chart.patient.age_years ? `${chart.patient.age_years} yrs` : "Age unknown"} ·{" "}
+                {formatAge(chart.patient.age_years)} ·{" "}
                 {chart.patient.sex ? chart.patient.sex.toUpperCase() : "Unknown"}
               </span>
               {chart.patient.dob && (

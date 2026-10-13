@@ -1,5 +1,6 @@
 "use client";
 
+import { formatAgeSexShort } from "@/lib/format-age";
 import Link from "next/link";
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 
@@ -669,7 +670,7 @@ export default function Page() {
                         </span>
                         <span className="font-medium text-sm">{item.full_name}</span>
                         <span className="text-xs text-muted-foreground">
-                          · {item.age_years ?? "?"}y/{item.sex[0]?.toUpperCase()}
+                          · {formatAgeSexShort(item.age_years, item.sex)}
                         </span>
                       </div>
                       <p className="text-xs text-muted-foreground mt-0.5">

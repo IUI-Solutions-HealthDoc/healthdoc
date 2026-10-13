@@ -54,7 +54,8 @@ export interface QueueToken {
   // --- joined for the list row only ---
   full_name: string;
   uhid: string;
-  age_years: number;
+  /** null when neither an age nor a DOB was recorded. Never shown as 0. */
+  age_years: number | null;
   sex: Sex;
   provider_user_id?: string;
   provider_name?: string;
@@ -73,7 +74,8 @@ export interface Patient {
   thid?: string;
   full_name: string;
   sex: Sex;
-  age_years: number;
+  /** null when neither an age nor a DOB was recorded. Never shown as 0. */
+  age_years: number | null;
   mobile?: string;
   photo_file_id?: string;
 }
@@ -143,7 +145,8 @@ export interface EncounterContext {
   patient_id: string;
   patient_name: string;
   uhid: string;
-  age_years: number;
+  /** null when neither an age nor a DOB was recorded. Never shown as 0. */
+  age_years: number | null;
   sex: string;
   provider_user_id: string;
   provider_name: string;

@@ -1,5 +1,6 @@
 "use client";
 
+import { formatAgeSexShort } from "@/lib/format-age";
 import { useEffect, useState } from "react";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
@@ -125,7 +126,7 @@ export function DoctorDashboard() {
                     {arr.full_name} · {arr.thid ?? arr.uhid}
                   </Typography>
                   <Typography sx={{ fontSize: "0.6875rem", color: "text.secondary" }}>
-                    {arr.age_years ?? "?"}y/{arr.sex[0]?.toUpperCase()} · Visit {arr.visit_number}
+                    {formatAgeSexShort(arr.age_years, arr.sex)} · Visit {arr.visit_number}
                   </Typography>
                 </Box>
                 <Button
