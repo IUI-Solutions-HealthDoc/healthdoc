@@ -11,7 +11,7 @@
    * (QA 12 Oct 2026). Everything that does not contain the receipt is taken
    * out of the layout, and the dialog that holds it prints as plain flow.
    */
-  body:has(#receipt-print-root) > *:not(:has(#receipt-print-root)) {
+  body:has(#receipt-print-root) > *:not(#receipt-print-root):not(:has(#receipt-print-root)) {
     display: none !important;
   }
 
