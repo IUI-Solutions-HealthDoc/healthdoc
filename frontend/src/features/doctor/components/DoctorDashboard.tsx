@@ -9,6 +9,7 @@ import Typography from "@mui/material/Typography";
 import Link from "next/link";
 
 import { listEmergencyWorklist, type EmergencyWorklistItem } from "@/features/emergency/api";
+import { formatDateTime } from "@/lib/api";
 import { meridian } from "@/styles/theme";
 import { useLocale } from "@/lib/i18n";
 import { doctorPageHeaderSx } from "../panelSx";
@@ -93,7 +94,19 @@ export function DoctorDashboard() {
         </Typography>
       </Box>
 
-      {emergencyArrivals.length > 0 && (
+      {(() => {
+        const old = emergencyArrivals.filter((a) => a.stale);
+        return old.length > 0 ? (
+          <Alert severity="warning" sx={{ borderRadius: "12px" }}>
+            {old.length} emergency visit{old.length === 1 ? "" : "s"} opened more than 24 hours ago{" "}
+            {old.length === 1 ? "is" : "are"} still open:{" "}
+            {old.map((a) => `${a.visit_number} (${formatDateTime(a.arrival_time)})`).join(", ")}. Close or discharge
+            them from the consultation once the record is complete.
+          </Alert>
+        ) : null;
+      })()}
+
+      {emergencyArrivals.some((a) => !a.stale) && (
         <Box
           sx={{
             p: 2,
@@ -104,10 +117,10 @@ export function DoctorDashboard() {
           }}
         >
           <Typography sx={{ fontWeight: 700, fontSize: "0.9375rem", color: "error.main", mb: 1 }}>
-            Emergency Arrivals Awaiting Care ({emergencyArrivals.length})
+            Emergency Arrivals Awaiting Care ({emergencyArrivals.filter((a) => !a.stale).length})
           </Typography>
           <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1.5 }}>
-            {emergencyArrivals.map((arr) => (
+            {emergencyArrivals.filter((arr) => !arr.stale).map((arr) => (
               <Box
                 key={arr.visit_id}
                 sx={{
@@ -126,7 +139,7 @@ export function DoctorDashboard() {
                     {arr.full_name} · {arr.thid ?? arr.uhid}
                   </Typography>
                   <Typography sx={{ fontSize: "0.6875rem", color: "text.secondary" }}>
-                    {formatAgeSexShort(arr.age_years, arr.sex)} · Visit {arr.visit_number}
+                    {formatAgeSexShort(arr.age_years, arr.sex)} · Visit {arr.visit_number} · arrived {formatDateTime(arr.arrival_time)}
                   </Typography>
                 </Box>
                 <Button

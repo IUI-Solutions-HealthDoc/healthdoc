@@ -172,6 +172,35 @@ async def create_radiology_order_item(
     return response
 
 
+
+async def _registered_machine(db: AsyncSession, facility_id: uuid.UUID, machine: str) -> str:
+    """The equipment-register name for a typed or chosen machine.
+
+    Free text let "xr-01" and "XR-01" be saved as two machines (QA 12 Oct
+    2026). When the facility keeps imaging equipment in its register, a booking
+    must name one of those machines, matched on name or asset tag without case,
+    and a machine that is down or in maintenance cannot be booked. A facility
+    with no imaging equipment registered keeps free text, upper-cased, rather
+    than being locked out of booking.
+    """
+    from app.equipment.models import Equipment
+
+    wanted = " ".join(machine.split())
+    rows = (await db.execute(
+        select(Equipment).where(Equipment.facility_id == facility_id, Equipment.category == "imaging",
+                                Equipment.status != "retired")
+    )).scalars().all()
+    if not rows:
+        return wanted.upper()
+    for row in rows:
+        if wanted.casefold() in {row.name.casefold(), (row.asset_tag or "").casefold()}:
+            if row.status in ("down", "maintenance"):
+                raise HTTPException(409, {"code": "machine_unavailable",
+                                          "message": f"{row.name} is {row.status}. Choose a working machine."})
+            return row.name
+    raise HTTPException(422, {"code": "machine_not_registered",
+                              "message": "Choose a machine from the equipment register."})
+
 @router.put("/order-items/{item_id}/schedule", response_model=RadiologyOrderItemOut)
 async def schedule_scan(
     current_db_user: CurrentDbUser,
@@ -218,7 +247,7 @@ async def schedule_scan(
         )
 
     item.scheduled_at = payload.scheduled_at
-    item.machine_id = payload.machine_id
+    item.machine_id = await _registered_machine(db, current_db_user.facility_id, payload.machine_id)
     item.status = "scheduled"
 
     await _write_audit_log(db, table_name="radiology_order_items", row_id=item.id,
@@ -261,7 +290,7 @@ async def reschedule_scan(
         "status": item.status,
     }
     item.scheduled_at = payload.scheduled_at
-    item.machine_id = payload.machine_id.strip()
+    item.machine_id = await _registered_machine(db, current_db_user.facility_id, payload.machine_id)
     await _write_audit_log(
         db,
         table_name="radiology_order_items",

@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -285,6 +285,9 @@ async def unmerge_promotion(
     return merge_log
 
 
+EMERGENCY_STALE_HOURS = 24
+
+
 async def get_emergency_worklist(
     db: AsyncSession, facility_id: uuid.UUID
 ) -> list[dict]:
@@ -307,7 +310,11 @@ async def get_emergency_worklist(
     )
     result = await db.execute(stmt)
     items = []
+    # Visits from early September still sat in "awaiting care" in mid October
+    # (QA 10 Oct 2026); the board flags them instead of mixing them in.
+    stale_before = datetime.now(UTC) - timedelta(hours=EMERGENCY_STALE_HOURS)
     for visit, patient in result.all():
+        created = visit.created_at if visit.created_at.tzinfo else visit.created_at.replace(tzinfo=UTC)
         items.append({
             "visit_id": visit.id,
             "visit_number": visit.visit_number,
@@ -320,6 +327,7 @@ async def get_emergency_worklist(
             "arrival_time": visit.created_at,
             "status": visit.status,
             "visit_type": visit.visit_type,
+            "stale": created < stale_before,
         })
     return items
 

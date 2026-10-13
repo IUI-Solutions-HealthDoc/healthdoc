@@ -89,6 +89,10 @@ class EmergencyWorklistItem(BaseModel):
     arrival_time: datetime
     status: str
     visit_type: str = "emergency"
+    #: Open longer than EMERGENCY_STALE_HOURS: almost always a visit nobody
+    #: closed. Shown apart for review; never closed automatically, since
+    #: whether the patient was treated is a clinical record, not a timer.
+    stale: bool = False
 
 
 # ---------------------------------------------------------------------------
