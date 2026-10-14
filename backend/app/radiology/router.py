@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit.service import write_audit_log
 from app.auth.deps import CurrentDbUser, require_roles
 from app.common.accession import RADIOLOGY, allocate_accession_number
+from app.common.patient_brief import patient_briefs
 from app.common.db import get_db
 from app.common.idempotency import check_idempotency, hash_request_body, record_idempotent_response
 from app.files.minio_client import ensure_bucket, get_minio_client
@@ -171,6 +172,35 @@ async def create_radiology_order_item(
     return response
 
 
+
+async def _registered_machine(db: AsyncSession, facility_id: uuid.UUID, machine: str) -> str:
+    """The equipment-register name for a typed or chosen machine.
+
+    Free text let "xr-01" and "XR-01" be saved as two machines (QA 12 Oct
+    2026). When the facility keeps imaging equipment in its register, a booking
+    must name one of those machines, matched on name or asset tag without case,
+    and a machine that is down or in maintenance cannot be booked. A facility
+    with no imaging equipment registered keeps free text, upper-cased, rather
+    than being locked out of booking.
+    """
+    from app.equipment.models import Equipment
+
+    wanted = " ".join(machine.split())
+    rows = (await db.execute(
+        select(Equipment).where(Equipment.facility_id == facility_id, Equipment.category == "imaging",
+                                Equipment.status != "retired")
+    )).scalars().all()
+    if not rows:
+        return wanted.upper()
+    for row in rows:
+        if wanted.casefold() in {row.name.casefold(), (row.asset_tag or "").casefold()}:
+            if row.status in ("down", "maintenance"):
+                raise HTTPException(409, {"code": "machine_unavailable",
+                                          "message": f"{row.name} is {row.status}. Choose a working machine."})
+            return row.name
+    raise HTTPException(422, {"code": "machine_not_registered",
+                              "message": "Choose a machine from the equipment register."})
+
 @router.put("/order-items/{item_id}/schedule", response_model=RadiologyOrderItemOut)
 async def schedule_scan(
     current_db_user: CurrentDbUser,
@@ -217,7 +247,7 @@ async def schedule_scan(
         )
 
     item.scheduled_at = payload.scheduled_at
-    item.machine_id = payload.machine_id
+    item.machine_id = await _registered_machine(db, current_db_user.facility_id, payload.machine_id)
     item.status = "scheduled"
 
     await _write_audit_log(db, table_name="radiology_order_items", row_id=item.id,
@@ -260,7 +290,7 @@ async def reschedule_scan(
         "status": item.status,
     }
     item.scheduled_at = payload.scheduled_at
-    item.machine_id = payload.machine_id.strip()
+    item.machine_id = await _registered_machine(db, current_db_user.facility_id, payload.machine_id)
     await _write_audit_log(
         db,
         table_name="radiology_order_items",
@@ -358,7 +388,7 @@ async def list_radiology_order_items(
     # the deployment, paged and filterable by status — a worklist of every
     # hospital's scans, with accession numbers.
     query = (
-        select(RadiologyOrderItem)
+        select(RadiologyOrderItem, Order.patient_id)
         .join(Order, Order.id == RadiologyOrderItem.order_id)
         .where(Order.facility_id == current_db_user.facility_id)
     )
@@ -370,8 +400,15 @@ async def list_radiology_order_items(
         query.order_by(RadiologyOrderItem.created_at.desc())
         .offset((page - 1) * page_size).limit(page_size)
     )
-    rows = result.scalars().all()
-    return RadiologyOrderItemListOut(items=rows, page=page, page_size=page_size, total=total)
+    rows = result.all()
+    briefs = await patient_briefs(db, (pid for _, pid in rows), current_db_user.facility_id)
+    items = []
+    for item, pid in rows:
+        out = RadiologyOrderItemOut.model_validate(item)
+        if pid in briefs:
+            out = out.model_copy(update=briefs[pid].model_dump())
+        items.append(out)
+    return RadiologyOrderItemListOut(items=items, page=page, page_size=page_size, total=total)
 
 
 @router.get("/order-items/{item_id}/reports", response_model=RadiologyReportHistoryOut)
@@ -586,7 +623,7 @@ async def _write_audit_log(db: AsyncSession, *, table_name: str, row_id: uuid.UU
 @router.post(
     "/orders/{order_id}/attachments",
     response_model=RadiologyAttachmentOut,
-    dependencies=[Depends(require_roles("doctor", "radiologist", "admin"))],
+    dependencies=[Depends(require_roles("doctor", "radiology_tech", "admin"))],
 )
 async def upload_order_attachment(
     current_db_user: CurrentDbUser,
@@ -673,7 +710,7 @@ async def upload_order_attachment(
 @router.get(
     "/orders/{order_id}/attachments",
     response_model=RadiologyAttachmentListOut,
-    dependencies=[Depends(require_roles("doctor", "radiologist", "admin"))],
+    dependencies=[Depends(require_roles("doctor", "radiology_tech", "admin"))],
 )
 async def list_order_attachments(
     current_db_user: CurrentDbUser,
@@ -703,7 +740,7 @@ async def list_order_attachments(
 @router.get(
     "/order-items/{item_id}/attachments",
     response_model=RadiologyAttachmentListOut,
-    dependencies=[Depends(require_roles("doctor", "radiologist", "admin"))],
+    dependencies=[Depends(require_roles("doctor", "radiology_tech", "admin"))],
 )
 async def list_item_attachments(
     current_db_user: CurrentDbUser,
@@ -730,7 +767,7 @@ async def list_item_attachments(
 
 @router.get(
     "/attachments/{attachment_id}/download",
-    dependencies=[Depends(require_roles("doctor", "radiologist", "admin"))],
+    dependencies=[Depends(require_roles("doctor", "radiology_tech", "admin"))],
 )
 async def download_attachment(
     current_db_user: CurrentDbUser,

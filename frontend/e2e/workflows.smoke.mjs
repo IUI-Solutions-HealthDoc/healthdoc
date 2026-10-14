@@ -449,6 +449,8 @@ const workflows = {
 
     await withRole("dev.emergency", async (page) => {
       await open(page, "/emergency");
+      // The page opens on the Triage Tracking Board tab; registration is its own tab.
+      await click(page, "Emergency registration");
       await field(page, "Name (leave blank if unknown)", `Emergency Test ${randomUUID().replace(/[0-9-]/g, "a")}`);
       await field(page, "Sex", "female");
       await field(page, "Estimated age (years)", "34");
@@ -575,6 +577,8 @@ const workflows = {
       const [binding, abha] = await Promise.all([...reads, open(page, "/patient-portal")]);
       assert.ok(binding.patient_id, "The portal must have a verified patient binding");
       assert.equal(abha.patient_id, binding.patient_id, "Portal reads must agree on the bound patient");
+      // Identity moved to its own tab (portal tabs: documents, consent, ABHA).
+      await click(page, "ABHA & Identity");
       await text(page, "Portal identity verified by");
       assert.deepEqual(forbidden, [], "The portal must load a patient's own record without a single refusal");
       await record(page, { role: "patient", name: "My health record — own chart and access history", detail: "The portal loaded this patient's own record, ABHA link status and data-access history with no failing call. Every read here is scoped to the signed-in patient by the server." });

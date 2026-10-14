@@ -1,5 +1,6 @@
 "use client";
 
+import { PatientIdentityCell } from "@/components/common/PatientIdentityCell";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
@@ -45,6 +46,7 @@ const STATUS_FILTERS: { value: string; labelKey: MessageKey }[] = [
 
 const WORKLIST_COLUMNS: MessageKey[] = [
   "lab.col.accession",
+  "field.patient",
   "lab.col.test",
   "lab.col.sample",
   "lab.col.barcode",
@@ -55,6 +57,26 @@ const WORKLIST_COLUMNS: MessageKey[] = [
 ];
 
 const PAGE_SIZE = 20;
+
+// What each stored status means to the bench. "completed" is a result that
+// has been entered and NOT yet verified; showing the bare word next to an
+// unverified value read as final (QA 12 Oct 2026).
+const LAB_STATUS_LABELS: Record<string, string> = {
+  placed: "Ordered",
+  in_progress: "In progress",
+  completed: "Entered · awaiting verification",
+  released: "Verified · released",
+  cancelled: "Cancelled",
+};
+
+const SPECIMEN_STATUS_LABELS: Record<string, string> = {
+  pending_collection: "Awaiting collection",
+  collected: "Collected",
+  received: "Received in lab",
+  rejected: "Rejected",
+  recollected: "Recollection ordered",
+  not_recorded: "Collection not recorded",
+};
 
 function StatusChip({ status }: { status: string }) {
   const tone =
@@ -67,13 +89,18 @@ function StatusChip({ status }: { status: string }) {
           : "bg-muted text-muted-foreground";
   return (
     <span className={`rounded-full px-2 py-1 text-xs font-medium ${tone}`}>
-      {status.replaceAll("_", " ")}
+      {LAB_STATUS_LABELS[status] ?? status.replaceAll("_", " ")}
     </span>
   );
 }
 
-function SpecimenStatusChip({ status }: { status?: string | null }) {
-  const s = status || "pending_collection";
+function SpecimenStatusChip({ status, itemStatus }: { status?: string | null; itemStatus?: string }) {
+  // A result exists, so the sample was taken; a specimen still marked
+  // pending only means nobody recorded the collection step.
+  const resulted = itemStatus === "completed" || itemStatus === "released";
+  const s = !status || (status === "pending_collection" && resulted)
+    ? resulted ? "not_recorded" : "pending_collection"
+    : status;
   const tone =
     s === "received"
       ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300"
@@ -86,7 +113,7 @@ function SpecimenStatusChip({ status }: { status?: string | null }) {
             : "bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300";
   return (
     <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${tone}`}>
-      {s.replaceAll("_", " ")}
+      {SPECIMEN_STATUS_LABELS[s] ?? s.replaceAll("_", " ")}
     </span>
   );
 }
@@ -483,11 +510,12 @@ export function LabWorklistPanel() {
                   {rows.map((row) => (
                     <tr key={row.id} className="border-b border-border last:border-none">
                       <td className="px-4 py-3 font-mono">{row.accession_number}</td>
+                      <td className="px-4 py-3"><PatientIdentityCell row={row} /></td>
                       <td className="px-4 py-3 font-medium">{row.test_name}</td>
                       <td className="px-4 py-3">{row.sample_type}</td>
                       <td className="px-4 py-3">{row.barcode ?? t("lab.notCollected")}</td>
                       <td className="px-4 py-3">
-                        <SpecimenStatusChip status={row.specimen_status} />
+                        <SpecimenStatusChip status={row.specimen_status} itemStatus={row.status} />
                       </td>
                       <td className="px-4 py-3">
                         <StatusChip status={row.status} />
@@ -539,6 +567,15 @@ export function LabWorklistPanel() {
               <p className="text-sm text-muted-foreground">
                 {selected.accession_number} · {selected.sample_type}
               </p>
+              <p className="text-sm"><PatientIdentityCell row={selected} /></p>
+              {selected.patient_age_years == null || selected.patient_age_years < 18 ? (
+                <p role="note" className="mt-1 text-xs font-medium text-amber-800">
+                  {/* No approved age-specific ranges exist yet (QA 12 Oct 2026):
+                      say so rather than flag a child against adult values silently. */}
+                  Reference ranges and flags here are adult ranges. Interpret this result against
+                  {selected.patient_age_years == null ? " the patient's age" : " paediatric ranges"}.
+                </p>
+              ) : null}
             </div>
             <StatusChip status={selected.status} />
           </div>
@@ -556,7 +593,7 @@ export function LabWorklistPanel() {
                 <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   Specimen Status:
                 </span>
-                <SpecimenStatusChip status={selected.specimen_status} />
+                <SpecimenStatusChip status={selected.specimen_status} itemStatus={selected.status} />
                 {selected.recollected_from_id && (
                   <span className="rounded-full bg-purple-500/10 px-2 py-0.5 text-[10px] font-medium text-purple-600 dark:text-purple-300">
                     Linked Recollection

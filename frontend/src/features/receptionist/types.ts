@@ -23,6 +23,8 @@ export interface PatientCreate {
   district?: string | null;
   state_code?: string | null;
   pincode?: string | null;
+  /** Sent after the desk confirms a possible-duplicate warning names a different person. */
+  confirm_not_duplicate?: boolean;
 }
 
 export interface Patient {
@@ -71,6 +73,8 @@ export interface PatientSearchRequest {
   uhid?: string;
   aadhaar_number?: string;
   abha_number?: string;
+  /** With full_name instead of dob: matches a stored age or DOB within +-2 years. */
+  age_years?: string;
   page?: number;
   page_size?: number;
 }
@@ -88,6 +92,8 @@ export interface PatientSearchResult {
   match_score: number;
   /** "aadhaar" | "abha" | "uhid" | "thid" | "merged_identifier" | "mobile" | "name_dob" */
   matched_on: string;
+  /** Every criterion this patient matched, matched_on first. */
+  matched_fields?: string[];
   merged_from_uhid?: string | null;
 }
 
@@ -177,6 +183,7 @@ export const MATCH_LABELS: Record<string, string> = {
   merged_identifier: "Merged UHID match",
   mobile: "Mobile match",
   name_dob: "Name + date of birth",
+  name_age: "Name + age",
 };
 
 export function isIdentityMatch(matchedOn: string): boolean {

@@ -1,5 +1,6 @@
 "use client";
 
+import { PatientIdentityCell } from "@/components/common/PatientIdentityCell";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { ModuleCapabilityGate } from "@/components/common/ModuleCapabilityGate";
@@ -15,14 +16,13 @@ import {
   rescheduleScan,
   scheduleScan,
   signOffRadiologyReport,
-  uploadOrderAttachment,
-} from "@/features/radiology/api";
+  uploadOrderAttachment, radiologyStageCounts } from "@/features/radiology/api";
 import type {
   RadiologyAttachment,
   RadiologyOrderItem,
   RadiologyReport,
 } from "@/features/radiology/types";
-import { ApiError, downloadBlob, formatDateTime } from "@/lib/api";
+import { ApiError, api, downloadBlob, formatDateTime } from "@/lib/api";
 import { useLocale, type MessageKey } from "@/lib/i18n";
 import { useAuth } from "@/providers/auth-provider";
 import { Download, FileUp, Image as ImageIcon } from "lucide-react";
@@ -38,12 +38,52 @@ const WORKFLOW: { status: string; labelKey: MessageKey; hint: string }[] = [
 
 const RADIOLOGY_COLUMNS: MessageKey[] = [
   "radiology.col.accession",
+  "field.patient",
   "radiology.col.scan",
   "radiology.col.slot",
   "radiology.col.status",
 ];
 
+interface ImagingMachine {
+  id: string;
+  name: string;
+  category: string;
+  status: string;
+  asset_tag: string | null;
+}
+
+/**
+ * The machine, picked from the equipment register when the facility keeps
+ * one, so "xr-01" and "XR-01" cannot become two machines (QA 12 Oct 2026).
+ * A machine that is down or in maintenance is shown but cannot be chosen.
+ * Without registered imaging equipment the field stays free text.
+ */
+function MachinePicker({ machines, value, onChange, placeholder }: {
+  machines: ImagingMachine[] | null;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+}) {
+  if (machines && machines.length > 0) {
+    return (
+      <select className="w-full rounded-md border border-border px-3 py-2" value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">Choose machine…</option>
+        {machines.map((m) => (
+          <option key={m.id} value={m.name} disabled={m.status !== "working"}>
+            {m.name}{m.asset_tag ? ` (${m.asset_tag})` : ""}{m.status !== "working" ? ` — ${m.status}` : ""}
+          </option>
+        ))}
+      </select>
+    );
+  }
+  return (
+    <input maxLength={50} className="w-full rounded-md border border-border px-3 py-2" value={value}
+      onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />
+  );
+}
+
 function StatusChip({ status }: { status: string }) {
+  const { t } = useLocale();
   const tone =
     status === "released"
       ? "bg-success-muted text-success"
@@ -52,7 +92,14 @@ function StatusChip({ status }: { status: string }) {
         : status === "cancelled"
           ? "bg-danger-muted text-danger"
           : "bg-muted text-muted-foreground";
-  return <span className={`rounded-full px-2 py-1 text-xs font-medium ${tone}`}>{status}</span>;
+  // The same words as the stage tabs above: the chip said "reporting" while
+  // the tab said "Preliminary" for the same scan (QA 12 Oct 2026).
+  const stage = WORKFLOW.find((s) => s.status === status);
+  return (
+    <span className={`rounded-full px-2 py-1 text-xs font-medium ${tone}`}>
+      {stage ? t(stage.labelKey) : status.replaceAll("_", " ")}
+    </span>
+  );
 }
 
 function RadiologyPageContent() {
@@ -73,6 +120,12 @@ function RadiologyPageContent() {
 
   const [slot, setSlot] = useState("");
   const [machine, setMachine] = useState("");
+  const [machines, setMachines] = useState<ImagingMachine[] | null>(null);
+  useEffect(() => {
+    api<ImagingMachine[]>("/equipment")
+      .then((rows) => setMachines(rows.filter((m) => m.category === "imaging" && m.status !== "retired")))
+      .catch(() => setMachines([]));
+  }, []);
   const [findings, setFindings] = useState("");
   const [impression, setImpression] = useState("");
   const [pacsStudyUid, setPacsStudyUid] = useState("");
@@ -255,11 +308,18 @@ function RadiologyPageContent() {
     }
   }, [loadFhir, selected]);
 
-  const counts = useMemo(() => {
-    const byStatus: Record<string, number> = {};
-    for (const item of items) byStatus[item.status] = (byStatus[item.status] ?? 0) + 1;
-    return byStatus;
+  // Counted per stage, not from the rows on screen: those are already
+  // filtered, so every other tab's count vanished (QA 12 Oct 2026).
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  useEffect(() => {
+    radiologyStageCounts(WORKFLOW.map((stage) => stage.status))
+      .then(setCounts)
+      .catch(() => setCounts({}));
   }, [items]);
+  // A scan from another stage must not stay open under "Nothing in this stage".
+  useEffect(() => {
+    if (selected && !items.some((item) => item.id === selected.id)) setSelected(null);
+  }, [items, selected]);
 
   const currentReport = reports.find((r) => r.is_current) ?? null;
 
@@ -326,6 +386,7 @@ function RadiologyPageContent() {
                     }`}
                   >
                     <td className="px-4 py-3 font-mono text-xs">{item.accession_number}</td>
+                    <td className="px-4 py-3 text-sm"><PatientIdentityCell row={item} /></td>
                     <td className="px-4 py-3">
                       <div className="text-sm font-medium">{item.scan_type}</div>
                       <div className="text-xs uppercase text-muted-foreground">
@@ -358,6 +419,7 @@ function RadiologyPageContent() {
                 <p className="text-xs text-muted-foreground">
                   {selected.accession_number} · <StatusChip status={selected.status} />
                 </p>
+                <p className="mt-1 text-sm"><PatientIdentityCell row={selected} /></p>
               </div>
 
               {!canOperate && (selected.status === "placed" || selected.status === "scheduled") && (
@@ -380,12 +442,8 @@ function RadiologyPageContent() {
                   </label>
                   <label className="block space-y-1 text-sm">
                     <span className="text-muted-foreground">{t("radiology.machine")}</span>
-                    <input
-                      className="w-full rounded-md border border-border px-3 py-2"
-                      value={machine}
-                      onChange={(e) => setMachine(e.target.value)}
-                      placeholder={t("radiology.machinePlaceholder")}
-                    />
+                    <MachinePicker machines={machines} value={machine} onChange={setMachine}
+                      placeholder={t("radiology.machinePlaceholder")} />
                   </label>
                   <button
                     type="button"
@@ -441,12 +499,7 @@ function RadiologyPageContent() {
                     </label>
                     <label className="block space-y-1 text-sm">
                       <span className="text-muted-foreground">Machine</span>
-                      <input
-                        maxLength={50}
-                        className="w-full rounded-md border border-border px-3 py-2"
-                        value={rescheduleMachine}
-                        onChange={(event) => setRescheduleMachine(event.target.value)}
-                      />
+                      <MachinePicker machines={machines} value={rescheduleMachine} onChange={setRescheduleMachine} />
                     </label>
                     <label className="block space-y-1 text-sm">
                       <span className="text-muted-foreground">Reason</span>

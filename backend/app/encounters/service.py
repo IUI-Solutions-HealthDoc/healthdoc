@@ -142,6 +142,10 @@ async def create_encounter(
     )
     db.add(encounter)
     await db.flush()
+    # Opening the consultation is what puts the patient "in service".
+    from app.queue.service import start_service_for_visit
+
+    await start_service_for_visit(db, payload.visit_id)
     return encounter
 
 
@@ -324,4 +328,8 @@ async def update_review_status(
         review.signed_off_at = datetime.now(UTC)
 
     await db.flush()
+    # updated_at is set by the database on UPDATE, so the flush expires it;
+    # reading it lazily in the response raised MissingGreenlet (500 on
+    # "Mark as reviewed", QA 12 Oct 2026).
+    await db.refresh(review)
     return review

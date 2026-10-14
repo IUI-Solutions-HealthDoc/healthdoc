@@ -12,7 +12,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { listDepartments } from "@/features/admin/api/departments";
 import type { Department } from "@/features/admin/api/departments";
-import { ApiError } from "@/lib/api";
+import { ApiError, formatDateTime } from "@/lib/api";
 import { useLocale, type MessageKey } from "@/lib/i18n";
 
 import { createMaintenanceLog, listMaintenanceLogs } from "./api";
@@ -213,13 +213,19 @@ export function MaintenanceLogPanel() {
               <li key={log.id} className="rounded border border-border p-3 text-sm">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="font-medium">{log.machine_id}</span>
+                  {/* The same label as the Type dropdown, not the stored value
+                      ("preventive", "qa check"); QA 12 Oct 2026. */}
                   <span className="rounded bg-muted px-2 py-0.5 text-xs">
-                    {log.maintenance_type.replace("_", " ")}
+                    {log.maintenance_type in TYPE_KEYS
+                      ? t(TYPE_KEYS[log.maintenance_type as MaintenanceType])
+                      : log.maintenance_type.replace("_", " ")}
                   </span>
                 </div>
                 <p className="mt-1 text-muted-foreground">
                   {departmentName(log.department_id)} ·{" "}
-                  {new Date(log.performed_at).toLocaleString()}
+                  {/* Day-first, 24-hour, India time: toLocaleString() with no
+                      locale printed 10/9/2026, 3:46:00 PM for 9 October. */}
+                  {formatDateTime(log.performed_at)}
                   {log.performed_by_vendor ? ` · ${log.performed_by_vendor}` : ""}
                 </p>
                 <p className="mt-1 text-muted-foreground">

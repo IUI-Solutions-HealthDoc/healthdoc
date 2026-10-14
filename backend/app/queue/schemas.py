@@ -149,7 +149,7 @@ class DoctorWorklistItemOut(QueueTokenOut):
     patient_id: uuid.UUID
     full_name: str
     uhid: str
-    age_years: int
+    age_years: int | None
     sex: str
     provider_user_id: uuid.UUID
     provider_name: str

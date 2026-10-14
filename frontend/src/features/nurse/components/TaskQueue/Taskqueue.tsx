@@ -23,6 +23,10 @@ function formatAuditStamp(value?: string | null): string | null {
   });
 }
 
+function formatAge(age?: number | null): string | null {
+  return age === null || age === undefined ? null : `${age} y`;
+}
+
 function isPending(status: Order["status"]): boolean {
   return status !== "completed" && status !== "cancelled";
 }
@@ -68,10 +72,13 @@ export default function TaskQueue({ orders, onAccept, onCheckOff }: TaskQueuePro
           <tbody>
             {pendingOrders.map((order: Order) => {
               const canAccept = order.status === "placed" && Boolean(onAccept);
+              // Lab and radiology orders are completed by the department when
+              // the result is entered; the ward gets a 409 for trying. Other
+              // orders are checked off once someone has accepted them, so the
+              // record says who picked the order up (QA 10 Oct 2026, D-02/D-11).
+              const diagnostic = order.order_type === "lab" || order.order_type === "radiology";
               const canComplete =
-                order.status === "placed" ||
-                order.status === "accepted" ||
-                order.status === "in_progress";
+                !diagnostic && (order.status === "accepted" || order.status === "in_progress");
               const acceptedLabel = formatAuditStamp(order.accepted_at);
 
               return (
@@ -79,7 +86,20 @@ export default function TaskQueue({ orders, onAccept, onCheckOff }: TaskQueuePro
                   <td className="px-4 py-3 text-sm">
                     {order.order_number ?? order.id.slice(0, 8)}
                   </td>
-                  <td className="px-4 py-3 text-sm">{order.patient_name ?? "-"}</td>
+                  <td className="px-4 py-3 text-sm">
+                    {order.patient_name ? (
+                      <>
+                        <span className="font-medium">{order.patient_name}</span>
+                        <span className="block text-xs text-muted-foreground">
+                          {[order.patient_uhid, formatAge(order.patient_age_years), order.patient_sex]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="text-danger">{t("nurse.taskPatientUnknown")}</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-sm capitalize">{order.order_type}</td>
                   <td className="px-4 py-3 text-sm">
                     <span
@@ -114,6 +134,8 @@ export default function TaskQueue({ orders, onAccept, onCheckOff }: TaskQueuePro
                         >
                           {t("nurse.taskMarkCompleted")}
                         </button>
+                      ) : diagnostic ? (
+                        <span className="text-xs text-muted-foreground">{t("nurse.taskDoneInDepartment")}</span>
                       ) : null}
                     </div>
                   </td>

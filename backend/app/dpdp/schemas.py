@@ -1,6 +1,7 @@
 """API contracts for DPO, grievance, and consent-manager workflows."""
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import UTC, datetime
 
@@ -18,6 +19,16 @@ def _strip(value: str | None) -> str | None:
     return normalized
 
 
+_EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[A-Za-z]{2,}")
+_PHONE = re.compile(r"(?:\+?\d[\d ()-]{8,}\d)")
+
+
+def _reachable(contact: str) -> bool:
+    if _EMAIL.search(contact):
+        return True
+    return any(10 <= len(re.sub(r"\D", "", m)) <= 13 for m in _PHONE.findall(contact))
+
+
 class DpoAppointmentCreate(BaseModel):
     user_id: uuid.UUID
     replaces_dpo_id: uuid.UUID | None = None
@@ -27,7 +38,13 @@ class DpoAppointmentCreate(BaseModel):
     @field_validator("published_contact")
     @classmethod
     def strip_contact(cls, value: str | None) -> str | None:
-        return _strip(value)
+        value = _strip(value)
+        # The published contact is how a data principal reaches the DPO, so it
+        # must carry an email address or a phone number; "abc" was accepted
+        # (QA 12 Oct 2026).
+        if value is not None and not _reachable(value):
+            raise ValueError("published_contact must include an email address or a phone number")
+        return value
 
     @model_validator(mode="after")
     def published_contact_must_match_flag(self):

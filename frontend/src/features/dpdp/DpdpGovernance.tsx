@@ -48,6 +48,14 @@ function isOverdue(grievance: Grievance): boolean {
   return new Date(grievance.due_at).getTime() < Date.now();
 }
 
+function isReachableContact(contact: string): boolean {
+  if (/[^@\s]+@[^@\s]+\.[A-Za-z]{2,}/.test(contact)) return true;
+  return (contact.match(/\+?\d[\d ()-]{8,}\d/g) ?? []).some((m) => {
+    const digits = m.replace(/\D/g, "").length;
+    return digits >= 10 && digits <= 13;
+  });
+}
+
 export function DpdpGovernance() {
   const { t } = useLocale();
   const { user, loading: sessionLoading } = useCurrentUser();
@@ -139,6 +147,9 @@ export function DpdpGovernance() {
       setBusy(false);
     }
   };
+
+  // Same rule as the server: the published contact must reach someone.
+  const contactUnreachable = publishContact && contact.trim() !== "" && !isReachableContact(contact);
 
   const submitAppointment = () =>
     act(
@@ -274,7 +285,11 @@ export function DpdpGovernance() {
                   value={contact}
                   onChange={(e) => setContact(e.target.value)}
                   disabled={!publishContact}
+                  aria-invalid={contactUnreachable}
                 />
+                {contactUnreachable ? (
+                  <span className="text-xs text-danger">Include an email address or a phone number people can use.</span>
+                ) : null}
               </label>
             </div>
             <label className="mt-3 flex items-center gap-2 text-sm">
@@ -292,7 +307,7 @@ export function DpdpGovernance() {
             </label>
             <button
               type="button"
-              disabled={busy || !appointee || (publishContact && !contact.trim())}
+              disabled={busy || !appointee || (publishContact && (!contact.trim() || contactUnreachable))}
               onClick={() => void submitAppointment()}
               className="mt-4 rounded bg-blue-700 px-4 py-2 text-sm text-white disabled:bg-gray-300"
             >

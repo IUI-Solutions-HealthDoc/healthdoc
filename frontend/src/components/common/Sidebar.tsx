@@ -37,7 +37,7 @@ import { useLocale, type MessageKey } from "@/lib/i18n";
 import { useAuth } from "@/providers/auth-provider";
 import { HealthDocBrand } from "./HealthDocBrand";
 
-type NavArea = "front_desk" | "clinical" | "diagnostics" | "finance" | "audit" | "admin" | "platform" | "patient";
+type NavArea = "front_desk" | "clinical" | "diagnostics" | "finance" | "audit" | "admin" | "platform" | "monitoring" | "patient";
 
 type NavItem = {
   href: string;
@@ -55,6 +55,7 @@ const AREA_KEYS: Record<NavArea, MessageKey> = {
   audit: "area.audit",
   admin: "area.admin",
   platform: "area.platform",
+  monitoring: "area.monitoring",
   patient: "area.patient",
 };
 
@@ -83,7 +84,8 @@ const NAV_ITEMS: readonly NavItem[] = [
     href: "/equipment", labelKey: "sidebar.equipment", icon: Wrench, area: "clinical",
     roles: [ROLES.ADMIN, ROLES.HOD, ROLES.DOCTOR, ROLES.NURSE, ROLES.LAB_TECH, ROLES.RADIOLOGY_TECH],
   },
-  { href: "/monitor", labelKey: "sidebar.controlRoom", icon: LayoutDashboard, area: "platform", roles: [ROLES.MONITOR] },
+  // A state/district officer is not a platform administrator (QA 12 Oct 2026).
+  { href: "/monitor", labelKey: "sidebar.controlRoom", icon: LayoutDashboard, area: "monitoring", roles: [ROLES.MONITOR] },
   { href: "/hod", labelKey: "sidebar.hodDashboard", icon: LayoutDashboard, area: "clinical", roles: [ROLES.HOD] },
   { href: "/receptionist/registration", labelKey: "sidebar.registration", icon: UserRound, area: "front_desk", roles: [ROLES.RECEPTIONIST] },
   { href: "/receptionist/appointments", labelKey: "sidebar.appointments", icon: Calendar, area: "front_desk", roles: [ROLES.RECEPTIONIST] },
@@ -102,6 +104,9 @@ const NAV_ITEMS: readonly NavItem[] = [
   { href: "/emergency", labelKey: "sidebar.emergency", icon: Stethoscope, area: "clinical", roles: [ROLES.EMERGENCY] },
   { href: "/supervisor/merges", labelKey: "sidebar.identityMerges", icon: Shield, area: "audit", roles: [ROLES.SUPERVISOR] },
   { href: "/consent", labelKey: "sidebar.consent", icon: FileText, area: "clinical", roles: [ROLES.RECEPTIONIST, ROLES.DOCTOR, ROLES.NURSE] },
+  // Both pages existed and were reachable only by typing the URL (QA 12 Oct 2026).
+  { href: "/ot", labelKey: "sidebar.operationTheatre", icon: Stethoscope, area: "clinical", roles: [ROLES.DOCTOR, ROLES.NURSE, ROLES.SUPERVISOR, ROLES.ADMIN] },
+  { href: "/programs", labelKey: "sidebar.carePrograms", icon: ClipboardList, area: "clinical", roles: [ROLES.DOCTOR, ROLES.NURSE, ROLES.SUPERVISOR, ROLES.ADMIN] },
   { href: "/immunization", labelKey: "sidebar.immunization", icon: Syringe, area: "clinical", roles: [ROLES.DOCTOR, ROLES.NURSE, ROLES.ADMIN] },
   { href: "/forms", labelKey: "sidebar.clinicalForms", icon: FileText, area: "clinical", roles: [ROLES.DOCTOR, ROLES.NURSE, ROLES.ADMIN] },
   { href: "/lab", labelKey: "sidebar.laboratory", icon: FlaskConical, area: "diagnostics", roles: [ROLES.LAB_TECH, ROLES.DOCTOR] },
@@ -121,6 +126,7 @@ const NAV_ITEMS: readonly NavItem[] = [
   { href: "/admin/account-requests", labelKey: "sidebar.accountRequests", icon: UserRound, area: "admin", roles: [ROLES.ADMIN] },
   { href: "/admin/permissions", labelKey: "sidebar.permissions", icon: Shield, area: "admin", roles: [ROLES.ADMIN] },
   { href: "/admin/departments", labelKey: "sidebar.departmentsRooms", icon: Building2, area: "admin", roles: [ROLES.ADMIN] },
+  { href: "/admin/beds", labelKey: "sidebar.wardsBeds", icon: Bed, area: "admin", roles: [ROLES.ADMIN] },
   { href: "/admin/abdm-sync", labelKey: "sidebar.abdmIdentityLinks", icon: Shield, area: "admin", roles: [ROLES.ADMIN] },
   { href: "/admin/hfr", labelKey: "sidebar.hfr", icon: Building2, area: "admin", roles: [ROLES.ADMIN] },
   { href: "/admin/data-protection", labelKey: "sidebar.dataProtection", icon: Shield, area: "admin", roles: [ROLES.ADMIN, ROLES.AUDITOR] },

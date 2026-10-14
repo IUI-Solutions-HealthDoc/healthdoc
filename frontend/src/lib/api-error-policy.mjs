@@ -70,8 +70,16 @@ export function userFacingApiError(code, payload) {
     return domainMessages[domainCode];
   }
 
+  // HealthDoc's own refusals carry a sentence written for the person at the
+  // screen ("Choose a date from today to 60 days ahead"). Replacing it with
+  // "check the highlighted fields" when nothing is highlighted, or "reload"
+  // when reloading cannot help, hid the real reason (QA 12 Oct 2026). Text
+  // relayed from ABDM is still never shown: it can carry upstream detail.
+  const own = ownRefusalMessage(code, payload, domainCode);
+  if (own) return own;
+
   if (code === 400 || code === 422) {
-    return "Please check the highlighted fields and try again.";
+    return validationSummary(payload) ?? "Please check the highlighted fields and try again.";
   }
   if (code === 401) return "Your session has expired. Sign in again.";
   if (code === 403) return "You do not have permission to perform this action.";
@@ -88,4 +96,44 @@ export function userFacingApiError(code, payload) {
   }
   if (code >= 500) return "Something went wrong on the server. Report it to IT if it happens again.";
   return "The request could not be completed. Please try again.";
+}
+
+const RELAYED_PREFIXES = ["abdm", "abha", "aadhaar", "hip_", "hiu_", "gateway"];
+
+function domainMessageText(value) {
+  if (!value || typeof value !== "object") return undefined;
+  if (typeof value.code === "string" && typeof value.message === "string") return value.message;
+  return domainMessageText(value.detail);
+}
+
+function isPlainSentence(text) {
+  return text.length > 0 && text.length <= 300 && !/[{}\[\]<>]|Traceback|Exception|SELECT |\bnull\b/.test(text);
+}
+
+function ownRefusalMessage(code, payload, domainCode) {
+  if (![400, 404, 409, 422].includes(code) || !domainCode) return undefined;
+  if (RELAYED_PREFIXES.some((prefix) => domainCode.toLowerCase().startsWith(prefix))) return undefined;
+  const text = domainMessageText(payload);
+  return typeof text === "string" && isPlainSentence(text.trim()) ? text.trim() : undefined;
+}
+
+/**
+ * FastAPI's 422 list, reduced to the field and the reason. The submitted
+ * value (`input`) is never echoed: it may be an identifier.
+ */
+function validationSummary(payload) {
+  const items = payload && typeof payload === "object" && Array.isArray(payload.detail) ? payload.detail : null;
+  if (!items) return undefined;
+  const parts = [];
+  for (const item of items.slice(0, 3)) {
+    if (!item || typeof item.msg !== "string") continue;
+    const reason = item.msg.replace(/^Value error, /, "").replace(/\b([a-z]+)_([a-z_]+)\b/g, (m) => m.replace(/_/g, " "));
+    if (!isPlainSentence(reason)) continue;
+    const loc = Array.isArray(item.loc) ? item.loc.filter((part) => typeof part === "string" && part !== "body") : [];
+    const field = loc.length ? loc[loc.length - 1].replace(/_/g, " ") : "";
+    parts.push(field ? `${field}: ${reason}` : reason);
+  }
+  if (!parts.length) return undefined;
+  const text = parts.join("; ");
+  return `${text.charAt(0).toUpperCase()}${text.slice(1)}${/[.!?]$/.test(text) ? "" : "."}`;
 }

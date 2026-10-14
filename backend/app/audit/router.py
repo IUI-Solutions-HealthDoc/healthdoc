@@ -90,8 +90,26 @@ async def list_audit_logs(
         page=page,
         page_size=page_size,
     )
+    # Local imports: app.audit sits under every module, so it must not import
+    # their models at load time (see app/audit/deps.py).
+    import sqlalchemy as sa
+
+    from app.patients.models import Patient
+    from app.users.models import User
+
+    users = {u: f"{name} ({login})" for u, name, login in (await db.execute(
+        sa.select(User.id, User.full_name, User.username).where(User.id.in_({r.user_id for r in items if r.user_id}))
+    )).all()} if items else {}
+    patients = dict((await db.execute(
+        sa.select(Patient.id, sa.func.coalesce(Patient.uhid, Patient.thid)).where(
+            Patient.id.in_({r.patient_id for r in items if r.patient_id}), Patient.facility_id == user.facility_id)
+    )).all()) if items else {}
     return AuditLogListOut(
-        items=[AuditLogOut.model_validate(r) for r in items],
+        items=[
+            AuditLogOut.model_validate(r).model_copy(
+                update={"user_display": users.get(r.user_id), "patient_uhid": patients.get(r.patient_id)})
+            for r in items
+        ],
         page=page,
         page_size=page_size,
         total=total,

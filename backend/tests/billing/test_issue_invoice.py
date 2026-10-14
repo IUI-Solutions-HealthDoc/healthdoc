@@ -257,3 +257,32 @@ async def test_a_missing_invoice_is_404(db, user):
         )
 
     assert caught.value.status_code == 404
+
+
+@pytest.mark.parametrize(("priced", "code"), [(False, "invoice_has_unpriced_charges"), (True, "invoice_has_unbilled_charges")])
+async def test_an_invoice_with_charges_still_off_it_cannot_be_issued(db, draft_invoice, user, monkeypatch, priced, code):
+    """QA 12 Oct 2026: issued for Rs 50 with the CBC and X-ray unpriced and unbilled.
+
+    Issuing freezes the invoice, so a charge left off at that moment can never
+    be billed. The aggregator is stubbed to the reported shape; the guard is
+    what is under test.
+    """
+    from decimal import Decimal
+
+    from app.billing.schemas import ChargeCategory, ChargeLine
+
+    await _add_line(db, draft_invoice)
+    line = ChargeLine(charge_category=ChargeCategory.LAB, reference_type="lab_order_items",
+                      reference_id=uuid.uuid4(), description="CBC", unit_price=Decimal("0") if not priced else Decimal("250"),
+                      amount=Decimal("0") if not priced else Decimal("250"), priced=priced)
+
+    async def pending(_db, _visit_id, _invoice_id):
+        return [line]
+
+    monkeypatch.setattr(service, "aggregate_unbilled_charges", pending)
+    with pytest.raises(HTTPException) as caught:
+        await service.issue_invoice(db, invoice_id=draft_invoice, updated_by=user,
+                                    expected_row_version=await _row_version(db, draft_invoice))
+    assert caught.value.detail["code"] == code
+    assert "CBC" in caught.value.detail["message"]
+    assert await _status(db, draft_invoice) == "draft"

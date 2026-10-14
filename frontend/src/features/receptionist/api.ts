@@ -364,7 +364,10 @@ export function searchPatients(
     body: JSON.stringify({
       page,
       page_size: pageSize,
-      ...normaliseCriteria(criteria),
+      ...(({ age_years, ...rest }) => ({
+        ...rest,
+        ...(age_years ? { age_years: Number(age_years) } : {}),
+      }))(normaliseCriteria(criteria)),
     }),
     idempotencyKey: null, // creates nothing
   });

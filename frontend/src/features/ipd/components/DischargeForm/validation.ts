@@ -10,7 +10,7 @@ export const DISCHARGE_TYPES = [
 
 export const addDischargeSchema = z
   .object({
-    admission_id: z.string().uuid("Admission ID must be a UUID"),
+    admission_id: z.guid("Admission ID must be a UUID"),
     discharged_at: z.string().min(1),
     discharge_type: z.enum(DISCHARGE_TYPES),
     discharge_summary: z.string().min(1, "Discharge summary is required"),
@@ -19,7 +19,7 @@ export const addDischargeSchema = z
     // Backend: DischargeRequest.destination_facility_id / destination_facility_name.
     // Required (either one) only when discharge_type === "transferred" —
     // mirrors ck_discharges_transfer_destination.
-    destination_facility_id: z.string().uuid().optional(),
+    destination_facility_id: z.guid().optional(),
     destination_facility_name: z.string().trim().optional(),
   })
   .refine(

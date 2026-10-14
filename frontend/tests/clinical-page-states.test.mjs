@@ -27,6 +27,7 @@ function formsPage({ definitions, orderSets, submissions, search }) {
     "./components/CsvAdministrationModal": { CsvAdministrationModal(props) { modals.csv = props; return null; } },
     "./components/DynamicFormRenderer": { DynamicFormRenderer(props) { editors.push(props); return { type: "editor", props: { patient: props.patientId, form: props.formDef } }; } },
     "@/lib/api": { api: search, formatDateTime: (iso) => iso },
+    "@/providers/auth-provider": { useAuth: () => ({ user: { role: "admin" } }) },
   }).FormsPage);
   const render = () => h.render({});
   const searchFor = async (tree, term) => {

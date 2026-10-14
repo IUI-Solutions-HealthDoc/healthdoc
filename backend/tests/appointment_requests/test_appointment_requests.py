@@ -126,10 +126,10 @@ async def test_open_requests_are_capped_and_a_retry_does_not_add_one(db):
     first = await _ask(db, w, key="same-key")
     again = await _ask(db, w, key="same-key")
     assert first.id == again.id
-    await _ask(db, w)
-    await _ask(db, w)
+    await _ask(db, w, on=TODAY + timedelta(days=4))
+    await _ask(db, w, on=TODAY + timedelta(days=5))
     with pytest.raises(HTTPException) as refused:
-        await _ask(db, w)
+        await _ask(db, w, on=TODAY + timedelta(days=6))
     assert refused.value.detail["code"] == "too_many_open_requests"
 
 
@@ -146,4 +146,69 @@ async def test_withdraw_once_and_other_facilities_cannot_act(db):
     assert out.status == "withdrawn"
     with pytest.raises(HTTPException) as again:
         await portal.withdraw_appointment_request(asked.id, binding=w.binding, db=db)
+    assert again.value.status_code == 409
+
+
+# ---------------------------------------------------------------- QA 12 Oct 2026
+
+
+async def test_the_same_ask_twice_is_one_request(db):
+    w = await _world(db)
+    await _ask(db, w)
+    with pytest.raises(HTTPException) as refused:
+        await _ask(db, w)
+    assert (refused.value.status_code, refused.value.detail["code"]) == (409, "duplicate_request")
+    # A different session or day is a different ask.
+    await _ask(db, w, on=TODAY + timedelta(days=4))
+
+
+async def test_booking_names_the_doctor_and_needs_no_second_confirmation(db):
+    w = await _world(db)
+    asked = await _ask(db, w)
+    with pytest.raises(HTTPException) as refused:
+        await appointments_router.confirm_appointment_request(
+            asked.id, appointments_router.RequestConfirm(start_time="10:30"),
+            current_user=w.desk, db=db, idempotency_key=str(uuid.uuid4()),
+        )
+    assert refused.value.detail["code"] == "doctor_required"
+    appointment = await appointments_router.confirm_appointment_request(
+        asked.id, appointments_router.RequestConfirm(start_time="10:30", doctor_user_id=w.doctor),
+        current_user=w.desk, db=db, idempotency_key=str(uuid.uuid4()),
+    )
+    assert appointment.status == "confirmed"
+
+
+async def test_a_morning_request_is_not_silently_booked_for_the_afternoon(db):
+    w = await _world(db)
+    asked = await _ask(db, w)
+    with pytest.raises(HTTPException) as refused:
+        await appointments_router.confirm_appointment_request(
+            asked.id, appointments_router.RequestConfirm(start_time="16:00", doctor_user_id=w.doctor),
+            current_user=w.desk, db=db, idempotency_key=str(uuid.uuid4()),
+        )
+    assert refused.value.detail["code"] == "outside_requested_session"
+    appointment = await appointments_router.confirm_appointment_request(
+        asked.id,
+        appointments_router.RequestConfirm(start_time="16:00", doctor_user_id=w.doctor, outside_session_agreed=True),
+        current_user=w.desk, db=db, idempotency_key=str(uuid.uuid4()),
+    )
+    assert appointment.start_time == "16:00"
+
+
+async def test_the_patient_can_cancel_a_booked_appointment_once(db):
+    w = await _world(db)
+    asked = await _ask(db, w)
+    with pytest.raises(HTTPException) as not_booked:
+        await portal.cancel_my_appointment(asked.id, binding=w.binding, db=db)
+    assert not_booked.value.status_code == 404
+    await appointments_router.confirm_appointment_request(
+        asked.id, appointments_router.RequestConfirm(start_time="10:30", doctor_user_id=w.doctor),
+        current_user=w.desk, db=db, idempotency_key=str(uuid.uuid4()),
+    )
+    out = await portal.cancel_my_appointment(
+        asked.id, binding=w.binding, db=db, payload=portal.MyAppointmentCancelIn(reason="Feeling better"))
+    assert out.appointment_status == "cancelled" and "Feeling better" in out.cancellation_reason
+    assert out.reason == "Fever for three days"
+    with pytest.raises(HTTPException) as again:
+        await portal.cancel_my_appointment(asked.id, binding=w.binding, db=db)
     assert again.value.status_code == 409

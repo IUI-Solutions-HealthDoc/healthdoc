@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const addIntakeOutputSchema = z.object({
-  admission_id: z.uuid(),
+  admission_id: z.guid(),
   recorded_at: z
     .string()
     .min(1, "Recorded time is required")

@@ -18,9 +18,11 @@ export function ExternalReferralInbox() {
   return <Stack spacing={2}>
     <Typography component="h1" sx={{ fontSize: "1.5rem", fontWeight: 700 }}>External referrals</Typography>
     <Typography>Your referred orders across visits, including completed consultations. Recording an outside report is separate from local clinical review.</Typography>
-    <label>Referral status{" "}<select value={state} onChange={(event) => {
+    {/* Its own row and width: the filter's text was cut off at the edge and
+        crowded the count line beneath it (QA 12 Oct 2026). */}
+    <label className="flex flex-wrap items-center gap-2 pb-1">Referral status<select value={state} onChange={(event) => {
       setState(event.target.value as ReferralState); setOffset(0);
-    }} className="rounded border p-2">
+    }} className="min-w-52 rounded border p-2">
       <option value="pending">Pending receipt</option><option value="completed">Completed</option>
       <option value="cancelled">Cancelled</option><option value="all">All referrals</option>
     </select></label>

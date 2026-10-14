@@ -23,7 +23,7 @@ export const DEFAULT_VALUES = {
   discharge_type: "discharged" as const,
   discharge_summary: "",
   follow_up_date: "",
-  // `undefined`, not "". The schema is `z.string().uuid().optional()`, and an
+  // `undefined`, not "". The schema is `z.guid().optional()`, and an
   // empty string is neither a UUID nor absent — so this default failed
   // validation on every submit, for every discharge type. Nothing renders an
   // input for destination_facility_id, so the error had nowhere to appear:

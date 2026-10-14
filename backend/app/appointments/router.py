@@ -9,7 +9,7 @@ from typing import Iterator, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.appointments import requests, service
@@ -33,6 +33,7 @@ from app.common.idempotency import (
 )
 from app.departments.models import Department
 from app.patients.models import Patient
+from app.patients.service import mask_mobile
 from app.queue.service import require_initial_priority_allowed
 from app.users.models import Facility
 
@@ -204,6 +205,9 @@ class AppointmentRequestOut(BaseModel):
     patient_id: uuid.UUID
     patient_name: str | None = None
     patient_uhid: str | None = None
+    # Two patients with one name must be told apart at the desk (QA 12 Oct 2026).
+    patient_age_years: int | None = None
+    patient_mobile_masked: str | None = None
     department_id: uuid.UUID
     department_name: str | None = None
     preferred_date: date
@@ -222,6 +226,9 @@ class RequestConfirm(BaseModel):
     duration_minutes: int = Field(default=15, ge=5, le=240)
     #: Defaults to the date the patient asked for.
     appointment_date: date | None = None
+    #: The desk spoke to the patient and they accepted a time outside the
+    #: session they asked for.
+    outside_session_agreed: bool = False
 
 
 class RequestDecline(BaseModel):
@@ -249,7 +256,8 @@ async def list_appointment_requests(
 ) -> list[AppointmentRequestOut]:
     rows = (
         await db.execute(
-            select(AppointmentRequest, Patient.full_name, Patient.uhid, Department.name)
+            select(AppointmentRequest, Patient.full_name, func.coalesce(Patient.uhid, Patient.thid),
+                   Patient.age_years, Patient.mobile, Department.name)
             .join(Patient, Patient.id == AppointmentRequest.patient_id)
             .join(Department, Department.id == AppointmentRequest.department_id)
             .where(AppointmentRequest.facility_id == current_user.facility_id, AppointmentRequest.status == request_status)
@@ -259,9 +267,10 @@ async def list_appointment_requests(
     ).all()
     return [
         AppointmentRequestOut.model_validate(req).model_copy(
-            update={"patient_name": name, "patient_uhid": uhid, "department_name": dept}
+            update={"patient_name": name, "patient_uhid": uhid, "department_name": dept,
+                    "patient_age_years": age, "patient_mobile_masked": mask_mobile(mobile)}
         )
-        for req, name, uhid, dept in rows
+        for req, name, uhid, age, mobile, dept in rows
     ]
 
 
@@ -287,6 +296,7 @@ async def confirm_appointment_request(
             db, request_id, facility_id=current_user.facility_id, actor_id=current_user.id,
             start_time=payload.start_time, doctor_user_id=payload.doctor_user_id,
             duration_minutes=payload.duration_minutes, appointment_date=payload.appointment_date,
+            outside_session_agreed=payload.outside_session_agreed,
         )
     res = AppointmentOut.model_validate(appointment)
     await record_idempotent_response(db, key, endpoint, 200, res.model_dump(mode="json"), user_id=current_user.id)

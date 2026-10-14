@@ -1,5 +1,6 @@
 "use client";
 
+import { PaediatricDoseNotice } from "@/components/common/PaediatricDoseNotice";
 import * as React from "react";
 import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
@@ -72,6 +73,7 @@ export function PrescriptionWorkspace({ context, encounter }: PrescriptionWorksp
           </Button>
         </Stack>
 
+        <PaediatricDoseNotice ageYears={context.age_years} />
         <SafetyBanner alerts={alerts} checking={checking} />
 
         {needsOverride && !hasBlocking && (

@@ -1,5 +1,6 @@
 "use client";
 
+import { PaediatricDoseNotice } from "@/components/common/PaediatricDoseNotice";
 import Link from "next/link";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
@@ -302,14 +303,25 @@ function DispenseLine({
   );
 }
 
+/** Quantities are decimal strings on the wire; zero is checked as text. */
+const isZero = (quantity: string | null | undefined) => !quantity || /^0+(\.0+)?$/.test(quantity.trim());
+
 function ResultCard({ result }: { result: DispenseResult }) {
   const { t } = useLocale();
+  // Green only when medicine actually left the counter: a dispense of 0 (no
+  // stock) showed the same green "success" as a full one (QA 12 Oct 2026).
+  const nothing = result.items.every((item) => isZero(item.quantity_dispensed));
+  const tone = nothing
+    ? { border: "border-danger", chip: "bg-danger-muted text-danger" }
+    : result.status === "dispensed"
+      ? { border: "border-success", chip: "bg-success-muted text-success" }
+      : { border: "border-warning", chip: "bg-warning-muted text-warning" };
   return (
-    <section className="surface-card space-y-3 border border-success p-5" aria-live="polite">
+    <section className={`surface-card space-y-3 border ${tone.border} p-5`} aria-live="polite">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-lg font-medium">{t("pharmacy.dispense.recordedTitle")}</h2>
-        <span className="rounded-full bg-success-muted px-3 py-1 text-sm text-success">
-          {result.status.replaceAll("_", " ")}
+        <span className={`rounded-full px-3 py-1 text-sm ${tone.chip}`}>
+          {nothing ? "Nothing dispensed" : result.status.replaceAll("_", " ")}
         </span>
       </div>
       <p className="text-sm text-muted-foreground">
@@ -483,10 +495,23 @@ function Dispense() {
       {prescription && (
         <>
           <section className="surface-card p-4 text-sm">
-            <p>
-              <span className="text-muted-foreground">{t("pharmacy.dispense.patientId")}</span>{" "}
-              <span className="font-mono">{prescription.patient_id}</span>
-            </p>
+            {prescription.patient_name ? (
+              <p>
+                <span className="text-muted-foreground">{t("field.patient")}</span>{" "}
+                <span className="font-semibold">{prescription.patient_name}</span>
+                <span className="text-muted-foreground">
+                  {" · "}
+                  {[
+                    prescription.patient_uhid,
+                    prescription.patient_age_years != null ? `${prescription.patient_age_years} y` : t("patient.ageUnknown"),
+                    prescription.patient_sex,
+                  ].filter(Boolean).join(" · ")}
+                </span>
+              </p>
+            ) : (
+              <p className="text-danger">{t("pharmacy.dispense.patientUnknown")}</p>
+            )}
+            <div className="mt-2"><PaediatricDoseNotice ageYears={prescription.patient_age_years} /></div>
             {prescription.notes ? (
               <p className="mt-2">
                 {t("pharmacy.dispense.notes")} {prescription.notes}

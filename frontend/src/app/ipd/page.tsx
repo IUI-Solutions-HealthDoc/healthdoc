@@ -1,5 +1,6 @@
 "use client";
 
+import { formatAge } from "@/lib/format-age";
 import { useCallback, useEffect, useState } from "react";
 
 import AdmissionForm from "@/features/ipd/components/AdmissionForm";
@@ -301,7 +302,7 @@ export default function IpdPage() {
                             {item.patient_name}
                           </h3>
                           <p className="text-xs text-slate-500">
-                            UHID: {item.patient_uhid} · {item.patient_sex || ""} · {item.patient_age ? `${item.patient_age} yrs` : ""}
+                            UHID: {item.patient_uhid} · {item.patient_sex || ""} · {formatAge(item.patient_age)}
                           </p>
                         </div>
                         <span

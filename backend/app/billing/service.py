@@ -85,6 +85,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit.actions import AuditAction
 from app.audit.service import write_audit_log
 from app.billing.models import Invoice, InvoiceItem, Payment, Refund
+from app.users.models import User
 from app.billing.pricing import price_pharmacy_batch
 from app.billing.schemas import (
     ChargeLine,
@@ -1109,6 +1110,38 @@ async def issue_invoice(
             },
         )
 
+    # Issuing freezes the invoice, so every charge the visit has accrued must
+    # be on it first. A CBC and an X-ray with no tariff were left off an
+    # invoice issued for the registration fee alone (QA 12 Oct 2026); they
+    # could never be billed afterwards.
+    pending = await aggregate_unbilled_charges(db, invoice.visit_id, invoice.id)
+    unpriced = [line.description for line in pending if not line.priced]
+    unbuilt = [line.description for line in pending if line.priced]
+    if unpriced:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "invoice_has_unpriced_charges",
+                "message": (
+                    f"{len(unpriced)} charge(s) have no tariff: {', '.join(unpriced[:5])}. "
+                    "Add the tariff, then build the invoice again before issuing."
+                ),
+                "unpriced": unpriced,
+            },
+        )
+    if unbuilt:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "invoice_has_unbilled_charges",
+                "message": (
+                    f"{len(unbuilt)} charge(s) are not on the invoice yet: {', '.join(unbuilt[:5])}. "
+                    "Build the invoice again before issuing."
+                ),
+                "unbilled": unbuilt,
+            },
+        )
+
     invoice.status = "issued"
     invoice.issued_at = datetime.now(UTC)
     invoice.updated_by = updated_by
@@ -1236,6 +1269,7 @@ async def record_payment(
     )
 
     await db.refresh(payment)
+    collector = await db.get(User, payment.collected_by)
 
     return PaymentOut(
         id=payment.id,
@@ -1246,6 +1280,8 @@ async def record_payment(
         mode=payment.mode,
         status=payment.status,
         collected_at=payment.collected_at.isoformat(),
+        collected_by=payment.collected_by,
+        collected_by_name=collector.full_name if collector else None,
     )
 
 

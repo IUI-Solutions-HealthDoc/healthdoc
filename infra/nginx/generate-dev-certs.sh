@@ -15,7 +15,19 @@ mkdir -p "$DIR"
 # Override with LAN_IP=... when the address is not on en0. Autodetection is
 # best-effort: on hosts with neither macOS ipconfig nor GNU hostname -I, a
 # localhost-only certificate is still a valid development fallback.
-LAN_IP="${LAN_IP:-$(ipconfig getifaddr en0 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}' || true)}"
+# Windows Git Bash has an `ipconfig` too, which rejects "getifaddr en0" with a
+# usage text; only an IPv4 address is accepted from any of these (QA 12 Oct 2026).
+detect_lan_ip() {
+  local ip=""
+  case "$(uname -s)" in
+    Darwin) ip=$(ipconfig getifaddr en0 2>/dev/null || true) ;;
+    Linux) ip=$(hostname -I 2>/dev/null | awk '{print $1}' || true) ;;
+    MINGW*|MSYS*|CYGWIN*)
+      ip=$(ipconfig 2>/dev/null | tr -d '\r' | awk -F': ' '/IPv4/ {print $2; exit}' || true) ;;
+  esac
+  [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && echo "$ip" || true
+}
+LAN_IP="${LAN_IP:-$(detect_lan_ip)}"
 SAN="DNS:localhost,IP:127.0.0.1"
 if [[ -n "${LAN_IP:-}" ]]; then
   SAN="$SAN,IP:$LAN_IP"

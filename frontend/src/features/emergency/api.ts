@@ -94,6 +94,8 @@ export interface EmergencyWorklistItem {
   arrival_time: string;
   status: string;
   visit_type: string;
+  /** Open longer than 24 h: shown apart for review, never auto-closed. */
+  stale?: boolean;
 }
 
 export function listEmergencyWorklist(): Promise<EmergencyWorklistItem[]> {

@@ -127,8 +127,8 @@ export function AuditEntryDetail({ entry, loading }: Props) {
       </Box>
 
       <Typography sx={{ m: 0, mb: 1, fontSize: "0.75rem", color: meridian.textSecondary }}>
-        Live GET /audit/logs returns this slim §4.4 shape (no prev_hash / signature /
-        visit_id / IP on the wire).
+        The trail list carries who, what, when and which record. Chain signatures, visit
+        and network address are kept on the server and are not shown here.
       </Typography>
 
       <Box

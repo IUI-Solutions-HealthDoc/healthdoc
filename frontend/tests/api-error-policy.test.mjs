@@ -110,3 +110,37 @@ test("ABHA enrolment refusals name their cause instead of 'highlighted fields' o
     "The service is temporarily unavailable. Try again shortly.",
   );
 });
+
+test("HealthDoc's own refusal reaches the screen instead of generic copy", () => {
+  // QA 12 Oct 2026: both of these showed "check the highlighted fields" /
+  // "reload and try again" while the server had said exactly what was wrong.
+  assert.equal(
+    userFacingApiError(422, { detail: { code: "date_out_of_range", message: "Choose a date from today to 60 days ahead" } }),
+    "Choose a date from today to 60 days ahead",
+  );
+  assert.equal(
+    userFacingApiError(409, { detail: { code: "too_many_open_requests", message: "You already have 3 requests waiting for the hospital" } }),
+    "You already have 3 requests waiting for the hospital",
+  );
+});
+
+test("text relayed from ABDM or shaped like data is still never shown", () => {
+  assert.equal(
+    userFacingApiError(409, { detail: { code: "abdm_link_failed", message: "upstream private text" } }),
+    "This request conflicts with the record's current state. Reload and try again.",
+  );
+  assert.equal(
+    userFacingApiError(409, { detail: { code: "some_conflict", message: "row {'id': 'x'} locked" } }),
+    "This request conflicts with the record's current state. Reload and try again.",
+  );
+  assert.doesNotMatch(userFacingApiError(500, { detail: { code: "x", message: "Plain words" } }), /Plain words/);
+});
+
+test("a model-level validation error names the rule, never the submitted value", () => {
+  const message = userFacingApiError(422, { detail: [{
+    type: "value_error", loc: ["body"], input: { full_name: "PRIVATE NAME" },
+    msg: "Value error, guardian_name and guardian_relationship are required for a patient under 18",
+  }] });
+  assert.equal(message, "Guardian name and guardian relationship are required for a patient under 18.");
+  assert.doesNotMatch(message, /PRIVATE/);
+});

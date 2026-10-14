@@ -122,7 +122,7 @@ export function HfrFacilityRegistry() {
           {byId && !idValid ? <span role="alert" className="text-danger">A facility id is 12 characters and starts with IN.</span> : null}
         </label>
         {!byName ? (
-          <button type="button" onClick={() => setByName(true)} className="text-sm underline">Search by name, ownership and location instead</button>
+          <button type="button" onClick={() => setByName(true)} className="mb-2 block text-sm underline">Search by name, ownership and location instead</button>
         ) : (
         <fieldset disabled={byId} className="grid gap-3 md:grid-cols-3">
           <label className="block space-y-1 text-sm md:col-span-3"><span className="text-muted-foreground">Facility name (full or part)</span>

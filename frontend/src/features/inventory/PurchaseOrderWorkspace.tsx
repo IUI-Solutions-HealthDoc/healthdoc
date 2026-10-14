@@ -24,6 +24,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { searchMedicines } from "@/features/pharmacy/api";
 import type { MedicineSearchResult } from "@/features/pharmacy/types";
 import { ApiError } from "@/lib/api";
+import { api } from "@/lib/api";
 import { useLocale } from "@/lib/i18n";
 
 import {
@@ -64,6 +65,7 @@ export function PurchaseOrderWorkspace() {
   const [busy, setBusy] = useState(false);
 
   const [supplierId, setSupplierId] = useState("");
+  const [newSupplier, setNewSupplier] = useState("");
   const [expectedDate, setExpectedDate] = useState("");
   const [lines, setLines] = useState<DraftLine[]>([]);
   const [term, setTerm] = useState("");
@@ -173,6 +175,20 @@ export function PurchaseOrderWorkspace() {
                 </option>
               ))}
             </select>
+            {/* No supplier could be added anywhere (QA 10 Oct 2026). */}
+            <span className="mt-2 flex gap-2">
+              <input value={newSupplier} maxLength={200} onChange={(e) => setNewSupplier(e.target.value)}
+                placeholder="New supplier name" aria-label="New supplier name" className="flex-1 rounded border border-gray-300 p-2" />
+              <button type="button" disabled={newSupplier.trim().length < 2}
+                onClick={() => void api<Supplier>("/pharmacy/suppliers", {
+                  method: "POST", body: JSON.stringify({ name: newSupplier.trim() }), idempotencyKey: null,
+                }).then((created) => {
+                  setSuppliers((list) => list.some((s) => s.id === created.id) ? list : [...list, created]);
+                  setSupplierId(created.id);
+                  setNewSupplier("");
+                })}
+                className="rounded border border-gray-300 px-3 text-sm disabled:opacity-50">Add supplier</button>
+            </span>
           </label>
           <label className="text-sm">
             <span className="block text-gray-700">{t("inventory.po.expectedDelivery")}</span>

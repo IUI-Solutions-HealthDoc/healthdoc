@@ -14,6 +14,11 @@ export interface LabOrderItem {
   rejection_reason?: string | null;
   recollected_from_id?: string | null;
   created_at: string;
+  patient_id?: string | null;
+  patient_name?: string | null;
+  patient_uhid?: string | null;
+  patient_age_years?: number | null;
+  patient_sex?: string | null;
 }
 
 export interface LabSpecimenEvent {

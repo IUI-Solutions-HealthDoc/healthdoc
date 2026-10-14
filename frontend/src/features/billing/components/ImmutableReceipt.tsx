@@ -71,7 +71,7 @@ export function ImmutableReceipt({ payment, invoice }: Props) {
       <Row label={t("billing.receipt.amount")} value={formatINR(payment.amount)} />
       <Row label={t("billing.receipt.currency")} value={payment.currency} />
       <Row label={t("billing.receipt.mode")} value={paymentModeLabel(t, payment.mode)} />
-      <Row label={t("billing.receipt.collectedBy")} value={payment.collected_by} />
+      <Row label={t("billing.receipt.collectedBy")} value={payment.collected_by_name ?? "—"} />
       <Row
         label={t("billing.receipt.collectedAt")}
         value={new Intl.DateTimeFormat("en-IN", {

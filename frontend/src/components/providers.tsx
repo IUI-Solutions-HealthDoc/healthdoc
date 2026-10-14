@@ -8,6 +8,7 @@ import { muiTheme } from "@/styles/theme";
 import { Toaster } from "@/components/ui/Toaster";
 import { AuthProvider } from "@/providers/auth-provider";
 import { CriticalAlertListener } from "@/features/lab/CriticalAlertListener";
+import { NumberWheelGuard } from "@/components/common/NumberWheelGuard";
 
 const LAYER_ORDER = "@layer theme, base, mui, components, utilities;";
 
@@ -20,6 +21,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
         <CssBaseline />
         <AuthProvider>
           <CriticalAlertListener />
+          <NumberWheelGuard />
           {children}
           <Toaster />
         </AuthProvider>

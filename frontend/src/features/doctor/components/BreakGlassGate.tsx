@@ -7,7 +7,10 @@ import CircularProgress from "@mui/material/CircularProgress";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 
+import Link from "next/link";
+
 import { Button } from "@/components/ui/Button";
+import { handPatientToConsent } from "@/features/consent/handoff";
 import { useLocale } from "@/lib/i18n";
 import type { MessageKey } from "@/lib/i18n";
 import { meridian } from "@/styles/theme";
@@ -88,8 +91,25 @@ function PatientRecordGate({ patient, children }: Props) {
     <>
       <Box sx={{ ...doctorPanelSx, display: "flex", flexDirection: "column", gap: 1.5 }}>
         <Typography sx={{ fontSize: "1.0625rem", fontWeight: 700 }}>{t("doctor.breakGlassRecordLocked")}</Typography>
+        {/* Which patient: the card used to say only "this patient" (QA 10 Oct 2026). */}
+        <Typography sx={{ fontSize: "0.9375rem", fontWeight: 600 }}>
+          {patient.full_name}
+          <Box component="span" sx={{ ml: 1, fontWeight: 400, color: meridian.textSecondary, fontSize: "0.8125rem" }}>
+            {[patient.uhid, patient.token_display].filter(Boolean).join(" · ")}
+          </Box>
+        </Typography>
         <Typography sx={{ fontSize: "0.875rem", color: meridian.textSecondary, lineHeight: 1.55 }}>
           {blockedReason ? t(BLOCKED_KEYS[blockedReason]) : t("doctor.breakGlassCannotView")}
+        </Typography>
+        <Typography sx={{ fontSize: "0.8125rem", lineHeight: 1.55 }}>
+          {t("doctor.breakGlassRoutineHint")}{" "}
+          <Link
+            href="/consent"
+            onClick={() => handPatientToConsent({ id: patient.patient_id, full_name: patient.full_name })}
+            style={{ textDecoration: "underline", fontWeight: 600 }}
+          >
+            {t("consent.recordConsent")}
+          </Link>
         </Typography>
         <Typography sx={{ fontSize: "0.8125rem", color: meridian.textSecondary, lineHeight: 1.55 }}>
           {t("doctor.breakGlassEmergencyHint")}
