@@ -100,8 +100,6 @@ async def list_equipment(
 
 
 async def _with_last_service(db: AsyncSession, facility_id: uuid.UUID, rows) -> list[EquipmentOut]:
-    from sqlalchemy import func
-
     from app.departments.models import Department
     from app.maintenance.models import MachineMaintenanceLog
 
