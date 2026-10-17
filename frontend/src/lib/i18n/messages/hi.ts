@@ -77,7 +77,7 @@ export const hi = {
   "field.validUntil": "वैध तक",
 
   "patient.scanBarcode": "बारकोड / सटीक पहचान स्कैन करें",
-  "patient.scanHint": "बारकोड स्कैन करें या UHID / THID पेस्ट करें (जैसे IN-RJ-JPR001-2026-000001-4)…",
+  "patient.scanHint": "बारकोड स्कैन करें या UHID / THID पेस्ट करें (जैसे IN-DL-DEV001-2026-000001-4)…",
   "patient.scanAndFind": "स्कैन और खोजें",
   "patient.mobilePlaceholder": "10 अंक या +91",
   "patient.enterCriterion": "कम से कम एक मानदंड दर्ज करें।",
@@ -146,6 +146,7 @@ export const hi = {
   "monitor.errLoad": "नियंत्रण कक्ष लोड नहीं हो सका।",
   "monitor.stale": "पिछला सफल डेटा दिखाया जा रहा है।",
   "monitor.wholeState": "पूरा राज्य",
+  "monitor.dataFrom": "डेटा का समय",
   "monitor.updated": "अद्यतन",
   "monitor.district": "ज़िला",
   "monitor.allDistricts": "सभी ज़िले",
@@ -391,7 +392,7 @@ export const hi = {
   "monitor.status.amber": "पीला",
   "monitor.status.green": "हरा",
   "monitor.status.grey": "रिपोर्ट नहीं",
-  "monitor.thresholds": "{bedAmber}% बिस्तर भरने या किसी दवा के पुनःआदेश स्तर से कम होने पर पीला; {bedRed}% बिस्तर या {stockRed}+ दवाएँ कम होने पर लाल। {minutes} मिनट तक कोई डेटा न आने पर 'रिपोर्ट नहीं'।",
+  "monitor.thresholds": "{bedAmber}% बिस्तर, किसी दवा के पुनःआदेश स्तर से कम होने, किसी मशीन के बंद होने, या कर्मचारी सक्रिय न होने पर रोगियों के प्रतीक्षा करने पर पीला; {bedRed}% बिस्तर, {stockRed}+ दवाएँ कम होने, या किसी महत्वपूर्ण मशीन के बंद होने पर लाल। {minutes} मिनट तक कोई डेटा न आने पर 'रिपोर्ट नहीं'।",
 
   "area.front_desk": "फ्रंट डेस्क",
   "area.clinical": "क्लिनिकल",
@@ -692,7 +693,7 @@ export const hi = {
   "receptionist.checkedInAtArrival": "आगमन पर चेक-इन",
   "receptionist.readyForConsultation": "परामर्श के लिए तैयार",
   "receptionist.bookingModalHint": "मरीज़, विभाग, प्रदाता और स्लॉट चुनें। प्रदाता संघर्ष जाँच लागू है।",
-  "receptionist.patientSearchPlaceholder": "जैसे IN-RJ-JPR001… या 9876543210",
+  "receptionist.patientSearchPlaceholder": "जैसे IN-DL-DEV001… या 9876543210",
   "receptionist.labelPhone": "फ़ोन",
   "receptionist.serviceCatalogue": "सेवा कैटलॉग",
   "receptionist.standardConsultation15": "मानक परामर्श (15 मि.)",
@@ -772,6 +773,7 @@ export const hi = {
   "consent.auditBanner": "सहमति निर्णय ऑडिट इतिहास में रहते हैं। रद्द सहमति मिटाई नहीं जाती, दर्ज रहती है।",
   "consent.findPatient": "जिस मरीज़ की सहमति चाहिए उसे खोजें। रिकॉर्ड प्रति मरीज़ पढ़े जाते हैं — सुविधा-व्यापी सूची नहीं है।",
   "consent.minorNeedsGuardian": "रोगी की आयु {age} वर्ष है, इसलिए सहमति माता-पिता या अभिभावक देते हैं।",
+  "consent.unnamedPatient": "रोगी",
   "consent.changePatient": "मरीज़ बदलें",
   "consent.recordConsent": "सहमति दर्ज करें",
   "consent.records": "सहमति रिकॉर्ड",
@@ -807,7 +809,7 @@ export const hi = {
   "consent.purpose.RESEARCH": "अनुसंधान",
   "consent.purpose.PAYMENT": "भुगतान / बिलिंग",
   "consent.access.ui": "UI",
-  "consent.access.api": "API",
+  "consent.access.api": "सिस्टम",
   "consent.access.abdm_hiu": "ABDM HIU · स्वास्थ्य सूचना उपयोगकर्ता",
   "consent.access.export": "निर्यात",
   "consent.dataAccessLog": "डेटा एक्सेस लॉग",
@@ -1005,6 +1007,8 @@ export const hi = {
   "doctor.vitalsAnthropometry": "शारीरिक माप",
   "doctor.vitalsBmiAuto": "BMI (स्वतः)",
   "doctor.vitalsWhrAuto": "WHR (स्वतः)",
+  "doctor.vitalAllowed": "मान्य: {range}",
+  "doctor.toast.vitalsOutOfRange": "कुछ रीडिंग संभव सीमा से बाहर हैं। चिह्नित फ़ील्ड ठीक करें।",
   "doctor.vitalTemp": "तापमान",
   "doctor.vitalPulse": "नाड़ी",
   "doctor.vitalRespRate": "श्वसन दर",
@@ -1177,7 +1181,7 @@ export const hi = {
   "nurse.metricDischargesDetail": "पूरी सुविधा",
   "nurse.pendingOrdersTitle": "लंबित डॉक्टर ऑर्डर",
   "nurse.pendingOrdersSubtitle": "काम शुरू होने पर स्वीकार करें, फिर आवश्यक नोट के साथ पूर्ण चिह्नित करें।",
-  "nurse.taskQueueError": "नर्सिंग कार्य लोड नहीं हो सके। API कनेक्शन जाँचें और फिर कोशिश करें।",
+  "nurse.taskQueueError": "नर्सिंग कार्य लोड नहीं हो सके। कनेक्शन जाँचें और फिर से प्रयास करें।",
   "nurse.wardOverviewTitle": "वार्ड अवलोकन",
   "nurse.wardOverviewSubtitle": "अधिभोग प्रत्येक बिस्तर से जुड़ी सक्रिय भर्ती से आता है।",
   "nurse.selectBedPrompt": "लाइव क्लिनिकल पैनल खोलने के लिए बिस्तर चुनें।",
@@ -1586,7 +1590,7 @@ export const hi = {
   "queueDisplay.status.live": "लाइव",
   "queueDisplay.status.reconnecting": "पुनः कनेक्ट…",
   "queueDisplay.noDepartment":
-    "कोई विभाग चयनित नहीं। इस स्क्रीन को /queue-display?department=<department_id> से खोलें।",
+    "कोई विभाग नहीं चुना गया। यह स्क्रीन कतार पेज से खोलें, जो पते में विभाग जोड़ता है।",
   "queueDisplay.noTokenCalled": "अभी कोई टोकन बुलाया नहीं जा रहा।",
   "queueDisplay.waitingForCall": "अगले टोकन के बुलाए जाने की प्रतीक्षा।",
   "queueDisplay.boardFromConnect": "यह बोर्ड कनेक्ट होने के बाद की कॉल दिखाता है।",
@@ -1979,7 +1983,7 @@ export const hi = {
   "billing.tariff.retireSummary":
     "{code} · {scheme} · {price} · {effectiveFrom} से",
   "nurse.ward.loadLiveError":
-    "लाइव वार्ड डेटा लोड नहीं हो सका। API कनेक्शन जाँचें और पुनः प्रयास करें।",
+    "वार्ड डेटा लोड नहीं हो सका। कनेक्शन जाँचें और फिर से प्रयास करें।",
   "nurse.ward.panelsLoadError":
     "कुछ लाइव मरीज़ पैनल लोड नहीं हो सके। इस चार्ट पर कार्रवाई से पहले पुनः प्रयास करें।",
   "nurse.ward.loadingPatientChart": "मरीज़ चार्ट लोड हो रहा है…",
@@ -2242,7 +2246,7 @@ export const hi = {
   "dpdp.grievanceUpdateFailed": "शिकायत अपडेट नहीं हो सकी",
   "dpdp.consentManagersSection": "सहमति प्रबंधक ({count})",
   "dpdp.consentManagersHint":
-    "DPDP Rules 2025 के तहत पंजीकृत। `consent_records.consent_manager_id` इन्हीं की ओर है।",
+    "DPDP नियम 2025 के तहत पंजीकृत सहमति प्रबंधक। किसी सहमति प्रबंधक के माध्यम से दी गई सहमति इनमें से एक से जुड़ी होती है।",
   "dpdp.consentManagersEmpty": "कोई पंजीकृत नहीं।",
   "dpdp.consentManagerActive": "सक्रिय",
   "dpdp.consentManagerInactive": "निष्क्रिय",
@@ -2320,7 +2324,7 @@ export const hi = {
   "audit.list.pageOf": "पृष्ठ {current} / {total}",
   "audit.detail.loading": "प्रविष्टि लोड…",
   "audit.detail.selectPrompt":
-    "entry_hash और JSON diff देखने के लिए audit log प्रविष्टि चुनें।",
+    "क्या बदला और उसकी अखंडता जाँच देखने के लिए एक ऑडिट प्रविष्टि चुनें।",
   "audit.detail.copy": "कॉपी",
   "audit.detail.copied": "कॉपी हुआ",
   "audit.detail.copyFailed": "कॉपी विफल",
@@ -2405,13 +2409,13 @@ export const hi = {
   "ipd.checklist.skipReasonRequired":
     "इस कार्य को छोड़ने का कम से कम 10 अक्षरों का कारण दें।",
   "reports.kpi.subtitle":
-    "OPD प्रतीक्षा और शार्प इंजरी के लिए /reports/kpis से लाइव KPI स्नैपशॉट। वित्त MIS अलग पैनल है।",
+    "OPD प्रतीक्षा समय और सुई की चोटों के सुविधा माप। वित्त रिपोर्ट बिलिंग डेस्क के लिए अलग पैनल में हैं।",
   "reports.kpi.tileHint":
-    "ट्रेंड फोकस करने के लिए टाइल क्लिक करें; दोनों दिखाने के लिए फिर क्लिक करें। मान kpi_snapshots से।",
+    "किसी टाइल पर क्लिक करके उसका रुझान देखें; दोनों देखने के लिए फिर क्लिक करें। मान दिन में एक बार गणना किए जाते हैं।",
   "reports.kpi.trendDescMulti":
     "बहु-श्रृंखला रेखा दृश्य · फोकस चार्ट के लिए टाइल चुनें",
   "reports.kpi.chart.noSnapshotsDesc":
-    "दूसरा समय फ़िल्टर आज़माएँ — KPI पंक्तियाँ kpi_snapshots में प्रति दिन संग्रहीत हैं।",
+    "कोई और समय अवधि चुनें। माप दिन में एक बार सहेजे जाते हैं।",
   "patientPortal.unboundBody1":
     "केवल पोर्टल भूमिका यह साबित नहीं करती कि आप कौन-से मरीज़ हैं। HealthDoc मरीज़ ID नहीं माँगेगा।",
   "patientPortal.unboundBody2":
@@ -2544,7 +2548,7 @@ export const hi = {
   "billing.receipt.collectedAt": "वसूली समय",
   "billing.receipt.refunds": "वापसी",
   "billing.lineItems.title": "लाइन आइटम",
-  "billing.lineItems.hint": "invoice_items · राशि = मात्रा × इकाई मूल्य",
+  "billing.lineItems.hint": "हर पंक्ति: मात्रा × इकाई मूल्य।",
   "billing.lineItems.addItem": "आइटम जोड़ें",
   "billing.lineItems.col.category": "श्रेणी",
   "billing.lineItems.col.description": "विवरण",
@@ -2602,7 +2606,7 @@ export const hi = {
   "reports.kpi.days": "{count} दिन",
   "reports.kpi.snapshots": "{count} स्नैपशॉट",
   "reports.kpi.focus": "फोकस: {label}",
-  "reports.kpi.showingBoth": "दोनों स्कीमा उदाहरण KPI दिखाए जा रहे हैं",
+  "reports.kpi.showingBoth": "दोनों माप दिखाए जा रहे हैं",
   "reports.kpi.errCustomRange": "From तारीख To तारीख से पहले या बराबर होनी चाहिए।",
   "reports.kpi.errLoad": "KPI लोड नहीं हो सके",
   "reports.kpi.chart.noSnapshotsTitle": "इस अवधि में कोई स्नैपशॉट नहीं",
@@ -2611,13 +2615,13 @@ export const hi = {
   "reports.kpi.spark.noDataTitle": "कोई डेटा नहीं",
   "reports.kpi.spark.noDataDesc": "इस KPI के लिए खाली विंडो।",
   "reports.kpi.table.title": "नवीनतम स्नैपशॉट",
-  "reports.kpi.table.subtitle": "वर्तमान विंडो · kpi_code, period, value, numerator / denominator",
+  "reports.kpi.table.subtitle": "वर्तमान अवधि · माप, अवधि, मान, अंश / हर",
   "reports.kpi.col.kpi": "KPI",
   "reports.kpi.col.period": "अवधि",
   "reports.kpi.col.value": "मान",
   "reports.kpi.col.numerator": "अंश",
   "reports.kpi.col.denominator": "हर",
-  "reports.billingMis.eyebrow": "बिलिंग MIS · /billing/mis/*",
+  "reports.billingMis.eyebrow": "बिलिंग रिपोर्ट",
   "reports.billingMis.title": "राजस्व और प्राप्य",
   "reports.billingMis.subtitle": "चयनित व्यावसायिक-तिथि सीमा के लिए बिलिंग गतिविधि।",
   "reports.billingMis.errLoad": "MIS लोड विफल",

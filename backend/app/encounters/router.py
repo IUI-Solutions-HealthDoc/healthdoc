@@ -234,7 +234,7 @@ async def create_review(encounter_id: UUID, payload: DoctorReviewCreate, current
         )
     except service.EncounterNotFound:
         raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="encounter_not_found")
-    return DoctorReviewOut.model_validate(review)
+    return (await _with_reviewer_names(db, [review]))[0]
 
 
 @router.get("/{encounter_id}/reviews", response_model=list[DoctorReviewOut],
@@ -243,7 +243,7 @@ async def list_reviews(encounter_id: UUID, current_db_user: CurrentDbUser,
                         db: AsyncSession = Depends(get_db)) -> list[DoctorReviewOut]:
     await _get_scoped_encounter(db, encounter_id, current_db_user.facility_id)
     reviews = await service.list_reviews(db, encounter_id)
-    return [DoctorReviewOut.model_validate(r) for r in reviews]
+    return await _with_reviewer_names(db, list(reviews))
 
 
 @router.patch("/reviews/{review_id}", response_model=DoctorReviewOut,
@@ -272,4 +272,19 @@ async def update_review(review_id: UUID, payload: DoctorReviewStatusUpdate, curr
                 "message": f"Cannot move review from '{exc.current_status}' to '{exc.requested_status}'",
             },
         )
-    return DoctorReviewOut.model_validate(review)
+    return (await _with_reviewer_names(db, [review]))[0]
+
+
+async def _with_reviewer_names(db: AsyncSession, reviews) -> list[DoctorReviewOut]:
+    from sqlalchemy import select
+
+    from app.users.models import User
+
+    ids = {r.reviewed_by for r in reviews if r.reviewed_by}
+    names = (
+        dict((await db.execute(select(User.id, User.full_name).where(User.id.in_(ids)))).all()) if ids else {}
+    )
+    return [
+        DoctorReviewOut.model_validate(r).model_copy(update={"reviewed_by_name": names.get(r.reviewed_by)})
+        for r in reviews
+    ]

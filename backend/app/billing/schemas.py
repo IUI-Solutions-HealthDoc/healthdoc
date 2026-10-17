@@ -73,6 +73,8 @@ class InvoicePreviewResponse(BaseModel):
     unpriced_count: int
     projected_new_charges_total: Money
     projected_gross_amount: Money
+    #: Things the desk must know before issuing (an admission still open).
+    warnings: list[str] = []
 
 
 class InvoiceBuildRequest(BaseModel):
@@ -88,6 +90,9 @@ class InvoiceBuildResponse(BaseModel):
     lines_skipped_unpriced: int
     gross_amount: Money
     net_amount: Money
+    #: Charge codes with no tariff, so the desk knows what to configure.
+    unpriced_codes: list[str] = []
+    warnings: list[str] = []
 
 
 # PM-JAY eligibility — STUB, not a real ABDM check yet.

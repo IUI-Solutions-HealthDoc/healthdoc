@@ -57,7 +57,11 @@ export function InvoicePreviewModal({
     >
       <Stack spacing={2}>
         <Typography sx={{ color: meridian.textSecondary, fontSize: "0.875rem" }}>
-          {invoice.invoice_number} · {invoice.patient?.full_name} ({invoice.patient?.uhid}) · Scheme:{" "}
+          {invoice.invoice_number} ·{" "}
+          {invoice.patient?.full_name && invoice.patient?.uhid && invoice.patient.full_name.includes(invoice.patient.uhid)
+            ? invoice.patient.full_name
+            : `${invoice.patient?.full_name ?? ""} (${invoice.patient?.uhid ?? "—"})`}{" "}
+          · Scheme:{" "}
           {invoice.scheme_code ?? "Self-pay"}
         </Typography>
 

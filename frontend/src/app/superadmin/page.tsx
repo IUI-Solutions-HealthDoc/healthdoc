@@ -14,6 +14,10 @@ import { FacilityOnboarding } from "@/features/platform/FacilityOnboarding";
 export default function Page() {
   const { localizeField, t } = useLocale();
   const [facilities, setFacilities] = useState<PlatformFacility[]>([]);
+  // The onboarding and officer pickers choose from every facility. They used
+  // the search results, so a search with no match left them with nothing to
+  // choose (QA 17 Oct 2026).
+  const [allFacilities, setAllFacilities] = useState<PlatformFacility[]>([]);
   const [total, setTotal] = useState(0);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
@@ -29,6 +33,8 @@ export default function Page() {
       setFacilities(response.items);
       setTotal(response.total);
       setPage(1);
+      if (!search.trim()) setAllFacilities(response.items);
+      else void listPlatformFacilities("").then((all) => setAllFacilities(all.items)).catch(() => undefined);
     } catch (reason) {
       setError(getUserFacingError(reason, t("superadmin.errLoadFacilities")));
     } finally {
@@ -88,9 +94,9 @@ export default function Page() {
         </p>
       ) : null}
 
-      <FacilityOnboarding facilities={facilities} onChanged={() => void load(query)} />
+      <FacilityOnboarding facilities={allFacilities} onChanged={() => void load(query)} />
 
-      <ControlRoomOfficers facilities={facilities} />
+      <ControlRoomOfficers facilities={allFacilities} />
 
       <section className="surface-card overflow-hidden">
         <div className="border-b border-border px-5 py-4">

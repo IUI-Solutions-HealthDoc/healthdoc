@@ -119,8 +119,12 @@ export function useInvoiceEditor(
       const next = await getInvoice(result.invoice_id);
       setDraft(next);
       onSaved?.(next);
-      setBuildMessage(`${result.lines_added} charge(s) added. ${result.lines_skipped_unpriced} unpriced charge(s) skipped.`);
-      if (result.lines_skipped_unpriced) toast.error("Some charges have no tariff. Resolve pricing before issuing.");
+      const missing = result.unpriced_codes?.length ? ` No tariff for: ${result.unpriced_codes.join(", ")}.` : "";
+      const warning = result.warnings?.length ? ` ${result.warnings.join(" ")}` : "";
+      setBuildMessage(
+        `${result.lines_added} charge(s) added. ${result.lines_skipped_unpriced} unpriced charge(s) skipped.${missing}${warning}`,
+      );
+      if (result.lines_skipped_unpriced) toast.error("Some charges have no tariff. Add them under Tariffs before issuing.");
       else toast.success("Charges built", "Review the refreshed totals before issuing");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Build failed");

@@ -153,16 +153,19 @@ async def seed(users: list[tuple[str, str]]) -> None:
             text(
                 """
                 INSERT INTO facilities
-                    (id, code, name, name_hi, state_code, timezone, facility_type,
+                    (id, code, name, name_hi, state_code, district, timezone, facility_type,
                      ownership, is_active)
                 VALUES
                     (:id, 'DEV001', 'HealthDoc Development Hospital',
-                     'हेल्थडॉक विकास अस्पताल', 'DL',
+                     'हेल्थडॉक विकास अस्पताल', 'DL', 'New Delhi',
                      'Asia/Kolkata', 'hospital', 'government', true)
                 ON CONFLICT (id) DO UPDATE SET
                     name = EXCLUDED.name,
                     name_hi = EXCLUDED.name_hi,
                     timezone = EXCLUDED.timezone,
+                    -- The control room lists districts; with none recorded its
+                    -- district filter was empty (QA 17 Oct 2026).
+                    district = COALESCE(facilities.district, EXCLUDED.district),
                     -- HealthDoc targets government hospitals; keep a value an
                     -- operator recorded deliberately.
                     ownership = COALESCE(facilities.ownership, EXCLUDED.ownership),
@@ -515,6 +518,36 @@ async def seed(users: list[tuple[str, str]]) -> None:
                     "created_by": tariff_author,
                 },
             )
+            # Emergency care and bed-day tariffs, so an emergency visit and an
+            # inpatient stay bill something in development (QA 16 Oct 2026).
+            # Synthetic amounts; a real facility sets its own in Tariffs.
+            for code, description, description_hi, category, price in (
+                ("EMERGENCY_CARE", "Emergency care", "आपातकालीन देखभाल", "consultation", "200.00"),
+                ("IPD_BED_DAY", "Inpatient bed-day (general ward)", "भर्ती बिस्तर-दिन (सामान्य वार्ड)", "ipd_stay", "500.00"),
+            ):
+                await session.execute(
+                    text(
+                        """
+                        INSERT INTO charge_master
+                            (id, facility_id, charge_code, description, description_hi,
+                             charge_category, unit_price, scheme_code, effective_from,
+                             effective_to, is_active, created_by)
+                        SELECT :id, :facility_id, :code, :description, :description_hi, :category,
+                               CAST(:price AS NUMERIC), NULL, DATE '2020-01-01', NULL, true, :created_by
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM charge_master
+                             WHERE facility_id = :facility_id AND charge_code = :code
+                               AND scheme_code IS NULL AND is_active
+                        )
+                        """
+                    ),
+                    {
+                        "id": uuid.uuid5(uuid.NAMESPACE_URL, f"healthdoc:tariff:{code}"),
+                        "facility_id": FACILITY_ID, "code": code, "description": description,
+                        "description_hi": description_hi, "category": category, "price": price,
+                        "created_by": tariff_author,
+                    },
+                )
             # Existing stacks already have REGISTRATION without description_hi.
             await session.execute(
                 text(

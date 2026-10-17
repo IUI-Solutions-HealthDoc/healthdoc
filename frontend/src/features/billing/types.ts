@@ -227,6 +227,8 @@ export type InvoiceBuildResponse = {
   status: string;
   lines_added: number;
   lines_skipped_unpriced: number;
+  unpriced_codes?: string[];
+  warnings?: string[];
   gross_amount: Money;
   net_amount: Money;
 };

@@ -24,7 +24,9 @@ const EMAIL = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
 /** A 422's field-by-field reasons, so the superadmin sees what to change. */
 function said(reason: unknown, fallback: string): string {
   if (reason instanceof ApiError && reason.code === 422) {
-    const detail = (reason.payload as { detail?: unknown } | undefined)?.detail;
+    // api() passes the bare 422 list; older callers wrapped it as {detail}.
+    const payload = reason.payload as unknown;
+    const detail = Array.isArray(payload) ? payload : (payload as { detail?: unknown } | undefined)?.detail;
     if (Array.isArray(detail)) {
       const parts = detail
         .map((d: { loc?: unknown[]; msg?: unknown }) => `${(d.loc ?? []).slice(-1).join("")}: ${String(d.msg ?? "")}`)
@@ -55,6 +57,10 @@ export function FacilityOnboarding({ facilities, onChanged }: {
   const [admin, setAdmin] = useState({ username: "", full_name: "", email: "", temporary_password: "" });
   const [source, setSource] = useState("");
   const target = facilities.find((f) => f.id === selected);
+  // The Create buttons stayed disabled until every rule held, so a click said
+  // nothing about what was wrong (QA 17 Oct 2026). They now always answer.
+  const [triedCreate, setTriedCreate] = useState(false);
+  const [triedAdmin, setTriedAdmin] = useState(false);
 
   async function run(action: () => Promise<string>, fallback: string) {
     setBusy(true);
@@ -70,10 +76,21 @@ export function FacilityOnboarding({ facilities, onChanged }: {
     }
   }
 
-  const canCreate = CODE.test(form.code) && form.name.trim() && /^[A-Z]{2,5}$/.test(form.state_code)
-    && (!form.hfr_facility_id || HFR_ID.test(form.hfr_facility_id));
-  const canAdmin = USERNAME.test(admin.username) && admin.full_name.trim() && admin.temporary_password.length >= 8
-    && (admin.email === "" || EMAIL.test(admin.email));
+  const createProblems = {
+    code: !CODE.test(form.code),
+    name: !form.name.trim(),
+    state_code: !/^[A-Z]{2,5}$/.test(form.state_code),
+    hfr: Boolean(form.hfr_facility_id) && !HFR_ID.test(form.hfr_facility_id),
+  };
+  const canCreate = !Object.values(createProblems).some(Boolean);
+  const adminProblems = {
+    username: !USERNAME.test(admin.username),
+    full_name: !admin.full_name.trim(),
+    email: admin.email !== "" && !EMAIL.test(admin.email),
+    password: admin.temporary_password.length < 8,
+  };
+  const canAdmin = !Object.values(adminProblems).some(Boolean);
+  const mark = (tried: boolean, bad: boolean) => (tried && bad ? true : undefined);
 
   return (
     <section className="surface-card space-y-5 p-5" aria-label="Onboard a facility">
@@ -86,10 +103,13 @@ export function FacilityOnboarding({ facilities, onChanged }: {
 
       <div className="grid gap-3 sm:grid-cols-5">
         <input aria-label="Code" placeholder="Code (e.g. DEV002)" className={input} value={form.code}
+          aria-invalid={mark(triedCreate, createProblems.code)}
           onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))} />
         <input aria-label="Name" placeholder="Facility name" className={`${input} sm:col-span-2`} value={form.name}
+          aria-invalid={mark(triedCreate, createProblems.name)}
           onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
-        <input aria-label="State code" placeholder="State (e.g. BR)" className={input} value={form.state_code}
+        <input aria-label="State code" placeholder="State (e.g. DL)" className={input} value={form.state_code}
+          aria-invalid={mark(triedCreate, createProblems.state_code)}
           onChange={(e) => setForm((f) => ({ ...f, state_code: e.target.value.toUpperCase() }))} />
         <select aria-label="Ownership" className={input} value={form.ownership}
           onChange={(e) => setForm((f) => ({ ...f, ownership: e.target.value }))}>
@@ -98,9 +118,18 @@ export function FacilityOnboarding({ facilities, onChanged }: {
           <option value="government">Government</option>
         </select>
         <input aria-label="HFR facility id" placeholder="HFR id (optional, IN0910034387)" className={`${input} sm:col-span-2`}
+          aria-invalid={mark(triedCreate, createProblems.hfr)}
           value={form.hfr_facility_id} onChange={(e) => setForm((f) => ({ ...f, hfr_facility_id: e.target.value.trim() }))} />
-        <button type="button" className={primary} disabled={busy || !canCreate}
-          onClick={() => void run(async () => {
+        <button type="button" className={primary} disabled={busy}
+          onClick={() => {
+            if (!canCreate) {
+              setTriedCreate(true);
+              setNotice(null);
+              setError("Fill in the marked fields: a code of letters and digits (up to 20), a name, a 2–5 letter state code, and an HFR id like IN0910034387 if you have one.");
+              return;
+            }
+            setTriedCreate(false);
+            void run(async () => {
             const created = await createPlatformFacility({
               code: form.code, name: form.name.trim(), state_code: form.state_code,
               ownership: (form.ownership || null) as "government" | "private" | null,
@@ -109,7 +138,8 @@ export function FacilityOnboarding({ facilities, onChanged }: {
             setSelected(created.id);
             setForm({ code: "", name: "", state_code: "", ownership: "", hfr_facility_id: "" });
             return `${created.name} created. Now give it its first admin.`;
-          }, "The facility could not be created.")}>Create facility</button>
+          }, "The facility could not be created.");
+          }}>Create facility</button>
       </div>
 
       <label className="block space-y-1 text-sm">
@@ -153,27 +183,39 @@ export function FacilityOnboarding({ facilities, onChanged }: {
           <div className="grid gap-3 sm:grid-cols-4">
             <div className="space-y-1">
               <input aria-label="Admin username" placeholder="Admin username" className={input} value={admin.username}
-                aria-invalid={admin.username !== "" && !USERNAME.test(admin.username)}
+                aria-invalid={(admin.username !== "" || triedAdmin) && !USERNAME.test(admin.username)}
                 onChange={(e) => setAdmin((a) => ({ ...a, username: e.target.value.trim() }))} />
               {admin.username !== "" && !USERNAME.test(admin.username) ? (
                 <p role="alert" className="text-xs text-danger">Letters, digits, dot, underscore or hyphen only (e.g. dev2.admin), not an email.</p>
               ) : null}
             </div>
             <input aria-label="Admin full name" placeholder="Full name" className={input} value={admin.full_name}
+              aria-invalid={mark(triedAdmin, adminProblems.full_name)}
               onChange={(e) => setAdmin((a) => ({ ...a, full_name: e.target.value }))} />
             <input aria-label="Admin email" placeholder="Email (optional)" className={input} value={admin.email}
+              aria-invalid={mark(triedAdmin, adminProblems.email)}
               onChange={(e) => setAdmin((a) => ({ ...a, email: e.target.value.trim() }))} />
-            <input aria-label="Temporary password" type="password" placeholder="Temporary password" className={input}
+            <input aria-label="Temporary password" type="password" placeholder="Temporary password (8+ characters)" className={input}
+              aria-invalid={mark(triedAdmin, adminProblems.password)}
               value={admin.temporary_password} onChange={(e) => setAdmin((a) => ({ ...a, temporary_password: e.target.value }))} />
-            <button type="button" className={primary} disabled={busy || !canAdmin}
-              onClick={() => void run(async () => {
+            <button type="button" className={primary} disabled={busy}
+              onClick={() => {
+                if (!canAdmin) {
+                  setTriedAdmin(true);
+                  setNotice(null);
+                  setError("Fill in the marked fields: a username (letters, digits, dot, underscore, hyphen), the full name, a valid email or none, and a temporary password of at least 8 characters.");
+                  return;
+                }
+                setTriedAdmin(false);
+                void run(async () => {
                 const created = await createPlatformFacilityAdmin(target.id, {
                   username: admin.username, full_name: admin.full_name.trim(),
                   email: admin.email || null, temporary_password: admin.temporary_password,
                 });
                 setAdmin({ username: "", full_name: "", email: "", temporary_password: "" });
                 return `Admin ${created.username} created at ${target.name}. They change the password at first sign-in.`;
-              }, "The admin could not be created.")}>Create first admin</button>
+              }, "The admin could not be created.");
+              }}>Create first admin</button>
           </div>
 
           <div className="flex flex-wrap items-end gap-3">

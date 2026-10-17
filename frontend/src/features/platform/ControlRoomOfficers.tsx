@@ -106,8 +106,18 @@ export function ControlRoomOfficers({ facilities }: { facilities: PlatformFacili
     }
   }
 
-  const canCreate = USERNAME.test(form.username) && form.full_name.trim() && form.temporary_password.length >= 8
-    && (form.email === "" || EMAIL.test(form.email)) && STATE.test(form.state_code);
+  const problems = {
+    username: !USERNAME.test(form.username),
+    full_name: !form.full_name.trim(),
+    email: form.email !== "" && !EMAIL.test(form.email),
+    password: form.temporary_password.length < 8,
+    state: !STATE.test(form.state_code),
+  };
+  const canCreate = !Object.values(problems).some(Boolean);
+  // Create officer stayed disabled with no hint of what was missing
+  // (QA 17 Oct 2026); it now answers and marks the fields.
+  const [tried, setTried] = useState(false);
+  const bad = (flag: boolean) => (tried && flag ? true : undefined);
 
   function districtList(id: string, state: string) {
     return (
@@ -130,21 +140,29 @@ export function ControlRoomOfficers({ facilities }: { facilities: PlatformFacili
 
       <div className="grid gap-3 sm:grid-cols-6">
         <input aria-label="Officer username" placeholder="Username (e.g. patna.cmo)" className={input}
-          value={form.username} onChange={(e) => setForm((f) => ({ ...f, username: e.target.value.trim() }))} />
+          aria-invalid={bad(problems.username)} value={form.username} onChange={(e) => setForm((f) => ({ ...f, username: e.target.value.trim() }))} />
         <input aria-label="Officer full name" placeholder="Full name" className={`${input} sm:col-span-2`}
-          value={form.full_name} onChange={(e) => setForm((f) => ({ ...f, full_name: e.target.value }))} />
+          aria-invalid={bad(problems.full_name)} value={form.full_name} onChange={(e) => setForm((f) => ({ ...f, full_name: e.target.value }))} />
         <input aria-label="Officer email" placeholder="Email (optional)" className={input}
-          value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value.trim() }))} />
+          aria-invalid={bad(problems.email)} value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value.trim() }))} />
         <input aria-label="Officer temporary password" type="password" placeholder="Temporary password (8+)" className={`${input} sm:col-span-2`}
-          value={form.temporary_password} onChange={(e) => setForm((f) => ({ ...f, temporary_password: e.target.value }))} />
-        <input aria-label="Officer state" placeholder="State (e.g. BR)" className={input}
-          value={form.state_code} onChange={(e) => setForm((f) => ({ ...f, state_code: e.target.value.toUpperCase().trim() }))} />
+          aria-invalid={bad(problems.password)} value={form.temporary_password} onChange={(e) => setForm((f) => ({ ...f, temporary_password: e.target.value }))} />
+        <input aria-label="Officer state" placeholder="State (e.g. DL)" className={input}
+          aria-invalid={bad(problems.state)} value={form.state_code} onChange={(e) => setForm((f) => ({ ...f, state_code: e.target.value.toUpperCase().trim() }))} />
         <input aria-label="Officer district" placeholder="District (blank = whole state)" list="new-officer-districts"
           className={`${input} sm:col-span-2`} value={form.district}
           onChange={(e) => setForm((f) => ({ ...f, district: e.target.value }))} />
         {districtList("new-officer-districts", form.state_code)}
-        <button type="button" className={`${primary} sm:col-span-3`} disabled={busy || !canCreate}
-          onClick={() => void run(async () => {
+        <button type="button" className={`${primary} sm:col-span-3`} disabled={busy}
+          onClick={() => {
+            if (!canCreate) {
+              setTried(true);
+              setNotice(null);
+              setError("Fill in the marked fields: username (letters, digits, dot, underscore, hyphen), full name, a valid email or none, a temporary password of 8+ characters, and a 2–5 letter state code.");
+              return;
+            }
+            setTried(false);
+            void run(async () => {
             const created = await createMonitor({
               username: form.username, full_name: form.full_name.trim(), email: form.email || null,
               temporary_password: form.temporary_password, state_code: form.state_code,
@@ -152,7 +170,8 @@ export function ControlRoomOfficers({ facilities }: { facilities: PlatformFacili
             });
             setForm({ username: "", full_name: "", email: "", temporary_password: "", state_code: "", district: "" });
             return `${created.username} can sign in and see ${area(created)}. They change the temporary password at first sign-in.`;
-          }, "The officer could not be created.")}>Create officer</button>
+          }, "The officer could not be created.");
+          }}>Create officer</button>
       </div>
 
       {error ? <p className="text-sm text-danger" role="alert">{error}</p> : null}

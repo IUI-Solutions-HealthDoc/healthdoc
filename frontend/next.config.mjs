@@ -17,6 +17,9 @@ const devOrigins = (process.env.ALLOWED_DEV_ORIGINS ?? "")
 
 const nextConfig = {
   reactStrictMode: true,
+  // The development "N" badge on every screen was reported as a defect
+  // (QA 17 Oct 2026). It exists only in `next dev`; production never shows it.
+  devIndicators: false,
   // Keep tracing rooted in this package (avoid picking up ~/package-lock.json).
   outputFileTracingRoot: process.cwd(),
   ...(devOrigins.length > 0 ? { allowedDevOrigins: devOrigins } : {}),

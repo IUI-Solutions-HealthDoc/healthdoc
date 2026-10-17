@@ -62,7 +62,7 @@ function ReferralPageView({ state, offset, onPage }: { state: ReferralState; off
     <Button disabled={loading} onClick={() => void refresh()}>Refresh referrals</Button>
     {loading ? <p role="status">Loading referrals…</p> : error ? <Alert severity="error">{error}</Alert> : page && <>
       <p role="status">{page.total} matching referrals · {page.items.length ? `${offset + 1}–${offset + page.items.length}` : "No rows on this page"}</p>
-      {page.items.length === 0 ? <Typography>No referrals on this page. Change the status filter or return to an earlier page.</Typography> :
+      {page.items.length === 0 ? <Typography>{offset > 0 ? "No referrals on this page. Go back to the previous page." : page.total === 0 ? "No referrals with this status. Choose another status to see others." : "No referrals on this page."}</Typography> :
         <Box sx={{ overflowX: "auto" }}><table className="w-full text-left text-sm">
           <caption className="sr-only">External referral orders</caption>
           <thead><tr>{["Patient", "Order / visit", "Status", "Received", "Action"].map((label) => <th scope="col" className="p-2" key={label}>{label}</th>)}</tr></thead>

@@ -507,6 +507,11 @@ def _in_scope(areas: list[Area]):
     )
 
 
+def _count(n: int, one: str, many: str) -> str:
+    """"1 critical machine", never "1 critical machines" (QA 16 Oct 2026)."""
+    return f"{n} {one if n == 1 else many}"
+
+
 def status_of(pulse: FacilityPulse | None, *, now: datetime) -> tuple[str, list[str]]:
     """Red / amber / green / grey with the reasons, so a colour is never unexplained."""
     if pulse is None or now - pulse.captured_at > STALE_AFTER:
@@ -527,18 +532,21 @@ def status_of(pulse: FacilityPulse | None, *, now: datetime) -> tuple[str, list[
     if pulse.stock_below_reorder:
         flag(
             "red" if pulse.stock_below_reorder >= STOCK_RED else "amber",
-            f"{pulse.stock_below_reorder} medicines below reorder level",
+            f"{_count(pulse.stock_below_reorder, 'medicine', 'medicines')} below reorder level",
         )
     if pulse.staff_rostered_today == 0 and pulse.opd_today > 0:
         flag("amber", "patients seen but no staff on today's roster")
     if pulse.critical_equipment_down:
-        flag("red", f"{pulse.critical_equipment_down} critical machines not working")
+        flag("red", f"{_count(pulse.critical_equipment_down, 'critical machine', 'critical machines')} not working")
     elif pulse.equipment_down:
-        flag("amber", f"{pulse.equipment_down} machines not working")
+        flag("amber", f"{_count(pulse.equipment_down, 'machine', 'machines')} not working")
     uncovered = [s for s in (pulse.detail or {}).get("staff", []) if s["waiting"] and not s["active_today"]]
     if uncovered:
         waiting = sum(s["waiting"] for s in uncovered)
-        flag("amber", f"{waiting} patients waiting for {len(uncovered)} rostered staff with no activity yet")
+        flag(
+            "amber",
+            f"{_count(waiting, 'patient', 'patients')} waiting for {_count(len(uncovered), 'rostered staff member', 'rostered staff')} with no activity yet",
+        )
     return level, reasons
 
 
