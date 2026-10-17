@@ -407,3 +407,14 @@
     width: 100%;
   }
 }
+
+/* A field that failed validation must not look like a focused one: both were
+   the same dark blue, so the only cue was a line of small text below the form
+   (QA 17 Oct 2026). Every input that sets aria-invalid gets this, whichever
+   component draws it. MUI fields carry their own error styling. */
+input[aria-invalid="true"]:not(.MuiInputBase-input),
+select[aria-invalid="true"]:not(.MuiInputBase-input),
+textarea[aria-invalid="true"]:not(.MuiInputBase-input) {
+  border-color: var(--danger) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 25%, transparent);
+}

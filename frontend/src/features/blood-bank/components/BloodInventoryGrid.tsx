@@ -1,5 +1,6 @@
 "use client";
 
+import { localToday } from "@/lib/dates";
 import { useState } from "react";
 import {
   AlertTriangle,
@@ -62,7 +63,7 @@ export function BloodInventoryGrid({
   const stockByGroup: Record<string, number> = {};
   BLOOD_GROUPS.forEach((bg) => {
     stockByGroup[bg] = units.filter(
-      (u) => formatBloodGroup(u.blood_group, u.rh_factor) === bg && u.status === "available" && u.screening_status === "passed" && u.expiry_date >= new Date().toISOString().slice(0, 10)
+      (u) => formatBloodGroup(u.blood_group, u.rh_factor) === bg && u.status === "available" && u.screening_status === "passed" && u.expiry_date >= localToday()
     ).length;
   });
 
@@ -198,7 +199,7 @@ export function BloodInventoryGrid({
                 </tr>
               ) : (
                 filteredUnits.map((u) => {
-                  const isAvailable = u.status === "available" && u.screening_status === "passed" && u.expiry_date >= new Date().toISOString().slice(0, 10);
+                  const isAvailable = u.status === "available" && u.screening_status === "passed" && u.expiry_date >= localToday();
                   return (
                     <tr key={u.id} className="hover:bg-muted/30">
                       <td className="p-3 font-mono font-bold text-foreground">
@@ -236,7 +237,7 @@ export function BloodInventoryGrid({
                       <td className="p-3">
                         <span
                           className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold capitalize ${
-                            u.status === "available" && u.screening_status === "passed" && u.expiry_date >= new Date().toISOString().slice(0, 10)
+                            u.status === "available" && u.screening_status === "passed" && u.expiry_date >= localToday()
                               ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
                               : u.status === "reserved"
                               ? "bg-amber-500/10 text-amber-600 dark:text-amber-400"
@@ -321,13 +322,13 @@ export function BloodInventoryGrid({
                   <select
                     value={donorId}
                     required
-                    onChange={(e) => { setDonorId(e.target.value); const group = donors.find((d) => d.id === e.target.value)?.blood_group; if (group) { setBloodGroup(group.slice(0, -1)); setRhFactor(group.slice(-1)); } }}
+                    onChange={(e) => { setDonorId(e.target.value); const raw = donors.find((d) => d.id === e.target.value)?.blood_group; const group = raw ? formatBloodGroup(raw) : ""; if (/^(A|B|AB|O)[+-]$/.test(group)) { setBloodGroup(group.slice(0, -1)); setRhFactor(group.slice(-1)); } }}
                     className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                   >
                     <option value="">{t("bloodBank.collect.selectDonor")}</option>
                     {donors.filter((d) => d.is_eligible).map((d) => (
                       <option key={d.id} value={d.id}>
-                        {d.donor_number} — {d.full_name} ({d.blood_group}
+                        {d.donor_number} — {d.full_name} ({formatBloodGroup(d.blood_group)}
                         {d.rh_factor})
                       </option>
                     ))}

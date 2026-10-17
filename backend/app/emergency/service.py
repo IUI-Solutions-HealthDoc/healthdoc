@@ -309,11 +309,27 @@ async def get_emergency_worklist(
         .order_by(Visit.created_at.desc())
     )
     result = await db.execute(stmt)
+    from app.emergency.models import EmergencyTriage
+
+    # A patient whose triage is closed (admitted, discharged, left) has left
+    # the ED even while the visit row stays open for the ward.
+    closed = set(
+        (
+            await db.execute(
+                select(EmergencyTriage.visit_id).where(
+                    EmergencyTriage.facility_id == facility_id,
+                    EmergencyTriage.status.notin_(ACTIVE_TRIAGE_STATUSES),
+                )
+            )
+        ).scalars().all()
+    )
     items = []
     # Visits from early September still sat in "awaiting care" in mid October
     # (QA 10 Oct 2026); the board flags them instead of mixing them in.
     stale_before = datetime.now(UTC) - timedelta(hours=EMERGENCY_STALE_HOURS)
     for visit, patient in result.all():
+        if visit.id in closed:
+            continue
         created = visit.created_at if visit.created_at.tzinfo else visit.created_at.replace(tzinfo=UTC)
         items.append({
             "visit_id": visit.id,
@@ -336,6 +352,45 @@ async def get_emergency_worklist(
 # HD-18: ED Triage Service Implementations
 # ---------------------------------------------------------------------------
 
+class TriageRefused(ValueError):
+    """A triage write the ED rules refuse. `code` and `message` reach the screen."""
+
+    def __init__(self, code: str, message: str, status: int = 409) -> None:
+        super().__init__(code)
+        self.code = code
+        self.message = message
+        self.status = status
+
+
+ACTIVE_TRIAGE_STATUSES = ("waiting", "in_treatment")
+HIGH_ACUITY = ("resuscitation", "emergent")
+# Door-to-clinician is a shift measure; an all-time average barely moved and
+# read as a fixed number on every registration (QA 16-17 Oct 2026).
+DOOR_TO_CLINICIAN_WINDOW_HOURS = 24
+
+
+def _aware(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+async def _triage_in_facility(db: AsyncSession, triage_id: uuid.UUID, facility_id: uuid.UUID):
+    """404 for another facility's triage, never 403 (enumeration oracle)."""
+    from app.emergency.models import EmergencyTriage
+
+    triage = (
+        await db.execute(
+            select(EmergencyTriage)
+            .where(EmergencyTriage.id == triage_id, EmergencyTriage.facility_id == facility_id)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if triage is None:
+        raise TriageRefused("triage_not_found", "This triage record was not found.", 404)
+    return triage
+
+
 async def create_triage(
     db: AsyncSession,
     payload: EmergencyTriageCreate,
@@ -343,8 +398,36 @@ async def create_triage(
     facility_id: uuid.UUID,
     triaged_by: uuid.UUID,
 ) -> EmergencyTriage:
-    """Records an initial emergency triage assessment."""
+    """Records the initial triage of one emergency visit.
+
+    A second initial triage of the same visit used to save, so one patient sat
+    on the board twice at two acuities and the census counted two (QA 16 Oct
+    2026). A change of acuity goes through re-triage, which keeps the reason.
+    """
     from app.emergency.models import EmergencyTriage
+    from app.opd.models import Visit
+
+    visit = (
+        await db.execute(select(Visit).where(Visit.id == payload.visit_id).with_for_update())
+    ).scalar_one_or_none()
+    if visit is None or visit.facility_id != facility_id or visit.patient_id != payload.patient_id:
+        raise TriageRefused("visit_not_found", "This emergency visit was not found.", 404)
+    if visit.visit_type != "emergency":
+        raise TriageRefused("not_an_emergency_visit", "Only an emergency visit can be triaged here.", 422)
+
+    existing = (
+        await db.execute(
+            select(EmergencyTriage.id).where(
+                EmergencyTriage.visit_id == visit.id,
+                EmergencyTriage.status.in_(ACTIVE_TRIAGE_STATUSES),
+            )
+        )
+    ).first()
+    if existing is not None:
+        raise TriageRefused(
+            "already_triaged",
+            "This patient is already on the triage board. Use Re-triage to change the acuity.",
+        )
 
     triage = EmergencyTriage(
         id=uuid.uuid4(),
@@ -373,17 +456,19 @@ async def re_triage(
     triage_id: uuid.UUID,
     payload: EmergencyReTriageRequest,
     *,
+    facility_id: uuid.UUID,
     changed_by: uuid.UUID,
 ) -> EmergencyTriage:
     """Updates acuity level with a mandatory clinical reasoning log entry."""
-    from app.emergency.models import EmergencyTriage, EmergencyTriageLog
+    from app.emergency.models import EmergencyTriageLog
 
-    triage = await db.get(EmergencyTriage, triage_id)
-    if triage is None:
-        raise ValueError("Emergency triage not found")
-
+    triage = await _triage_in_facility(db, triage_id, facility_id)
+    if triage.status not in ACTIVE_TRIAGE_STATUSES:
+        raise TriageRefused("triage_closed", "This patient has already left the emergency board.")
     if triage.acuity_level == payload.new_acuity:
-        raise ValueError("New acuity must be different from current acuity")
+        raise TriageRefused(
+            "acuity_unchanged", "Choose a different acuity. The patient is already at this level.", 422,
+        )
 
     log_entry = EmergencyTriageLog(
         id=uuid.uuid4(),
@@ -410,40 +495,90 @@ async def update_triage(
     triage_id: uuid.UUID,
     payload: EmergencyTriageUpdate,
     *,
+    facility_id: uuid.UUID,
     updated_by: uuid.UUID,
+    updated_by_is_doctor: bool = False,
 ) -> EmergencyTriage:
-    """Updates triage status, bed/bay, clinician, or disposition."""
-    from app.emergency.models import EmergencyTriage
+    """Updates triage status, bed/bay, clinician, or disposition.
 
-    triage = await db.get(EmergencyTriage, triage_id)
-    if triage is None:
-        raise ValueError("Emergency triage not found")
-
+    Disposition rules (QA 16 Oct 2026): a patient who was seen cannot be
+    "left without being seen"; one never seen cannot be admitted; discharging
+    a P1/P2 patient needs an explicit confirmation; a finished triage is not
+    reopened. An admit decision lands in the IPD To Admit queue as a clinical
+    disposition, which is where the ward looks.
+    """
+    triage = await _triage_in_facility(db, triage_id, facility_id)
     now = datetime.now(timezone.utc)
-    if payload.status is not None:
-        triage.status = payload.status
-        if payload.status == "in_treatment" and triage.clinician_seen_at is None:
-            triage.clinician_seen_at = now
 
-    if payload.clinician_seen and triage.clinician_seen_at is None:
+    if triage.status not in ACTIVE_TRIAGE_STATUSES:
+        raise TriageRefused("triage_closed", "This patient has already left the emergency board.")
+
+    marking_seen = payload.clinician_seen or payload.status == "in_treatment"
+    if marking_seen and triage.clinician_seen_at is None:
         triage.clinician_seen_at = now
         if triage.status == "waiting":
             triage.status = "in_treatment"
+        # Mark Seen recorded no clinician, so the board said "No doctor
+        # assigned" for a patient a doctor had just seen.
+        if triage.assigned_doctor_id is None and updated_by_is_doctor:
+            triage.assigned_doctor_id = updated_by
 
     if payload.assigned_doctor_id is not None:
         triage.assigned_doctor_id = payload.assigned_doctor_id
     if payload.assigned_bay is not None:
-        triage.assigned_bay = payload.assigned_bay
+        triage.assigned_bay = payload.assigned_bay.strip() or None
 
     if payload.disposition is not None:
+        seen = triage.clinician_seen_at is not None
+        if payload.disposition == "lwbs" and seen:
+            raise TriageRefused(
+                "lwbs_after_seen",
+                "This patient has been seen by a clinician, so they cannot be recorded as left without being seen.",
+                422,
+            )
+        if payload.disposition == "admit" and not seen:
+            raise TriageRefused(
+                "admit_before_seen", "Mark the patient as seen by a clinician before admitting them.", 422,
+            )
+        if (
+            payload.disposition == "discharge"
+            and triage.acuity_level in HIGH_ACUITY
+            and not payload.confirm_high_acuity_discharge
+        ):
+            raise TriageRefused(
+                "high_acuity_discharge_unconfirmed",
+                "This is a priority 1 or 2 patient. Confirm that discharging them home is intended.",
+                422,
+            )
         triage.disposition = payload.disposition
         triage.disposition_at = now
         if payload.disposition_notes is not None:
-            triage.disposition_notes = payload.disposition_notes
-        if payload.disposition in ("discharge", "admit", "lwbs"):
-            triage.status = "discharged" if payload.disposition == "discharge" else (
-                "admitted" if payload.disposition == "admit" else "lwbs"
+            triage.disposition_notes = payload.disposition_notes.strip() or None
+        triage.status = {
+            "discharge": "discharged", "transfer": "discharged", "admit": "admitted", "lwbs": "lwbs",
+        }[payload.disposition]
+        if payload.disposition in ("discharge", "transfer", "lwbs"):
+            from app.opd.models import Visit
+
+            visit = await db.get(Visit, triage.visit_id)
+            if visit is not None and visit.status in ("registered", "in_consultation", "in_service", "waiting"):
+                visit.status = "lwbs" if payload.disposition == "lwbs" else "completed"
+        if payload.disposition == "admit":
+            from app.admissions.service import create_clinical_disposition
+
+            await create_clinical_disposition(
+                db,
+                facility_id=facility_id,
+                patient_id=triage.patient_id,
+                visit_id=triage.visit_id,
+                disposition_type="admit",
+                created_by=updated_by,
+                priority="emergency" if triage.acuity_level in HIGH_ACUITY else "urgent",
+                reason=triage.disposition_notes or triage.chief_complaint,
             )
+    elif payload.status is not None and payload.status not in ("waiting", "in_treatment"):
+        # Leaving the board without a disposition hid why the patient left.
+        raise TriageRefused("disposition_required", "Record a disposition to close this triage.", 422)
 
     triage.updated_by = updated_by
     triage.updated_at = now
@@ -461,6 +596,7 @@ async def list_active_triages(
 ) -> list[dict]:
     """Returns active emergency tracking board rows with clinical metrics and logs."""
     from app.emergency.models import EmergencyTriage, EmergencyTriageLog
+    from app.opd.models import Visit
     from app.users.models import User
     from sqlalchemy import case
 
@@ -472,8 +608,9 @@ async def list_active_triages(
     )
 
     query = (
-        select(EmergencyTriage, Patient, User)
+        select(EmergencyTriage, Patient, User, Visit)
         .join(Patient, Patient.id == EmergencyTriage.patient_id)
+        .join(Visit, Visit.id == EmergencyTriage.visit_id)
         .outerjoin(User, User.id == EmergencyTriage.assigned_doctor_id)
         .where(EmergencyTriage.facility_id == facility_id)
     )
@@ -481,15 +618,14 @@ async def list_active_triages(
     if status_filter:
         query = query.where(EmergencyTriage.status == status_filter)
     else:
-        query = query.where(EmergencyTriage.status.in_(["waiting", "in_treatment"]))
+        query = query.where(EmergencyTriage.status.in_(ACTIVE_TRIAGE_STATUSES))
 
     query = query.order_by(acuity_order, EmergencyTriage.triaged_at.asc())
     results = (await db.execute(query)).all()
 
     now = datetime.now(timezone.utc)
     items = []
-    for triage, patient, doctor in results:
-        # Fetch logs for this triage
+    for triage, patient, doctor, visit in results:
         logs_stmt = (
             select(EmergencyTriageLog)
             .where(EmergencyTriageLog.triage_id == triage.id)
@@ -497,23 +633,20 @@ async def list_active_triages(
         )
         logs_result = (await db.execute(logs_stmt)).scalars().all()
 
-        triaged_at = triage.triaged_at if triage.triaged_at.tzinfo else triage.triaged_at.replace(tzinfo=timezone.utc)
-        clinician_seen_at = (
-            triage.clinician_seen_at if (triage.clinician_seen_at is None or triage.clinician_seen_at.tzinfo)
-            else triage.clinician_seen_at.replace(tzinfo=timezone.utc)
-        )
-
-        minutes_seen = None
-        if clinician_seen_at:
-            minutes_seen = int((clinician_seen_at - triaged_at).total_seconds() / 60)
-        else:
-            minutes_seen = int((now - triaged_at).total_seconds() / 60)
+        # Door-to-clinician runs from arrival (the visit), not from triage: a
+        # patient who waited 11 minutes to be triaged showed 9 instead of 20.
+        arrived_at = _aware(visit.created_at) or _aware(triage.triaged_at)
+        clinician_seen_at = _aware(triage.clinician_seen_at)
+        end = clinician_seen_at or now
+        minutes_seen = max(0, int((end - arrived_at).total_seconds() / 60))
 
         items.append({
             "id": triage.id,
             "facility_id": triage.facility_id,
             "patient_id": triage.patient_id,
             "visit_id": triage.visit_id,
+            "visit_number": visit.visit_number,
+            "arrived_at": visit.created_at,
             "acuity_level": triage.acuity_level,
             "chief_complaint": triage.chief_complaint,
             "triage_notes": triage.triage_notes,
@@ -529,7 +662,9 @@ async def list_active_triages(
             "disposition_notes": triage.disposition_notes,
             "created_at": triage.created_at,
             "patient_name": patient.full_name,
-            "patient_identifier": patient.thid or patient.uhid or str(patient.id)[:8],
+            "patient_identifier": patient.thid or patient.uhid,
+            "patient_age_years": patient.age_years,
+            "patient_sex": patient.sex,
             "doctor_name": doctor.full_name if doctor else None,
             "logs": logs_result,
         })
@@ -540,41 +675,67 @@ async def get_emergency_metrics(
     db: AsyncSession,
     facility_id: uuid.UUID,
 ) -> dict:
-    """Calculates ED key performance metrics and census breakdown."""
+    """ED census and door-to-clinician.
+
+    The census is every open emergency visit, triaged or not: an arrival
+    waiting for triage is the patient most at risk of being missed, and the
+    board used to count them as zero (QA 16 Oct 2026).
+    """
     from app.emergency.models import EmergencyTriage
+    from app.opd.models import Visit
 
-    stmt = select(EmergencyTriage).where(EmergencyTriage.facility_id == facility_id)
-    all_triages = (await db.execute(stmt)).scalars().all()
+    open_visits = (
+        await db.execute(
+            select(Visit.id, Visit.created_at).where(
+                Visit.facility_id == facility_id,
+                Visit.visit_type == "emergency",
+                Visit.status.in_(["registered", "in_consultation"]),
+            )
+        )
+    ).all()
+    all_triages = (
+        await db.execute(select(EmergencyTriage).where(EmergencyTriage.facility_id == facility_id))
+    ).scalars().all()
 
-    active = [t for t in all_triages if t.status in ("waiting", "in_treatment")]
+    active = [t for t in all_triages if t.status in ACTIVE_TRIAGE_STATUSES]
+    closed_visit_ids = {t.visit_id for t in all_triages if t.status not in ACTIVE_TRIAGE_STATUSES}
+    active_visit_ids = {t.visit_id for t in active}
+    untriaged = [v for v in open_visits if v.id not in active_visit_ids and v.id not in closed_visit_ids]
     waiting = [t for t in active if t.status == "waiting"]
     in_tx = [t for t in active if t.status == "in_treatment"]
     lwbs = [t for t in all_triages if t.status == "lwbs" or t.disposition == "lwbs"]
 
-    resuscitation = [t for t in active if t.acuity_level == "resuscitation"]
-    emergent = [t for t in active if t.acuity_level == "emergent"]
-    urgent = [t for t in active if t.acuity_level == "urgent"]
-    non_urgent = [t for t in active if t.acuity_level == "non_urgent"]
-
+    arrivals = {
+        v.id: _aware(v.created_at)
+        for v in (
+            await db.execute(
+                select(Visit.id, Visit.created_at).where(
+                    Visit.id.in_([t.visit_id for t in all_triages if t.clinician_seen_at is not None] or [uuid.uuid4()])
+                )
+            )
+        ).all()
+    }
+    window_start = datetime.now(timezone.utc) - timedelta(hours=DOOR_TO_CLINICIAN_WINDOW_HOURS)
     door_times = []
     for t in all_triages:
-        if t.clinician_seen_at is not None:
-            t_triaged = t.triaged_at if t.triaged_at.tzinfo else t.triaged_at.replace(tzinfo=timezone.utc)
-            t_seen = t.clinician_seen_at if t.clinician_seen_at.tzinfo else t.clinician_seen_at.replace(tzinfo=timezone.utc)
-            if t_seen >= t_triaged:
-                door_times.append((t_seen - t_triaged).total_seconds() / 60)
+        seen = _aware(t.clinician_seen_at)
+        if seen is None or seen < window_start:
+            continue
+        arrived = arrivals.get(t.visit_id) or _aware(t.triaged_at)
+        if seen >= arrived:
+            door_times.append((seen - arrived).total_seconds() / 60)
     avg_door = (sum(door_times) / len(door_times)) if door_times else None
 
     return {
-        "active_census": len(active),
-        "waiting_count": len(waiting),
+        "active_census": len(active) + len(untriaged),
+        "waiting_count": len(waiting) + len(untriaged),
+        "awaiting_triage_count": len(untriaged),
         "in_treatment_count": len(in_tx),
-        "resuscitation_count": len(resuscitation),
-        "emergent_count": len(emergent),
-        "urgent_count": len(urgent),
-        "non_urgent_count": len(non_urgent),
+        "resuscitation_count": len([t for t in active if t.acuity_level == "resuscitation"]),
+        "emergent_count": len([t for t in active if t.acuity_level == "emergent"]),
+        "urgent_count": len([t for t in active if t.acuity_level == "urgent"]),
+        "non_urgent_count": len([t for t in active if t.acuity_level == "non_urgent"]),
         "avg_door_to_clinician_minutes": round(avg_door, 1) if avg_door is not None else None,
+        "door_to_clinician_window_hours": DOOR_TO_CLINICIAN_WINDOW_HOURS,
         "lwbs_count": len(lwbs),
     }
-
-

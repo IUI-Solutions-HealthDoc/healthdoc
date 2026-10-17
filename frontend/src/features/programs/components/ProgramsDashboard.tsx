@@ -25,8 +25,32 @@ import TableRow from "@mui/material/TableRow";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 
+import Alert from "@mui/material/Alert";
+
 import { toast } from "@/components/ui/toast";
+import { api, getUserFacingError } from "@/lib/api";
+import { localToday } from "@/lib/dates";
+import { formatAgeSexShort } from "@/lib/format-age";
 import { useLocale } from "@/lib/i18n";
+
+interface CandidatePatient {
+  patient_id: string;
+  patient_name: string;
+  patient_identifier: string | null;
+  patient_age: number | null;
+  patient_sex: string | null;
+}
+
+/** Nothing clinical pre-filled: these held an HbA1c, a blood pressure, a
+ *  weight and a medication note that nobody had measured (QA 17 Oct 2026). */
+const emptyVisit = () => ({
+  scheduled_date: localToday(),
+  hba1c: "",
+  bp_systolic: "",
+  bp_diastolic: "",
+  weight_kg: "",
+  clinical_summary: "",
+});
 
 import {
   enrolPatient,
@@ -43,6 +67,13 @@ export function ProgramsDashboard() {
   const [programs, setPrograms] = useState<CareProgram[]>([]);
   const [enrolments, setEnrolments] = useState<ProgramEnrolment[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [enrolPatientChoice, setEnrolPatientChoice] = useState<CandidatePatient | null>(null);
+  const [patientQuery, setPatientQuery] = useState("");
+  const [patientResults, setPatientResults] = useState<CandidatePatient[] | null>(null);
+  const [patientError, setPatientError] = useState<string | null>(null);
+  const [enrolError, setEnrolError] = useState<string | null>(null);
+  const [timelineError, setTimelineError] = useState<string | null>(null);
 
   // Modals
   const [enrolModalOpen, setEnrolModalOpen] = useState(false);
@@ -54,110 +85,25 @@ export function ProgramsDashboard() {
   const [activeTimeline, setActiveTimeline] = useState<ProgramTimeline | null>(null);
 
   // Form states
-  const [enrolForm, setEnrolForm] = useState({
-    patient_id: "00000000-0000-0000-0000-000000000001",
-    program_code: "DIABETES_T2",
-    target_hba1c: "7.0",
-    target_bp: "130/80",
-  });
+  const [enrolForm, setEnrolForm] = useState({ program_code: "", target_hba1c: "", target_bp: "" });
 
-  const [visitForm, setVisitForm] = useState({
-    scheduled_date: new Date().toISOString().slice(0, 10),
-    hba1c: "7.2",
-    bp_systolic: "128",
-    bp_diastolic: "82",
-    weight_kg: "72.5",
-    clinical_summary: "Glycaemic targets approaching optimal threshold; continue Metformin 500mg BD.",
-  });
+  const [visitForm, setVisitForm] = useState(emptyVisit);
 
   const [exitReason, setExitReason] = useState("");
 
   const loadData = async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const [progs, enrs] = await Promise.all([listCarePrograms(), listEnrolments()]);
       setPrograms(progs);
       setEnrolments(enrs);
-    } catch {
-      // Mock fallback data for offline / preview
-      setPrograms([
-        {
-          id: "cp-1",
-          program_code: "DIABETES_T2",
-          program_name: "Type 2 Diabetes Mellitus Care Program",
-          category: "chronic",
-          description: "Glycaemic surveillance and end-organ monitoring",
-          is_active: true,
-        },
-        {
-          id: "cp-2",
-          program_code: "HYPERTENSION",
-          program_name: "Essential Hypertension Care Program",
-          category: "chronic",
-          description: "Blood pressure surveillance and cardiovascular risk stratification",
-          is_active: true,
-        },
-        {
-          id: "cp-3",
-          program_code: "ANC_MATERNAL",
-          program_name: "Antenatal & Maternal Longitudinal Care",
-          category: "maternal",
-          description: "Trimester milestones and fetal growth surveillance",
-          is_active: true,
-        },
-        {
-          id: "cp-4",
-          program_code: "CKD_RENAL",
-          program_name: "Chronic Kidney Disease Care Program",
-          category: "chronic",
-          description: "eGFR progression monitoring and renal protection",
-          is_active: true,
-        },
-      ]);
-      setEnrolments([
-        {
-          id: "enr-1",
-          facility_id: "fac-1",
-          patient_id: "pat-1",
-          patient_name: "Rajesh Sharma",
-          patient_uhid: "HD-2026-00412",
-          program_code: "DIABETES_T2",
-          program_name: "Type 2 Diabetes Mellitus Care Program",
-          enrolment_date: "2026-08-15",
-          status: "active",
-          target_outcomes: { target_hba1c: 7.0, target_bp: "130/80" },
-          enrolled_by: "usr-1",
-          created_at: new Date().toISOString(),
-        },
-        {
-          id: "enr-2",
-          facility_id: "fac-1",
-          patient_id: "pat-2",
-          patient_name: "Priya Devi",
-          patient_uhid: "HD-2026-00583",
-          program_code: "ANC_MATERNAL",
-          program_name: "Antenatal & Maternal Longitudinal Care",
-          enrolment_date: "2026-07-10",
-          status: "active",
-          target_outcomes: { gestational_age_weeks: 24, target_weight_gain_kg: 10 },
-          enrolled_by: "usr-2",
-          created_at: new Date().toISOString(),
-        },
-        {
-          id: "enr-3",
-          facility_id: "fac-1",
-          patient_id: "pat-3",
-          patient_name: "Sunita Verma",
-          patient_uhid: "HD-2026-00391",
-          program_code: "HYPERTENSION",
-          program_name: "Essential Hypertension Care Program",
-          enrolment_date: "2026-06-01",
-          status: "active",
-          target_outcomes: { target_systolic: 130, target_diastolic: 80 },
-          enrolled_by: "usr-1",
-          created_at: new Date().toISOString(),
-        },
-      ]);
+    } catch (err) {
+      // Invented programmes and patients used to stand in for a failed load,
+      // so Confirm Enrolment failed against records that did not exist.
+      setPrograms([]);
+      setEnrolments([]);
+      setLoadError(getUserFacingError(err, t("programs.errLoad")));
     } finally {
       setLoading(false);
     }
@@ -167,21 +113,53 @@ export function ProgramsDashboard() {
     void loadData();
   }, []);
 
+  async function searchPatients() {
+    if (patientQuery.trim().length < 2) {
+      setPatientError(t("programs.searchMinChars"));
+      return;
+    }
+    setPatientError(null);
+    try {
+      setPatientResults(await api<CandidatePatient[]>(`/programs/candidate-patients?q=${encodeURIComponent(patientQuery.trim())}`));
+    } catch (err) {
+      setPatientResults(null);
+      setPatientError(getUserFacingError(err, t("programs.errSearch")));
+    }
+  }
+
+  function openEnrolDialog() {
+    setEnrolForm({ program_code: "", target_hba1c: "", target_bp: "" });
+    setEnrolPatientChoice(null);
+    setPatientQuery("");
+    setPatientResults(null);
+    setPatientError(null);
+    setEnrolError(null);
+    setEnrolModalOpen(true);
+  }
+
   const handleEnrol = async () => {
+    if (!enrolPatientChoice) {
+      setEnrolError(t("programs.errPatientRequired"));
+      return;
+    }
+    if (!enrolForm.program_code) {
+      setEnrolError(t("programs.errProgramRequired"));
+      return;
+    }
+    setEnrolError(null);
     try {
       await enrolPatient({
-        patient_id: enrolForm.patient_id,
+        patient_id: enrolPatientChoice.patient_id,
         program_code: enrolForm.program_code,
-        target_outcomes: {
-          target_hba1c: enrolForm.target_hba1c,
-          target_bp: enrolForm.target_bp,
-        },
+        target_outcomes: Object.fromEntries(
+          Object.entries({ target_hba1c: enrolForm.target_hba1c.trim(), target_bp: enrolForm.target_bp.trim() }).filter(([, v]) => v),
+        ),
       });
       toast.success(t("programs.toast.enrolled"));
       setEnrolModalOpen(false);
       void loadData();
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : t("programs.toast.enrolFailed"));
+      setEnrolError(getUserFacingError(e, t("programs.toast.enrolFailed")));
     }
   };
 
@@ -191,11 +169,13 @@ export function ProgramsDashboard() {
       await recordProgramVisit(activeEnrolment.id, {
         scheduled_date: visitForm.scheduled_date,
         completed_date: visitForm.scheduled_date,
-        metrics: {
-          hba1c: visitForm.hba1c,
-          bp: `${visitForm.bp_systolic}/${visitForm.bp_diastolic}`,
-          weight_kg: visitForm.weight_kg,
-        },
+        metrics: Object.fromEntries(
+          Object.entries({
+            hba1c: visitForm.hba1c.trim(),
+            bp: visitForm.bp_systolic.trim() && visitForm.bp_diastolic.trim() ? `${visitForm.bp_systolic.trim()}/${visitForm.bp_diastolic.trim()}` : "",
+            weight_kg: visitForm.weight_kg.trim(),
+          }).filter(([, v]) => v),
+        ),
         clinical_summary: visitForm.clinical_summary,
       });
       toast.success(t("programs.toast.visitRecorded"));
@@ -208,35 +188,14 @@ export function ProgramsDashboard() {
 
   const handleOpenTimeline = async (enrolment: ProgramEnrolment) => {
     setActiveEnrolment(enrolment);
+    setTimelineError(null);
     try {
       const timeline = await getEnrolmentTimeline(enrolment.id);
       setActiveTimeline(timeline);
-    } catch {
-      setActiveTimeline({
-        enrolment,
-        visits: [
-          {
-            id: "v-1",
-            enrolment_id: enrolment.id,
-            scheduled_date: "2026-08-15",
-            completed_date: "2026-08-15",
-            status: "completed",
-            metrics: { hba1c: 8.4, bp: "142/90", weight_kg: 76.0 },
-            clinical_summary: "Baseline enrolment evaluation. Initiated lifestyle and oral hypoglycaemic therapy.",
-            created_at: new Date().toISOString(),
-          },
-          {
-            id: "v-2",
-            enrolment_id: enrolment.id,
-            scheduled_date: "2026-09-15",
-            completed_date: "2026-09-15",
-            status: "completed",
-            metrics: { hba1c: 7.2, bp: "128/82", weight_kg: 74.5 },
-            clinical_summary: "1-month trajectory review. HbA1c reduced by 1.2 points, BP target achieved.",
-            created_at: new Date().toISOString(),
-          },
-        ],
-      });
+    } catch (err) {
+      // An invented two-visit history used to stand in for a failed read.
+      setActiveTimeline({ enrolment, visits: [] } as unknown as ProgramTimeline);
+      setTimelineError(getUserFacingError(err, t("programs.errTimeline")));
     }
     setTimelineModalOpen(true);
   };
@@ -245,7 +204,7 @@ export function ProgramsDashboard() {
     if (!activeEnrolment || !exitReason.trim()) return;
     try {
       await exitEnrolment(activeEnrolment.id, {
-        exit_date: new Date().toISOString().slice(0, 10),
+        exit_date: localToday(),
         exit_reason: exitReason.trim(),
       });
       toast.success(t("programs.toast.discharged"));
@@ -289,7 +248,7 @@ export function ProgramsDashboard() {
           <Button
             variant="contained"
             startIcon={<AddIcon />}
-            onClick={() => setEnrolModalOpen(true)}
+            onClick={openEnrolDialog}
             sx={{ fontWeight: 700 }}
           >
             {t("programs.enrolPatient")}
@@ -352,6 +311,16 @@ export function ProgramsDashboard() {
       </Box>
 
       {/* Enrolments Table */}
+      {loadError && (
+        <Alert
+          severity="error"
+          sx={{ mb: 2 }}
+          action={<Button color="inherit" size="small" onClick={() => void loadData()}>{t("common.retry")}</Button>}
+        >
+          {loadError}
+        </Alert>
+      )}
+
       <TableContainer component={Card} variant="outlined" sx={{ borderRadius: 2 }}>
         <Table>
           <TableHead sx={{ bgcolor: "action.hover" }}>
@@ -369,7 +338,7 @@ export function ProgramsDashboard() {
               <TableRow key={enr.id} hover>
                 <TableCell>
                   <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{enr.patient_name || "—"}</Typography>
-                  <Typography variant="caption" color="text.secondary">{enr.patient_uhid || enr.patient_id.slice(0, 8)}</Typography>
+                  <Typography variant="caption" color="text.secondary">{enr.patient_uhid || "—"}</Typography>
                 </TableCell>
 
                 <TableCell>
@@ -416,6 +385,7 @@ export function ProgramsDashboard() {
                         startIcon={<EventNoteIcon />}
                         onClick={() => {
                           setActiveEnrolment(enr);
+                          setVisitForm(emptyVisit());
                           setVisitModalOpen(true);
                         }}
                       >
@@ -454,10 +424,64 @@ export function ProgramsDashboard() {
 
       {/* Enrol Patient Modal */}
       <Dialog open={enrolModalOpen} onClose={() => setEnrolModalOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ fontWeight: 800 }}>Enrol Patient in Longitudinal Care Program</DialogTitle>
+        <DialogTitle sx={{ fontWeight: 800 }}>{t("programs.enrolDialogTitle")}</DialogTitle>
         <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 1 }}>
+          {enrolError && <Alert severity="error">{enrolError}</Alert>}
+          {enrolPatientChoice ? (
+            <Box sx={{ p: 1.5, border: 1, borderColor: "primary.light", borderRadius: 1.5, display: "flex", justifyContent: "space-between", gap: 1 }}>
+              <Box>
+                <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{enrolPatientChoice.patient_name}</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {[enrolPatientChoice.patient_identifier, formatAgeSexShort(enrolPatientChoice.patient_age, enrolPatientChoice.patient_sex ?? "unknown")]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </Typography>
+              </Box>
+              <Button size="small" onClick={() => setEnrolPatientChoice(null)}>{t("common.changePatient")}</Button>
+            </Box>
+          ) : (
+            <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+              <Box sx={{ display: "flex", gap: 1 }}>
+                <TextField
+                  label={t("programs.patientSearchLabel")}
+                  placeholder={t("programs.patientSearchPlaceholder")}
+                  value={patientQuery}
+                  onChange={(e) => setPatientQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      void searchPatients();
+                    }
+                  }}
+                  error={Boolean(patientError) || Boolean(enrolError && !enrolPatientChoice)}
+                  helperText={patientError ?? undefined}
+                  size="small"
+                  fullWidth
+                />
+                <Button variant="outlined" onClick={() => void searchPatients()}>{t("common.search")}</Button>
+              </Box>
+              {patientResults && patientResults.length === 0 && (
+                <Typography variant="caption" color="text.secondary">{t("programs.noPatients")}</Typography>
+              )}
+              {(patientResults ?? []).map((row) => (
+                <Button
+                  key={row.patient_id}
+                  variant="text"
+                  sx={{ justifyContent: "flex-start", textTransform: "none" }}
+                  onClick={() => {
+                    setEnrolPatientChoice(row);
+                    setPatientResults(null);
+                  }}
+                >
+                  {row.patient_name} · {row.patient_identifier ?? ""}
+                </Button>
+              ))}
+            </Box>
+          )}
           <TextField
-            label="Care Program Registry"
+            label={t("programs.programLabel")}
+            required
+            error={Boolean(enrolError && !enrolForm.program_code)}
             select
             value={enrolForm.program_code}
             onChange={(e) => setEnrolForm({ ...enrolForm, program_code: e.target.value })}
@@ -471,14 +495,14 @@ export function ProgramsDashboard() {
           </TextField>
 
           <TextField
-            label="Target Indicator 1 (e.g. Target HbA1c / Gestational weeks)"
+            label={t("programs.target1")}
             value={enrolForm.target_hba1c}
             onChange={(e) => setEnrolForm({ ...enrolForm, target_hba1c: e.target.value })}
             fullWidth
           />
 
           <TextField
-            label="Target Indicator 2 (e.g. Target BP mmHg)"
+            label={t("programs.target2")}
             value={enrolForm.target_bp}
             onChange={(e) => setEnrolForm({ ...enrolForm, target_bp: e.target.value })}
             fullWidth
@@ -487,7 +511,7 @@ export function ProgramsDashboard() {
         <DialogActions sx={{ p: 2 }}>
           <Button onClick={() => setEnrolModalOpen(false)}>{t("common.cancel")}</Button>
           <Button variant="contained" onClick={handleEnrol} sx={{ fontWeight: 700 }}>
-            Confirm Enrolment
+            {t("programs.confirmEnrolment")}
           </Button>
         </DialogActions>
       </Dialog>
@@ -559,6 +583,7 @@ export function ProgramsDashboard() {
           Clinical Trajectory & Metric Timeline: {activeEnrolment?.patient_name}
         </DialogTitle>
         <DialogContent sx={{ pt: 1 }}>
+          {timelineError && <Alert severity="error" sx={{ mb: 2 }}>{timelineError}</Alert>}
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             Program: {activeEnrolment?.program_name} | Enrolled: {activeEnrolment?.enrolment_date}
           </Typography>

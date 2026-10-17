@@ -4,7 +4,30 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 from typing import Literal
-from pydantic import BaseModel, ConfigDict, Field
+from zoneinfo import ZoneInfo
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.common.enums import BloodGroup
+
+_RH = {"+": "pos", "POS": "pos", "POSITIVE": "pos", "-": "neg", "NEG": "neg", "NEGATIVE": "neg"}
+
+
+def normalise_blood_group(value: str | None) -> str | None:
+    """"O+", "o pos" and "o_pos" are the same group; the database stores o_pos.
+
+    The donor and stock forms send "O+", which the CHECK refused, so every
+    donor registration and every unit added to stock failed as a "conflict"
+    (QA 17 Oct 2026).
+    """
+    if value is None:
+        return None
+    raw = value.strip().upper().replace(" ", "").replace("_", "")
+    for suffix, rh in sorted(_RH.items(), key=lambda kv: -len(kv[0])):
+        if raw.endswith(suffix) and raw[: -len(suffix)] in {"A", "B", "AB", "O"}:
+            code = f"{raw[: -len(suffix)].lower()}_{rh}"
+            if code in BloodGroup.values():
+                return code
+    raise ValueError("Choose a blood group: A+, A-, B+, B-, AB+, AB-, O+ or O-")
 
 
 class BloodDonorCreate(BaseModel):
@@ -22,6 +45,32 @@ class BloodDonorCreate(BaseModel):
     hemoglobin_g_dl: float | None = Field(default=None, ge=5, le=25)
     last_donation_date: date | None = None
     remarks: str | None = None
+
+    @field_validator("blood_group")
+    @classmethod
+    def _group(cls, value: str) -> str:
+        return normalise_blood_group(value)
+
+    @field_validator("last_donation_date")
+    @classmethod
+    def _not_future(cls, value: date | None) -> date | None:
+        # A future "last donation" was accepted (QA 17 Oct 2026).
+        if value is not None and value > datetime.now(ZoneInfo("Asia/Kolkata")).date():
+            raise ValueError("The last donation date cannot be in the future")
+        return value
+
+    @field_validator("mobile")
+    @classmethod
+    def _mobile_digits(cls, value: str | None) -> str | None:
+        # Letters were accepted in the contact phone (QA 17 Oct 2026).
+        if value is None or not value.strip():
+            return None
+        digits = value.strip().replace(" ", "").replace("-", "")
+        if digits.startswith("+91"):
+            digits = digits[3:]
+        if not (len(digits) == 10 and digits.isdigit() and digits[0] in "6789"):
+            raise ValueError("Enter a 10-digit mobile number starting with 6, 7, 8 or 9")
+        return digits
 
 
 class BloodDonorOut(BaseModel):
@@ -53,6 +102,11 @@ class BloodUnitCreate(BaseModel):
     volume_ml: int = Field(default=450, ge=100, le=1000)
     expiry_date: date
     screening_status: Literal["pending", "passed", "failed"] = "pending"
+
+    @field_validator("blood_group")
+    @classmethod
+    def _group(cls, value: str) -> str:
+        return normalise_blood_group(value)
 
 
 class BloodUnitOut(BaseModel):

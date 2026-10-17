@@ -11,6 +11,8 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { listDepartments } from "@/features/admin/api/departments";
+import { listEquipment, type EquipmentItem } from "@/features/equipment/api";
+import { fieldsFromError } from "@/lib/field-errors";
 import type { Department } from "@/features/admin/api/departments";
 import { ApiError, formatDateTime } from "@/lib/api";
 import { useLocale, type MessageKey } from "@/lib/i18n";
@@ -40,6 +42,17 @@ export function MaintenanceLogPanel() {
   const [vendor, setVendor] = useState("");
   const [downtime, setDowntime] = useState("");
   const [notes, setNotes] = useState("");
+  const [machines, setMachines] = useState<EquipmentItem[]>([]);
+  const [badFields, setBadFields] = useState<Set<string>>(new Set());
+  const [saved, setSaved] = useState<string | null>(null);
+
+  // The register's machines, so a service record names one of them rather
+  // than free text the Equipment page has never heard of (QA 17 Oct 2026).
+  useEffect(() => {
+    listEquipment()
+      .then((rows) => setMachines(rows.filter((m) => m.status !== "retired")))
+      .catch(() => setMachines([]));
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -60,6 +73,19 @@ export function MaintenanceLogPanel() {
   }, [load]);
 
   const submit = async () => {
+    const missing = new Set<string>();
+    if (!machineId.trim()) missing.add("machine_id");
+    if (!departmentId) missing.add("department_id");
+    if (!performedAt) missing.add("performed_at");
+    if (!vendor.trim()) missing.add("performed_by_vendor");
+    if (type === "breakdown" && downtime.trim() === "") missing.add("downtime_minutes");
+    if (missing.size) {
+      setBadFields(missing);
+      setError(t("maintenance.completeFields"));
+      return;
+    }
+    setBadFields(new Set());
+    setSaved(null);
     setBusy(true);
     try {
       await createMaintenanceLog({
@@ -80,9 +106,20 @@ export function MaintenanceLogPanel() {
       setVendor("");
       setDowntime("");
       setNotes("");
+      setError(null);
+      setSaved(t("maintenance.recorded"));
       await load();
     } catch (reason) {
       setError(reason instanceof ApiError ? reason.message : t("maintenance.recordFailed"));
+      setBadFields(
+        fieldsFromError(reason, {
+          machine_not_registered: ["machine_id"],
+          machine_retired: ["machine_id"],
+          performed_by_required: ["performed_by_vendor"],
+          downtime_required: ["downtime_minutes"],
+          department_not_found: ["department_id"],
+        }),
+      );
     } finally {
       setBusy(false);
     }
@@ -101,22 +138,34 @@ export function MaintenanceLogPanel() {
         </p>
       ) : null}
 
+      {saved ? (
+        <p role="status" className="rounded-md bg-success-muted p-3 text-sm text-success">{saved}</p>
+      ) : null}
       <div className="rounded border border-border p-4">
         <h3 className="text-base font-semibold">{t("maintenance.recordServiceTitle")}</h3>
+        <p className="mt-1 text-xs text-muted-foreground">{t("maintenance.registerHint")}</p>
         <div className="mt-3 grid gap-3 sm:grid-cols-3">
           <label className="text-sm">
             <span className="block text-muted-foreground">{t("maintenance.machine")}</span>
             <input
               className="mt-1 w-full rounded border border-gray-300 p-2"
-              placeholder="XR-01"
+              placeholder={machines.length ? t("maintenance.chooseMachine") : "XR-01"}
+              list="maintenance-machines"
+              aria-invalid={badFields.has("machine_id") ? true : undefined}
               value={machineId}
               onChange={(e) => setMachineId(e.target.value)}
             />
+            <datalist id="maintenance-machines">
+              {machines.map((m) => (
+                <option key={m.id} value={m.asset_tag ?? m.name}>{m.name}{m.location ? ` · ${m.location}` : ""}</option>
+              ))}
+            </datalist>
           </label>
           <label className="text-sm">
             <span className="block text-muted-foreground">{t("maintenance.department")}</span>
             <select
               className="mt-1 w-full rounded border border-gray-300 p-2"
+              aria-invalid={badFields.has("department_id") ? true : undefined}
               value={departmentId}
               onChange={(e) => setDepartmentId(e.target.value)}
             >
@@ -147,6 +196,7 @@ export function MaintenanceLogPanel() {
             <input
               type="datetime-local"
               className="mt-1 w-full rounded border border-gray-300 p-2"
+              aria-invalid={badFields.has("performed_at") ? true : undefined}
               value={performedAt}
               onChange={(e) => setPerformedAt(e.target.value)}
             />
@@ -155,6 +205,8 @@ export function MaintenanceLogPanel() {
             <span className="block text-muted-foreground">{t("maintenance.vendor")}</span>
             <input
               className="mt-1 w-full rounded border border-gray-300 p-2"
+              aria-invalid={badFields.has("performed_by_vendor") ? true : undefined}
+              placeholder={t("maintenance.vendorPlaceholder")}
               value={vendor}
               onChange={(e) => setVendor(e.target.value)}
             />
@@ -165,6 +217,7 @@ export function MaintenanceLogPanel() {
               type="number"
               min="0"
               className="mt-1 w-full rounded border border-gray-300 p-2"
+              aria-invalid={badFields.has("downtime_minutes") ? true : undefined}
               placeholder={t("maintenance.downtimePlaceholder")}
               value={downtime}
               onChange={(e) => setDowntime(e.target.value)}
@@ -182,7 +235,7 @@ export function MaintenanceLogPanel() {
         </label>
         <button
           type="button"
-          disabled={busy || !machineId.trim() || !departmentId || !performedAt}
+          disabled={busy}
           onClick={() => void submit()}
           className="mt-4 rounded bg-blue-700 px-4 py-2 text-sm text-white disabled:bg-gray-300"
         >

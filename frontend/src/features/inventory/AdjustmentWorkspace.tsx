@@ -64,23 +64,35 @@ export function AdjustmentWorkspace() {
     void reload();
   }, [reload]);
 
+  // Focusing the box lists the catalogue; typing narrows it. A failed search
+  // said nothing and looked like an empty catalogue (QA 17 Oct 2026).
+  const [browsing, setBrowsing] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
   useEffect(() => {
     const q = term.trim();
-    if (q.length < 2) {
+    if (q.length === 1 || (q.length === 0 && !browsing)) {
       setMatches([]);
       return;
     }
     let cancelled = false;
     const timer = setTimeout(() => {
       searchMedicines(q)
-        .then((r) => !cancelled && setMatches(r.items))
-        .catch(() => !cancelled && setMatches([]));
+        .then((r) => {
+          if (cancelled) return;
+          setMatches(r.items);
+          setSearchError(r.items.length ? null : t("inventory.noItemsMatch"));
+        })
+        .catch((reason) => {
+          if (cancelled) return;
+          setMatches([]);
+          setSearchError(reason instanceof ApiError ? reason.message : t("inventory.errItemSearch"));
+        });
     }, 250);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [term]);
+  }, [term, browsing, t]);
 
   useEffect(() => {
     const q = approverTerm.trim();
@@ -210,8 +222,10 @@ export function AdjustmentWorkspace() {
                   className="mt-1 w-full rounded border border-gray-300 p-2"
                   placeholder={t("inventory.grn.searchMedicinesPlaceholder")}
                   value={term}
+                  onFocus={() => setBrowsing(true)}
                   onChange={(event) => setTerm(event.target.value)}
                 />
+                {searchError ? <p className="mt-1 text-xs text-danger">{searchError}</p> : null}
                 {matches.length > 0 ? (
                   <ul className="mt-1 max-h-40 overflow-auto rounded border border-gray-200 text-sm">
                     {matches.map((match) => (

@@ -126,13 +126,17 @@ async def prescription_queue(
     response_model=MedicineSearchResponse,
     dependencies=[
         Depends(require_module("pharmacy")),
-        Depends(require_roles("pharmacist", "admin", "doctor")),
+        # HOD raises indents and picks medicines on the same search; without
+        # the role it got a 403 that the screen showed as "no medicines".
+        Depends(require_roles("pharmacist", "admin", "doctor", "hod")),
     ],
 )
 async def medicine_search(
     current_user: CurrentDbUser,
     db: DbSession,
-    q: str = Query(min_length=1),
+    # Empty lists the catalogue (first page), so a desk can pick without
+    # knowing the spelling (QA 17 Oct 2026).
+    q: str = Query(default="", max_length=80),
 ) -> MedicineSearchResponse:
     results = await search_medicines(db, q=q, facility_id=current_user.facility_id)
     return MedicineSearchResponse(items=results)

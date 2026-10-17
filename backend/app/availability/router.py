@@ -58,6 +58,24 @@ class AvailabilityOut(BaseModel):
     )
 
 
+@router.get("/availability/states", response_model=list[str])
+async def public_availability_states(db: AsyncSession = Depends(get_db)) -> list[str]:
+    """States that have at least one hospital publishing availability.
+
+    The page opened on a hard-coded state (BR) while the hospital was in DL,
+    and showed nothing (QA 16 Oct 2026); it now offers only states with data.
+    """
+    rows = (
+        await db.execute(
+            select(Facility.state_code)
+            .where(Facility.is_active.is_(True), Facility.publish_availability.is_(True), Facility.state_code.isnot(None))
+            .distinct()
+            .order_by(Facility.state_code)
+        )
+    ).scalars().all()
+    return [code.upper() for code in rows if code]
+
+
 @router.get("/availability", response_model=AvailabilityOut)
 async def public_availability(
     db: AsyncSession = Depends(get_db),

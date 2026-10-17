@@ -536,7 +536,8 @@ async def test_hd27_ot_schedule_creation_and_theatre_conflict_rejection(db):
             actor_user_id=surgeon_user.id,
         )
     assert exc_conflict.value.status_code == 409
-    assert "conflicting schedule" in exc_conflict.value.detail
+    assert exc_conflict.value.detail["code"] == "theatre_booked"
+    assert "already booked" in exc_conflict.value.detail["message"]
 
     # 4. Simultaneous booking in different theatre OT-2: SUCCEEDS
     sch2 = await create_ot_schedule(

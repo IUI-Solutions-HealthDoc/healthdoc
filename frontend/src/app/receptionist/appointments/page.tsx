@@ -132,6 +132,7 @@ export default function AppointmentsPage() {
 
   // Booking Modal State
   const [bookingModalOpen, setBookingModalOpen] = useState(false);
+  const [bookTried, setBookTried] = useState(false);
   const [serviceModalOpen, setServiceModalOpen] = useState(false);
 
   // Form states for booking
@@ -291,12 +292,24 @@ export default function AppointmentsPage() {
   // Handle Appointment Booking Submit
   async function handleCreateAppointment(e: React.FormEvent) {
     e.preventDefault();
+    // Confirm Booking used to be disabled until everything was filled in, so
+    // a click with no department did nothing at all (QA 17 Oct 2026). It now
+    // always answers, and marks the field that is missing.
+    setBookTried(true);
     if (!selectedPatient) {
       setError(t("receptionist.errSelectPatient"));
       return;
     }
     if (!selectedDeptId) {
       setError(t("receptionist.errSelectDepartment"));
+      return;
+    }
+    if (!bookingDate || bookingDate < todayStr) {
+      setError(t("receptionist.errBookingDate"));
+      return;
+    }
+    if (!/^\d{2}:\d{2}$/.test(apptTime)) {
+      setError(t("receptionist.errBookingTime"));
       return;
     }
 
@@ -338,6 +351,7 @@ export default function AppointmentsPage() {
   }
 
   function resetBookingForm() {
+    setBookTried(false);
     setSelectedPatient(null);
     setPatientSearchTerm("");
     setPatientSearchResults([]);
@@ -852,7 +866,7 @@ export default function AppointmentsPage() {
               {t("receptionist.bookingModalHint")}
             </p>
 
-            <form onSubmit={handleCreateAppointment} className="mt-5 space-y-4">
+            <form onSubmit={handleCreateAppointment} noValidate className="mt-5 space-y-4">
               {/* Patient Lookup */}
               <div>
                 <label className="block text-xs font-medium text-slate-700 dark:text-slate-300">
@@ -974,7 +988,8 @@ export default function AppointmentsPage() {
                   value={selectedDeptId}
                   onChange={(e) => setSelectedDeptId(e.target.value)}
                   required
-                  className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                  aria-invalid={bookTried && !selectedDeptId ? true : undefined}
+                  className={`mt-1 block w-full rounded-md border px-3 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 ${bookTried && !selectedDeptId ? "border-rose-600 ring-2 ring-rose-500/30" : "border-slate-300"}`}
                 >
                   <option value="">{t("receptionist.selectDepartment")}</option>
                   {departments.map((d) => (
@@ -1030,7 +1045,8 @@ export default function AppointmentsPage() {
                   min={todayStr}
                   onChange={(e) => setBookingDate(e.target.value)}
                   required
-                  className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                  aria-invalid={bookTried && (!bookingDate || bookingDate < todayStr) ? true : undefined}
+                  className={`mt-1 block w-full rounded-md border px-3 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 ${bookTried && (!bookingDate || bookingDate < todayStr) ? "border-rose-600 ring-2 ring-rose-500/30" : "border-slate-300"}`}
                 />
               </div>
 
@@ -1128,7 +1144,7 @@ export default function AppointmentsPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={isBusy("book") || !selectedPatient || !selectedDeptId || !bookingDate || bookingDate < todayStr}
+                  disabled={isBusy("book")}
                   className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
                 >
                   {isBusy("book") ? t("common.loading") : t("receptionist.confirmBooking")}

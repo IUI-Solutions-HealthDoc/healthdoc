@@ -50,6 +50,11 @@ function n(value: number | null): string {
   return value === null ? "—" : String(value);
 }
 
+function latestCapture(board: MonitorBoard): string | null {
+  const times = board.facilities.map((f) => f.captured_at).filter((v): v is string => Boolean(v));
+  return times.length ? times.reduce((a, b) => (a > b ? a : b)) : null;
+}
+
 export function ControlRoom() {
   const { t } = useLocale();
   const [district, setDistrict] = useState<string | null>(null);
@@ -103,7 +108,10 @@ export function ControlRoom() {
         <div>
           <h1 className="text-xl font-semibold">{t("monitor.title")}</h1>
           <p className="text-sm text-muted-foreground">
-            {area} · {t("monitor.updated")} {formatDateTime(board.generated_at)}
+            {/* The time of the data, not of the page load: "updated 3:37 pm"
+                over a 3:33 pm capture overstated how fresh it was (QA 16 Oct 2026). */}
+            {area} · {t("monitor.dataFrom")}{" "}
+            {latestCapture(board) ? formatDateTime(latestCapture(board) as string) : t("monitor.never")}
           </p>
           {error ? (
             <p className="text-sm text-danger" role="alert">

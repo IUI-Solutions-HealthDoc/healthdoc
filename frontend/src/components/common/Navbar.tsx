@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Menu, LogOut, User, Languages, AlertTriangle } from "lucide-react";
+import { Menu, LogOut, User, Languages, AlertTriangle, FlaskConical } from "lucide-react";
 import { useAuth } from "@/providers/auth-provider";
 import { useLocale, type MessageKey } from "@/lib/i18n";
 import { useDeskCounter } from "@/features/receptionist/useDeskCounter";
@@ -178,7 +178,13 @@ export default function Navbar({ open, setOpen }: NavbarProps) {
             title={t("nav.criticalAlertsTitle")}
             aria-label={t("nav.criticalAlertsTitle")}
           >
-            <AlertTriangle size={14} className={unackAlertCount > 0 ? "text-red-600 dark:text-red-400" : "text-muted-foreground"} />
+            {/* A warning triangle with nothing to warn about taught people to
+                ignore it (QA 17 Oct 2026); it appears only with open alerts. */}
+            {unackAlertCount > 0 ? (
+              <AlertTriangle size={14} className="text-red-600 dark:text-red-400" />
+            ) : (
+              <FlaskConical size={14} className="text-muted-foreground" aria-hidden="true" />
+            )}
             <span>
               {unackAlertCount > 0
                 ? t(unackAlertCount > 1 ? "nav.panicAlerts_plural" : "nav.panicAlerts", {

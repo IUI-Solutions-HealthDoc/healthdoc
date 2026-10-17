@@ -167,7 +167,11 @@ export function LabWorklistPanel() {
   const [amendJson, setAmendJson] = useState("");
   const [amendRemarks, setAmendRemarks] = useState("");
   const [busy, setBusy] = useState(false);
+  // An action's refusal and a failed load are different things: one shared
+  // state rendered "Unable to load live data · Try again" for a maker-checker
+  // refusal (QA 16 Oct 2026).
   const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
   const [rejectModalOpen, setRejectModalOpen] = useState(false);
@@ -198,13 +202,13 @@ export function LabWorklistPanel() {
       });
       setRows(response.items);
       setTotal(response.total);
-      setError(null);
+      setLoadError(null);
       if (selectedId && !response.items.some((row) => row.id === selectedId)) {
         setSelectedId(null);
         setHistory([]);
       }
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : t("lab.errLoadWorklist"));
+      setLoadError(reason instanceof ApiError ? reason.message : t("lab.errLoadWorklist"));
     }
   }, [page, selectedId, statusFilter, t]);
 
@@ -404,8 +408,8 @@ export function LabWorklistPanel() {
       );
       setMessage("Result verified and released.");
     } catch (reason) {
-      if (reason instanceof ApiError && reason.code === 403) {
-        setError("Maker–checker blocked this action. Sign in as a different lab professional.");
+      if (reason instanceof ApiError && (reason.code === 403 || /different from the person/i.test(reason.message))) {
+        setError("Another lab professional must verify this result. The person who entered it cannot release it.");
       } else {
         setError(reason instanceof ApiError ? reason.message : t("lab.errVerification"));
       }
@@ -479,8 +483,13 @@ export function LabWorklistPanel() {
         ))}
       </div>
 
-      {rows === null && !error ? <LoadingState label={t("lab.loadingOrders")} /> : null}
-      {error ? <ErrorState message={error} onRetry={() => void load()} /> : null}
+      {rows === null && !loadError ? <LoadingState label={t("lab.loadingOrders")} /> : null}
+      {loadError ? <ErrorState message={loadError} onRetry={() => void load()} /> : null}
+      {error ? (
+        <p role="alert" className="rounded-md border border-danger/30 bg-danger/10 p-3 text-sm text-danger">
+          {error}
+        </p>
+      ) : null}
       {message ? (
         <p role="status" className="rounded-md bg-success-muted p-3 text-sm text-success">
           {message}

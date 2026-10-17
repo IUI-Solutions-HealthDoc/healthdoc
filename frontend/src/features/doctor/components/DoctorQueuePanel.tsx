@@ -38,13 +38,15 @@ export function DoctorQueuePanel({
   onSelect,
 }: DoctorQueuePanelProps) {
   const { t } = useLocale();
-  const today = new Date().toISOString().slice(0, 10);
+  // The facility's day, not UTC's: before 05:30 IST a UTC date is yesterday.
+  const istDay = (d: Date) => d.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  const today = istDay(new Date());
   const waiting = patients.filter(
     (r) => r.status === "waiting" || r.status === "called" || r.status === "recalled",
   ).length;
   const inService = patients.filter((r) => r.status === "in_service").length;
   const completed = patients.filter(
-    (r) => r.status === "completed" && (!r.completed_at || r.completed_at.slice(0, 10) === today),
+    (r) => r.status === "completed" && (!r.completed_at || istDay(new Date(r.completed_at)) === today),
   ).length;
 
   const columns: DataTableColumn<QueueToken>[] = [

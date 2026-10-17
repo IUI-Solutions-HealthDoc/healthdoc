@@ -41,25 +41,53 @@ const BLOOD_LABEL: Record<string, string> = {
 };
 const BLOOD_ORDER = Object.keys(BLOOD_LABEL);
 
+/** The server wraps every body as {success, data}; the page read the top level
+ *  and crashed on `facilities.length` (QA 16 Oct 2026). */
+async function readData<T>(response: Response): Promise<T> {
+  if (!response.ok) throw new Error(String(response.status));
+  const body = (await response.json()) as { success?: boolean; data?: T } | T;
+  if (body && typeof body === "object" && "success" in body && "data" in body) return body.data as T;
+  return body as T;
+}
+
 export function PublicAvailability() {
   const { t } = useLocale();
-  const [state, setState] = useState("BR");
+  const [states, setStates] = useState<string[] | null>(null);
+  const [state, setState] = useState("");
   const [district, setDistrict] = useState("");
-  const [query, setQuery] = useState({ state: "BR", district: "" });
+  const [query, setQuery] = useState<{ state: string; district: string } | null>(null);
+
+  // Only states with a publishing hospital are offered, and the page opens on
+  // the first; a fixed default showed an empty list for everyone elsewhere.
+  useEffect(() => {
+    let current = true;
+    fetch(`${API_BASE_URL}/public/availability/states`)
+      .then((response) => readData<string[]>(response))
+      .then((codes) => {
+        if (!current) return;
+        setStates(codes);
+        if (codes.length) {
+          setState(codes[0]);
+          setQuery({ state: codes[0], district: "" });
+        }
+      })
+      .catch(() => current && setStates([]));
+    return () => {
+      current = false;
+    };
+  }, []);
   const [data, setData] = useState<Availability | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    if (!query) return;
     let current = true;
     const params = new URLSearchParams({ state: query.state });
     if (query.district.trim()) params.set("district", query.district.trim());
     setLoading(true);
     fetch(`${API_BASE_URL}/public/availability?${params.toString()}`)
-      .then(async (response) => {
-        if (!response.ok) throw new Error(String(response.status));
-        return (await response.json()) as Availability;
-      })
+      .then((response) => readData<Availability>(response))
       .then((loaded) => {
         if (!current) return;
         setData(loaded);
@@ -87,8 +115,12 @@ export function PublicAvailability() {
       >
         <label className="text-sm">
           <span className="block text-muted-foreground">{t("availability.state")}</span>
-          <input value={state} onChange={(e) => setState(e.target.value.toUpperCase().trim())} maxLength={5}
-            className="mt-1 w-24 rounded-md border border-border px-2 py-1.5" />
+          <select value={state} onChange={(e) => setState(e.target.value)}
+            className="mt-1 w-28 rounded-md border border-border px-2 py-1.5">
+            {(states ?? []).map((code) => (
+              <option key={code} value={code}>{code}</option>
+            ))}
+          </select>
         </label>
         <label className="text-sm">
           <span className="block text-muted-foreground">{t("availability.district")}</span>
@@ -105,15 +137,18 @@ export function PublicAvailability() {
           {error}
         </p>
       ) : null}
+      {states !== null && states.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{t("availability.none")}</p>
+      ) : null}
       {loading && !data ? <p className="text-sm text-muted-foreground">{t("common.loading")}</p> : null}
       {data ? (
         <>
           <p className="text-sm text-amber-900">{data.note}</p>
-          {data.facilities.length === 0 ? (
+          {(data.facilities ?? []).length === 0 ? (
             <p className="text-sm text-muted-foreground">{t("availability.none")}</p>
           ) : (
             <ul className="grid gap-3 md:grid-cols-2">
-              {data.facilities.map((facility) => {
+              {(data.facilities ?? []).map((facility) => {
                 const groups = BLOOD_ORDER.filter((code) => (facility.blood[code] ?? 0) > 0);
                 return (
                   <li key={facility.facility_id} className="rounded border border-border p-4 text-sm">

@@ -27,7 +27,8 @@ MAX_OPEN = 3
 #: does not hold clinic hours, so these are wide on purpose: they only catch
 #: a morning request booked at 16:00 without anyone noticing (QA 12 Oct 2026).
 #: 12:00-13:00 counts as both.
-SESSION_HOURS = {"morning": ("00:00", "13:00"), "afternoon": ("12:00", "23:59")}
+# Morning ends before 1 pm: 13:00 itself is afternoon (QA 16 Oct 2026).
+SESSION_HOURS = {"morning": ("00:00", "12:59"), "afternoon": ("12:00", "23:59")}
 
 
 class RequestError(ValueError):

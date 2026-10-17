@@ -9,6 +9,8 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { useLocale } from "@/lib/i18n";
+
 import { ApiError, getUserFacingError } from "@/lib/api";
 
 import {
@@ -45,6 +47,7 @@ function area(scope: Pick<MonitorScope, "state_code" | "district">): string {
 }
 
 export function ControlRoomOfficers({ facilities }: { facilities: PlatformFacility[] }) {
+  const { t } = useLocale();
   const [scopes, setScopes] = useState<MonitorScope[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -61,7 +64,7 @@ export function ControlRoomOfficers({ facilities }: { facilities: PlatformFacili
       setLoadError(null);
     } catch (reason) {
       // Shown as a failure, never as "no officers yet".
-      setLoadError(getUserFacingError(reason, "Control-room officers could not be loaded."));
+      setLoadError(getUserFacingError(reason, t("platform.errOfficersLoad")));
     }
   }, []);
 
@@ -106,8 +109,18 @@ export function ControlRoomOfficers({ facilities }: { facilities: PlatformFacili
     }
   }
 
-  const canCreate = USERNAME.test(form.username) && form.full_name.trim() && form.temporary_password.length >= 8
-    && (form.email === "" || EMAIL.test(form.email)) && STATE.test(form.state_code);
+  const problems = {
+    username: !USERNAME.test(form.username),
+    full_name: !form.full_name.trim(),
+    email: form.email !== "" && !EMAIL.test(form.email),
+    password: form.temporary_password.length < 8,
+    state: !STATE.test(form.state_code),
+  };
+  const canCreate = !Object.values(problems).some(Boolean);
+  // Create officer stayed disabled with no hint of what was missing
+  // (QA 17 Oct 2026); it now answers and marks the fields.
+  const [tried, setTried] = useState(false);
+  const bad = (flag: boolean) => (tried && flag ? true : undefined);
 
   function districtList(id: string, state: string) {
     return (
@@ -118,33 +131,37 @@ export function ControlRoomOfficers({ facilities }: { facilities: PlatformFacili
   }
 
   return (
-    <section className="surface-card space-y-5 p-5" aria-label="Control-room officers">
+    <section className="surface-card space-y-5 p-5" aria-label={t("platform.officersTitle")}>
       <div>
-        <h2 className="text-lg font-medium">Control-room officers</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          State and district officials who watch hospitals on the control room. They see counts for the
-          facilities in their area and, on request, a day&apos;s activity with patients shown as codes, never names.
-          They belong to no hospital.
-        </p>
+        <h2 className="text-lg font-medium">{t("platform.officersTitle")}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">{t("platform.officersIntro")}</p>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-6">
-        <input aria-label="Officer username" placeholder="Username (e.g. patna.cmo)" className={input}
-          value={form.username} onChange={(e) => setForm((f) => ({ ...f, username: e.target.value.trim() }))} />
-        <input aria-label="Officer full name" placeholder="Full name" className={`${input} sm:col-span-2`}
-          value={form.full_name} onChange={(e) => setForm((f) => ({ ...f, full_name: e.target.value }))} />
-        <input aria-label="Officer email" placeholder="Email (optional)" className={input}
-          value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value.trim() }))} />
-        <input aria-label="Officer temporary password" type="password" placeholder="Temporary password (8+)" className={`${input} sm:col-span-2`}
-          value={form.temporary_password} onChange={(e) => setForm((f) => ({ ...f, temporary_password: e.target.value }))} />
-        <input aria-label="Officer state" placeholder="State (e.g. BR)" className={input}
-          value={form.state_code} onChange={(e) => setForm((f) => ({ ...f, state_code: e.target.value.toUpperCase().trim() }))} />
-        <input aria-label="Officer district" placeholder="District (blank = whole state)" list="new-officer-districts"
+        <input aria-label={t("platform.officerUsername")} placeholder={t("platform.officerUsernamePlaceholder")} className={input}
+          aria-invalid={bad(problems.username)} value={form.username} onChange={(e) => setForm((f) => ({ ...f, username: e.target.value.trim() }))} />
+        <input aria-label={t("platform.officerFullName")} placeholder={t("platform.fullName")} className={`${input} sm:col-span-2`}
+          aria-invalid={bad(problems.full_name)} value={form.full_name} onChange={(e) => setForm((f) => ({ ...f, full_name: e.target.value }))} />
+        <input aria-label={t("platform.officerEmail")} placeholder={t("platform.emailOptional")} className={input}
+          aria-invalid={bad(problems.email)} value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value.trim() }))} />
+        <input aria-label={t("platform.officerPassword")} type="password" placeholder={t("platform.tempPassword8short")} className={`${input} sm:col-span-2`}
+          aria-invalid={bad(problems.password)} value={form.temporary_password} onChange={(e) => setForm((f) => ({ ...f, temporary_password: e.target.value }))} />
+        <input aria-label={t("platform.officerState")} placeholder={t("platform.statePlaceholder")} className={input}
+          aria-invalid={bad(problems.state)} value={form.state_code} onChange={(e) => setForm((f) => ({ ...f, state_code: e.target.value.toUpperCase().trim() }))} />
+        <input aria-label={t("platform.officerDistrict")} placeholder={t("platform.districtBlank")} list="new-officer-districts"
           className={`${input} sm:col-span-2`} value={form.district}
           onChange={(e) => setForm((f) => ({ ...f, district: e.target.value }))} />
         {districtList("new-officer-districts", form.state_code)}
-        <button type="button" className={`${primary} sm:col-span-3`} disabled={busy || !canCreate}
-          onClick={() => void run(async () => {
+        <button type="button" className={`${primary} sm:col-span-3`} disabled={busy}
+          onClick={() => {
+            if (!canCreate) {
+              setTried(true);
+              setNotice(null);
+              setError(t("platform.createOfficerFields"));
+              return;
+            }
+            setTried(false);
+            void run(async () => {
             const created = await createMonitor({
               username: form.username, full_name: form.full_name.trim(), email: form.email || null,
               temporary_password: form.temporary_password, state_code: form.state_code,
@@ -152,15 +169,16 @@ export function ControlRoomOfficers({ facilities }: { facilities: PlatformFacili
             });
             setForm({ username: "", full_name: "", email: "", temporary_password: "", state_code: "", district: "" });
             return `${created.username} can sign in and see ${area(created)}. They change the temporary password at first sign-in.`;
-          }, "The officer could not be created.")}>Create officer</button>
+          }, t("platform.errOfficer"));
+          }}>{t("platform.createOfficer")}</button>
       </div>
 
       {error ? <p className="text-sm text-danger" role="alert">{error}</p> : null}
       {notice ? <p className="text-sm text-success" role="status">{notice}</p> : null}
       {loadError ? <p className="text-sm text-danger" role="alert">{loadError}</p> : null}
-      {scopes === null && !loadError ? <p className="text-sm text-muted-foreground">Loading officers…</p> : null}
+      {scopes === null && !loadError ? <p className="text-sm text-muted-foreground">{t("platform.loadingOfficers")}</p> : null}
       {scopes !== null && officers.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No control-room officers yet.</p>
+        <p className="text-sm text-muted-foreground">{t("platform.noOfficers")}</p>
       ) : null}
 
       <ul className="space-y-3">
@@ -181,15 +199,15 @@ export function ControlRoomOfficers({ facilities }: { facilities: PlatformFacili
                         return officer.scopes.length === 1
                           ? `${officer.username} has no area left; their control room is closed until one is granted.`
                           : `${area(scope)} removed from ${officer.username}.`;
-                      }, "The area could not be removed.")}>Remove</button>
+                      }, t("platform.errRemoveArea"))}>{t("platform.remove")}</button>
                   </li>
                 ))}
               </ul>
               <div className="mt-2 flex flex-wrap items-center gap-2">
-                <input aria-label={`State to add for ${officer.username}`} placeholder="State" className="w-24 rounded-md border border-border px-2 py-1 text-xs"
+                <input aria-label={`State to add for ${officer.username}`} placeholder={t("platform.state")} className="w-24 rounded-md border border-border px-2 py-1 text-xs"
                   value={draft.state_code}
                   onChange={(e) => setExtra((all) => ({ ...all, [sub]: { ...draft, state_code: e.target.value.toUpperCase().trim() } }))} />
-                <input aria-label={`District to add for ${officer.username}`} placeholder="District (blank = whole state)" list={listId}
+                <input aria-label={`District to add for ${officer.username}`} placeholder={t("platform.districtBlank")} list={listId}
                   className="min-w-48 rounded-md border border-border px-2 py-1 text-xs" value={draft.district}
                   onChange={(e) => setExtra((all) => ({ ...all, [sub]: { ...draft, district: e.target.value } }))} />
                 {districtList(listId, draft.state_code)}
@@ -199,7 +217,7 @@ export function ControlRoomOfficers({ facilities }: { facilities: PlatformFacili
                     const added = await addMonitorScope(sub, { state_code: draft.state_code, district: draft.district.trim() || null });
                     setExtra((all) => ({ ...all, [sub]: { state_code: "", district: "" } }));
                     return `${officer.username} can now also see ${area(added)}.`;
-                  }, "The area could not be added.")}>Add area</button>
+                  }, t("platform.errAddArea"))}>{t("platform.addArea")}</button>
               </div>
             </li>
           );

@@ -1,5 +1,7 @@
 "use client";
 
+import { formatScheduleAge, humanizeCode } from "@/lib/format-age";
+
 import { useCallback, useEffect, useState } from "react";
 import {
   AlertTriangle,
@@ -11,6 +13,7 @@ import {
   ShieldAlert,
   Syringe,
 } from "lucide-react";
+import { formatDate } from "@/lib/dates";
 import { fetchPatientSchedule } from "../api";
 import type { PatientImmunizationSchedule } from "../types";
 
@@ -243,13 +246,13 @@ export function ImmunizationScheduleView({
                         </td>
                         <td className="p-3">
                           <span className="inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
-                            Dose {rec.dose_number}
+                            <span className="whitespace-nowrap">Dose {rec.dose_number}</span>
                           </span>
                         </td>
                         <td className="p-3 font-mono">{new Date(rec.administered_at).toLocaleString()}</td>
                         <td className="p-3 font-mono font-medium">{rec.batch_number}</td>
                         <td className="p-3 text-muted-foreground">
-                          {rec.route || "—"} {rec.site ? `• ${rec.site}` : ""}
+                          {humanizeCode(rec.route)} {rec.site ? `• ${humanizeCode(rec.site)}` : ""}
                         </td>
                         <td className="p-3 text-muted-foreground">
                           {rec.adverse_reaction ? (
@@ -297,7 +300,7 @@ export function ImmunizationScheduleView({
                         </span>
                       </div>
                       <p className="text-xs text-muted-foreground mt-1">
-                        Recommended milestone: {v.min_age_days} days • Due: {v.due_date || "Not calculated"}
+                        Recommended at {formatScheduleAge(v.min_age_days)} • Due: {v.due_date ? formatDate(v.due_date) : "Not calculated"}
                       </p>
                     </div>
                     <button
@@ -339,7 +342,7 @@ export function ImmunizationScheduleView({
                         </span>
                       </div>
                       <p className="text-xs text-muted-foreground mt-1">
-                        Required milestone was {v.min_age_days} days • Due: {v.due_date || "Not calculated"}
+                        Due at {formatScheduleAge(v.min_age_days)} • Due: {v.due_date ? formatDate(v.due_date) : "Not calculated"}
                       </p>
                     </div>
                     <button

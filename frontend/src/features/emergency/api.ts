@@ -145,6 +145,13 @@ export interface EmergencyTriageOut {
   disposition_at: string | null;
   disposition_notes: string | null;
   door_to_clinician_minutes: number | null;
+  patient_name?: string | null;
+  patient_identifier?: string | null;
+  patient_age_years?: number | null;
+  patient_sex?: string | null;
+  visit_number?: string | null;
+  arrived_at?: string | null;
+  doctor_name?: string | null;
 }
 
 export interface EmergencyMetricsOut {
@@ -157,6 +164,8 @@ export interface EmergencyMetricsOut {
   non_urgent_count: number;
   avg_door_to_clinician_minutes: number | null;
   lwbs_count: number;
+  awaiting_triage_count?: number;
+  door_to_clinician_window_hours?: number | null;
   facility_id?: string;
   generated_at?: string;
   total_census?: number;
@@ -178,8 +187,10 @@ export interface EmergencyTriageUpdateInput {
   assigned_doctor_id?: string | null;
   assigned_bay?: string | null;
   clinician_seen_at?: string | null;
+  clinician_seen?: boolean;
   disposition?: EmergencyDisposition | null;
   disposition_notes?: string | null;
+  confirm_high_acuity_discharge?: boolean;
 }
 
 export function listEmergencyTriages(status?: string): Promise<EmergencyTriageOut[]> {

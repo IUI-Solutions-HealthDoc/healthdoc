@@ -1,5 +1,6 @@
 "use client";
 
+import { formatDateTime } from "@/lib/api";
 import * as React from "react";
 import Box from "@mui/material/Box";
 import Divider from "@mui/material/Divider";
@@ -175,7 +176,7 @@ function PatientSummary({ token }: { token: QueueToken }) {
               : historyRead.status === "error"
                 ? t("doctor.summaryUnavailable")
                 : lastVisit
-                  ? lastVisit.visit_date
+                  ? formatDateTime(lastVisit.visit_date)
                   : t("doctor.summaryFirstVisit")
           }
         />

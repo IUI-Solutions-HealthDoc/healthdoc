@@ -31,8 +31,15 @@ import Tabs from "@mui/material/Tabs";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 
+import Alert from "@mui/material/Alert";
+
 import { toast } from "@/components/ui/toast";
+import { api, getUserFacingError } from "@/lib/api";
+import { localDateTimeNow } from "@/lib/dates";
+import { formatAgeSexShort } from "@/lib/format-age";
 import { useLocale } from "@/lib/i18n";
+import { getMe } from "@/features/session/api";
+import type { AdmittableVisit } from "@/features/ipd/api/ipd";
 
 import {
   cancelOtCase,
@@ -44,10 +51,65 @@ import {
 } from "../api";
 import type { OtSchedule } from "../types";
 
+type OtCandidate = AdmittableVisit & { admission_id?: string | null };
+
+// Suggestions only: there is no approved procedure catalogue yet, so the name
+// stays free text (QA 17 Oct 2026: "no option inside procedure name").
+const COMMON_PROCEDURES = [
+  "Appendectomy",
+  "Laparoscopic cholecystectomy",
+  "Inguinal hernia repair",
+  "Caesarean section",
+  "Dilatation and curettage",
+  "Open reduction and internal fixation",
+  "Incision and drainage",
+  "Debridement",
+  "Cataract extraction with IOL",
+  "Tonsillectomy",
+];
+
+const hoursFromNow = (hours: number) => localDateTimeNow(new Date(Date.now() + hours * 3_600_000));
+
+function emptySchedule() {
+  return {
+    theatre_number: "OT-1",
+    // Local time. These were UTC (toISOString), so the default start read
+    // 07:55 at 12:25 IST (QA 17 Oct 2026).
+    scheduled_start: hoursFromNow(1),
+    scheduled_end: hoursFromNow(2),
+    procedure_name: "",
+  };
+}
+
+/** Nothing clinical is pre-filled: a draft diagnosis or a pre-ticked safety
+ *  check is a record nobody made. */
+function emptyRecord(surgeonId: string) {
+  return {
+    started_at: "",
+    ended_at: localDateTimeNow(),
+    surgeon_user_id: surgeonId,
+    pre_op_diagnosis: "",
+    post_op_diagnosis: "",
+    procedure_performed: "",
+    anesthesia_type: "",
+    sponge_needle_count_correct: false,
+    recovery_status: "",
+    notes: "",
+  };
+}
+
 export function OtDashboard() {
   const { t } = useLocale();
   const [schedules, setSchedules] = useState<OtSchedule[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [me, setMe] = useState<{ id: string; full_name?: string | null } | null>(null);
+  const [patient, setPatient] = useState<OtCandidate | null>(null);
+  const [patientQuery, setPatientQuery] = useState("");
+  const [patientResults, setPatientResults] = useState<OtCandidate[] | null>(null);
+  const [patientError, setPatientError] = useState<string | null>(null);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
+  const [completeError, setCompleteError] = useState<string | null>(null);
   const [theatreTab, setTheatreTab] = useState<string>("ALL");
 
   // Modals state
@@ -58,91 +120,27 @@ export function OtDashboard() {
   const [activeSchedule, setActiveSchedule] = useState<OtSchedule | null>(null);
 
   // Form states
-  const [newSchedule, setNewSchedule] = useState(() => ({
-    patient_id: "00000000-0000-0000-0000-000000000001",
-    visit_id: "00000000-0000-0000-0000-000000000002",
-    theatre_number: "OT-1",
-    scheduled_start: new Date(Date.now() + 3600000).toISOString().slice(0, 16),
-    scheduled_end: new Date(Date.now() + 7200000).toISOString().slice(0, 16),
-    procedure_name: "Laparoscopic Cholecystectomy",
-  }));
+  const [newSchedule, setNewSchedule] = useState(emptySchedule);
 
-  const [checklist, setChecklist] = useState({
-    sign_in: true,
-    time_out: true,
-    sign_out: false,
-    notes: "Patient identity, surgical site, consent, pulse oximeter, antibiotic prophylaxis verified.",
-  });
+  const [checklist, setChecklist] = useState({ sign_in: false, time_out: false, sign_out: false, notes: "" });
 
-  const [completeForm, setCompleteForm] = useState(() => ({
-    started_at: new Date(Date.now() - 3600000).toISOString().slice(0, 16),
-    ended_at: new Date().toISOString().slice(0, 16),
-    surgeon_user_id: "00000000-0000-0000-0000-000000000003",
-    pre_op_diagnosis: "Symptomatic cholelithiasis",
-    post_op_diagnosis: "Chronic cholecystitis with gallstones",
-    procedure_performed: "Laparoscopic Cholecystectomy with 4-port technique",
-    anesthesia_type: "General Endotracheal Anesthesia",
-    sponge_needle_count_correct: true,
-    recovery_status: "stable_in_pacu",
-    notes: "Uncomplicated procedure, haemostasis secured, port sites closed in layers.",
-  }));
+  const [completeForm, setCompleteForm] = useState(() => emptyRecord(""));
 
   const [cancelReason, setCancelReason] = useState("");
 
   const loadSchedules = async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const data = await listOtSchedules();
       setSchedules(data);
-    } catch {
-      // Mock fallback data for offline / preview
-      setSchedules([
-        {
-          id: "ot-sch-1",
-          facility_id: "fac-1",
-          patient_id: "pat-1",
-          patient_name: "Rajesh Sharma",
-          patient_uhid: "HD-2026-00412",
-          visit_id: "vis-1",
-          theatre_number: "OT-1",
-          scheduled_start: new Date(Date.now() - 1800000).toISOString(),
-          scheduled_end: new Date(Date.now() + 5400000).toISOString(),
-          procedure_name: "Laparoscopic Cholecystectomy",
-          status: "in_progress",
-          surgical_safety_confirmed: true,
-          created_at: new Date().toISOString(),
-        },
-        {
-          id: "ot-sch-2",
-          facility_id: "fac-1",
-          patient_id: "pat-2",
-          patient_name: "Priya Devi",
-          patient_uhid: "HD-2026-00583",
-          visit_id: "vis-2",
-          theatre_number: "OT-2",
-          scheduled_start: new Date(Date.now() + 3600000).toISOString(),
-          scheduled_end: new Date(Date.now() + 7200000).toISOString(),
-          procedure_name: "Total Knee Arthroplasty (Right)",
-          status: "scheduled",
-          surgical_safety_confirmed: false,
-          created_at: new Date().toISOString(),
-        },
-        {
-          id: "ot-sch-3",
-          facility_id: "fac-1",
-          patient_id: "pat-3",
-          patient_name: "Sunita Verma",
-          patient_uhid: "HD-2026-00391",
-          visit_id: "vis-3",
-          theatre_number: "OT-1",
-          scheduled_start: new Date(Date.now() - 14400000).toISOString(),
-          scheduled_end: new Date(Date.now() - 7200000).toISOString(),
-          procedure_name: "Emergency Appendectomy",
-          status: "completed",
-          surgical_safety_confirmed: true,
-          created_at: new Date().toISOString(),
-        },
-      ]);
+    } catch (err) {
+      // This used to swap in three invented cases (fake patients, fake ids),
+      // so a failed load looked like a working theatre list and every action
+      // on it failed (QA 17 Oct 2026). A failure is shown as one.
+      setSchedules([]);
+      setLoadError(getUserFacingError(err, t("ot.errLoad")));
+      return;
     } finally {
       setLoading(false);
     }
@@ -150,7 +148,35 @@ export function OtDashboard() {
 
   useEffect(() => {
     void loadSchedules();
+    getMe()
+      .then((user) => setMe({ id: user.id, full_name: user.full_name }))
+      .catch(() => setMe(null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- load once
   }, []);
+
+  async function searchPatients() {
+    if (patientQuery.trim().length < 2) {
+      setPatientError(t("ot.searchMinChars"));
+      return;
+    }
+    setPatientError(null);
+    try {
+      setPatientResults(await api<OtCandidate[]>(`/ot/candidate-visits?q=${encodeURIComponent(patientQuery.trim())}`));
+    } catch (err) {
+      setPatientResults(null);
+      setPatientError(getUserFacingError(err, t("ot.errSearch")));
+    }
+  }
+
+  function openScheduleDialog() {
+    setNewSchedule(emptySchedule());
+    setPatient(null);
+    setPatientQuery("");
+    setPatientResults(null);
+    setPatientError(null);
+    setScheduleError(null);
+    setScheduleModalOpen(true);
+  }
 
   const filteredSchedules = useMemo(() => {
     if (theatreTab === "ALL") return schedules;
@@ -158,9 +184,26 @@ export function OtDashboard() {
   }, [schedules, theatreTab]);
 
   const handleCreateSchedule = async () => {
+    if (!patient) {
+      setScheduleError(t("ot.errPatientRequired"));
+      return;
+    }
+    if (!newSchedule.procedure_name.trim()) {
+      setScheduleError(t("ot.errProcedureRequired"));
+      return;
+    }
+    if (!newSchedule.scheduled_start || !newSchedule.scheduled_end || newSchedule.scheduled_end <= newSchedule.scheduled_start) {
+      setScheduleError(t("ot.errTimes"));
+      return;
+    }
+    setScheduleError(null);
     try {
       await createOtSchedule({
-        ...newSchedule,
+        patient_id: patient.patient_id,
+        visit_id: patient.visit_id,
+        admission_id: patient.admission_id ?? undefined,
+        theatre_number: newSchedule.theatre_number,
+        procedure_name: newSchedule.procedure_name.trim(),
         scheduled_start: new Date(newSchedule.scheduled_start).toISOString(),
         scheduled_end: new Date(newSchedule.scheduled_end).toISOString(),
       });
@@ -168,7 +211,7 @@ export function OtDashboard() {
       setScheduleModalOpen(false);
       void loadSchedules();
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : t("ot.toast.scheduleFailed"));
+      setScheduleError(getUserFacingError(e, t("ot.toast.scheduleFailed")));
     }
   };
 
@@ -201,6 +244,11 @@ export function OtDashboard() {
 
   const handleCompleteCase = async () => {
     if (!activeSchedule) return;
+    if (!completeForm.started_at || !completeForm.surgeon_user_id || !completeForm.procedure_performed.trim()) {
+      setCompleteError(t("ot.errRecordRequired"));
+      return;
+    }
+    setCompleteError(null);
     try {
       await completeOtCase(activeSchedule.id, {
         started_at: new Date(completeForm.started_at).toISOString(),
@@ -218,7 +266,7 @@ export function OtDashboard() {
       setCompleteModalOpen(false);
       void loadSchedules();
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : t("ot.toast.completeFailed"));
+      setCompleteError(getUserFacingError(e, t("ot.toast.completeFailed")));
     }
   };
 
@@ -267,7 +315,7 @@ export function OtDashboard() {
           <Button
             variant="contained"
             startIcon={<AddIcon />}
-            onClick={() => setScheduleModalOpen(true)}
+            onClick={openScheduleDialog}
             sx={{ fontWeight: 700 }}
           >
             {t("ot.scheduleSurgery")}
@@ -329,6 +377,16 @@ export function OtDashboard() {
         </Card>
       </Box>
 
+      {loadError && (
+        <Alert
+          severity="error"
+          sx={{ mb: 2 }}
+          action={<Button color="inherit" size="small" onClick={() => void loadSchedules()}>{t("common.retry")}</Button>}
+        >
+          {loadError}
+        </Alert>
+      )}
+
       {/* Theatre Selection Tabs */}
       <Box sx={{ borderBottom: 1, borderColor: "divider", mb: 2 }}>
         <Tabs value={theatreTab} onChange={(_, v) => setTheatreTab(v)}>
@@ -353,6 +411,13 @@ export function OtDashboard() {
             </TableRow>
           </TableHead>
           <TableBody>
+            {!loading && !loadError && filteredSchedules.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={6} align="center" sx={{ py: 4, color: "text.secondary" }}>
+                  {t("ot.emptyList")}
+                </TableCell>
+              </TableRow>
+            )}
             {filteredSchedules.map((sch) => {
               const startTime = new Date(sch.scheduled_start).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
               const endTime = new Date(sch.scheduled_end).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -366,7 +431,7 @@ export function OtDashboard() {
 
                   <TableCell>
                     <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{sch.patient_name || "—"}</Typography>
-                    <Typography variant="caption" color="text.secondary">{sch.patient_uhid || sch.patient_id.slice(0, 8)}</Typography>
+                    <Typography variant="caption" color="text.secondary">{sch.patient_uhid || "—"}</Typography>
                   </TableCell>
 
                   <TableCell>
@@ -409,10 +474,10 @@ export function OtDashboard() {
                         onClick={() => {
                           setActiveSchedule(sch);
                           setChecklist({
-                            sign_in: sch.pre_op_checklist?.sign_in ?? true,
-                            time_out: sch.pre_op_checklist?.time_out ?? true,
-                            sign_out: sch.pre_op_checklist?.sign_out ?? false,
-                            notes: sch.pre_op_checklist?.notes ?? "",
+                            sign_in: Boolean(sch.pre_op_checklist?.sign_in),
+                            time_out: Boolean(sch.pre_op_checklist?.time_out),
+                            sign_out: Boolean(sch.pre_op_checklist?.sign_out),
+                            notes: String(sch.pre_op_checklist?.notes ?? ""),
                           });
                           setChecklistModalOpen(true);
                         }}
@@ -440,6 +505,8 @@ export function OtDashboard() {
                           startIcon={<StopIcon />}
                           onClick={() => {
                             setActiveSchedule(sch);
+                            setCompleteForm(emptyRecord(me?.id ?? ""));
+                            setCompleteError(null);
                             setCompleteModalOpen(true);
                           }}
                         >
@@ -470,29 +537,88 @@ export function OtDashboard() {
 
       {/* Schedule Surgery Dialog */}
       <Dialog open={scheduleModalOpen} onClose={() => setScheduleModalOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ fontWeight: 800 }}>Schedule Operating Theatre Case</DialogTitle>
+        <DialogTitle sx={{ fontWeight: 800 }}>{t("ot.scheduleDialogTitle")}</DialogTitle>
         <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 1 }}>
+          {scheduleError && <Alert severity="error">{scheduleError}</Alert>}
+          {patient ? (
+            <Box sx={{ p: 1.5, border: 1, borderColor: "primary.light", borderRadius: 1.5, display: "flex", justifyContent: "space-between", gap: 1 }}>
+              <Box>
+                <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{patient.patient_name}</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {[patient.patient_identifier, formatAgeSexShort(patient.patient_age, patient.patient_sex ?? "unknown"), patient.visit_number]
+                    .filter(Boolean)
+                    .join(" · ")}
+                  {patient.admission_id ? ` · ${t("ot.admitted")}` : ""}
+                </Typography>
+              </Box>
+              <Button size="small" onClick={() => setPatient(null)}>{t("common.changePatient")}</Button>
+            </Box>
+          ) : (
+            <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+              <Box sx={{ display: "flex", gap: 1 }}>
+                <TextField
+                  label={t("ot.patientSearchLabel")}
+                  placeholder={t("ot.patientSearchPlaceholder")}
+                  value={patientQuery}
+                  onChange={(e) => setPatientQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      void searchPatients();
+                    }
+                  }}
+                  error={Boolean(patientError) || Boolean(scheduleError && !patient)}
+                  helperText={patientError ?? undefined}
+                  fullWidth
+                  size="small"
+                />
+                <Button variant="outlined" onClick={() => void searchPatients()}>{t("common.search")}</Button>
+              </Box>
+              {patientResults && patientResults.length === 0 && (
+                <Typography variant="caption" color="text.secondary">{t("ot.noCandidates")}</Typography>
+              )}
+              {(patientResults ?? []).map((row) => (
+                <Button
+                  key={row.visit_id}
+                  variant="text"
+                  sx={{ justifyContent: "flex-start", textTransform: "none" }}
+                  onClick={() => {
+                    setPatient(row);
+                    setPatientResults(null);
+                  }}
+                >
+                  {row.patient_name} · {[row.patient_identifier, row.visit_number].filter(Boolean).join(" · ")}
+                </Button>
+              ))}
+            </Box>
+          )}
           <TextField
-            label="Theatre Room"
+            label={t("ot.theatreRoom")}
             select
             value={newSchedule.theatre_number}
             onChange={(e) => setNewSchedule({ ...newSchedule, theatre_number: e.target.value })}
             fullWidth
           >
-            <MenuItem value="OT-1">OT-1 (Main Laparoscopic)</MenuItem>
-            <MenuItem value="OT-2">OT-2 (Orthopaedic Suite)</MenuItem>
-            <MenuItem value="Minor-OT">Minor OT (Day Procedures)</MenuItem>
+            <MenuItem value="OT-1">{t("ot.tab.ot1Main")}</MenuItem>
+            <MenuItem value="OT-2">{t("ot.tab.ot2Ortho")}</MenuItem>
+            <MenuItem value="Minor-OT">{t("ot.tab.minorOt")}</MenuItem>
           </TextField>
 
           <TextField
-            label="Procedure Name"
+            label={t("ot.procedureName")}
             value={newSchedule.procedure_name}
             onChange={(e) => setNewSchedule({ ...newSchedule, procedure_name: e.target.value })}
+            slotProps={{ htmlInput: { list: "ot-procedure-suggestions" } }}
+            required
+            error={Boolean(scheduleError && !newSchedule.procedure_name.trim())}
             fullWidth
           />
+          <datalist id="ot-procedure-suggestions">
+            {COMMON_PROCEDURES.map((name) => <option key={name} value={name} />)}
+          </datalist>
 
           <TextField
-            label="Scheduled Start"
+            label={t("ot.scheduledStart")}
             type="datetime-local"
             value={newSchedule.scheduled_start}
             onChange={(e) => setNewSchedule({ ...newSchedule, scheduled_start: e.target.value })}
@@ -500,7 +626,7 @@ export function OtDashboard() {
           />
 
           <TextField
-            label="Scheduled End"
+            label={t("ot.scheduledEnd")}
             type="datetime-local"
             value={newSchedule.scheduled_end}
             onChange={(e) => setNewSchedule({ ...newSchedule, scheduled_end: e.target.value })}
@@ -510,7 +636,7 @@ export function OtDashboard() {
         <DialogActions sx={{ p: 2 }}>
           <Button onClick={() => setScheduleModalOpen(false)}>{t("common.cancel")}</Button>
           <Button variant="contained" onClick={handleCreateSchedule} sx={{ fontWeight: 700 }}>
-            Confirm Booking
+            {t("ot.confirmBooking")}
           </Button>
         </DialogActions>
       </Dialog>
@@ -589,21 +715,45 @@ export function OtDashboard() {
 
       {/* Operative Record & Completion Modal */}
       <Dialog open={completeModalOpen} onClose={() => setCompleteModalOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle sx={{ fontWeight: 800 }}>Complete Surgery & Operative Record</DialogTitle>
+        <DialogTitle sx={{ fontWeight: 800 }}>{t("ot.completeDialogTitle")}</DialogTitle>
         <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 1 }}>
+          {completeError && <Alert severity="error">{completeError}</Alert>}
           <Typography variant="body2" color="text.secondary">
-            Procedure: {activeSchedule?.procedure_name} ({activeSchedule?.theatre_number})
+            {activeSchedule?.patient_name} · {activeSchedule?.procedure_name} ({activeSchedule?.theatre_number})
+          </Typography>
+          <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2 }}>
+            <TextField
+              label={t("ot.startedAt")}
+              type="datetime-local"
+              value={completeForm.started_at}
+              onChange={(e) => setCompleteForm({ ...completeForm, started_at: e.target.value })}
+              slotProps={{ inputLabel: { shrink: true } }}
+              required
+              error={Boolean(completeError && !completeForm.started_at)}
+              fullWidth
+            />
+            <TextField
+              label={t("ot.endedAt")}
+              type="datetime-local"
+              value={completeForm.ended_at}
+              onChange={(e) => setCompleteForm({ ...completeForm, ended_at: e.target.value })}
+              slotProps={{ inputLabel: { shrink: true } }}
+              fullWidth
+            />
+          </Box>
+          <Typography variant="caption" color="text.secondary">
+            {t("ot.surgeonIsYou", { name: me?.full_name ?? "" })}
           </Typography>
 
           <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2 }}>
             <TextField
-              label="Pre-operative Diagnosis"
+              label={t("ot.preOpDiagnosis")}
               value={completeForm.pre_op_diagnosis}
               onChange={(e) => setCompleteForm({ ...completeForm, pre_op_diagnosis: e.target.value })}
               fullWidth
             />
             <TextField
-              label="Post-operative Diagnosis"
+              label={t("ot.postOpDiagnosis")}
               value={completeForm.post_op_diagnosis}
               onChange={(e) => setCompleteForm({ ...completeForm, post_op_diagnosis: e.target.value })}
               fullWidth
@@ -611,7 +761,9 @@ export function OtDashboard() {
           </Box>
 
           <TextField
-            label="Procedure Performed"
+            label={t("ot.procedurePerformed")}
+            required
+            error={Boolean(completeError && !completeForm.procedure_performed.trim())}
             value={completeForm.procedure_performed}
             onChange={(e) => setCompleteForm({ ...completeForm, procedure_performed: e.target.value })}
             fullWidth
@@ -619,13 +771,13 @@ export function OtDashboard() {
 
           <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2 }}>
             <TextField
-              label="Anesthesia Type"
+              label={t("ot.anaesthesiaType")}
               value={completeForm.anesthesia_type}
               onChange={(e) => setCompleteForm({ ...completeForm, anesthesia_type: e.target.value })}
               fullWidth
             />
             <TextField
-              label="Recovery Status"
+              label={t("ot.recoveryStatus")}
               value={completeForm.recovery_status}
               onChange={(e) => setCompleteForm({ ...completeForm, recovery_status: e.target.value })}
               fullWidth
@@ -642,14 +794,14 @@ export function OtDashboard() {
               }
               label={
                 <Typography variant="subtitle2" sx={{ fontWeight: 700, color: "#2e7d32" }}>
-                  Sponge, Swab, and Needle Count Correct (Verified by Scrub & Circulating Nurse)
+                  {t("ot.countsCorrect")}
                 </Typography>
               }
             />
           </Box>
 
           <TextField
-            label="Operative Summary & Findings"
+            label={t("ot.operativeNotes")}
             multiline
             rows={3}
             value={completeForm.notes}
@@ -660,20 +812,20 @@ export function OtDashboard() {
         <DialogActions sx={{ p: 2 }}>
           <Button onClick={() => setCompleteModalOpen(false)}>{t("common.cancel")}</Button>
           <Button variant="contained" color="success" onClick={handleCompleteCase} sx={{ fontWeight: 700 }}>
-            Commit Operative Record
+            {t("ot.saveRecord")}
           </Button>
         </DialogActions>
       </Dialog>
 
       {/* Cancel Case Dialog */}
       <Dialog open={cancelModalOpen} onClose={() => setCancelModalOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle sx={{ fontWeight: 800 }}>Cancel OT Case</DialogTitle>
+        <DialogTitle sx={{ fontWeight: 800 }}>{t("ot.cancelDialogTitle")}</DialogTitle>
         <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 1 }}>
           <TextField
-            label="Cancellation Reason"
+            label={t("ot.cancelReason")}
             multiline
             rows={3}
-            placeholder="e.g. Patient haemodynamically unstable, elective postponement..."
+            placeholder={t("ot.cancelReasonPlaceholder")}
             value={cancelReason}
             onChange={(e) => setCancelReason(e.target.value)}
             fullWidth
@@ -683,7 +835,7 @@ export function OtDashboard() {
         <DialogActions sx={{ p: 2 }}>
           <Button onClick={() => setCancelModalOpen(false)}>{t("common.back")}</Button>
           <Button variant="contained" color="error" onClick={handleCancelCase} sx={{ fontWeight: 700 }}>
-            Confirm Cancellation
+            {t("ot.confirmCancellation")}
           </Button>
         </DialogActions>
       </Dialog>

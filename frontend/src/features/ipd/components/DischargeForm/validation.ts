@@ -11,7 +11,7 @@ export const DISCHARGE_TYPES = [
 export const addDischargeSchema = z
   .object({
     admission_id: z.guid("Admission ID must be a UUID"),
-    discharged_at: z.string().min(1),
+    discharged_at: z.string().min(1, "Enter the discharge date and time"),
     discharge_type: z.enum(DISCHARGE_TYPES),
     discharge_summary: z.string().min(1, "Discharge summary is required"),
     // Normalised on the way out, in dischargePatient — see the note there.
@@ -21,7 +21,14 @@ export const addDischargeSchema = z
     // mirrors ck_discharges_transfer_destination.
     destination_facility_id: z.guid().optional(),
     destination_facility_name: z.string().trim().optional(),
+    // Set after the server reports open mandatory checklist items and the
+    // ward confirms discharging anyway.
+    acknowledge_incomplete_checklist: z.boolean().optional(),
   })
+  .refine(
+    (data) => !data.follow_up_date || !data.discharged_at || data.follow_up_date.slice(0, 10) >= data.discharged_at.slice(0, 10),
+    { message: "The follow-up date must be on or after the discharge date", path: ["follow_up_date"] },
+  )
   .refine(
     (data) =>
       data.discharge_type !== "transferred" ||
