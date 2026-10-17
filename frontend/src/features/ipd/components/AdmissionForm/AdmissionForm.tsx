@@ -5,7 +5,6 @@ import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 
 import FormSection from "@/components/forms/FormSection";
-import TextField from "@/components/forms/TextField";
 import SelectField from "@/components/forms/SelectField";
 import DateTimeField from "@/components/forms/DateTimeField";
 import TextAreaField from "@/components/forms/TextAreaField";
@@ -16,14 +15,33 @@ import BedGrid from "@/components/BedGrid";
 import { AdmissionFormProps } from "./AdmissionForm.types";
 import { DEFAULT_VALUES } from "./constants";
 import { addAdmissionSchema, AddAdmissionSchema } from "./validation";
-import { getPendingAdmissions, type PendingAdmissionItem } from "@/features/ipd/api/ipd";
+import {
+  findAdmittableVisits,
+  getPendingAdmissions,
+  type AdmittableVisit,
+  type PendingAdmissionItem,
+} from "@/features/ipd/api/ipd";
+import { getUserFacingError } from "@/lib/api";
+import { localDateTimeNow } from "@/lib/dates";
+import { formatAgeSexShort } from "@/lib/format-age";
 import { useLocale } from "@/lib/i18n";
+
+/** Who is being admitted, shown instead of a visit UUID. */
+interface ChosenPatient {
+  visit_id: string;
+  name: string;
+  identifier: string | null;
+  visit_number: string | null;
+  age: number | null;
+  sex: string | null;
+}
 
 export default function AdmissionForm({
   wards,
   beds,
   isSubmitting = false,
   onSubmit,
+  initialDispositionId,
 }: AdmissionFormProps) {
   const { t, localizeField } = useLocale();
   const {
@@ -35,8 +53,37 @@ export default function AdmissionForm({
     formState: { errors },
   } = useForm<AddAdmissionSchema>({
     resolver: zodResolver(addAdmissionSchema),
-    defaultValues: DEFAULT_VALUES,
+    defaultValues: { ...DEFAULT_VALUES, admitted_at: localDateTimeNow() },
   });
+  const [chosen, setChosen] = useState<ChosenPatient | null>(null);
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<AdmittableVisit[] | null>(null);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [searching, setSearching] = useState(false);
+
+  async function runSearch() {
+    if (query.trim().length < 2) {
+      setSearchError(t("ipd.searchMinChars"));
+      return;
+    }
+    setSearching(true);
+    setSearchError(null);
+    try {
+      setResults(await findAdmittableVisits(query));
+    } catch (err) {
+      setResults(null);
+      setSearchError(getUserFacingError(err, t("ipd.errSearchVisits")));
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  function choose(patient: ChosenPatient) {
+    setChosen(patient);
+    setValue("visit_id", patient.visit_id, { shouldValidate: true });
+    setResults(null);
+    setQuery("");
+  }
 
   const [pendingList, setPendingList] = useState<PendingAdmissionItem[]>([]);
   const [selectedPendingId, setSelectedPendingId] = useState<string | null>(null);
@@ -47,7 +94,11 @@ export default function AdmissionForm({
     setLoadingPending(true);
     getPendingAdmissions()
       .then((data) => {
-        if (active) setPendingList(data || []);
+        if (!active) return;
+        setPendingList(data || []);
+        // "Admit to Bed" on the To Admit queue opens this form for that patient.
+        const wanted = initialDispositionId ? (data || []).find((d) => d.disposition_id === initialDispositionId) : null;
+        if (wanted) handleSelectPending(wanted);
       })
       .catch((err) => console.error("Failed to fetch pending admissions:", err))
       .finally(() => {
@@ -56,7 +107,8 @@ export default function AdmissionForm({
     return () => {
       active = false;
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once per mount and requested disposition
+  }, [initialDispositionId]);
 
   const wardId = useWatch({ control, name: "ward_id" });
   const bedId = useWatch({ control, name: "bed_id" });
@@ -66,13 +118,22 @@ export default function AdmissionForm({
   );
 
   const handleReset = () => {
-    reset(DEFAULT_VALUES);
+    reset({ ...DEFAULT_VALUES, admitted_at: localDateTimeNow() });
     setSelectedPendingId(null);
+    setChosen(null);
+    setResults(null);
   };
 
   const handleSelectPending = (item: PendingAdmissionItem) => {
     setSelectedPendingId(item.disposition_id);
-    setValue("visit_id", item.visit_id);
+    choose({
+      visit_id: item.visit_id,
+      name: item.patient_name,
+      identifier: item.patient_uhid,
+      visit_number: item.visit_number ?? null,
+      age: item.patient_age ?? null,
+      sex: item.patient_sex ?? null,
+    });
     if (item.recommended_ward_id && wards.some((w) => w.id === item.recommended_ward_id)) {
       setValue("ward_id", item.recommended_ward_id);
     }
@@ -135,7 +196,7 @@ export default function AdmissionForm({
                     </span>
                   </div>
                   <div className="mt-1 text-xs text-slate-600">
-                    UHID: {item.patient_uhid} · {item.patient_sex || ""}
+                    {item.patient_uhid} · {formatAgeSexShort(item.patient_age ?? null, item.patient_sex ?? "unknown")}
                   </div>
                   {item.recommended_ward_name && (
                     <div className="mt-1 text-xs font-medium text-blue-700">
@@ -154,14 +215,98 @@ export default function AdmissionForm({
         </div>
       )}
 
-      <form onSubmit={handleSubmit(submitHandler)} className="space-y-6">
+      <form onSubmit={handleSubmit(submitHandler)} noValidate className="space-y-6">
+        <input type="hidden" {...register("visit_id")} />
+        <div className="space-y-2">
+          <p className="text-sm font-medium">{t("ipd.patientToAdmit")}</p>
+          {chosen ? (
+            <div className="flex items-start justify-between gap-3 rounded-lg border border-primary/40 bg-primary/5 p-3">
+              <div>
+                <p className="font-semibold">{chosen.name}</p>
+                <p className="text-xs text-muted-foreground">
+                  {[chosen.identifier, formatAgeSexShort(chosen.age, chosen.sex ?? "unknown"), chosen.visit_number]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="text-xs font-medium text-primary underline"
+                onClick={() => {
+                  setChosen(null);
+                  setSelectedPendingId(null);
+                  setValue("visit_id", "");
+                }}
+              >
+                {t("common.changePatient")}
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <div className="flex gap-2">
+                <input
+                  type="search"
+                  aria-label={t("ipd.searchVisitsLabel")}
+                  aria-invalid={errors.visit_id ? true : undefined}
+                  placeholder={t("ipd.searchVisitsPlaceholder")}
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      void runSearch();
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => void runSearch()}
+                  disabled={searching}
+                  className="rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
+                >
+                  {searching ? t("common.loading") : t("common.search")}
+                </button>
+              </div>
+              {searchError && <p role="alert" className="text-xs text-danger">{searchError}</p>}
+              {errors.visit_id && !searchError && <p className="text-xs text-danger">{errors.visit_id.message}</p>}
+              {results && results.length === 0 && (
+                <p className="text-xs text-muted-foreground">{t("ipd.noAdmittableVisits")}</p>
+              )}
+              {results && results.length > 0 && (
+                <ul className="divide-y rounded-lg border border-border">
+                  {results.map((r) => (
+                    <li key={r.visit_id}>
+                      <button
+                        type="button"
+                        className="w-full px-3 py-2 text-left text-sm hover:bg-muted"
+                        onClick={() =>
+                          choose({
+                            visit_id: r.visit_id,
+                            name: r.patient_name,
+                            identifier: r.patient_identifier,
+                            visit_number: r.visit_number,
+                            age: r.patient_age,
+                            sex: r.patient_sex,
+                          })
+                        }
+                      >
+                        <span className="font-medium">{r.patient_name}</span>
+                        <span className="ml-2 text-xs text-muted-foreground">
+                          {[r.patient_identifier, formatAgeSexShort(r.patient_age, r.patient_sex ?? "unknown"), r.visit_number, r.visit_type.toUpperCase()]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+
         <div className="grid gap-5 md:grid-cols-2">
-          <TextField
-            label={t("ipd.visitId")}
-            placeholder={t("ipd.visitIdPlaceholder")}
-            registration={register("visit_id")}
-            error={errors.visit_id}
-          />
 
 
           <SelectField

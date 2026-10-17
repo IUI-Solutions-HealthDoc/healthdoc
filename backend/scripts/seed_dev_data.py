@@ -244,6 +244,73 @@ async def seed(users: list[tuple[str, str]]) -> None:
                 ),
                 {"ward_id": WARD_ID, "number": number},
             )
+        # One department and one ward left every picker with a single choice,
+        # so booking, admission and ward transfer could not be exercised
+        # (QA 17 Oct 2026). Development data only; ids are stable so a rerun
+        # updates in place.
+        extra_departments = (
+            ("PAED", "Paediatrics", "बाल रोग", "201"),
+            ("OBGYN", "Obstetrics & Gynaecology", "प्रसूति एवं स्त्री रोग", "202"),
+            ("ORTHO", "Orthopaedics", "हड्डी रोग", "203"),
+            ("SURG", "General Surgery", "सामान्य शल्य चिकित्सा", "204"),
+        )
+        department_ids = {"GENMED": DEPARTMENT_ID}
+        for code, name, name_hi, room in extra_departments:
+            dept_id = uuid.uuid5(uuid.NAMESPACE_URL, f"healthdoc:dev-department:{code}")
+            department_ids[code] = dept_id
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO departments (id, name, name_hi, code, facility_id)
+                    VALUES (:id, :name, :name_hi, :code, :facility_id)
+                    ON CONFLICT DO NOTHING
+                    """
+                ),
+                {"id": dept_id, "name": name, "name_hi": name_hi, "code": code, "facility_id": FACILITY_ID},
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO rooms (id, department_id, room_number, is_active)
+                    SELECT :id, d.id, :room, true FROM departments d
+                     WHERE d.facility_id = :facility_id AND d.code = :code
+                    ON CONFLICT DO NOTHING
+                    """
+                ),
+                {
+                    "id": uuid.uuid5(uuid.NAMESPACE_URL, f"healthdoc:dev-room:{code}"),
+                    "room": room, "code": code, "facility_id": FACILITY_ID,
+                },
+            )
+        extra_wards = (
+            ("Paediatric Ward", "बाल वार्ड", "PAED", 4),
+            ("Maternity Ward", "प्रसूति वार्ड", "OBGYN", 4),
+            ("ICU", "आईसीयू", "GENMED", 3),
+        )
+        for name, name_hi, code, bed_count in extra_wards:
+            ward_id = uuid.uuid5(uuid.NAMESPACE_URL, f"healthdoc:dev-ward:{name}")
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO wards (id, name, name_hi, department_id, facility_id, is_active)
+                    SELECT :id, :name, :name_hi, d.id, :facility_id, true FROM departments d
+                     WHERE d.facility_id = :facility_id AND d.code = :code
+                    ON CONFLICT DO NOTHING
+                    """
+                ),
+                {"id": ward_id, "name": name, "name_hi": name_hi, "code": code, "facility_id": FACILITY_ID},
+            )
+            for number in range(1, bed_count + 1):
+                await session.execute(
+                    text(
+                        """
+                        INSERT INTO beds (id, ward_id, bed_number, status)
+                        SELECT gen_random_uuid(), w.id, :number, 'vacant' FROM wards w WHERE w.id = :ward_id
+                        ON CONFLICT (ward_id, bed_number) DO NOTHING
+                        """
+                    ),
+                    {"ward_id": ward_id, "number": str(number)},
+                )
         # Suppliers, or no purchase order can be raised: the dropdown was empty
         # on a fresh setup (QA 10 Oct 2026). Synthetic names, development only.
         for supplier in ("Dev Medical Supplies (synthetic)", "Dev Surgical Traders (synthetic)"):

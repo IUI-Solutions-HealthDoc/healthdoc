@@ -163,6 +163,8 @@ async def update_encounter(encounter_id: UUID, payload: EncounterUpdate, current
                 "current": EncounterOut.model_validate(exc.encounter).model_dump(mode="json"),
             },
         ) from exc
+    except service.EncounterIncomplete as exc:
+        raise HTTPException(422, {"code": exc.code, "message": exc.message}) from exc
     return EncounterOut.model_validate(encounter)
 
 

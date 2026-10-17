@@ -11,7 +11,7 @@ test("structured validation payloads never become user-facing JSON", () => {
   };
   const message = userFacingApiError(422, payload);
 
-  assert.equal(message, "Please check the highlighted fields and try again.");
+  assert.equal(message, "Email: check this value.");
   assert.doesNotMatch(message, /private|loc|input|\{|\[/);
 });
 
@@ -129,9 +129,9 @@ test("text relayed from ABDM or shaped like data is still never shown", () => {
     userFacingApiError(409, { detail: { code: "abdm_link_failed", message: "upstream private text" } }),
     "This request conflicts with the record's current state. Reload and try again.",
   );
-  assert.equal(
+  assert.doesNotMatch(
     userFacingApiError(409, { detail: { code: "some_conflict", message: "row {'id': 'x'} locked" } }),
-    "This request conflicts with the record's current state. Reload and try again.",
+    /row|id|locked|\{/,
   );
   assert.doesNotMatch(userFacingApiError(500, { detail: { code: "x", message: "Plain words" } }), /Plain words/);
 });
@@ -143,4 +143,40 @@ test("a model-level validation error names the rule, never the submitted value",
   }] });
   assert.equal(message, "Guardian name and guardian relationship are required for a patient under 18.");
   assert.doesNotMatch(message, /PRIVATE/);
+});
+
+test("the bare 422 list api() passes is summarised, not replaced by generic copy", () => {
+  // QA 17 Oct 2026: every pydantic refusal (ANC weight, birth weight, vitals)
+  // read "check the highlighted fields" because api() passes error.message,
+  // which is the list itself, and only {detail: [...]} was read.
+  const message = userFacingApiError(422, [
+    { type: "greater_than_equal", loc: ["body", "weight_kg"], msg: "Input should be greater than or equal to 20", input: 15 },
+  ]);
+  assert.equal(message, "Weight kg: Input should be greater than or equal to 20.");
+});
+
+test("a code-only refusal is explained with its quantities, never its ids", () => {
+  const message = userFacingApiError(422, {
+    code: "insufficient_stock", prescription_item_id: "0b0e9c1e-7f7c-4a43-9d47-6c5bb1c0a111", requested: "9", short_by: "9",
+  });
+  assert.match(message, /Not enough stock: short by 9/);
+  assert.doesNotMatch(message, /0b0e9c1e|highlighted/);
+  assert.equal(userFacingApiError(422, { code: "invalid_performed_range" }), "Invalid performed range.");
+});
+
+test("HealthDoc's plain-string refusals are shown; ids and infrastructure text are not", () => {
+  assert.equal(
+    userFacingApiError(422, "Verifier must be different from the person who entered the result"),
+    "Verifier must be different from the person who entered the result.",
+  );
+  assert.equal(userFacingApiError(404, "maintenance_log_not_found"), "Maintenance log not found.");
+  assert.equal(
+    userFacingApiError(404, "Patient 0b0e9c1e-7f7c-4a43-9d47-6c5bb1c0a111 not found."),
+    "The requested record was not found.",
+  );
+  assert.equal(userFacingApiError(403, "Requires doctor role"), "You do not have permission to perform this action.");
+  assert.equal(
+    userFacingApiError(400, "Could not insert: DETAIL: Key (x)=(y) already exists"),
+    "Please check the highlighted fields and try again.",
+  );
 });

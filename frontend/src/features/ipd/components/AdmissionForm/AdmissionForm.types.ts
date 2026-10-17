@@ -9,4 +9,6 @@ export interface AdmissionFormProps {
   isSubmitting?: boolean;
 
   onSubmit: (data: AddAdmissionSchema) => Promise<boolean> | boolean;
+  /** Preselect this To Admit queue entry (from its "Admit to Bed" button). */
+  initialDispositionId?: string | null;
 }

@@ -20,6 +20,7 @@ insert, trigger-flipped, FOR UPDATE guarded against double-withdrawal).
 
 from __future__ import annotations
 
+import logging
 import uuid
 from collections.abc import Collection
 from dataclasses import dataclass
@@ -43,6 +44,8 @@ from app.consent.models import (
 from app.common.patient_scope import require_patient_scope, require_visit_scope
 from app.dpdp.models import ConsentManager
 from app.patients.models import Patient
+
+log = logging.getLogger(__name__)
 
 # requested -> {granted, denied} only. granted has no entry here at all
 # — see module docstring for why that transition can only happen
@@ -311,7 +314,8 @@ async def create_consent_record(
             await db.flush()
         except IntegrityError as exc:
             await db.rollback()
-            raise HTTPException(422, f"Could not create consent record: {exc.orig}") from exc
+            log.warning("consent record insert refused: %s", exc.orig)
+            raise HTTPException(422, {"code": "consent_record_rejected", "message": "The consent record could not be saved. Check the purpose, scope and dates."}) from exc
         await db.refresh(record)
 
         audit.resource_id = record.id
@@ -435,7 +439,7 @@ async def withdraw_consent(
             if "terminal status" not in str(exc.orig):
                 raise
             await db.rollback()
-            raise HTTPException(409, f"Cannot withdraw consent {consent_id}: {exc.orig}") from exc
+            raise HTTPException(409, {"code": "consent_already_closed", "message": "This consent has already ended, so it cannot be withdrawn."}) from exc
         await db.refresh(withdrawal)
 
         # Cascade: an unsent "renew your consent" reminder for a consent

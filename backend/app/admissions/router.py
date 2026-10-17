@@ -85,7 +85,25 @@ async def create_admission(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Ward not found")
     except service.BedNotAvailable:
         raise HTTPException(status.HTTP_409_CONFLICT, "Bed is already occupied")
-    return schemas.AdmissionOut.model_validate(admission)
+    except service.AdmissionRefused as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, {"code": exc.code, "message": exc.message}) from exc
+    described = await service.describe_admissions(db, [admission])
+    return schemas.AdmissionOut(**described[0])
+
+
+@router.get(
+    "/admittable-visits",
+    response_model=list[schemas.AdmittableVisitOut],
+    dependencies=[Depends(require_roles(*_IPD_ROLES))],
+)
+async def list_admittable_visits(
+    current_db_user: CurrentDbUser,
+    q: str = Query(..., min_length=2, max_length=80),
+    db: AsyncSession = Depends(get_db),
+) -> list[schemas.AdmittableVisitOut]:
+    """Open visits of patients not already admitted, matched by UHID/THID/visit number/name."""
+    rows = await service.find_admittable_visits(db, facility_id=current_db_user.facility_id, q=q)
+    return [schemas.AdmittableVisitOut(**row) for row in rows]
 
 
 @router.get(
@@ -103,7 +121,7 @@ async def list_admissions(
         facility_id=current_db_user.facility_id,
         admission_status=admission_status,
     )
-    return [schemas.AdmissionOut.model_validate(row) for row in rows]
+    return [schemas.AdmissionOut(**row) for row in await service.describe_admissions(db, rows)]
 
 
 @router.get(
@@ -276,7 +294,10 @@ async def discharge_admission(
             destination_facility_id=body.destination_facility_id,
             destination_facility_name=body.destination_facility_name,
             discharged_at=body.discharged_at,
+            acknowledge_incomplete_checklist=body.acknowledge_incomplete_checklist,
         )
+    except service.DischargeRefused as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, {"code": exc.code, "message": exc.message}) from exc
     except service.AdmissionNotActive as e:
         raise HTTPException(status.HTTP_409_CONFLICT, f"Admission is not active (status={e.current_status})")
     except service.TransferDestinationRequired:
@@ -284,8 +305,10 @@ async def discharge_admission(
                              "destination_facility_id or destination_facility_name is required "
                              "when discharge_type is 'transferred'")
     except service.DischargeBeforeAdmission:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
-                             "The discharge time is before the admission time") from None
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            {"code": "discharge_before_admission", "message": "The discharge time is before the admission time."},
+        ) from None
     return schemas.DischargeOut.model_validate(discharge)
 
 
@@ -372,6 +395,10 @@ async def update_checklist_task(
         )
     except service.ChecklistTaskNotFound:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Checklist task not found")
-    except service.ChecklistSkipReasonRequired:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "skipped_reason is required when skipping a checklist task")
+    except service.ChecklistSkipReasonRequired as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, {"code": "skip_reason_required", "message": str(exc)},
+        ) from exc
+    except service.ChecklistTaskBlocked as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, {"code": exc.code, "message": exc.message}) from exc
     return schemas.AdmissionChecklistTaskOut.model_validate(updated_task)

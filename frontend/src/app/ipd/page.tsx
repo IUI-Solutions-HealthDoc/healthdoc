@@ -26,13 +26,17 @@ import { DEFAULT_NOTIFICATION_PREVIEW } from "@/features/ipd/constants";
 import type { Ward } from "@/features/nurse/components/WardSelector/WardSelector.types";
 import { flattenBedGrids, type Bed } from "@/components/BedGrid/BedGrid.types";
 import { PageHeading } from "@/components/common/PageHeading";
+import { canRoleAccessPath } from "@/lib/auth/routes";
 import { useLocale } from "@/lib/i18n";
+import { useUserRole } from "@/providers/auth-provider";
 
 type Tab = "dashboard" | "to_admit" | "admit" | "transfer" | "discharge";
 
 export default function IpdPage() {
   const { t, localizeField } = useLocale();
+  const role = useUserRole();
   const [tab, setTab] = useState<Tab>("dashboard");
+  const [admitDispositionId, setAdmitDispositionId] = useState<string | null>(null);
 
   const [wards, setWards] = useState<Ward[]>([]);
   const [beds, setBeds] = useState<Bed[]>([]);
@@ -144,12 +148,16 @@ export default function IpdPage() {
                 {t("ipd.noWardsBody")}
               </p>
               <div className="mt-3">
-                <a
-                  href="/maintenance"
-                  className="inline-flex items-center rounded-lg bg-amber-700 px-4 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-amber-800 transition"
-                >
-                  Configure Hospital Wards in Maintenance →
-                </a>
+                {canRoleAccessPath(role, "/admin/beds") ? (
+                  <a
+                    href="/admin/beds"
+                    className="inline-flex items-center rounded-lg bg-amber-700 px-4 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-amber-800 transition"
+                  >
+                    {t("ipd.configureWards")}
+                  </a>
+                ) : (
+                  <p className="text-xs text-amber-900">{t("ipd.askAdminForWards")}</p>
+                )}
               </div>
             </div>
           </div>
@@ -161,17 +169,17 @@ export default function IpdPage() {
           {/* KPI Cards */}
           <div className="grid gap-4 sm:grid-cols-3">
             <div className="surface-card p-4">
-              <p className="text-sm text-muted-foreground">Active Admissions</p>
+              <p className="text-sm text-muted-foreground">{t("ipd.kpiActiveAdmissions")}</p>
               <p className="mt-1 text-2xl font-bold text-slate-900">{activeAdmissionsCount}</p>
             </div>
 
             <div className="surface-card p-4">
-              <p className="text-sm text-muted-foreground">Pending &ldquo;To Admit&rdquo; Orders</p>
+              <p className="text-sm text-muted-foreground">{t("ipd.kpiPendingToAdmit")}</p>
               <p className="mt-1 text-2xl font-bold text-blue-700">{pendingAdmissions.length}</p>
             </div>
 
             <div className="surface-card p-4">
-              <p className="text-sm text-muted-foreground">Discharges Today</p>
+              <p className="text-sm text-muted-foreground">{t("ipd.kpiDischargesToday")}</p>
               <p className="mt-1 text-2xl font-bold text-emerald-700">{dischargesTodayCount}</p>
             </div>
           </div>
@@ -181,10 +189,10 @@ export default function IpdPage() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <h2 className="text-lg font-bold text-slate-900">
-                  Live Ward Bed Board (HD-14)
+                  {t("ipd.bedBoardTitle")}
                 </h2>
                 <p className="text-xs text-muted-foreground">
-                  Click any occupied bed to view patient admission chart (HD-15) and safety checklist (HD-16).
+                  {t("ipd.bedBoardHint")}
                 </p>
               </div>
 
@@ -266,14 +274,14 @@ export default function IpdPage() {
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-xl font-bold text-slate-900">
-                &ldquo;To Admit&rdquo; Clinical Disposition Queue (HD-13)
+                {t("ipd.toAdmitTitle")}
               </h2>
               <p className="text-sm text-muted-foreground">
-                Patients ordered for inpatient admission by OPD and Emergency clinicians awaiting ward bed allocation.
+                {t("ipd.toAdmitSubtitle")}
               </p>
             </div>
             <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-bold text-blue-800">
-              {pendingAdmissions.length} Pending
+              {t("ipd.pendingCount", { count: pendingAdmissions.length })}
             </span>
           </div>
 
@@ -302,7 +310,8 @@ export default function IpdPage() {
                             {item.patient_name}
                           </h3>
                           <p className="text-xs text-slate-500">
-                            UHID: {item.patient_uhid} · {item.patient_sex || ""} · {formatAge(item.patient_age)}
+                            {item.patient_uhid} · {item.patient_sex || ""} · {formatAge(item.patient_age)}
+                            {item.visit_number ? ` · ${item.visit_number}` : ""}
                           </p>
                         </div>
                         <span
@@ -350,10 +359,13 @@ export default function IpdPage() {
                       </span>
                       <button
                         type="button"
-                        onClick={() => setTab("admit")}
+                        onClick={() => {
+                          setAdmitDispositionId(item.disposition_id);
+                          setTab("admit");
+                        }}
                         className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 transition"
                       >
-                        Admit to Bed →
+                        {t("ipd.admitToBed")}
                       </button>
                     </div>
                   </div>
@@ -366,12 +378,17 @@ export default function IpdPage() {
 
       {tab === "admit" && (
         <AdmissionForm
+          key={admitDispositionId ?? "manual"}
+          initialDispositionId={admitDispositionId}
           wards={wards}
           beds={beds}
           isSubmitting={isAdmitting}
           onSubmit={async (data) => {
             const ok = await submitAdmission(data);
-            if (ok) await loadData();
+            if (ok) {
+              setAdmitDispositionId(null);
+              await loadData();
+            }
             return ok;
           }}
         />
@@ -380,20 +397,24 @@ export default function IpdPage() {
       {(tab === "transfer" || tab === "discharge") && (
         <div className="space-y-4">
           <div>
-            <label className="mb-1 block text-sm font-semibold">
-              Select Admission
+            <label htmlFor="ipd-select-admission" className="mb-1 block text-sm font-semibold">
+              {t("ipd.selectAdmission")}
             </label>
+            {/* Listed by name, identifier, ward and bed. A UUID here invited
+                discharging the wrong patient (QA 16 Oct 2026). */}
             <select
+              id="ipd-select-admission"
               className="w-full rounded-md border px-3 py-2 text-sm"
               value={selectedAdmissionId}
               onChange={(e) => setSelectedAdmissionId(e.target.value)}
             >
-              <option value="">Select…</option>
+              <option value="">{admissions.length ? t("ipd.selectAdmissionPlaceholder") : t("ipd.noActiveAdmissions")}</option>
               {admissions.map((a) => {
                 const bed = beds.find((b) => b.bed_id === a.bed_id);
+                const ward = a.ward_name ? localizeField(a.ward_name, a.ward_name_hi ?? null) : "";
                 return (
                   <option key={a.id} value={a.id}>
-                    {a.patient_id} — Bed {bed?.bed_number ?? a.bed_id}
+                    {[a.patient_name, a.patient_identifier].filter(Boolean).join(" · ")} — {ward} {t("ipd.bedShort")} {a.bed_number ?? bed?.bed_number ?? "?"}
                   </option>
                 );
               })}
@@ -403,8 +424,7 @@ export default function IpdPage() {
           {selectedAdmission && tab === "transfer" && (
             <div className="space-y-3">
               <p className="text-sm text-muted-foreground">
-                In-hospital ward or bed move. To send the patient to another
-                facility, use Discharge with type Transferred to Another Facility.
+                {t("ipd.transferHint")}
               </p>
             <AddPatientMovementForm
               admissionId={selectedAdmission.id}
@@ -429,12 +449,12 @@ export default function IpdPage() {
               notificationPreview={DEFAULT_NOTIFICATION_PREVIEW}
               isSubmitting={isDischarging}
               onSubmit={async (data) => {
-                const ok = await submitDischarge(data);
-                if (ok) {
+                const outcome = await submitDischarge(data);
+                if (outcome.ok) {
                   setSelectedAdmissionId("");
                   await loadData();
                 }
-                return ok;
+                return outcome;
               }}
             />
           )}

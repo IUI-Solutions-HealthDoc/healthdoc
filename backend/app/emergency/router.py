@@ -26,10 +26,14 @@ from app.emergency.schemas import (
     PromotionRequest, UnmergeRequest,
 )
 from app.emergency.service import (
-    approve_promotion, create_triage, generate_thid, get_emergency_metrics,
+    TriageRefused, approve_promotion, create_triage, generate_thid, get_emergency_metrics,
     get_emergency_worklist, list_active_triages, re_triage, request_promotion,
     unmerge_promotion, update_triage,
 )
+
+
+def _refused(exc: TriageRefused) -> HTTPException:
+    return HTTPException(exc.status, {"code": exc.code, "message": exc.message})
 from app.patients.models import Patient
 from app.users.models import Facility
 
@@ -288,9 +292,12 @@ async def record_emergency_triage(
     current_db_user: CurrentDbUser,
     db: AsyncSession = Depends(get_db),
 ) -> EmergencyTriageOut:
-    triage = await create_triage(
-        db, payload, facility_id=current_db_user.facility_id, triaged_by=current_db_user.id
-    )
+    try:
+        triage = await create_triage(
+            db, payload, facility_id=current_db_user.facility_id, triaged_by=current_db_user.id
+        )
+    except TriageRefused as exc:
+        raise _refused(exc) from None
     # Fetch row with patient / user info
     board = await list_active_triages(db, current_db_user.facility_id, status_filter=triage.status)
     match = next((item for item in board if item["id"] == triage.id), None)
@@ -313,10 +320,11 @@ async def retriage_emergency_patient(
 ) -> EmergencyTriageOut:
     try:
         triage = await re_triage(
-            db, triage_id, payload, changed_by=current_db_user.id
+            db, triage_id, payload,
+            facility_id=current_db_user.facility_id, changed_by=current_db_user.id,
         )
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    except TriageRefused as exc:
+        raise _refused(exc) from None
 
     board = await list_active_triages(db, current_db_user.facility_id, status_filter=triage.status)
     match = next((item for item in board if item["id"] == triage.id), None)
@@ -339,10 +347,13 @@ async def update_emergency_triage(
 ) -> EmergencyTriageOut:
     try:
         triage = await update_triage(
-            db, triage_id, payload, updated_by=current_db_user.id
+            db, triage_id, payload,
+            facility_id=current_db_user.facility_id,
+            updated_by=current_db_user.id,
+            updated_by_is_doctor="doctor" in current_db_user.roles,
         )
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    except TriageRefused as exc:
+        raise _refused(exc) from None
 
     board = await list_active_triages(db, current_db_user.facility_id, status_filter=triage.status)
     match = next((item for item in board if item["id"] == triage.id), None)

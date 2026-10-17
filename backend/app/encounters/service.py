@@ -55,6 +55,14 @@ class StaleEncounterWrite(Exception):
         self.encounter = encounter
 
 
+class EncounterIncomplete(Exception):
+    """Closing a consultation that records nothing (QA 17 Oct 2026)."""
+
+    def __init__(self, code: str, message: str):
+        self.code = code
+        self.message = message
+
+
 class DoctorReviewNotFound(Exception):
     def __init__(self, review_id: UUID):
         self.review_id = review_id
@@ -146,6 +154,27 @@ async def create_encounter(
     from app.queue.service import start_service_for_visit
 
     await start_service_for_visit(db, payload.visit_id)
+    if visit.visit_type == "emergency":
+        # A doctor opening the consultation is the moment the patient was seen.
+        # The ED board otherwise read "Waiting for clinician" and "No doctor
+        # assigned" for a patient already under care (QA 16-17 Oct 2026).
+        from app.emergency.models import EmergencyTriage
+
+        triage = (
+            await db.execute(
+                select(EmergencyTriage).where(
+                    EmergencyTriage.visit_id == visit.id,
+                    EmergencyTriage.status.in_(("waiting", "in_treatment")),
+                ).with_for_update()
+            )
+        ).scalar_one_or_none()
+        if triage is not None:
+            if triage.clinician_seen_at is None:
+                triage.clinician_seen_at = datetime.now(UTC)
+                triage.status = "in_treatment"
+            if triage.assigned_doctor_id is None:
+                triage.assigned_doctor_id = payload.provider_user_id
+            triage.updated_by = actor_id
     return encounter
 
 
@@ -189,6 +218,13 @@ async def update_encounter(
     if payload.chief_complaint is not None:
         encounter.chief_complaint = payload.chief_complaint
     closing_now = payload.ended_at is not None and encounter.ended_at is None
+    if closing_now and not (encounter.chief_complaint or "").strip():
+        # A completed encounter with no chief complaint is indistinguishable
+        # from a recorded consultation everywhere it is read afterwards.
+        raise EncounterIncomplete(
+            "chief_complaint_required",
+            "Enter the chief complaint before completing the consultation.",
+        )
     if payload.ended_at is not None:
         encounter.ended_at = payload.ended_at
     if payload.subjective is not None:

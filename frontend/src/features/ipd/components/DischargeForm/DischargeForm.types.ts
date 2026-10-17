@@ -1,3 +1,4 @@
+import type { DischargeOutcome } from "@/features/ipd/hooks/useAddDischarge";
 import type { AddDischargeSchema } from "./validation";
 
 export type NotificationStatus = "queued" | "sent" | "delivered" | "failed";
@@ -21,5 +22,5 @@ export interface DischargeFormProps {
 
   isSubmitting?: boolean;
 
-  onSubmit: (data: AddDischargeSchema) => Promise<boolean> | boolean;
+  onSubmit: (data: AddDischargeSchema) => Promise<DischargeOutcome>;
 }
