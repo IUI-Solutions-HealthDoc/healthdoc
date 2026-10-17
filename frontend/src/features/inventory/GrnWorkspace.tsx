@@ -88,7 +88,8 @@ export function GrnWorkspace() {
 
   useEffect(() => {
     const term = search.trim();
-    if (term.length < 2) {
+    // The focused line lists the catalogue; one character is too few to narrow.
+    if (term.length === 1 || activeLine === null) {
       setMatches([]);
       return;
     }
@@ -106,7 +107,7 @@ export function GrnWorkspace() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [search]);
+  }, [search, activeLine]);
 
   const updateLine = (index: number, patch: Partial<GrnItemDraft>) => {
     setLines((current) =>

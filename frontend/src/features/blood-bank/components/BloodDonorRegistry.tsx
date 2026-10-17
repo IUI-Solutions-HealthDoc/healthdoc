@@ -4,6 +4,7 @@ import { useState } from "react";
 import { AlertCircle, CheckCircle2, Heart, Plus, Search, UserCheck, UserX, X } from "lucide-react";
 import { registerBloodDonor } from "../api";
 import { useClinicalWrite } from "@/lib/useClinicalWrite";
+import { localToday } from "@/lib/dates";
 import { useLocale } from "@/lib/i18n";
 import { formatBloodGroup, type BloodDonor } from "../types";
 
@@ -65,6 +66,15 @@ export function BloodDonorRegistry({ donors, onRefresh }: BloodDonorRegistryProp
       setError(t("bloodBank.donor.errAgeRange"));
       return;
     }
+    const phone = contactPhone.replace(/[\s-]/g, "").replace(/^\+91/, "");
+    if (phone && !/^[6-9]\d{9}$/.test(phone)) {
+      setError(t("bloodBank.donor.errPhone"));
+      return;
+    }
+    if (lastDonation && lastDonation > localToday()) {
+      setError(t("bloodBank.donor.errFutureDonation"));
+      return;
+    }
 
     try {
       setIsSubmitting(true);
@@ -73,9 +83,11 @@ export function BloodDonorRegistry({ donors, onRefresh }: BloodDonorRegistryProp
         age_years: age,
         sex: gender,
         blood_group: bloodGroup + rhFactor,
-        mobile: contactPhone.trim() || null,
-        weight_kg: Number(weight),
-        hemoglobin_g_dl: Number(hemoglobin),
+        mobile: phone || null,
+        // Empty is "not measured", not 0: Number("") is 0, which the server
+        // refused as a weight below 30 kg.
+        weight_kg: weight.trim() ? Number(weight) : null,
+        hemoglobin_g_dl: hemoglobin.trim() ? Number(hemoglobin) : null,
         last_donation_date: lastDonation || null,
         remarks: ineligibilityReason.trim() || null,
       }, registerBloodDonor);
@@ -323,9 +335,11 @@ export function BloodDonorRegistry({ donors, onRefresh }: BloodDonorRegistryProp
                 </label>
                 <input
                   type="tel"
-                  placeholder="+91 98765 43210"
+                  inputMode="numeric"
+                  maxLength={14}
+                  placeholder="98765 43210"
                   value={contactPhone}
-                  onChange={(e) => setContactPhone(e.target.value)}
+                  onChange={(e) => setContactPhone(e.target.value.replace(/[^\d+\s-]/g, ""))}
                   className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                 />
               </div>
@@ -339,7 +353,7 @@ export function BloodDonorRegistry({ donors, onRefresh }: BloodDonorRegistryProp
                   <input aria-label={t("bloodBank.donor.hemoglobin")} type="number" min="5" max="25" step="0.1" required value={hemoglobin} onChange={(e) => setHemoglobin(e.target.value)} />
                 </label>
                 <label className="block text-xs">{t("bloodBank.donor.lastDonationHint")}
-                  <input type="date" value={lastDonation} onChange={(e) => setLastDonation(e.target.value)} />
+                  <input type="date" max={localToday()} value={lastDonation} onChange={(e) => setLastDonation(e.target.value)} />
                 </label>
                 <label className="block text-xs">{t("bloodBank.donor.screeningNotes")}
                   <input value={ineligibilityReason} onChange={(e) => setIneligibilityReason(e.target.value)} />

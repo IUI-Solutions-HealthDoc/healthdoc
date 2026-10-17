@@ -26,7 +26,7 @@ export interface BloodDonor {
 
 export interface BloodDonorCreate {
  full_name: string; age_years: number; sex: string; blood_group: string;
- mobile?: string | null; weight_kg: number; hemoglobin_g_dl: number;
+ mobile?: string | null; weight_kg: number | null; hemoglobin_g_dl: number | null;
  last_donation_date?: string | null; remarks?: string | null;
 }
 

@@ -46,11 +46,15 @@ def _key():
 
 async def test_a_pregnancy_is_followed_to_delivery_and_counted_without_names(db):
     mother, fid, nurse, _admin, _other = await _world(db)
+    # Relative to today: the plausibility checks compare the LMP with the visit
+    # and delivery dates, so fixed dates would age out of range.
+    lmp = datetime.now(UTC).date() - timedelta(days=230)
+    edd = lmp + timedelta(days=282)
     preg = await mch.register_pregnancy(
-        mch.PregnancyCreate(patient_id=mother, lmp_date=date(2026, 3, 1), edd=date(2026, 12, 6), gravida=2, para=1),
+        mch.PregnancyCreate(patient_id=mother, lmp_date=lmp, edd=edd, gravida=2, para=1),
         current_user=nurse, db=db, idempotency_key=_key(),
     )
-    assert (preg.status, preg.edd) == ("active", date(2026, 12, 6))  # stored as entered, not computed
+    assert (preg.status, preg.edd) == ("active", edd)  # stored as entered, not computed
     with pytest.raises(HTTPException) as again:
         await mch.register_pregnancy(mch.PregnancyCreate(patient_id=mother), current_user=nurse, db=db, idempotency_key=_key())
     assert again.value.detail["code"] == "pregnancy_already_active"
@@ -125,3 +129,88 @@ async def test_ending_a_pregnancy_needs_a_reason_and_frees_the_patient(db):
     second = await mch.register_pregnancy(mch.PregnancyCreate(patient_id=mother), current_user=nurse, db=db,
                                           idempotency_key=_key())
     assert second.status == "active"
+
+
+
+async def _patient(db, fid, created_by, *, sex="female", age=26):
+    pid = uuid.uuid4()
+    await db.execute(
+        sa.text("INSERT INTO patients (id, full_name, sex, identity_path, facility_id, created_by, age_years, uhid) "
+                "VALUES (:p, 'Another Patient', :s, 'demographics_only', :f, :u, :a, :h)"),
+        {"p": pid, "s": sex, "f": fid, "u": created_by, "a": age, "h": f"IN-BR-{uuid.uuid4().hex[:10]}"},
+    )
+    await db.flush()
+    return pid
+
+
+async def _refusal(call):
+    with pytest.raises(HTTPException) as exc:
+        await call
+    assert isinstance(exc.value.detail, dict), exc.value.detail
+    return exc.value.detail["code"]
+
+
+# QA 16 Oct 2026: each of these saved. A refused clinical write rolls the
+# session back, so each case sets up its own world.
+@pytest.mark.parametrize(
+    "sex,age,kwargs,code",
+    [
+        ("female", 4, {"lmp": 40}, "pregnancy_age"),
+        ("male", 30, {"lmp": 40}, "pregnancy_sex"),
+        ("female", 26, {"lmp": 46, "edd": -85}, "edd_inconsistent"),
+        ("female", 26, {"gravida": 1, "para": 3}, "para_exceeds_gravida"),
+    ],
+)
+async def test_an_impossible_pregnancy_is_refused(db, sex, age, kwargs, code):
+    _mother, fid, nurse, _admin, _other = await _world(db)
+    patient = await _patient(db, fid, nurse.id, sex=sex, age=age)
+    today = datetime.now(UTC).date()
+    lmp = today - timedelta(days=kwargs["lmp"]) if "lmp" in kwargs else None
+    edd = lmp + timedelta(days=kwargs["edd"]) if "edd" in kwargs else None
+    payload = mch.PregnancyCreate(
+        patient_id=patient, lmp_date=lmp, edd=edd, gravida=kwargs.get("gravida"), para=kwargs.get("para"),
+    )
+    assert await _refusal(mch.register_pregnancy(payload, current_user=nurse, db=db, idempotency_key=_key())) == code
+
+
+@pytest.mark.parametrize(
+    "visit,code",
+    [
+        ({"gestation_weeks": 40}, "gestation_inconsistent"),
+        ({"bp_systolic": 60, "bp_diastolic": 120}, "bp_inverted"),
+        ("delivery", "delivery_too_early"),
+    ],
+)
+async def test_an_impossible_visit_or_delivery_is_refused(db, visit, code):
+    mother, _fid, nurse, _admin, _other = await _world(db)
+    today = datetime.now(UTC).date()
+    preg = await mch.register_pregnancy(
+        mch.PregnancyCreate(patient_id=mother, lmp_date=today - timedelta(days=46), gravida=1, para=0),
+        current_user=nurse, db=db, idempotency_key=_key(),
+    )
+    if visit == "delivery":
+        call = mch.record_delivery(
+            preg.id,
+            mch.DeliveryCreate(delivered_at=datetime.now(UTC) - timedelta(minutes=5), mode="normal",
+                               newborns=[mch.NewbornIn(outcome="live_birth", sex="male", birth_weight_g=2900)]),
+            current_user=nurse, db=db, idempotency_key=_key(),
+        )
+    else:
+        call = mch.record_anc_visit(
+            preg.id, mch.AncVisitCreate(visit_date=today, **visit), current_user=nurse, db=db, idempotency_key=_key(),
+        )
+    assert await _refusal(call) == code
+
+
+async def test_a_consistent_early_visit_is_recorded(db):
+    mother, _fid, nurse, _admin, _other = await _world(db)
+    today = datetime.now(UTC).date()
+    preg = await mch.register_pregnancy(
+        mch.PregnancyCreate(patient_id=mother, lmp_date=today - timedelta(days=46), gravida=1, para=0),
+        current_user=nurse, db=db, idempotency_key=_key(),
+    )
+    preg = await mch.record_anc_visit(
+        preg.id, mch.AncVisitCreate(visit_date=today, gestation_weeks=7, bp_systolic=118, bp_diastolic=76),
+        current_user=nurse, db=db, idempotency_key=_key(),
+    )
+    assert len(preg.anc_visits) == 1

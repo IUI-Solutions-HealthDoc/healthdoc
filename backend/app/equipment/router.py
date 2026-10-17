@@ -68,6 +68,10 @@ class EquipmentOut(BaseModel):
     status: str
     status_since: datetime
     status_reason: str | None
+    # The latest service record for this machine, so the card says when it was
+    # last serviced (QA 17 Oct 2026: "equipment block is not updated").
+    last_service_at: datetime | None = None
+    last_service_type: str | None = None
 
 
 class StatusEventOut(BaseModel):
@@ -92,7 +96,36 @@ async def list_equipment(
     if status:
         stmt = stmt.where(Equipment.status == status)
     rows = (await db.execute(stmt.order_by(Equipment.status != "down", Equipment.name))).scalars().all()
-    return [EquipmentOut.model_validate(row) for row in rows]
+    return await _with_last_service(db, current_db_user.facility_id, rows)
+
+
+async def _with_last_service(db: AsyncSession, facility_id: uuid.UUID, rows) -> list[EquipmentOut]:
+    from sqlalchemy import func
+
+    from app.departments.models import Department
+    from app.maintenance.models import MachineMaintenanceLog
+
+    latest = {
+        machine: (performed_at, kind)
+        for machine, performed_at, kind in (
+            await db.execute(
+                select(MachineMaintenanceLog.machine_id, MachineMaintenanceLog.performed_at, MachineMaintenanceLog.maintenance_type)
+                .join(Department, Department.id == MachineMaintenanceLog.department_id)
+                .where(Department.facility_id == facility_id)
+                .order_by(MachineMaintenanceLog.performed_at.asc())
+            )
+        ).all()
+    }
+    out = []
+    for row in rows:
+        key = (row.asset_tag or row.name).strip().upper()
+        found = latest.get(key) or latest.get(row.name.strip().upper())
+        out.append(
+            EquipmentOut.model_validate(row).model_copy(
+                update={"last_service_at": found[0] if found else None, "last_service_type": found[1] if found else None}
+            )
+        )
+    return out
 
 
 @router.post("", status_code=201, response_model=EquipmentOut, dependencies=[Depends(require_roles("admin"))])

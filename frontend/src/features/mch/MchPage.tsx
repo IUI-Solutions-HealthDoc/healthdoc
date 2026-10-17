@@ -14,6 +14,9 @@
 import { useCallback, useState } from "react";
 
 import { ApiError, api, formatDateTime, newIdempotencyKey } from "@/lib/api";
+import { formatDate } from "@/lib/dates";
+import { fieldsFromError } from "@/lib/field-errors";
+import { formatAgeSexShort } from "@/lib/format-age";
 import { useLocale } from "@/lib/i18n";
 
 import {
@@ -26,8 +29,26 @@ import {
   type Pregnancy,
 } from "./api";
 
-type Found = { id: string; uhid: string; full_name: string };
+type Found = { id: string; uhid: string; full_name: string; age_years?: number | null; sex?: string | null };
 const input = "w-full rounded-md border border-border px-2 py-1.5 text-sm";
+
+/** The fields each maternal refusal concerns, so the form can mark them. */
+const FIELD_CODES: Record<string, string[]> = {
+  edd_inconsistent: ["edd", "lmp_date"],
+  para_exceeds_gravida: ["para", "gravida"],
+  lmp_in_future: ["lmp_date"],
+  lmp_too_old: ["lmp_date"],
+  bp_inverted: ["bp_systolic", "bp_diastolic"],
+  bp_incomplete: ["bp_systolic", "bp_diastolic"],
+  gestation_inconsistent: ["gestation_weeks"],
+  visit_before_lmp: ["visit_date"],
+  visit_in_future: ["visit_date"],
+  delivery_in_future: ["delivered_at"],
+  delivery_before_lmp: ["delivered_at"],
+  delivery_too_early: ["delivered_at"],
+};
+
+const bad = (fields: Set<string>, name: string) => (fields.has(name) ? true : undefined);
 
 function num(value: string): number | null {
   const trimmed = value.trim();
@@ -104,7 +125,10 @@ export function MchPage() {
       {patient && pregnancies ? (
         <div className="space-y-4">
           <p className="text-sm">
-            <span className="font-medium">{patient.full_name}</span> <span className="text-muted-foreground">{patient.uhid}</span>
+            <span className="font-medium">{patient.full_name}</span>{" "}
+            <span className="text-muted-foreground">
+              {patient.uhid} · {formatAgeSexShort(patient.age_years ?? null, patient.sex ?? "unknown")}
+            </span>
           </p>
           {active ? (
             <ActivePregnancy pregnancy={active} onChanged={() => void load(patient)} />
@@ -126,11 +150,13 @@ function RegisterPregnancy({ patientId, onDone }: { patientId: string; onDone: (
   const [key, setKey] = useState(newIdempotencyKey);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [badFields, setBadFields] = useState<Set<string>>(new Set());
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setBusy(true);
     setError(null);
+    setBadFields(new Set());
     try {
       await registerPregnancy({
         patient_id: patientId, lmp_date: form.lmp_date || null, edd: form.edd || null,
@@ -140,6 +166,7 @@ function RegisterPregnancy({ patientId, onDone }: { patientId: string; onDone: (
       onDone();
     } catch (reason) {
       setError(message(reason, t("mch.errSave")));
+      setBadFields(fieldsFromError(reason, FIELD_CODES));
     } finally {
       setBusy(false);
     }
@@ -148,10 +175,10 @@ function RegisterPregnancy({ patientId, onDone }: { patientId: string; onDone: (
   return (
     <form onSubmit={submit} noValidate className="grid gap-3 rounded border border-border p-4 md:grid-cols-5">
       <h2 className="text-sm font-semibold md:col-span-5">{t("mch.register")}</h2>
-      <label className="text-xs">{t("mch.lmp")}<input type="date" className={input} value={form.lmp_date} onChange={(e) => setForm((f) => ({ ...f, lmp_date: e.target.value }))} /></label>
-      <label className="text-xs">{t("mch.edd")}<input type="date" className={input} value={form.edd} onChange={(e) => setForm((f) => ({ ...f, edd: e.target.value }))} /></label>
-      <label className="text-xs">{t("mch.gravida")}<input inputMode="numeric" className={input} value={form.gravida} onChange={(e) => setForm((f) => ({ ...f, gravida: e.target.value }))} /></label>
-      <label className="text-xs">{t("mch.para")}<input inputMode="numeric" className={input} value={form.para} onChange={(e) => setForm((f) => ({ ...f, para: e.target.value }))} /></label>
+      <label className="text-xs">{t("mch.lmp")}<input type="date" aria-invalid={bad(badFields, "lmp_date")} className={input} value={form.lmp_date} onChange={(e) => setForm((f) => ({ ...f, lmp_date: e.target.value }))} /></label>
+      <label className="text-xs">{t("mch.edd")}<input type="date" aria-invalid={bad(badFields, "edd")} className={input} value={form.edd} onChange={(e) => setForm((f) => ({ ...f, edd: e.target.value }))} /></label>
+      <label className="text-xs">{t("mch.gravida")}<input inputMode="numeric" aria-invalid={bad(badFields, "gravida")} className={input} value={form.gravida} onChange={(e) => setForm((f) => ({ ...f, gravida: e.target.value }))} /></label>
+      <label className="text-xs">{t("mch.para")}<input inputMode="numeric" aria-invalid={bad(badFields, "para")} className={input} value={form.para} onChange={(e) => setForm((f) => ({ ...f, para: e.target.value }))} /></label>
       <label className="text-xs">{t("mch.rchId")}<input className={input} maxLength={30} value={form.rch_id} onChange={(e) => setForm((f) => ({ ...f, rch_id: e.target.value }))} /></label>
       <p className="text-xs text-muted-foreground md:col-span-4">{t("mch.eddNote")}</p>
       <button type="submit" disabled={busy} className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50">{t("mch.registerButton")}</button>
@@ -178,7 +205,7 @@ function VisitTable({ pregnancy }: { pregnancy: Pregnancy }) {
         <tbody>
           {pregnancy.anc_visits.map((v) => (
             <tr key={v.id} className="border-t border-border">
-              <td className="py-1 pr-3">{v.visit_date}</td><td className="py-1 pr-3">{v.gestation_weeks ?? "—"}</td>
+              <td className="py-1 pr-3 whitespace-nowrap">{formatDate(v.visit_date)}</td><td className="py-1 pr-3">{v.gestation_weeks ?? "—"}</td>
               <td className="py-1 pr-3">{v.weight_kg ?? "—"}</td>
               <td className="py-1 pr-3">{v.bp_systolic !== null ? `${v.bp_systolic}/${v.bp_diastolic}` : "—"}</td>
               <td className="py-1 pr-3">{v.hemoglobin_g_dl ?? "—"}</td><td className="py-1 pr-3">{v.fundal_height_cm ?? "—"}</td>
@@ -195,6 +222,18 @@ function VisitTable({ pregnancy }: { pregnancy: Pregnancy }) {
 
 const URINE = ["", "nil", "trace", "+", "++", "+++"];
 
+type Section = "visit" | "risk" | "delivery" | "end";
+
+function summaryLine(pregnancy: Pregnancy, t: (key: "mch.lmp" | "mch.edd") => string): string {
+  return [
+    pregnancy.lmp_date && `${t("mch.lmp")} ${formatDate(pregnancy.lmp_date)}`,
+    pregnancy.edd && `${t("mch.edd")} ${formatDate(pregnancy.edd)}`,
+    pregnancy.gravida !== null && `G${pregnancy.gravida}`,
+    pregnancy.para !== null && `P${pregnancy.para}`,
+    pregnancy.rch_id && `RCH ${pregnancy.rch_id}`,
+  ].filter(Boolean).join(" · ");
+}
+
 function ActivePregnancy({ pregnancy, onChanged }: { pregnancy: Pregnancy; onChanged: () => void }) {
   const { t } = useLocale();
   const empty = { visit_date: "", gestation_weeks: "", weight_kg: "", bp_systolic: "", bp_diastolic: "", hemoglobin_g_dl: "",
@@ -206,26 +245,33 @@ function ActivePregnancy({ pregnancy, onChanged }: { pregnancy: Pregnancy; onCha
   const [babies, setBabies] = useState([{ outcome: "live_birth", sex: "female", birth_weight_g: "" }]);
   const [key, setKey] = useState(newIdempotencyKey);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // The error is shown beside the form that failed. One message at the foot
+  // of the section sat below "End pregnancy", out of sight of the ANC form,
+  // so a refused visit looked like nothing happened (QA 16 Oct 2026).
+  const [failure, setFailure] = useState<{ at: Section; text: string; fields: Set<string> } | null>(null);
 
-  async function act(action: () => Promise<unknown>, after?: () => void) {
+  async function act(at: Section, action: () => Promise<unknown>, after?: () => void) {
     setBusy(true);
-    setError(null);
+    setFailure(null);
     try {
       await action();
       setKey(newIdempotencyKey());
       after?.();
       onChanged();
     } catch (reason) {
-      setError(message(reason, t("mch.errSave")));
+      setFailure({ at, text: message(reason, t("mch.errSave")), fields: fieldsFromError(reason, FIELD_CODES) });
     } finally {
       setBusy(false);
     }
   }
+  const errorFor = (at: Section) =>
+    failure?.at === at ? <p className="text-sm text-danger md:col-span-6" role="alert">{failure.text}</p> : null;
+  const visitBad = failure?.at === "visit" ? failure.fields : new Set<string>();
+  const deliveryBad = failure?.at === "delivery" ? failure.fields : new Set<string>();
 
   const field = (name: keyof typeof empty, label: string, mode: "numeric" | "decimal" = "numeric") => (
     <label className="text-xs">{label}
-      <input inputMode={mode} className={input} value={visit[name]} onChange={(e) => setVisit((v) => ({ ...v, [name]: e.target.value }))} />
+      <input inputMode={mode} aria-invalid={bad(visitBad, name)} className={input} value={visit[name]} onChange={(e) => setVisit((v) => ({ ...v, [name]: e.target.value }))} />
     </label>
   );
 
@@ -237,17 +283,13 @@ function ActivePregnancy({ pregnancy, onChanged }: { pregnancy: Pregnancy; onCha
           <span className="rounded bg-red-100 px-2 py-0.5 text-xs font-medium text-red-800">{t("mch.highRisk")}: {pregnancy.high_risk_reason}</span>
         ) : null}
       </div>
-      <p className="text-xs text-muted-foreground">
-        {[pregnancy.lmp_date && `${t("mch.lmp")} ${pregnancy.lmp_date}`, pregnancy.edd && `${t("mch.edd")} ${pregnancy.edd}`,
-          pregnancy.gravida !== null && `G${pregnancy.gravida}`, pregnancy.para !== null && `P${pregnancy.para}`,
-          pregnancy.rch_id && `RCH ${pregnancy.rch_id}`].filter(Boolean).join(" · ")}
-      </p>
+      <p className="text-xs text-muted-foreground">{summaryLine(pregnancy, t)}</p>
       <VisitTable pregnancy={pregnancy} />
 
       <form noValidate className="grid gap-2 border-t border-border pt-3 md:grid-cols-6"
         onSubmit={(e) => {
           e.preventDefault();
-          void act(() => recordAncVisit(pregnancy.id, {
+          void act("visit", () => recordAncVisit(pregnancy.id, {
             visit_date: visit.visit_date, gestation_weeks: num(visit.gestation_weeks), weight_kg: dec(visit.weight_kg),
             bp_systolic: num(visit.bp_systolic), bp_diastolic: num(visit.bp_diastolic), hemoglobin_g_dl: dec(visit.hemoglobin_g_dl),
             fundal_height_cm: num(visit.fundal_height_cm), fetal_heart_rate: num(visit.fetal_heart_rate),
@@ -256,7 +298,7 @@ function ActivePregnancy({ pregnancy, onChanged }: { pregnancy: Pregnancy; onCha
           }, key), () => setVisit(empty));
         }}>
         <h3 className="text-xs font-semibold md:col-span-6">{t("mch.addVisit")}</h3>
-        <label className="text-xs">{t("mch.visitDate")}<input type="date" className={input} value={visit.visit_date} onChange={(e) => setVisit((v) => ({ ...v, visit_date: e.target.value }))} /></label>
+        <label className="text-xs">{t("mch.visitDate")}<input type="date" aria-invalid={bad(visitBad, "visit_date")} className={input} value={visit.visit_date} onChange={(e) => setVisit((v) => ({ ...v, visit_date: e.target.value }))} /></label>
         {field("gestation_weeks", t("mch.weeks"))}
         {field("weight_kg", t("mch.weight"), "decimal")}
         {field("bp_systolic", t("mch.bpSys"))}
@@ -277,19 +319,21 @@ function ActivePregnancy({ pregnancy, onChanged }: { pregnancy: Pregnancy; onCha
         {field("ifa_tablets", t("mch.ifa"))}
         <label className="text-xs md:col-span-5">{t("mch.notes")}<input className={input} maxLength={1000} value={visit.notes} onChange={(e) => setVisit((v) => ({ ...v, notes: e.target.value }))} /></label>
         <button type="submit" disabled={busy || !visit.visit_date} className="self-end rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50">{t("mch.saveVisit")}</button>
+        {errorFor("visit")}
       </form>
 
       <div className="flex flex-wrap items-end gap-2 border-t border-border pt-3">
         {pregnancy.high_risk ? (
           <button type="button" disabled={busy} className="rounded-md border border-border px-3 py-1.5 text-xs"
-            onClick={() => void act(() => flagRisk(pregnancy.id, { high_risk: false, reason: null }, key))}>{t("mch.clearRisk")}</button>
+            onClick={() => void act("risk", () => flagRisk(pregnancy.id, { high_risk: false, reason: null }, key))}>{t("mch.clearRisk")}</button>
         ) : (
           <>
             <label className="min-w-64 flex-1 text-xs">{t("mch.riskReason")}<input className={input} maxLength={500} value={riskReason} onChange={(e) => setRiskReason(e.target.value)} /></label>
             <button type="button" disabled={busy || !riskReason.trim()} className="rounded-md border border-red-300 px-3 py-1.5 text-xs font-medium text-red-700 disabled:opacity-50"
-              onClick={() => void act(() => flagRisk(pregnancy.id, { high_risk: true, reason: riskReason.trim() }, key), () => setRiskReason(""))}>{t("mch.flagRisk")}</button>
+              onClick={() => void act("risk", () => flagRisk(pregnancy.id, { high_risk: true, reason: riskReason.trim() }, key), () => setRiskReason(""))}>{t("mch.flagRisk")}</button>
           </>
         )}
+        {errorFor("risk")}
       </div>
 
       <form noValidate className="grid gap-2 border-t border-border pt-3 md:grid-cols-4"
@@ -297,13 +341,13 @@ function ActivePregnancy({ pregnancy, onChanged }: { pregnancy: Pregnancy; onCha
           e.preventDefault();
           const at = new Date(delivery.delivered_at);
           if (Number.isNaN(at.getTime())) return;
-          void act(() => recordDelivery(pregnancy.id, {
+          void act("delivery", () => recordDelivery(pregnancy.id, {
             delivered_at: at.toISOString(), mode: delivery.mode, notes: delivery.notes.trim() || null,
             newborns: babies.map((b) => ({ outcome: b.outcome, sex: b.sex, birth_weight_g: num(b.birth_weight_g) })),
           }, key));
         }}>
         <h3 className="text-xs font-semibold md:col-span-4">{t("mch.recordDelivery")}</h3>
-        <label className="text-xs">{t("mch.deliveredAt")}<input type="datetime-local" className={input} value={delivery.delivered_at} onChange={(e) => setDelivery((d) => ({ ...d, delivered_at: e.target.value }))} /></label>
+        <label className="text-xs">{t("mch.deliveredAt")}<input type="datetime-local" aria-invalid={bad(deliveryBad, "delivered_at")} className={input} value={delivery.delivered_at} onChange={(e) => setDelivery((d) => ({ ...d, delivered_at: e.target.value }))} /></label>
         <label className="text-xs">{t("mch.mode")}
           <select className={input} value={delivery.mode} onChange={(e) => setDelivery((d) => ({ ...d, mode: e.target.value }))}>
             <option value="normal">{t("mch.mode.normal")}</option><option value="assisted">{t("mch.mode.assisted")}</option><option value="caesarean">{t("mch.mode.caesarean")}</option>
@@ -323,23 +367,28 @@ function ActivePregnancy({ pregnancy, onChanged }: { pregnancy: Pregnancy; onCha
                 <option value="other">{t("mch.sex.other")}</option><option value="unknown">{t("mch.sex.unknown")}</option>
               </select>
             </label>
-            <label className="text-xs">{t("mch.birthWeight")}<input inputMode="numeric" className={input} value={baby.birth_weight_g} onChange={(e) => setBabies((all) => all.map((b, i) => (i === index ? { ...b, birth_weight_g: e.target.value } : b)))} /></label>
+            <label className="text-xs">{t("mch.birthWeight")}<input inputMode="numeric" aria-invalid={bad(deliveryBad, "birth_weight_g")} className={input} value={baby.birth_weight_g} onChange={(e) => setBabies((all) => all.map((b, i) => (i === index ? { ...b, birth_weight_g: e.target.value } : b)))} /></label>
             {babies.length > 1 ? (
               <button type="button" className="self-end text-xs underline" onClick={() => setBabies((all) => all.filter((_, i) => i !== index))}>{t("mch.removeBaby")}</button>
             ) : <span />}
           </div>
         ))}
-        <button type="button" className="text-left text-xs underline md:col-span-3" disabled={babies.length >= 6}
-          onClick={() => setBabies((all) => [...all, { outcome: "live_birth", sex: "female", birth_weight_g: "" }])}>{t("mch.addBaby")}</button>
+        {/* The link alone adds a newborn: it used to span three grid columns,
+            so a click in the empty space beside it added a baby. */}
+        <div className="md:col-span-3">
+          <button type="button" className="text-xs underline" disabled={babies.length >= 6}
+            onClick={() => setBabies((all) => [...all, { outcome: "live_birth", sex: "female", birth_weight_g: "" }])}>{t("mch.addBaby")}</button>
+        </div>
         <button type="submit" disabled={busy || !delivery.delivered_at} className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50">{t("mch.saveDelivery")}</button>
+        {errorFor("delivery")}
       </form>
 
       <div className="flex flex-wrap items-end gap-2 border-t border-border pt-3">
         <label className="min-w-64 flex-1 text-xs">{t("mch.endReason")}<input className={input} maxLength={500} value={endReason} onChange={(e) => setEndReason(e.target.value)} /></label>
         <button type="button" disabled={busy || !endReason.trim()} className="rounded-md border border-border px-3 py-1.5 text-xs disabled:opacity-50"
-          onClick={() => void act(() => endPregnancy(pregnancy.id, endReason.trim(), key))}>{t("mch.endPregnancy")}</button>
+          onClick={() => void act("end", () => endPregnancy(pregnancy.id, endReason.trim(), key))}>{t("mch.endPregnancy")}</button>
+        {errorFor("end")}
       </div>
-      {error ? <p className="text-sm text-danger" role="alert">{error}</p> : null}
     </section>
   );
 }
@@ -353,8 +402,12 @@ function ClosedPregnancy({ pregnancy }: { pregnancy: Pregnancy }) {
           ? t("mch.deliveredOn", { when: formatDateTime(pregnancy.delivery.delivered_at), mode: pregnancy.delivery.mode })
           : t("mch.endedWith", { reason: pregnancy.end_reason ?? "" })}
       </p>
+      {/* LMP, EDD and G/P disappeared once the pregnancy was delivered. */}
+      <p className="text-xs text-muted-foreground">{summaryLine(pregnancy, t)}</p>
       {pregnancy.delivery?.newborns.map((b) => (
-        <p key={b.id} className="text-xs text-muted-foreground">{b.outcome.replace("_", " ")} · {b.sex}{b.birth_weight_g ? ` · ${b.birth_weight_g} g` : ""}</p>
+        <p key={b.id} className="text-xs text-muted-foreground">
+          {b.outcome === "live_birth" ? t("mch.liveBirth") : t("mch.stillBirth")} · {b.sex}{b.birth_weight_g ? ` · ${b.birth_weight_g} g` : ""}
+        </p>
       ))}
       <VisitTable pregnancy={pregnancy} />
     </section>

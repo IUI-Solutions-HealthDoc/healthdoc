@@ -563,6 +563,18 @@ async def seed(users: list[tuple[str, str]]) -> None:
             ("Amoxicillin Syrup", "Amoxicillin", "125mg/5ml", "syrup", "medicine", False, "J01CA04", 20),
             ("Morphine 10mg/ml", "Morphine", "10mg/ml", "injection", "medicine", True, "N02AA01", 10),
             ("Nitrile Gloves (M)", None, None, "consumable", "consumable", False, None, 500),
+            # More common essentials, so a search returns a list worth choosing
+            # from (QA 17 Oct 2026). Codes are ATC; development data only.
+            ("Ibuprofen 400mg", "Ibuprofen", "400mg", "tablet", "medicine", False, "M01AE01", 100),
+            ("Metformin 500mg", "Metformin", "500mg", "tablet", "medicine", False, "A10BA02", 100),
+            ("Amlodipine 5mg", "Amlodipine", "5mg", "tablet", "medicine", False, "C08CA01", 100),
+            ("Cetirizine 10mg", "Cetirizine", "10mg", "tablet", "medicine", False, "R06AE07", 50),
+            ("Pantoprazole 40mg", "Pantoprazole", "40mg", "tablet", "medicine", False, "A02BC02", 50),
+            ("Azithromycin 500mg", "Azithromycin", "500mg", "tablet", "medicine", False, "J01FA10", 30),
+            ("ORS Solution", "Oral rehydration salts", "200ml", "fluid", "medicine", False, "A07CA", 100),
+            ("Iron and Folic Acid", "Ferrous sulphate + folic acid", "100mg/0.5mg", "tablet", "medicine", False, "B03AD03", 200),
+            ("Ceftriaxone 1g", "Ceftriaxone", "1g", "injection", "medicine", False, "J01DD04", 30),
+            ("Normal Saline 500ml", "Sodium chloride 0.9%", "500ml", "fluid", "medicine", False, "B05BB01", 50),
         ]
         for name, generic, strength, form, item_type, controlled, code, reorder in catalogue:
             await session.execute(

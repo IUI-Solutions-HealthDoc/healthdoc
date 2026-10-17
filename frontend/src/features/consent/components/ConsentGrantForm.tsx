@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { ApiError, newIdempotencyKey } from "@/lib/api";
+import { ApiError, api, newIdempotencyKey } from "@/lib/api";
 import { useLocale } from "@/lib/i18n";
 import { createConsentRecord, listConsentPurposes } from "../api";
 import { consentChannelFormLabel } from "../i18nLabels";
@@ -57,6 +57,30 @@ export function ConsentGrantForm({ patientId, onCreated }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<ConsentRecord | null>(null);
   const [idempotencyKey, setIdempotencyKey] = useState(() => newIdempotencyKey());
+  // A minor's consent is a guardian's decision. "Patient" was offered and
+  // saved for a 4-year-old (QA 16 Oct 2026); the server now refuses it, and
+  // the form starts on Guardian with the guardian from registration.
+  const [minorAge, setMinorAge] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api<{ age_years?: number | null; guardian_name?: string | null; guardian_relationship?: string | null }>(
+      `/patients/${patientId}`,
+    )
+      .then((p) => {
+        if (cancelled || p.age_years === null || p.age_years === undefined || p.age_years >= 18) return;
+        setMinorAge(p.age_years);
+        setGrantedBy("guardian");
+        if (p.guardian_name) setRepresentativeName(p.guardian_name);
+        if (p.guardian_relationship) setRelationship(p.guardian_relationship);
+      })
+      .catch(() => {
+        // The server still refuses a minor's own consent; the form only loses the head start.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [patientId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -209,9 +233,16 @@ export function ConsentGrantForm({ patientId, onCreated }: Props) {
               className="w-full rounded-md border border-border bg-background px-3 py-2"
             >
               {GRANTERS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
+                <option key={option.value} value={option.value} disabled={option.value === "patient" && minorAge !== null}>
+                  {option.label}
+                </option>
               ))}
             </select>
+            {minorAge !== null && (
+              <span className="block text-xs text-muted-foreground">
+                {t("consent.minorNeedsGuardian", { age: minorAge })}
+              </span>
+            )}
           </label>
 
           <label className="space-y-1 text-sm">

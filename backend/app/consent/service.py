@@ -47,6 +47,15 @@ from app.patients.models import Patient
 
 log = logging.getLogger(__name__)
 
+
+def _age_years(patient: Patient | None) -> int | None:
+    if patient is None:
+        return None
+    if patient.dob is not None:
+        today = datetime.now(UTC).date()
+        return today.year - patient.dob.year - ((today.month, today.day) < (patient.dob.month, patient.dob.day))
+    return patient.age_years
+
 # requested -> {granted, denied} only. granted has no entry here at all
 # — see module docstring for why that transition can only happen
 # through withdraw_consent(), never this map.
@@ -252,6 +261,26 @@ async def create_consent_record(
 ) -> ConsentRecord:
     await require_patient_scope(db, patient_id, facility_id)
     await require_visit_scope(db, visit_id, patient_id, facility_id)
+
+    # A 4-year-old was recorded as having given consent themself (QA 16 Oct
+    # 2026). Registration already requires a guardian for a minor; consent now
+    # does too. ABDM consent-manager grants carry their own decision-maker.
+    if channel != ConsentChannel.ABDM_CONSENT_MANAGER.value:
+        patient = await db.get(Patient, patient_id)
+        age = _age_years(patient)
+        if age is not None and age < 18 and granted_by_type == "patient":
+            raise HTTPException(
+                422,
+                detail={
+                    "code": "minor_needs_guardian",
+                    "message": f"This patient is {age} years old. A parent or guardian gives consent for a patient under 18.",
+                },
+            )
+    if granted_by_type == "guardian" and not ((guardian_name or "").strip() and (guardian_relationship or "").strip()):
+        raise HTTPException(
+            422,
+            detail={"code": "guardian_details_required", "message": "Enter the guardian's name and relationship to the patient."},
+        )
 
     purpose = await db.get(ConsentPurpose, purpose_id)
     if purpose is None:
