@@ -89,26 +89,7 @@ export default function AdmissionForm({
   const [selectedPendingId, setSelectedPendingId] = useState<string | null>(null);
   const [_loadingPending, setLoadingPending] = useState<boolean>(false);
 
-  useEffect(() => {
-    let active = true;
-    setLoadingPending(true);
-    getPendingAdmissions()
-      .then((data) => {
-        if (!active) return;
-        setPendingList(data || []);
-        // "Admit to Bed" on the To Admit queue opens this form for that patient.
-        const wanted = initialDispositionId ? (data || []).find((d) => d.disposition_id === initialDispositionId) : null;
-        if (wanted) handleSelectPending(wanted);
-      })
-      .catch((err) => console.error("Failed to fetch pending admissions:", err))
-      .finally(() => {
-        if (active) setLoadingPending(false);
-      });
-    return () => {
-      active = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once per mount and requested disposition
-  }, [initialDispositionId]);
+
 
   const wardId = useWatch({ control, name: "ward_id" });
   const bedId = useWatch({ control, name: "bed_id" });
@@ -141,6 +122,27 @@ export default function AdmissionForm({
       setValue("reason", item.reason);
     }
   };
+
+  useEffect(() => {
+    let active = true;
+    setLoadingPending(true);
+    getPendingAdmissions()
+      .then((data) => {
+        if (!active) return;
+        setPendingList(data || []);
+        // "Admit to Bed" on the To Admit queue opens this form for that patient.
+        const wanted = initialDispositionId ? (data || []).find((d) => d.disposition_id === initialDispositionId) : null;
+        if (wanted) handleSelectPending(wanted);
+      })
+      .catch((err) => console.error("Failed to fetch pending admissions:", err))
+      .finally(() => {
+        if (active) setLoadingPending(false);
+      });
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once per mount and requested disposition
+  }, [initialDispositionId]);
 
   const submitHandler = async (data: AddAdmissionSchema) => {
     const success = await onSubmit(data);

@@ -31,9 +31,10 @@ that write uses the request's normal session while the CSV body itself
 does not.
 """
 import uuid
+from typing import Annotated
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -77,6 +78,7 @@ async def list_audit_logs(
     date_to: datetime | None = None,
     page: int = 1,
     page_size: int = 20,
+    action: Annotated[str | None, Query(max_length=50)] = None,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     items, total = await service.list_audit_logs(
@@ -89,6 +91,7 @@ async def list_audit_logs(
         date_to=date_to,
         page=page,
         page_size=page_size,
+        action=action,
     )
     # Local imports: app.audit sits under every module, so it must not import
     # their models at load time (see app/audit/deps.py).

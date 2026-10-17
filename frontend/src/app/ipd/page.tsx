@@ -70,9 +70,9 @@ export default function IpdPage() {
       setPendingAdmissions(pendingRes || []);
     } catch (error) {
       console.error("Unable to load IPD data", error);
-      setLoadError("Unable to load live IPD data. Check the API connection and retry.");
+      setLoadError(t("ipd.errLoadLive"));
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void loadData();
@@ -200,19 +200,19 @@ export default function IpdPage() {
               <div className="flex flex-wrap items-center gap-3 text-xs">
                 <div className="flex items-center gap-1.5">
                   <span className="h-3 w-3 rounded-full bg-emerald-500 ring-2 ring-emerald-200" />
-                  <span className="font-medium text-slate-700">Vacant ({bedStatusCounts["vacant"] ?? 0})</span>
+                  <span className="font-medium text-slate-700">{t("ipd.legendVacant", { count: bedStatusCounts["vacant"] ?? 0 })}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="h-3 w-3 rounded-full bg-indigo-600 ring-2 ring-indigo-200" />
-                  <span className="font-medium text-slate-700">Occupied ({bedStatusCounts["occupied"] ?? 0})</span>
+                  <span className="font-medium text-slate-700">{t("ipd.legendOccupied", { count: bedStatusCounts["occupied"] ?? 0 })}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="h-3 w-3 rounded-full bg-amber-500 ring-2 ring-amber-200" />
-                  <span className="font-medium text-slate-700">Maintenance ({bedStatusCounts["maintenance"] ?? 0})</span>
+                  <span className="font-medium text-slate-700">{t("ipd.legendMaintenance", { count: bedStatusCounts["maintenance"] ?? 0 })}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="h-3 w-3 rounded-full bg-purple-500 ring-2 ring-purple-200" />
-                  <span className="font-medium text-slate-700">Reserved ({bedStatusCounts["reserved"] ?? 0})</span>
+                  <span className="font-medium text-slate-700">{t("ipd.legendReserved", { count: bedStatusCounts["reserved"] ?? 0 })}</span>
                 </div>
               </div>
             </div>
@@ -229,7 +229,7 @@ export default function IpdPage() {
                       : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                   }`}
                 >
-                  All Wards ({beds.length} beds)
+                  {t("ipd.allWards", { count: beds.length })}
                 </button>
                 {wards.map((ward) => {
                   const wardBeds = beds.filter((b) => b.ward_id === ward.id);
@@ -342,12 +342,12 @@ export default function IpdPage() {
                         )}
                         {item.doctor_name && (
                           <p className="text-slate-700">
-                            <strong className="text-slate-900">Doctor:</strong> {item.doctor_name}
+                            <strong className="text-slate-900">{t("ipd.doctorLabel")}:</strong> {item.doctor_name}
                           </p>
                         )}
                         {item.reason && (
                           <div className="mt-2 rounded bg-slate-50 p-2 text-slate-700 border border-slate-200/60">
-                            <strong className="text-slate-900">Indication:</strong> {item.reason}
+                            <strong className="text-slate-900">{t("ipd.indication")}:</strong> {item.reason}
                           </div>
                         )}
                       </div>

@@ -291,3 +291,14 @@ async def test_the_trail_names_the_user_instead_of_a_uuid(engine: AsyncEngine, s
         caller = DbUser(id=user_id, facility_id=facility_id, keycloak_sub="x", username=login, roles=["auditor"])
         page = await router_module.list_audit_logs(user=caller, db=db)
     assert {i["user_display"] for i in page["items"]} == {f"{name} ({login})"}
+
+
+async def test_list_filters_by_action_beyond_the_newest_page(engine: AsyncEngine, session_factory, facility_id):
+    # QA 17 Oct 2026: Login/Logout filtered only the newest page the viewer
+    # had loaded, so older logins never appeared.
+    await _insert_audit_row(engine, facility_id, action="login", resource_type="sessions")
+    for _ in range(3):
+        await _insert_audit_row(engine, facility_id, action="create")
+    async with session_factory() as db:
+        items, total = await service.list_audit_logs(db, facility_id=facility_id, action="login", page_size=2)
+    assert total == 1 and [row.action for row in items] == ["login"]

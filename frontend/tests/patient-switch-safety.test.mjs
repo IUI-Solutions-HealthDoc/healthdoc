@@ -50,7 +50,7 @@ function harness(kind) {
       jsx: (type, props, key) => ({ type, props, key }),
       jsxs: (type, props, key) => ({ type, props, key }),
     },
-    "@/lib/api": { ApiError: class extends Error {}, newIdempotencyKey: () => "synthetic-key" },
+    "@/lib/api": { ApiError: class extends Error {}, newIdempotencyKey: () => "synthetic-key", formatDateTime: (iso) => iso },
   };
   let component;
   if (kind === "abha") {

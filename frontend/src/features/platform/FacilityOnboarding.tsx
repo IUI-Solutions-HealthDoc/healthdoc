@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 
+import { useLocale } from "@/lib/i18n";
+
 import { ApiError, getUserFacingError } from "@/lib/api";
 
 import {
@@ -48,6 +50,7 @@ export function FacilityOnboarding({ facilities, onChanged }: {
   facilities: PlatformFacility[];
   onChanged: () => void;
 }) {
+  const { t } = useLocale();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -93,31 +96,29 @@ export function FacilityOnboarding({ facilities, onChanged }: {
   const mark = (tried: boolean, bad: boolean) => (tried && bad ? true : undefined);
 
   return (
-    <section className="surface-card space-y-5 p-5" aria-label="Onboard a facility">
+    <section className="surface-card space-y-5 p-5" aria-label={t("platform.onboardTitle")}>
       <div>
-        <h2 className="text-lg font-medium">Onboard a facility</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Create it, give it its first admin, then copy another facility&apos;s setup. Each step runs once.
-        </p>
+        <h2 className="text-lg font-medium">{t("platform.onboardTitle")}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">{t("platform.onboardIntro")}</p>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-5">
-        <input aria-label="Code" placeholder="Code (e.g. DEV002)" className={input} value={form.code}
+        <input aria-label={t("platform.code")} placeholder={t("platform.codePlaceholder")} className={input} value={form.code}
           aria-invalid={mark(triedCreate, createProblems.code)}
           onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))} />
-        <input aria-label="Name" placeholder="Facility name" className={`${input} sm:col-span-2`} value={form.name}
+        <input aria-label={t("platform.name")} placeholder={t("platform.facilityName")} className={`${input} sm:col-span-2`} value={form.name}
           aria-invalid={mark(triedCreate, createProblems.name)}
           onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
-        <input aria-label="State code" placeholder="State (e.g. DL)" className={input} value={form.state_code}
+        <input aria-label={t("platform.stateCode")} placeholder={t("platform.statePlaceholder")} className={input} value={form.state_code}
           aria-invalid={mark(triedCreate, createProblems.state_code)}
           onChange={(e) => setForm((f) => ({ ...f, state_code: e.target.value.toUpperCase() }))} />
-        <select aria-label="Ownership" className={input} value={form.ownership}
+        <select aria-label={t("platform.ownership")} className={input} value={form.ownership}
           onChange={(e) => setForm((f) => ({ ...f, ownership: e.target.value }))}>
-          <option value="">Ownership</option>
-          <option value="private">Private</option>
-          <option value="government">Government</option>
+          <option value="">{t("platform.ownership")}</option>
+          <option value="private">{t("platform.private")}</option>
+          <option value="government">{t("platform.government")}</option>
         </select>
-        <input aria-label="HFR facility id" placeholder="HFR id (optional, IN0910034387)" className={`${input} sm:col-span-2`}
+        <input aria-label={t("platform.hfrId")} placeholder={t("platform.hfrOptional")} className={`${input} sm:col-span-2`}
           aria-invalid={mark(triedCreate, createProblems.hfr)}
           value={form.hfr_facility_id} onChange={(e) => setForm((f) => ({ ...f, hfr_facility_id: e.target.value.trim() }))} />
         <button type="button" className={primary} disabled={busy}
@@ -125,7 +126,7 @@ export function FacilityOnboarding({ facilities, onChanged }: {
             if (!canCreate) {
               setTriedCreate(true);
               setNotice(null);
-              setError("Fill in the marked fields: a code of letters and digits (up to 20), a name, a 2–5 letter state code, and an HFR id like IN0910034387 if you have one.");
+              setError(t("platform.createFacilityFields"));
               return;
             }
             setTriedCreate(false);
@@ -138,15 +139,15 @@ export function FacilityOnboarding({ facilities, onChanged }: {
             setSelected(created.id);
             setForm({ code: "", name: "", state_code: "", ownership: "", hfr_facility_id: "" });
             return `${created.name} created. Now give it its first admin.`;
-          }, "The facility could not be created.");
-          }}>Create facility</button>
+          }, t("platform.errFacility"));
+          }}>{t("platform.createFacility")}</button>
       </div>
 
       <label className="block space-y-1 text-sm">
-        <span className="text-muted-foreground">Facility to set up</span>
-        <select aria-label="Facility to set up" className={input} value={selected}
+        <span className="text-muted-foreground">{t("platform.facilityToSetUp")}</span>
+        <select aria-label={t("platform.facilityToSetUp")} className={input} value={selected}
           onChange={(e) => { setSelected(e.target.value); setHfr(facilities.find((f) => f.id === e.target.value)?.hfr_facility_id ?? ""); }}>
-          <option value="">Choose</option>
+          <option value="">{t("platform.choose")}</option>
           {facilities.map((f) => <option key={f.id} value={f.id}>{f.name} ({f.code})</option>)}
         </select>
       </label>
@@ -155,15 +156,15 @@ export function FacilityOnboarding({ facilities, onChanged }: {
         <div className="space-y-4">
           <div className="flex flex-wrap items-end gap-3">
             <label className="flex-1 space-y-1 text-sm">
-              <span className="text-muted-foreground">HFR facility id</span>
-              <input aria-label="Set HFR facility id" className={input} value={hfr} placeholder="IN0910034387"
+              <span className="text-muted-foreground">{t("platform.hfrId")}</span>
+              <input aria-label={t("platform.setHfr")} className={input} value={hfr} placeholder="IN0910034387"
                 onChange={(e) => setHfr(e.target.value.trim())} />
             </label>
             <button type="button" className={primary} disabled={busy || (hfr !== "" && !HFR_ID.test(hfr))}
               onClick={() => void run(async () => {
                 await updatePlatformFacility(target.id, { hfr_facility_id: hfr || null });
                 return hfr ? `HFR id ${hfr} saved for ${target.name}.` : `HFR id cleared for ${target.name}.`;
-              }, "The HFR id could not be saved.")}>Save HFR id</button>
+              }, t("platform.errHfr"))}>{t("platform.saveHfr")}</button>
           </div>
 
           <label className="flex items-center gap-2 text-sm">
@@ -175,27 +176,25 @@ export function FacilityOnboarding({ facilities, onChanged }: {
                   return publish
                     ? `${target.name}'s free beds and blood stock are now on the public availability page.`
                     : `${target.name} is no longer on the public availability page.`;
-                }, "The publishing choice could not be saved.");
-              }} />
-            Publish free beds and blood stock on the public availability page (counts only, no patient data)
-          </label>
+                }, t("platform.errPublish"));
+              }} />{t("platform.publishAvailability")}</label>
 
           <div className="grid gap-3 sm:grid-cols-4">
             <div className="space-y-1">
-              <input aria-label="Admin username" placeholder="Admin username" className={input} value={admin.username}
+              <input aria-label={t("platform.adminUsername")} placeholder={t("platform.adminUsername")} className={input} value={admin.username}
                 aria-invalid={(admin.username !== "" || triedAdmin) && !USERNAME.test(admin.username)}
                 onChange={(e) => setAdmin((a) => ({ ...a, username: e.target.value.trim() }))} />
               {admin.username !== "" && !USERNAME.test(admin.username) ? (
-                <p role="alert" className="text-xs text-danger">Letters, digits, dot, underscore or hyphen only (e.g. dev2.admin), not an email.</p>
+                <p role="alert" className="text-xs text-danger">{t("platform.usernameRule")}</p>
               ) : null}
             </div>
-            <input aria-label="Admin full name" placeholder="Full name" className={input} value={admin.full_name}
+            <input aria-label={t("platform.adminFullName")} placeholder={t("platform.fullName")} className={input} value={admin.full_name}
               aria-invalid={mark(triedAdmin, adminProblems.full_name)}
               onChange={(e) => setAdmin((a) => ({ ...a, full_name: e.target.value }))} />
-            <input aria-label="Admin email" placeholder="Email (optional)" className={input} value={admin.email}
+            <input aria-label={t("platform.adminEmail")} placeholder={t("platform.emailOptional")} className={input} value={admin.email}
               aria-invalid={mark(triedAdmin, adminProblems.email)}
               onChange={(e) => setAdmin((a) => ({ ...a, email: e.target.value.trim() }))} />
-            <input aria-label="Temporary password" type="password" placeholder="Temporary password (8+ characters)" className={input}
+            <input aria-label={t("platform.tempPassword")} type="password" placeholder={t("platform.tempPassword8")} className={input}
               aria-invalid={mark(triedAdmin, adminProblems.password)}
               value={admin.temporary_password} onChange={(e) => setAdmin((a) => ({ ...a, temporary_password: e.target.value }))} />
             <button type="button" className={primary} disabled={busy}
@@ -203,7 +202,7 @@ export function FacilityOnboarding({ facilities, onChanged }: {
                 if (!canAdmin) {
                   setTriedAdmin(true);
                   setNotice(null);
-                  setError("Fill in the marked fields: a username (letters, digits, dot, underscore, hyphen), the full name, a valid email or none, and a temporary password of at least 8 characters.");
+                  setError(t("platform.createAdminFields"));
                   return;
                 }
                 setTriedAdmin(false);
@@ -214,15 +213,15 @@ export function FacilityOnboarding({ facilities, onChanged }: {
                 });
                 setAdmin({ username: "", full_name: "", email: "", temporary_password: "" });
                 return `Admin ${created.username} created at ${target.name}. They change the password at first sign-in.`;
-              }, "The admin could not be created.");
-              }}>Create first admin</button>
+              }, t("platform.errAdmin"));
+              }}>{t("platform.createFirstAdmin")}</button>
           </div>
 
           <div className="flex flex-wrap items-end gap-3">
             <label className="flex-1 space-y-1 text-sm">
-              <span className="text-muted-foreground">Copy setup from</span>
-              <select aria-label="Copy setup from" className={input} value={source} onChange={(e) => setSource(e.target.value)}>
-                <option value="">Choose</option>
+              <span className="text-muted-foreground">{t("platform.copySetupFrom")}</span>
+              <select aria-label={t("platform.copySetupFrom")} className={input} value={source} onChange={(e) => setSource(e.target.value)}>
+                <option value="">{t("platform.choose")}</option>
                 {facilities.filter((f) => f.id !== target.id).map((f) => <option key={f.id} value={f.id}>{f.name} ({f.code})</option>)}
               </select>
             </label>
@@ -231,7 +230,7 @@ export function FacilityOnboarding({ facilities, onChanged }: {
                 const copied = await copyPlatformFacilitySetup(target.id, source);
                 return `Copied ${copied.departments} departments, ${copied.rooms} rooms, ${copied.wards} wards, `
                   + `${copied.stock_locations} stores and ${copied.tariff_rows} tariff rows.`;
-              }, "The setup could not be copied.")}>Copy setup</button>
+              }, t("platform.errCopy"))}>{t("platform.copySetup")}</button>
           </div>
         </div>
       ) : null}

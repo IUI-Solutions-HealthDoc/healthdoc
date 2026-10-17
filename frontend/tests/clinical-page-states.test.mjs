@@ -283,6 +283,7 @@ test("immunization: a failed catalogue read blocks dose entry with a retry, and 
     "./components/ImmunizationScheduleView": { ImmunizationScheduleView(props) { return { type: "schedule", props: { patient: props.patientId, open: props.onOpenCertificateModal } }; } },
     "./components/RecordImmunizationModal": { RecordImmunizationModal() { return { type: "record-modal", props: {} }; } },
     "@/lib/api": { api: async () => { const next = responses.shift(); if (next instanceof Error) throw next; return next; } },
+    "@/lib/format-age": { formatScheduleAge: (days) => `${days} days`, humanizeCode: (value) => value ?? "—" },
   }).ImmunizationPage);
   let tree = h.render({}); h.effects(); await flush(); tree = h.render({});
   assert.match(alerts(tree), /vaccine catalogue could not be loaded: catalogue unavailable \(500\)/);
