@@ -265,7 +265,8 @@ async def seed(users: list[tuple[str, str]]) -> None:
                 text(
                     """
                     INSERT INTO departments (id, name, name_hi, code, facility_id)
-                    VALUES (:id, :name, :name_hi, :code, :facility_id)
+                    VALUES (CAST(:id AS uuid), CAST(:name AS text), CAST(:name_hi AS text),
+                            CAST(:code AS varchar), CAST(:facility_id AS uuid))
                     ON CONFLICT DO NOTHING
                     """
                 ),
@@ -275,8 +276,8 @@ async def seed(users: list[tuple[str, str]]) -> None:
                 text(
                     """
                     INSERT INTO rooms (id, department_id, room_number, is_active)
-                    SELECT :id, d.id, :room, true FROM departments d
-                     WHERE d.facility_id = :facility_id AND d.code = :code
+                    SELECT CAST(:id AS uuid), d.id, CAST(:room AS varchar), true FROM departments d
+                     WHERE d.facility_id = CAST(:facility_id AS uuid) AND d.code = CAST(:code AS varchar)
                     ON CONFLICT DO NOTHING
                     """
                 ),
@@ -296,8 +297,9 @@ async def seed(users: list[tuple[str, str]]) -> None:
                 text(
                     """
                     INSERT INTO wards (id, name, name_hi, department_id, facility_id, is_active)
-                    SELECT :id, :name, :name_hi, d.id, :facility_id, true FROM departments d
-                     WHERE d.facility_id = :facility_id AND d.code = :code
+                    SELECT CAST(:id AS uuid), CAST(:name AS text), CAST(:name_hi AS text), d.id,
+                           CAST(:facility_id AS uuid), true FROM departments d
+                     WHERE d.facility_id = CAST(:facility_id AS uuid) AND d.code = CAST(:code AS varchar)
                     ON CONFLICT DO NOTHING
                     """
                 ),
@@ -308,7 +310,8 @@ async def seed(users: list[tuple[str, str]]) -> None:
                     text(
                         """
                         INSERT INTO beds (id, ward_id, bed_number, status)
-                        SELECT gen_random_uuid(), w.id, :number, 'vacant' FROM wards w WHERE w.id = :ward_id
+                        SELECT gen_random_uuid(), w.id, CAST(:number AS varchar), 'vacant' FROM wards w
+                         WHERE w.id = CAST(:ward_id AS uuid)
                         ON CONFLICT (ward_id, bed_number) DO NOTHING
                         """
                     ),
@@ -532,11 +535,12 @@ async def seed(users: list[tuple[str, str]]) -> None:
                             (id, facility_id, charge_code, description, description_hi,
                              charge_category, unit_price, scheme_code, effective_from,
                              effective_to, is_active, created_by)
-                        SELECT :id, :facility_id, :code, :description, :description_hi, :category,
-                               CAST(:price AS NUMERIC), NULL, DATE '2020-01-01', NULL, true, :created_by
+                        SELECT CAST(:id AS uuid), CAST(:facility_id AS uuid), CAST(:code AS varchar),
+                               CAST(:description AS text), CAST(:description_hi AS text), CAST(:category AS varchar),
+                               CAST(:price AS NUMERIC), NULL, DATE '2020-01-01', NULL, true, CAST(:created_by AS uuid)
                         WHERE NOT EXISTS (
                             SELECT 1 FROM charge_master
-                             WHERE facility_id = :facility_id AND charge_code = :code
+                             WHERE facility_id = CAST(:facility_id AS uuid) AND charge_code = CAST(:code AS varchar)
                                AND scheme_code IS NULL AND is_active
                         )
                         """
