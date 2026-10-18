@@ -153,16 +153,19 @@ async def seed(users: list[tuple[str, str]]) -> None:
             text(
                 """
                 INSERT INTO facilities
-                    (id, code, name, name_hi, state_code, timezone, facility_type,
+                    (id, code, name, name_hi, state_code, district, timezone, facility_type,
                      ownership, is_active)
                 VALUES
                     (:id, 'DEV001', 'HealthDoc Development Hospital',
-                     'हेल्थडॉक विकास अस्पताल', 'DL',
+                     'हेल्थडॉक विकास अस्पताल', 'DL', 'New Delhi',
                      'Asia/Kolkata', 'hospital', 'government', true)
                 ON CONFLICT (id) DO UPDATE SET
                     name = EXCLUDED.name,
                     name_hi = EXCLUDED.name_hi,
                     timezone = EXCLUDED.timezone,
+                    -- The control room lists districts; with none recorded its
+                    -- district filter was empty (QA 17 Oct 2026).
+                    district = COALESCE(facilities.district, EXCLUDED.district),
                     -- HealthDoc targets government hospitals; keep a value an
                     -- operator recorded deliberately.
                     ownership = COALESCE(facilities.ownership, EXCLUDED.ownership),
@@ -244,6 +247,76 @@ async def seed(users: list[tuple[str, str]]) -> None:
                 ),
                 {"ward_id": WARD_ID, "number": number},
             )
+        # One department and one ward left every picker with a single choice,
+        # so booking, admission and ward transfer could not be exercised
+        # (QA 17 Oct 2026). Development data only; ids are stable so a rerun
+        # updates in place.
+        extra_departments = (
+            ("PAED", "Paediatrics", "बाल रोग", "201"),
+            ("OBGYN", "Obstetrics & Gynaecology", "प्रसूति एवं स्त्री रोग", "202"),
+            ("ORTHO", "Orthopaedics", "हड्डी रोग", "203"),
+            ("SURG", "General Surgery", "सामान्य शल्य चिकित्सा", "204"),
+        )
+        department_ids = {"GENMED": DEPARTMENT_ID}
+        for code, name, name_hi, room in extra_departments:
+            dept_id = uuid.uuid5(uuid.NAMESPACE_URL, f"healthdoc:dev-department:{code}")
+            department_ids[code] = dept_id
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO departments (id, name, name_hi, code, facility_id)
+                    VALUES (CAST(:id AS uuid), CAST(:name AS text), CAST(:name_hi AS text),
+                            CAST(:code AS varchar), CAST(:facility_id AS uuid))
+                    ON CONFLICT DO NOTHING
+                    """
+                ),
+                {"id": dept_id, "name": name, "name_hi": name_hi, "code": code, "facility_id": FACILITY_ID},
+            )
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO rooms (id, department_id, room_number, is_active)
+                    SELECT CAST(:id AS uuid), d.id, CAST(:room AS varchar), true FROM departments d
+                     WHERE d.facility_id = CAST(:facility_id AS uuid) AND d.code = CAST(:code AS varchar)
+                    ON CONFLICT DO NOTHING
+                    """
+                ),
+                {
+                    "id": uuid.uuid5(uuid.NAMESPACE_URL, f"healthdoc:dev-room:{code}"),
+                    "room": room, "code": code, "facility_id": FACILITY_ID,
+                },
+            )
+        extra_wards = (
+            ("Paediatric Ward", "बाल वार्ड", "PAED", 4),
+            ("Maternity Ward", "प्रसूति वार्ड", "OBGYN", 4),
+            ("ICU", "आईसीयू", "GENMED", 3),
+        )
+        for name, name_hi, code, bed_count in extra_wards:
+            ward_id = uuid.uuid5(uuid.NAMESPACE_URL, f"healthdoc:dev-ward:{name}")
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO wards (id, name, name_hi, department_id, facility_id, is_active)
+                    SELECT CAST(:id AS uuid), CAST(:name AS text), CAST(:name_hi AS text), d.id,
+                           CAST(:facility_id AS uuid), true FROM departments d
+                     WHERE d.facility_id = CAST(:facility_id AS uuid) AND d.code = CAST(:code AS varchar)
+                    ON CONFLICT DO NOTHING
+                    """
+                ),
+                {"id": ward_id, "name": name, "name_hi": name_hi, "code": code, "facility_id": FACILITY_ID},
+            )
+            for number in range(1, bed_count + 1):
+                await session.execute(
+                    text(
+                        """
+                        INSERT INTO beds (id, ward_id, bed_number, status)
+                        SELECT gen_random_uuid(), w.id, CAST(:number AS varchar), 'vacant' FROM wards w
+                         WHERE w.id = CAST(:ward_id AS uuid)
+                        ON CONFLICT (ward_id, bed_number) DO NOTHING
+                        """
+                    ),
+                    {"ward_id": ward_id, "number": str(number)},
+                )
         # Suppliers, or no purchase order can be raised: the dropdown was empty
         # on a fresh setup (QA 10 Oct 2026). Synthetic names, development only.
         for supplier in ("Dev Medical Supplies (synthetic)", "Dev Surgical Traders (synthetic)"):
@@ -448,6 +521,37 @@ async def seed(users: list[tuple[str, str]]) -> None:
                     "created_by": tariff_author,
                 },
             )
+            # Emergency care and bed-day tariffs, so an emergency visit and an
+            # inpatient stay bill something in development (QA 16 Oct 2026).
+            # Synthetic amounts; a real facility sets its own in Tariffs.
+            for code, description, description_hi, category, price in (
+                ("EMERGENCY_CARE", "Emergency care", "आपातकालीन देखभाल", "consultation", "200.00"),
+                ("IPD_BED_DAY", "Inpatient bed-day (general ward)", "भर्ती बिस्तर-दिन (सामान्य वार्ड)", "ipd_stay", "500.00"),
+            ):
+                await session.execute(
+                    text(
+                        """
+                        INSERT INTO charge_master
+                            (id, facility_id, charge_code, description, description_hi,
+                             charge_category, unit_price, scheme_code, effective_from,
+                             effective_to, is_active, created_by)
+                        SELECT CAST(:id AS uuid), CAST(:facility_id AS uuid), CAST(:code AS varchar),
+                               CAST(:description AS text), CAST(:description_hi AS text), CAST(:category AS varchar),
+                               CAST(:price AS NUMERIC), NULL, DATE '2020-01-01', NULL, true, CAST(:created_by AS uuid)
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM charge_master
+                             WHERE facility_id = CAST(:facility_id AS uuid) AND charge_code = CAST(:code AS varchar)
+                               AND scheme_code IS NULL AND is_active
+                        )
+                        """
+                    ),
+                    {
+                        "id": uuid.uuid5(uuid.NAMESPACE_URL, f"healthdoc:tariff:{code}"),
+                        "facility_id": FACILITY_ID, "code": code, "description": description,
+                        "description_hi": description_hi, "category": category, "price": price,
+                        "created_by": tariff_author,
+                    },
+                )
             # Existing stacks already have REGISTRATION without description_hi.
             await session.execute(
                 text(
@@ -496,6 +600,18 @@ async def seed(users: list[tuple[str, str]]) -> None:
             ("Amoxicillin Syrup", "Amoxicillin", "125mg/5ml", "syrup", "medicine", False, "J01CA04", 20),
             ("Morphine 10mg/ml", "Morphine", "10mg/ml", "injection", "medicine", True, "N02AA01", 10),
             ("Nitrile Gloves (M)", None, None, "consumable", "consumable", False, None, 500),
+            # More common essentials, so a search returns a list worth choosing
+            # from (QA 17 Oct 2026). Codes are ATC; development data only.
+            ("Ibuprofen 400mg", "Ibuprofen", "400mg", "tablet", "medicine", False, "M01AE01", 100),
+            ("Metformin 500mg", "Metformin", "500mg", "tablet", "medicine", False, "A10BA02", 100),
+            ("Amlodipine 5mg", "Amlodipine", "5mg", "tablet", "medicine", False, "C08CA01", 100),
+            ("Cetirizine 10mg", "Cetirizine", "10mg", "tablet", "medicine", False, "R06AE07", 50),
+            ("Pantoprazole 40mg", "Pantoprazole", "40mg", "tablet", "medicine", False, "A02BC02", 50),
+            ("Azithromycin 500mg", "Azithromycin", "500mg", "tablet", "medicine", False, "J01FA10", 30),
+            ("ORS Solution", "Oral rehydration salts", "200ml", "fluid", "medicine", False, "A07CA", 100),
+            ("Iron and Folic Acid", "Ferrous sulphate + folic acid", "100mg/0.5mg", "tablet", "medicine", False, "B03AD03", 200),
+            ("Ceftriaxone 1g", "Ceftriaxone", "1g", "injection", "medicine", False, "J01DD04", 30),
+            ("Normal Saline 500ml", "Sodium chloride 0.9%", "500ml", "fluid", "medicine", False, "B05BB01", 50),
         ]
         for name, generic, strength, form, item_type, controlled, code, reorder in catalogue:
             await session.execute(

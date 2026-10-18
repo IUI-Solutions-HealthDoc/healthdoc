@@ -216,3 +216,44 @@ async def test_inclusive_date_migration_roundtrip_and_guard_preserve_rows(db, mo
         async with connection.begin_nested():
             await connection.run_sync(run, migration.downgrade)
     assert (await db.execute(sa.text("SELECT count(*) FROM charge_master"))).scalar_one() == 1
+
+
+async def test_an_emergency_visit_bills_emergency_care_and_discharged_bed_days(
+    db, facility, user, visit, draft_invoice,
+):
+    # QA 16 Oct 2026: an emergency visit admitted and discharged billed only
+    # the registration fee, with no warning.
+    from datetime import timedelta
+
+    await db.execute(sa.text("UPDATE visits SET visit_type='emergency' WHERE id=:id"), {"id": visit})
+    preview = await service.preview_invoice(db, visit)
+    care, = [line for line in preview.new_charge_lines if line.charge_code == "EMERGENCY_CARE"]
+    assert care.priced is False and preview.unpriced_count >= 1  # no tariff: unpriced, never zero-billed
+
+    await tariff(db, facility, user, "consultation", charge_code="EMERGENCY_CARE", unit_price=Decimal("200.00"))
+    await tariff(db, facility, user, "ipd_stay", charge_code="IPD_BED_DAY", unit_price=Decimal("500.00"))
+    ward, bed, admission = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    patient = (await db.execute(sa.text("SELECT patient_id FROM visits WHERE id=:id"), {"id": visit})).scalar_one()
+    await db.execute(sa.text("INSERT INTO wards (id, name, facility_id, is_active) VALUES (:id, 'Synthetic Ward', :f, true)"),
+                     {"id": ward, "f": facility})
+    await db.execute(sa.text("INSERT INTO beds (id, ward_id, bed_number, status) VALUES (:id, :w, '1', 'vacant')"),
+                     {"id": bed, "w": ward})
+    admitted = datetime(2026, 6, 1, 8, 0, tzinfo=UTC)
+    await db.execute(sa.text(
+        "INSERT INTO admissions (id, visit_id, patient_id, ward_id, bed_id, admitted_at, status, created_by) "
+        "VALUES (:id, :v, :p, :w, :b, :at, 'admitted', :u)"
+    ), {"id": admission, "v": visit, "p": patient, "w": ward, "b": bed, "at": admitted, "u": user})
+    open_preview = await service.preview_invoice(db, visit)
+    assert open_preview.warnings and "still admitted" in open_preview.warnings[0]
+    assert not [line for line in open_preview.new_charge_lines if line.charge_code == "IPD_BED_DAY"]
+
+    await db.execute(sa.text("UPDATE admissions SET status='discharged' WHERE id=:id"), {"id": admission})
+    await db.execute(sa.text(
+        "INSERT INTO discharges (id, admission_id, discharged_at, discharge_type, created_by) "
+        "VALUES (:id, :a, :at, 'discharged', :u)"
+    ), {"id": uuid.uuid4(), "a": admission, "at": admitted + timedelta(days=2, hours=4), "u": user})
+    preview = await service.preview_invoice(db, visit)
+    bed_days, = [line for line in preview.new_charge_lines if line.charge_code == "IPD_BED_DAY"]
+    assert (bed_days.quantity, bed_days.amount) == (Decimal(3), Decimal("1500.00"))
+    care, = [line for line in preview.new_charge_lines if line.charge_code == "EMERGENCY_CARE"]
+    assert care.amount == Decimal("200.00") and not preview.warnings

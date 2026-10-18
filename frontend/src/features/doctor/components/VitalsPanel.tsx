@@ -36,7 +36,7 @@ export interface VitalsPanelProps {
 
 export function VitalsPanel({ encounter }: VitalsPanelProps) {
   const { t } = useLocale();
-  const { form, setField, bmi, whr, anyEntered, saving, record, history, historyFailed } = useVitals(encounter);
+  const { form, setField, bmi, whr, anyEntered, saving, record, history, historyFailed, errors } = useVitals(encounter);
 
   // The unit is part of the label: as an end adornment inside a quarter-width
   // field it ran into the label text (QA 12 Oct 2026).
@@ -47,6 +47,8 @@ export function VitalsPanel({ encounter }: VitalsPanelProps) {
       onChange={(e) => setField(key, e.target.value)}
       size="small"
       type="number"
+      error={Boolean(errors[key])}
+      helperText={errors[key] ? t("doctor.vitalAllowed", { range: errors[key] as string }) : undefined}
       slotProps={{ inputLabel: { shrink: true } }}
     />
   );

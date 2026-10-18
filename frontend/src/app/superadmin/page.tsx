@@ -14,6 +14,10 @@ import { FacilityOnboarding } from "@/features/platform/FacilityOnboarding";
 export default function Page() {
   const { localizeField, t } = useLocale();
   const [facilities, setFacilities] = useState<PlatformFacility[]>([]);
+  // The onboarding and officer pickers choose from every facility. They used
+  // the search results, so a search with no match left them with nothing to
+  // choose (QA 17 Oct 2026).
+  const [allFacilities, setAllFacilities] = useState<PlatformFacility[]>([]);
   const [total, setTotal] = useState(0);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
@@ -29,6 +33,8 @@ export default function Page() {
       setFacilities(response.items);
       setTotal(response.total);
       setPage(1);
+      if (!search.trim()) setAllFacilities(response.items);
+      else void listPlatformFacilities("").then((all) => setAllFacilities(all.items)).catch(() => undefined);
     } catch (reason) {
       setError(getUserFacingError(reason, t("superadmin.errLoadFacilities")));
     } finally {
@@ -48,12 +54,11 @@ export default function Page() {
     <div className="mx-auto max-w-6xl space-y-6 p-6">
       <div>
         <p className="text-sm font-medium uppercase tracking-wide text-primary">
-          Platform administration
+          {t("superadmin.eyebrow")}
         </p>
-        <h1 className="mt-2 text-3xl font-semibold">Facilities</h1>
+        <h1 className="mt-2 text-3xl font-semibold">{t("superadmin.title")}</h1>
         <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
-          Platform metadata only. This workspace never requests patient, encounter, merge or
-          other clinical records.
+          {t("superadmin.intro")}
         </p>
       </div>
 
@@ -88,14 +93,14 @@ export default function Page() {
         </p>
       ) : null}
 
-      <FacilityOnboarding facilities={facilities} onChanged={() => void load(query)} />
+      <FacilityOnboarding facilities={allFacilities} onChanged={() => void load(query)} />
 
-      <ControlRoomOfficers facilities={facilities} />
+      <ControlRoomOfficers facilities={allFacilities} />
 
       <section className="surface-card overflow-hidden">
         <div className="border-b border-border px-5 py-4">
-          <h2 className="text-lg font-medium">Registered facilities</h2>
-          <p className="mt-1 text-sm text-muted-foreground">{total} total</p>
+          <h2 className="text-lg font-medium">{t("superadmin.registered")}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">{t("superadmin.total", { count: total })}</p>
         </div>
         {loading ? (
           <p className="p-5 text-sm text-muted-foreground">{t("superadmin.loadingFacilities")}</p>
@@ -121,7 +126,7 @@ export default function Page() {
                         : "bg-muted text-muted-foreground"
                     }`}
                   >
-                    {facility.is_active ? "Active" : "Inactive"}
+                    {facility.is_active ? t("superadmin.active") : t("superadmin.inactive")}
                   </span>
                 </li>
               ))}
@@ -129,7 +134,7 @@ export default function Page() {
 
             {facilities.length > PAGE_SIZE && (
               <div className="flex items-center justify-between border-t border-border px-5 py-3 bg-muted/20 text-xs">
-                <span className="text-muted-foreground">Page {currentPage} of {totalPages}</span>
+                <span className="text-muted-foreground">{t("common.pageOf", { page: currentPage, pages: totalPages })}</span>
                 <div className="flex gap-2">
                   <button
                     type="button"
@@ -137,7 +142,7 @@ export default function Page() {
                     onClick={() => setPage((p) => Math.max(1, p - 1))}
                     className="rounded border border-border bg-card px-3 py-1 font-medium disabled:opacity-50"
                   >
-                    Previous
+                    {t("common.previous")}
                   </button>
                   <button
                     type="button"
@@ -145,7 +150,7 @@ export default function Page() {
                     onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                     className="rounded border border-border bg-card px-3 py-1 font-medium disabled:opacity-50"
                   >
-                    Next
+                    {t("common.next")}
                   </button>
                 </div>
               </div>

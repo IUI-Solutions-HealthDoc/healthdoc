@@ -46,6 +46,11 @@ function auditParams(filters: AuditLogFilters): URLSearchParams {
   if (filters.resource_type && filters.resource_type !== "all") {
     params.set("resource_type", filters.resource_type);
   }
+  // Server-side now: narrowing only the loaded page hid every login/logout
+  // older than the newest hundred rows (QA 17 Oct 2026).
+  if (filters.action && filters.action !== "all") {
+    params.set("action", filters.action);
+  }
   return params;
 }
 

@@ -229,3 +229,39 @@ def test_router_exposes_no_update_or_delete_route():
     assert ("/maintenance/logs", "GET") in exposed
     assert ("/maintenance/logs/{log_id}", "GET") in exposed
     assert not any(method in {"PATCH", "PUT", "DELETE"} for _, method in exposed)
+
+
+async def test_service_names_a_registered_machine_and_says_who_did_it(db, seed):
+    # QA 17 Oct 2026: free-text machines ("MR-01") outside the register, and
+    # records saved with no vendor or breakdown downtime.
+    from app.equipment.models import Equipment
+
+    department, _room, actor = seed
+    db.add(Equipment(
+        id=uuid.uuid4(), facility_id=department.facility_id, name="MRI Scanner", category="imaging",
+        asset_tag="MR-01", status="working", status_since=datetime.now(UTC), created_by=actor.id,
+    ))
+    await db.flush()
+    with pytest.raises(service.MaintenanceRefused) as unknown:
+        await service.create_maintenance_log(
+            db, payload=_payload(department.id, machine_id="CT-09"), facility_id=department.facility_id, actor_id=actor.id,
+        )
+    assert unknown.value.code == "machine_not_registered"
+    with pytest.raises(service.MaintenanceRefused) as no_vendor:
+        await service.create_maintenance_log(
+            db, payload=_payload(department.id, machine_id="mr-01", performed_by_vendor=None),
+            facility_id=department.facility_id, actor_id=actor.id,
+        )
+    assert no_vendor.value.code == "performed_by_required"
+    with pytest.raises(service.MaintenanceRefused) as no_downtime:
+        await service.create_maintenance_log(
+            db, payload=_payload(department.id, machine_id="mr-01", maintenance_type="breakdown", downtime_minutes=None),
+            facility_id=department.facility_id, actor_id=actor.id,
+        )
+    assert no_downtime.value.code == "downtime_required"
+    row = await service.create_maintenance_log(
+        db, payload=_payload(department.id, machine_id="mri scanner"), facility_id=department.facility_id, actor_id=actor.id,
+    )
+    assert row.machine_id == "MR-01"
+    rows, total = await service.list_maintenance_logs(db, facility_id=department.facility_id, machine_id="mr")
+    assert total == 1 and rows[0].id == row.id

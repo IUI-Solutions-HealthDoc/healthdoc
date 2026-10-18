@@ -61,7 +61,11 @@ async def create_maintenance_log(
             actor_id=current_db_user.id,
         )
     except service.DepartmentNotFound:
-        raise HTTPException(status_code=404, detail="department_not_found") from None
+        raise HTTPException(
+            status_code=404, detail={"code": "department_not_found", "message": "Choose the department."},
+        ) from None
+    except service.MaintenanceRefused as exc:
+        raise HTTPException(status_code=422, detail={"code": exc.code, "message": exc.message}) from None
 
     response = MaintenanceLogOut.model_validate(row)
     await record_idempotent_response(

@@ -36,7 +36,8 @@ export function InvoiceHeader({ invoice }: { invoice: InvoiceWithItems }) {
             {invoice.patient?.full_name ?? "Patient"}
           </Typography>
           <Typography sx={{ mt: 0.5, fontSize: "0.875rem", color: meridian.textSecondary }}>
-            UHID {invoice.patient?.uhid ?? "—"} · Visit {invoice.visit?.visit_number ?? "—"} (
+            {/* An emergency patient's identifier is a THID, not a UHID (QA 16 Oct 2026). */}
+            {/^TH-/i.test(invoice.patient?.uhid ?? "") ? "THID" : "UHID"} {invoice.patient?.uhid ?? "—"} · Visit {invoice.visit?.visit_number ?? "—"} (
             {invoice.visit?.visit_type
               ? invoice.visit.visit_type.toUpperCase()
               : "—"}

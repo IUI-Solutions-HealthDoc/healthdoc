@@ -165,6 +165,31 @@ def _require_writer(user) -> None:
         raise HTTPException(403, {"code": "mch_write_forbidden", "message": "Doctors and nurses record maternal care"})
 
 
+def _refuse(code: str, message: str) -> HTTPException:
+    return HTTPException(422, {"code": code, "message": message})
+
+
+def _weeks_since(lmp: date, on: date) -> float:
+    return (on - lmp).days / 7
+
+
+# QA 16 Oct 2026: a pregnancy registered for a 4-year-old; an EDD three months
+# before the LMP; G1 P3; 40 weeks six weeks after the LMP; BP 60/120; a live
+# birth at six weeks. Each saved. These bounds are plausibility checks on the
+# record, not clinical judgement: they refuse what cannot be true and leave
+# everything possible to the clinician.
+MIN_MATERNAL_AGE, MAX_MATERNAL_AGE = 10, 60
+EDD_MIN_DAYS, EDD_MAX_DAYS = 240, 300
+GESTATION_TOLERANCE_WEEKS = 4
+MIN_DELIVERY_WEEKS = 20
+
+
+def _age_on(patient, on: date) -> int | None:
+    if patient.dob:
+        return on.year - patient.dob.year - ((on.month, on.day) < (patient.dob.month, patient.dob.day))
+    return patient.age_years
+
+
 def _require_active(pregnancy: Pregnancy) -> None:
     if pregnancy.status != "active":
         raise HTTPException(409, {"code": "pregnancy_closed", "message": f"This pregnancy is {pregnancy.status}"})
@@ -197,6 +222,31 @@ async def register_pregnancy(
         today = await facility_today(db, current_user.facility_id)
         if payload.lmp_date and payload.lmp_date > today:
             raise HTTPException(422, {"code": "lmp_in_future", "message": "The last menstrual period cannot be in the future"})
+        from app.patients.models import Patient
+
+        patient = await db.get(Patient, payload.patient_id)
+        if patient is not None and patient.sex == "male":
+            raise _refuse("pregnancy_sex", "This patient is recorded as male. Correct the patient's sex first if it is wrong.")
+        age = _age_on(patient, today) if patient is not None else None
+        if age is not None and not MIN_MATERNAL_AGE <= age <= MAX_MATERNAL_AGE:
+            raise _refuse(
+                "pregnancy_age",
+                f"This patient is recorded as {age} years old. Check the date of birth before registering a pregnancy.",
+            )
+        if payload.lmp_date and payload.lmp_date < today.replace(year=today.year - 1):
+            raise _refuse("lmp_too_old", "The last menstrual period is more than a year ago. Check the date.")
+        if payload.lmp_date and payload.edd:
+            gap = (payload.edd - payload.lmp_date).days
+            if not EDD_MIN_DAYS <= gap <= EDD_MAX_DAYS:
+                raise _refuse(
+                    "edd_inconsistent",
+                    "The expected delivery date should be about 40 weeks (280 days) after the last menstrual period.",
+                )
+        if payload.gravida is not None and payload.para is not None and payload.para >= payload.gravida:
+            raise _refuse(
+                "para_exceeds_gravida",
+                "Para counts earlier births, so it must be less than gravida (which includes this pregnancy).",
+            )
         open_one = (
             await db.execute(
                 select(Pregnancy.id).where(
@@ -276,6 +326,18 @@ async def record_anc_visit(
             raise HTTPException(422, {"code": "visit_in_future", "message": "A visit cannot be recorded for a future day"})
         if (payload.bp_systolic is None) != (payload.bp_diastolic is None):
             raise HTTPException(422, {"code": "bp_incomplete", "message": "Record both systolic and diastolic, or neither"})
+        if payload.bp_systolic is not None and payload.bp_systolic <= payload.bp_diastolic:
+            raise _refuse("bp_inverted", "Systolic pressure must be higher than diastolic. Check the order of the two numbers.")
+        if pregnancy.lmp_date:
+            if payload.visit_date < pregnancy.lmp_date:
+                raise _refuse("visit_before_lmp", "The visit date is before the last menstrual period.")
+            by_lmp = _weeks_since(pregnancy.lmp_date, payload.visit_date)
+            if payload.gestation_weeks is not None and abs(payload.gestation_weeks - by_lmp) > GESTATION_TOLERANCE_WEEKS:
+                raise _refuse(
+                    "gestation_inconsistent",
+                    f"By the last menstrual period the pregnancy is {int(by_lmp)} weeks on this date, not "
+                    f"{payload.gestation_weeks}. Check the weeks or the LMP.",
+                )
         db.add(AncVisit(
             id=uuid.uuid4(), pregnancy_id=pregnancy.id, facility_id=current_user.facility_id,
             recorded_by=current_user.id, **payload.model_dump(),
@@ -303,6 +365,17 @@ async def record_delivery(
             raise HTTPException(422, {"code": "delivered_at_needs_zone", "message": "Send the time with its time zone"})
         if payload.delivered_at > datetime.now(UTC):
             raise HTTPException(422, {"code": "delivery_in_future", "message": "A delivery cannot be in the future"})
+        if pregnancy.lmp_date:
+            delivered_on = payload.delivered_at.date()
+            if delivered_on < pregnancy.lmp_date:
+                raise _refuse("delivery_before_lmp", "The delivery is dated before the last menstrual period.")
+            weeks = _weeks_since(pregnancy.lmp_date, delivered_on)
+            if weeks < MIN_DELIVERY_WEEKS:
+                raise _refuse(
+                    "delivery_too_early",
+                    f"By the last menstrual period this is {int(weeks)} weeks. A loss before 20 weeks is recorded "
+                    "with End pregnancy, not as a delivery.",
+                )
         delivery = Delivery(
             id=uuid.uuid4(), pregnancy_id=pregnancy.id, facility_id=current_user.facility_id,
             delivered_at=payload.delivered_at, mode=payload.mode, notes=payload.notes, recorded_by=current_user.id,

@@ -145,10 +145,16 @@ export function ConsentRecordDetail({
         <Stack direction="row" sx={{ justifyContent: "space-between", gap: 2, mb: 2 }}>
           <Box>
             <Typography sx={{ m: 0, fontSize: "1.0625rem", fontWeight: 700, color: meridian.textPrimary }}>
-              {record.patient?.name ?? record.patient_id}
+              {record.patient?.name ?? t("consent.unnamedPatient")}
             </Typography>
+            {/* A record id here read as the record's title (QA 16 Oct 2026):
+                purpose and date identify a consent to a person. */}
             <Typography sx={{ m: 0, mt: 0.4, fontSize: "0.8125rem", color: meridian.textSecondary }}>
-              {record.patient?.uhid} · {record.id}
+              {[
+                record.patient?.uhid,
+                record.purpose_label ?? (record.purpose_code ? record.purpose_code.replaceAll("_", " ") : null),
+                formatDateTime(record.granted_at ?? record.created_at),
+              ].filter(Boolean).join(" · ")}
             </Typography>
           </Box>
           <StatusChip status={record.status} label={consentStatusLabel(t, record.status)} />

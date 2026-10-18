@@ -42,8 +42,8 @@ interface ConfirmBody {
   outside_session_agreed?: boolean;
 }
 
-// Matches requests.SESSION_HOURS on the server; 12:00-13:00 is both.
-const SESSION_HOURS = { morning: ["00:00", "13:00"], afternoon: ["12:00", "23:59"] } as const;
+// Matches requests.SESSION_HOURS on the server; 12:00-12:59 is both, 13:00 is afternoon.
+const SESSION_HOURS = { morning: ["00:00", "12:59"], afternoon: ["12:00", "23:59"] } as const;
 
 function confirmRequest(id: string, body: ConfirmBody, key: string) {
   return api(`/appointments/requests/${id}/confirm`, { method: "POST", idempotencyKey: key, body: JSON.stringify(body) });

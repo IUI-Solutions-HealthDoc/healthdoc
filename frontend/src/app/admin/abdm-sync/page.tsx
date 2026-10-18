@@ -1,5 +1,6 @@
 "use client";
 
+import { fieldsFromError } from "@/lib/field-errors";
 import { useState } from "react";
 
 import { getAbhaLink, unlinkAbha, type AbhaLink } from "@/features/admin/api/abdm";
@@ -26,6 +27,9 @@ export default function Page() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [unlinkReason, setUnlinkReason] = useState("");
+  // The fields a refusal is about, so they are marked rather than only named
+  // in a banner (QA 17 Oct 2026).
+  const [badFields, setBadFields] = useState<Set<string>>(new Set());
   const unlinkReasonValid = unlinkReason.trim().length >= 10;
 
   async function search(event: React.FormEvent) {
@@ -37,12 +41,15 @@ export default function Page() {
     if (dob) criteria.dob = dob;
     if (Object.keys(criteria).length === 0) {
       setError(t("admin.abdm.searchCriteriaRequired"));
+      setBadFields(new Set(["uhid", "abha_number", "full_name"]));
       return;
     }
     if (criteria.full_name && !criteria.dob) {
       setError(t("admin.abdm.dobRequiredForName"));
+      setBadFields(new Set(["dob"]));
       return;
     }
+    setBadFields(new Set());
 
     setBusy(true);
     setError(null);
@@ -55,6 +62,7 @@ export default function Page() {
       if (response.items.length === 0) setMessage(t("admin.abdm.noPatientMatch"));
     } catch (reason) {
       setError(reason instanceof ApiError ? reason.message : t("admin.abdm.patientSearchFailed"));
+      setBadFields(fieldsFromError(reason));
     } finally {
       setBusy(false);
     }
@@ -118,19 +126,19 @@ export default function Page() {
       <form onSubmit={search} className="surface-card grid gap-4 p-5 md:grid-cols-2 lg:grid-cols-4">
         <label className="space-y-1 text-sm">
           <span className="text-muted-foreground">UHID</span>
-          <input className="w-full rounded-md border border-border px-3 py-2" value={uhid} onChange={(event) => setUhid(event.target.value)} />
+          <input aria-invalid={badFields.has("uhid") || undefined} className="w-full rounded-md border border-border px-3 py-2" value={uhid} onChange={(event) => setUhid(event.target.value)} />
         </label>
         <label className="space-y-1 text-sm">
           <span className="text-muted-foreground">ABHA number</span>
-          <input className="w-full rounded-md border border-border px-3 py-2" value={abha} onChange={(event) => setAbha(event.target.value)} />
+          <input aria-invalid={badFields.has("abha_number") || undefined} className="w-full rounded-md border border-border px-3 py-2" value={abha} onChange={(event) => setAbha(event.target.value)} />
         </label>
         <label className="space-y-1 text-sm">
           <span className="text-muted-foreground">{t("field.fullName")}</span>
-          <input className="w-full rounded-md border border-border px-3 py-2" value={name} onChange={(event) => setName(event.target.value)} />
+          <input aria-invalid={badFields.has("full_name") || undefined} className="w-full rounded-md border border-border px-3 py-2" value={name} onChange={(event) => setName(event.target.value)} />
         </label>
         <label className="space-y-1 text-sm">
           <span className="text-muted-foreground">{t("field.dob")}</span>
-          <input type="date" className="w-full rounded-md border border-border px-3 py-2" value={dob} onChange={(event) => setDob(event.target.value)} />
+          <input type="date" aria-invalid={badFields.has("dob") || undefined} className="w-full rounded-md border border-border px-3 py-2" value={dob} onChange={(event) => setDob(event.target.value)} />
         </label>
         <button type="submit" disabled={busy} className="w-fit rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50">
           {t("admin.abdm.searchPatients")}

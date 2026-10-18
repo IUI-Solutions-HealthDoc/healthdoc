@@ -82,7 +82,7 @@ export function SchemeSelector({
         onChange={(e) => onSchemeAdjustmentChange(Number(e.target.value) || 0)}
         slotProps={{ htmlInput: { min: 0, step: 1 } }}
         fullWidth
-        helperText="Subtracted from gross along with discount → net_amount"
+        helperText="Subtracted from the gross amount, together with any discount, to give the net amount."
       />
     </Box>
   );

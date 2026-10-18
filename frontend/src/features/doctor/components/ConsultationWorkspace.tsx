@@ -4,6 +4,10 @@ import { useRef, useState } from "react";
 
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
+import Dialog from "@mui/material/Dialog";
+import DialogActions from "@mui/material/DialogActions";
+import DialogContent from "@mui/material/DialogContent";
+import DialogTitle from "@mui/material/DialogTitle";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 
@@ -75,6 +79,29 @@ export function ConsultationWorkspace({ context }: ConsultationWorkspaceProps) {
     setComplaintError(null);
     void saveEncounter();
   };
+
+  // Complete used to close an encounter whose chief complaint had been
+  // cleared, with no confirmation (QA 17 Oct 2026). It now needs the
+  // complaint, saves pending edits first, and asks before the permanent step.
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const askComplete = () => {
+    if (chiefComplaint.trim() === "") {
+      setComplaintError(t("doctor.completeNeedsComplaint"));
+      complaintRef.current?.focus();
+      return;
+    }
+    setConfirmOpen(true);
+  };
+  const confirmComplete = async () => {
+    setConfirmOpen(false);
+    if (dirty && !(await saveEncounter())) return;
+    await complete();
+  };
+  const recorded = [
+    soap.subjective?.trim() || soap.objective?.trim() ? t("doctor.completeHasNotes") : null,
+    soap.assessment?.trim() ? t("doctor.completeHasAssessment") : null,
+    soap.plan?.trim() ? t("doctor.completeHasPlan") : null,
+  ].filter(Boolean) as string[];
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
@@ -151,12 +178,32 @@ export function ConsultationWorkspace({ context }: ConsultationWorkspaceProps) {
             <Button variant="contained" sx={doctorButtonSx} disabled={loading || saving || ended} onClick={save}>
               {saving ? t("doctor.statusSaving") : t("doctor.saveEncounter")}
             </Button>
-            <Button variant="outlined" sx={doctorButtonSx} disabled={!canComplete || completing || ended} onClick={complete}>
+            <Button variant="outlined" sx={doctorButtonSx} disabled={!canComplete || completing || saving || ended} onClick={askComplete}>
               {completing ? t("doctor.completing") : t("doctor.completeConsultation")}
             </Button>
           </Stack>
         </Stack>
       </Box>
+      <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)} aria-labelledby="complete-consultation-title">
+        <DialogTitle id="complete-consultation-title">{t("doctor.completeConfirmTitle")}</DialogTitle>
+        <DialogContent>
+          <Typography sx={{ fontSize: "0.875rem", mb: 1 }}>
+            {t("doctor.completeConfirmBody", { name: context.patient_name })}
+          </Typography>
+          <Typography sx={{ fontSize: "0.8125rem", color: meridian.textSecondary }}>
+            {t("doctor.completeChiefComplaint", { complaint: chiefComplaint.trim() })}
+          </Typography>
+          {recorded.length ? (
+            <Typography sx={{ fontSize: "0.8125rem", color: meridian.textSecondary }}>{recorded.join(" · ")}</Typography>
+          ) : (
+            <Alert severity="warning" sx={{ mt: 1.5 }}>{t("doctor.completeNoNotesWarning")}</Alert>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button variant="outlined" onClick={() => setConfirmOpen(false)}>{t("common.cancel")}</Button>
+          <Button variant="contained" onClick={() => void confirmComplete()}>{t("doctor.completeConfirmAction")}</Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

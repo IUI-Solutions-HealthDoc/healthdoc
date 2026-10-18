@@ -41,7 +41,26 @@ class AdmissionOut(BaseModel):
     admitted_at: datetime
     reason: str | None
     status: str
+    patient_name: str | None = None
+    patient_identifier: str | None = None
+    visit_number: str | None = None
+    ward_name: str | None = None
+    ward_name_hi: str | None = None
+    bed_number: str | None = None
     model_config = {"from_attributes": True}
+
+
+class AdmittableVisitOut(BaseModel):
+    visit_id: UUID
+    visit_number: str
+    visit_type: str
+    visit_date: datetime
+    patient_id: UUID
+    patient_name: str
+    patient_identifier: str | None = None
+    patient_age: int | None = None
+    patient_sex: str | None = None
+    admission_id: UUID | None = None
 
 
 class TransferRequest(BaseModel):
@@ -58,6 +77,8 @@ class DischargeRequest(BaseModel):
     destination_facility_name: str | None = None
     #: Must carry its UTC offset, as admitted_at does.
     discharged_at: AwareDatetime | None = None
+    #: The ward confirms leaving with mandatory checklist items still open.
+    acknowledge_incomplete_checklist: bool = False
 
     _discharged_not_future = field_validator("discharged_at")(_not_in_future)
 

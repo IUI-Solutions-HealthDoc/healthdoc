@@ -6,6 +6,7 @@
  * says why not). HealthDoc records shift names, not clinic hours, so the
  * portal does not offer clock-time slots it would have to invent.
  */
+import { formatDate } from "@/lib/dates";
 import { useCallback, useEffect, useState } from "react";
 
 import { ApiError, newIdempotencyKey } from "@/lib/api";
@@ -200,7 +201,7 @@ export function AppointmentRequestsTab() {
               <li key={r.id} className="surface-card p-4 text-sm">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="font-medium">
-                    {r.department_name} · {r.preferred_date} · {t(r.session === "morning" ? "patientPortal.appt.morning" : "patientPortal.appt.afternoon")}
+                    {r.department_name} · {formatDate(r.preferred_date)} · {t(r.session === "morning" ? "patientPortal.appt.morning" : "patientPortal.appt.afternoon")}
                     {r.is_teleconsult ? ` · ${t("patientPortal.appt.teleconsultShort")}` : ""}
                   </span>
                   <span className={`rounded px-2 py-0.5 text-xs font-medium ${STATUS_STYLE[r.status]}`}>{t(STATUS_LABEL[r.status])}</span>
@@ -217,7 +218,7 @@ export function AppointmentRequestsTab() {
                   </p>
                 ) : r.status === "confirmed" && r.appointment_date ? (
                   <p className="mt-1">
-                    {t("patientPortal.appt.bookedFor", { date: r.appointment_date, time: r.start_time ?? "" })}
+                    {t("patientPortal.appt.bookedFor", { date: formatDate(r.appointment_date), time: r.start_time ?? "" })}
                     {r.doctor_name ? ` · ${r.doctor_name}` : ""}
                   </p>
                 ) : null}

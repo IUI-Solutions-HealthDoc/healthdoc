@@ -108,11 +108,19 @@ class EmergencyTriageCreate(BaseModel):
     patient_id: uuid.UUID
     visit_id: uuid.UUID
     acuity_level: str = Field(..., description="resuscitation | emergent | urgent | non_urgent")
-    chief_complaint: str = Field(..., min_length=1)
+    chief_complaint: str = Field(..., min_length=1, max_length=500)
     triage_notes: str | None = None
     assigned_doctor_id: uuid.UUID | None = None
-    assigned_bay: str | None = None
+    assigned_bay: str | None = Field(default=None, max_length=50)
     triaged_at: datetime | None = None
+
+    @field_validator("chief_complaint")
+    @classmethod
+    def _complaint_has_words(cls, value: str) -> str:
+        # A single space saved as the chief complaint (QA 16 Oct 2026).
+        if not value.strip():
+            raise ValueError("Enter the chief complaint")
+        return value.strip()
 
     @model_validator(mode="after")
     def _validate_acuity(self) -> "EmergencyTriageCreate":
@@ -128,6 +136,8 @@ class EmergencyTriageUpdate(BaseModel):
     clinician_seen: bool | None = None
     disposition: str | None = None
     disposition_notes: str | None = None
+    # Discharging a priority 1/2 patient home must be deliberate.
+    confirm_high_acuity_discharge: bool = False
 
     @model_validator(mode="after")
     def _validate_update(self) -> "EmergencyTriageUpdate":
@@ -141,6 +151,13 @@ class EmergencyTriageUpdate(BaseModel):
 class EmergencyReTriageRequest(BaseModel):
     new_acuity: str = Field(..., description="resuscitation | emergent | urgent | non_urgent")
     reason: str = Field(..., min_length=10, description="Mandatory clinical justification for acuity change.")
+
+    @field_validator("reason")
+    @classmethod
+    def _reason_has_words(cls, value: str) -> str:
+        if len(value.strip()) < 10:
+            raise ValueError("Give at least 10 characters of clinical justification")
+        return value.strip()
 
     @model_validator(mode="after")
     def _validate_re_triage(self) -> "EmergencyReTriageRequest":
@@ -184,6 +201,10 @@ class EmergencyTriageOut(BaseModel):
     created_at: datetime
     patient_name: str | None = None
     patient_identifier: str | None = None
+    patient_age_years: int | None = None
+    patient_sex: str | None = None
+    visit_number: str | None = None
+    arrived_at: datetime | None = None
     doctor_name: str | None = None
     logs: list[EmergencyTriageLogOut] = []
 
@@ -199,5 +220,7 @@ class EmergencyMetricsOut(BaseModel):
     urgent_count: int
     non_urgent_count: int
     avg_door_to_clinician_minutes: float | None = None
+    door_to_clinician_window_hours: int | None = None
+    awaiting_triage_count: int = 0
     lwbs_count: int
 

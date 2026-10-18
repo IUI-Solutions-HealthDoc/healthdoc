@@ -17,8 +17,53 @@ type ViewState =
   | { status: "error"; message: string }
   | { status: "ready"; data: PortalDashboard };
 
+// Stored codes as a patient reads them: "abha_identity" printed as
+// "Abha Identity" (QA 17 Oct 2026).
+const READABLE: Record<string, string> = {
+  abha_identity: "ABHA identity",
+  abha: "ABHA",
+  patients: "Patient record",
+  patient: "Patient record",
+  encounters: "Consultation notes",
+  lab_results: "Lab results",
+  radiology_reports: "Imaging reports",
+  prescriptions: "Prescriptions",
+  consent_records: "Consent records",
+  admissions: "Admission record",
+  clinical_review: "Clinical review",
+  treatment: "Treatment",
+};
+
 function humanise(value: string | null): string {
-  return value ? value.replaceAll("_", " ") : "—";
+  if (!value) return "—";
+  if (READABLE[value]) return READABLE[value];
+  const words = value.replaceAll("_", " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+type AccessEntry = PortalDashboard["accessHistory"]["items"][number];
+
+/**
+ * One screen opening a record reads it several times within a second or two;
+ * listed one by one, the history looked like duplicated events (QA 17 Oct
+ * 2026). Identical reads within a minute are shown once with a count.
+ */
+function collapseRepeats(items: AccessEntry[]): (AccessEntry & { repeats: number })[] {
+  const out: (AccessEntry & { repeats: number })[] = [];
+  for (const entry of items) {
+    const last = out[out.length - 1];
+    const same =
+      last &&
+      last.staff_name === entry.staff_name &&
+      last.role === entry.role &&
+      last.resource_type === entry.resource_type &&
+      last.purpose_code === entry.purpose_code &&
+      Boolean(last.emergency_access) === Boolean(entry.emergency_access) &&
+      Math.abs(new Date(last.accessed_at).getTime() - new Date(entry.accessed_at).getTime()) <= 60_000;
+    if (same) last.repeats += 1;
+    else out.push({ ...entry, repeats: 1 });
+  }
+  return out;
 }
 
 function UnboundPortal() {
@@ -73,7 +118,7 @@ export default function Page() {
   const totalConsentPages = Math.max(1, Math.ceil(consents.length / CONSENT_PAGE_SIZE));
   const paginatedConsents = consents.slice((consentPage - 1) * CONSENT_PAGE_SIZE, consentPage * CONSENT_PAGE_SIZE);
 
-  const historyItems = view.status === "ready" ? view.data.accessHistory.items : [];
+  const historyItems = view.status === "ready" ? collapseRepeats(view.data.accessHistory.items) : [];
   const totalHistoryPages = Math.max(1, Math.ceil(historyItems.length / HISTORY_PAGE_SIZE));
   const paginatedHistory = historyItems.slice((historyPage - 1) * HISTORY_PAGE_SIZE, historyPage * HISTORY_PAGE_SIZE);
 
@@ -283,7 +328,7 @@ export default function Page() {
               <table className="w-full text-left text-sm">
                 <thead className="bg-muted/50 text-muted-foreground"><tr><th className="p-3">When</th><th className="p-3">Accessed by</th><th className="p-3">Data</th><th className="p-3">Purpose</th></tr></thead>
                 <tbody>{paginatedHistory.map((entry, index) => (
-                  <tr key={`${entry.accessed_at}-${index}`} className="border-t border-border"><td className="p-3">{formatDateTime(entry.accessed_at)}</td><td className="p-3">{entry.staff_name ?? "System"}<span className="block text-xs capitalize text-muted-foreground">{humanise(entry.role)}</span></td><td className="p-3 capitalize">{humanise(entry.resource_type)}{entry.emergency_access ? <span className="ml-2 rounded bg-danger-muted px-2 py-0.5 text-xs text-danger">Emergency</span> : null}</td><td className="p-3 capitalize">{humanise(entry.purpose_code)}</td></tr>
+                  <tr key={`${entry.accessed_at}-${index}`} className="border-t border-border"><td className="p-3">{formatDateTime(entry.accessed_at)}</td><td className="p-3">{entry.staff_name ?? "System"}<span className="block text-xs text-muted-foreground">{humanise(entry.role)}</span></td><td className="p-3">{humanise(entry.resource_type)}{entry.repeats > 1 ? <span className="ml-1 text-xs text-muted-foreground">×{entry.repeats}</span> : null}{entry.emergency_access ? <span className="ml-2 rounded bg-danger-muted px-2 py-0.5 text-xs text-danger">Emergency</span> : null}</td><td className="p-3">{humanise(entry.purpose_code)}</td></tr>
                 ))}</tbody>
               </table>
             </div>

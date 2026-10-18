@@ -172,6 +172,40 @@ async def _check_conflict(
         )
 
 
+async def _check_patient_conflict(
+    db: AsyncSession,
+    facility_id: uuid.UUID,
+    patient_id: uuid.UUID,
+    appointment_date: date,
+    start_time: str,
+    end_time: str,
+    exclude_id: uuid.UUID | None = None,
+) -> None:
+    """One patient, one place at a time.
+
+    Only the doctor's diary was checked, so the same patient booked twice into
+    the same department and slot (no doctor named) succeeded twice with the
+    same success toast (QA 17 Oct 2026). The patient row is locked so two
+    desks booking at once serialise here.
+    """
+    await db.execute(select(Patient.id).where(Patient.id == patient_id).with_for_update())
+    stmt = select(Appointment).where(
+        Appointment.facility_id == facility_id,
+        Appointment.patient_id == patient_id,
+        Appointment.appointment_date == appointment_date,
+        Appointment.status.in_(ACTIVE_STATUSES),
+        Appointment.start_time < end_time,
+        Appointment.end_time > start_time,
+    )
+    if exclude_id is not None:
+        stmt = stmt.where(Appointment.id != exclude_id)
+    clash = (await db.execute(stmt.limit(1))).scalars().first()
+    if clash is not None:
+        raise AppointmentConflictError(
+            f"This patient already has an appointment from {clash.start_time} to {clash.end_time} on this day"
+        )
+
+
 async def list_services(
     db: AsyncSession, facility_id: uuid.UUID
 ) -> list[AppointmentService]:
@@ -337,6 +371,9 @@ async def create_appointment(
         raise AppointmentValidationError("An appointment cannot be booked for a past date")
     end_time = calc_end_time(payload.start_time, duration)
 
+    await _check_patient_conflict(
+        db, facility_id, payload.patient_id, payload.appointment_date, payload.start_time, end_time,
+    )
     if payload.doctor_user_id is not None:
         await _lock_doctor(db, payload.doctor_user_id, facility_id)
         await _check_conflict(
@@ -399,6 +436,9 @@ async def update_appointment(
         if new_date < await _facility_today(db, facility_id):
             raise AppointmentValidationError("An appointment cannot be moved to a past date")
         new_end = calc_end_time(new_start, new_duration)
+        await _check_patient_conflict(
+            db, facility_id, appt.patient_id, new_date, new_start, new_end, exclude_id=appt.id,
+        )
         if new_doctor is not None:
             await _lock_doctor(db, new_doctor, facility_id)
             await _check_conflict(db, facility_id, new_doctor, new_date, new_start, new_end, exclude_id=appt.id)

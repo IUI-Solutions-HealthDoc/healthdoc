@@ -54,6 +54,15 @@ def compute_donor_eligibility(
     return is_eligible, next_date
 
 
+def _group_or_raw(value: str) -> str:
+    from app.blood_bank.schemas import normalise_blood_group
+
+    try:
+        return normalise_blood_group(value) or value.strip()
+    except ValueError:
+        return value.strip()
+
+
 async def list_donors(
     db: AsyncSession,
     facility_id: uuid.UUID,
@@ -62,7 +71,7 @@ async def list_donors(
 ) -> list[BloodDonor]:
     query = select(BloodDonor).where(BloodDonor.id.in_(donor_scope(facility_id))).order_by(BloodDonor.full_name)
     if blood_group:
-        query = query.where(BloodDonor.blood_group == blood_group.strip())
+        query = query.where(BloodDonor.blood_group == _group_or_raw(blood_group))
     if is_eligible is not None:
         query = query.where(BloodDonor.is_eligible == is_eligible)
     res = await db.execute(query)
@@ -118,7 +127,7 @@ async def list_units(
     if status:
         query = query.where(BloodUnit.status == status.strip())
     if blood_group:
-        query = query.where(BloodUnit.blood_group == blood_group.strip())
+        query = query.where(BloodUnit.blood_group == _group_or_raw(blood_group))
     if screening_status:
         query = query.where(BloodUnit.screening_status == screening_status.strip())
     res = await db.execute(query)

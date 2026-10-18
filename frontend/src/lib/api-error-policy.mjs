@@ -77,6 +77,10 @@ export function userFacingApiError(code, payload) {
   // relayed from ABDM is still never shown: it can carry upstream detail.
   const own = ownRefusalMessage(code, payload, domainCode);
   if (own) return own;
+  const coded = codeOnlyMessage(code, payload, domainCode);
+  if (coded) return coded;
+  const plain = plainDetailMessage(code, payload);
+  if (plain) return plain;
 
   if (code === 400 || code === 422) {
     return validationSummary(payload) ?? "Please check the highlighted fields and try again.";
@@ -121,16 +125,99 @@ function ownRefusalMessage(code, payload, domainCode) {
  * FastAPI's 422 list, reduced to the field and the reason. The submitted
  * value (`input`) is never echoed: it may be an identifier.
  */
+/**
+ * A refusal that carries only a code (`{"code": "insufficient_stock",
+ * "short_by": "9"}`) used to become "check the highlighted fields" with
+ * nothing highlighted (QA 16-17 Oct 2026). Known codes get a sentence built
+ * from their numeric parameters; any other HealthDoc code is read as words.
+ */
+const CODE_SENTENCES = {
+  insufficient_stock: (p) =>
+    p.short_by
+      ? `Not enough stock: short by ${p.short_by}. Reduce the quantity or tick partial fulfilment.`
+      : p.available !== undefined && p.requested !== undefined
+        ? `Not enough stock: ${p.available} available, ${p.requested} requested. Reduce the quantity or tick partial fulfilment.`
+        : "Not enough stock for this quantity.",
+  batch_expired: () => "This batch has expired and cannot be dispensed. Choose another batch.",
+  allergy_conflict: () => "The patient has a recorded allergy to this medicine. Review the allergy before dispensing.",
+  drug_interaction_conflict: () => "This medicine interacts with another on the prescription. Review the prescription first.",
+  sample_not_ready_for_result: () => "The sample has not been received in the lab yet, so a result cannot be entered.",
+  result_already_exists: () => "A result has already been entered for this test.",
+  idempotency_key_reuse: () => "This form was already submitted with different values. Reload the page and enter it again.",
+  invoice_not_found: () => "The invoice was not found.",
+  consent_manager_inactive: () => "This consent manager is not active.",
+  prescription_item_mismatch: () => "This line does not belong to the prescription being dispensed.",
+  substitute_matches_prescribed_item: () => "The substitute is the same medicine as the one prescribed.",
+};
+
+function codeParams(value) {
+  if (!value || typeof value !== "object") return {};
+  if (typeof value.code === "string") return value;
+  return codeParams(value.detail);
+}
+
+function codeOnlyMessage(code, payload, domainCode) {
+  if (![400, 404, 409, 422].includes(code) || !domainCode) return undefined;
+  if (RELAYED_PREFIXES.some((prefix) => domainCode.toLowerCase().startsWith(prefix))) return undefined;
+  const params = {};
+  for (const [key, val] of Object.entries(codeParams(payload))) {
+    // Only quantities travel into the sentence; ids and free text never do.
+    if (typeof val === "string" && /^-?\d+(\.\d+)?$/.test(val)) params[key] = val;
+    if (typeof val === "number" && Number.isFinite(val)) params[key] = String(val);
+  }
+  if (Object.hasOwn(CODE_SENTENCES, domainCode)) return CODE_SENTENCES[domainCode](params);
+  return codeAsSentence(domainCode);
+}
+
+function codeAsSentence(value) {
+  if (!/^[a-z][a-z0-9]*(_[a-z0-9]+)+$/.test(value)) return undefined;
+  const words = value.replace(/_/g, " ");
+  return `${words.charAt(0).toUpperCase()}${words.slice(1)}.`;
+}
+
+const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+
+/**
+ * FastAPI's `HTTPException(422, "Verifier must be different from the person
+ * who entered the result")` arrives as a bare string. It is HealthDoc's own
+ * sentence, so it is shown; a bare code is read as words. Anything carrying
+ * an id, markup or a stack is not.
+ */
+function plainDetailMessage(code, payload) {
+  if (![400, 404, 409, 422].includes(code)) return undefined;
+  const text = typeof payload === "string" ? payload : payload && typeof payload === "object" && typeof payload.detail === "string" ? payload.detail : undefined;
+  if (!text) return undefined;
+  const trimmed = text.trim();
+  const asCode = codeAsSentence(trimmed);
+  if (asCode) return asCode;
+  if (UUID_RE.test(trimmed) || /=|Keycloak|object storage|DETAIL:|psycopg|asyncpg/i.test(trimmed)) return undefined;
+  if (!isPlainSentence(trimmed) || !/\s/.test(trimmed)) return undefined;
+  return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+}
+
 function validationSummary(payload) {
-  const items = payload && typeof payload === "object" && Array.isArray(payload.detail) ? payload.detail : null;
+  // api() hands over the envelope's `error.message`, which for a FastAPI 422
+  // is the bare list; tests and older callers pass `{detail: [...]}`.
+  const items = Array.isArray(payload)
+    ? payload
+    : payload && typeof payload === "object" && Array.isArray(payload.detail) ? payload.detail : null;
   if (!items) return undefined;
   const parts = [];
   for (const item of items.slice(0, 3)) {
-    if (!item || typeof item.msg !== "string") continue;
-    const reason = item.msg.replace(/^Value error, /, "").replace(/\b([a-z]+)_([a-z_]+)\b/g, (m) => m.replace(/_/g, " "));
-    if (!isPlainSentence(reason)) continue;
+    if (!item || typeof item !== "object") continue;
     const loc = Array.isArray(item.loc) ? item.loc.filter((part) => typeof part === "string" && part !== "body") : [];
     const field = loc.length ? loc[loc.length - 1].replace(/_/g, " ") : "";
+    if (!item || typeof item.msg !== "string") {
+      // Still name the field: "check the highlighted fields" with nothing
+      // highlighted left people guessing (QA 17 Oct 2026).
+      if (field) parts.push(`${field}: check this value`);
+      continue;
+    }
+    const reason = item.msg.replace(/^Value error, /, "").replace(/\b([a-z]+)_([a-z_]+)\b/g, (m) => m.replace(/_/g, " "));
+    if (!isPlainSentence(reason)) {
+      if (field) parts.push(`${field}: check this value`);
+      continue;
+    }
     parts.push(field ? `${field}: ${reason}` : reason);
   }
   if (!parts.length) return undefined;

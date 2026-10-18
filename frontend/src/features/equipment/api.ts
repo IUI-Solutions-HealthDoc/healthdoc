@@ -20,6 +20,8 @@ export interface EquipmentItem {
   status: EquipmentStatus;
   status_since: string;
   status_reason: string | null;
+  last_service_at?: string | null;
+  last_service_type?: string | null;
 }
 
 export interface EquipmentEvent {

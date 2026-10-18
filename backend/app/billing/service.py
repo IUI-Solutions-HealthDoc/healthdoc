@@ -123,8 +123,21 @@ def _money(value: Decimal) -> Decimal:
 encounters_t = sa.table("encounters", sa.column("id"), sa.column("visit_id"))
 visits_t = sa.table(
     "visits", sa.column("id"), sa.column("facility_id"), sa.column("patient_id"),
-    sa.column("visit_date", sa.DateTime(timezone=True)),
+    sa.column("visit_date", sa.DateTime(timezone=True)), sa.column("visit_type"),
 )
+admissions_t = sa.table(
+    "admissions", sa.column("id"), sa.column("visit_id"), sa.column("status"),
+    sa.column("admitted_at", sa.DateTime(timezone=True)),
+)
+discharges_t = sa.table(
+    "discharges", sa.column("admission_id"), sa.column("discharged_at", sa.DateTime(timezone=True)),
+)
+
+#: Tariff codes for care that has no order row to bill from. The price is the
+#: facility's own charge_master entry; without one the line stays unpriced and
+#: blocks issue, never a guessed amount.
+EMERGENCY_CARE_CODE = "EMERGENCY_CARE"
+IPD_BED_DAY_CODE = "IPD_BED_DAY"
 orders_t = sa.table("orders", sa.column("id"), sa.column("encounter_id"))
 
 lab_order_items_t = sa.table(
@@ -506,17 +519,84 @@ async def _aggregate_pharmacy_charges(db: AsyncSession, visit_id: uuid.UUID, inv
     return lines
 
 
+async def _aggregate_emergency_charge(
+    db: AsyncSession, visit_id: uuid.UUID, invoice_id: uuid.UUID, context: _TariffContext,
+) -> list[ChargeLine]:
+    """Emergency care, once per emergency visit.
+
+    An emergency visit was billed only its registration fee, with no warning
+    (QA 16 Oct 2026). Priced from the facility's EMERGENCY_CARE tariff.
+    """
+    visit_type = (await db.execute(sa.select(visits_t.c.visit_type).where(visits_t.c.id == visit_id))).scalar_one_or_none()
+    if visit_type != "emergency":
+        return []
+    if visit_id in await _already_billed_reference_ids(db, invoice_id, "emergency_visits"):
+        return []
+    return [
+        await _department_charge(
+            db, context, category=ChargeCategory.CONSULTATION, code=EMERGENCY_CARE_CODE,
+            reference_type="emergency_visits", reference_id=visit_id, description="Emergency care",
+        )
+    ]
+
+
+async def _aggregate_ipd_stay_charges(
+    db: AsyncSession, visit_id: uuid.UUID, invoice_id: uuid.UUID, context: _TariffContext,
+) -> list[ChargeLine]:
+    """Bed-days for each discharged admission on the visit, at the IPD_BED_DAY tariff.
+
+    Counted from admission to discharge, part days rounded up, at least one.
+    An admission still open is not billed yet: its days are not known.
+    """
+    billed = await _already_billed_reference_ids(db, invoice_id, "admissions")
+    rows = (
+        await db.execute(
+            sa.select(admissions_t.c.id, admissions_t.c.admitted_at, discharges_t.c.discharged_at)
+            .select_from(admissions_t.join(discharges_t, discharges_t.c.admission_id == admissions_t.c.id))
+            .where(admissions_t.c.visit_id == visit_id)
+        )
+    ).all()
+    lines: list[ChargeLine] = []
+    for row in rows:
+        if row.id in billed or row.admitted_at is None or row.discharged_at is None:
+            continue
+        seconds = max((row.discharged_at - row.admitted_at).total_seconds(), 0)
+        days = max(1, -(-int(seconds) // 86_400))
+        line = await _department_charge(
+            db, context, category=ChargeCategory.IPD_STAY, code=IPD_BED_DAY_CODE,
+            reference_type="admissions", reference_id=row.id,
+            description=f"Inpatient stay ({days} day{'s' if days != 1 else ''})",
+        )
+        line.quantity = Decimal(days)
+        line.amount = _money(line.unit_price * days) if line.priced else Decimal("0.00")
+        lines.append(line)
+    return lines
+
+
+async def open_admission_warning(db: AsyncSession, visit_id: uuid.UUID) -> str | None:
+    open_stay = (
+        await db.execute(
+            sa.select(admissions_t.c.id).where(admissions_t.c.visit_id == visit_id, admissions_t.c.status == "admitted")
+        )
+    ).first()
+    if open_stay is None:
+        return None
+    return "The patient is still admitted. Bed-day charges are added when the patient is discharged."
+
+
 async def aggregate_unbilled_charges(db: AsyncSession, visit_id: uuid.UUID, invoice_id: uuid.UUID) -> list[ChargeLine]:
-    # ipd_stay / procedure / blood deliberately not aggregated — no
-    # rate basis (bed-class tariff, OT package price, blood unit
-    # price) exists anywhere in the schema yet. Left out rather than
-    # guessed; flagged again here since this is the one function that
-    # decides "everything chargeable for this visit."
+    # Procedures and blood are still not aggregated: no rate basis (OT package
+    # price, blood unit price) exists in the schema yet. Left out rather than
+    # guessed. Emergency care and bed-days are priced from the facility's own
+    # charge_master; with no tariff they come back unpriced, which blocks
+    # issue (invoice_has_unpriced_charges) instead of billing zero.
     context = await _tariff_context(db, visit_id, invoice_id)
     lab = await _aggregate_lab_charges(db, visit_id, invoice_id, context)
     radiology = await _aggregate_radiology_charges(db, visit_id, invoice_id, context)
     pharmacy = await _aggregate_pharmacy_charges(db, visit_id, invoice_id)
-    return lab + radiology + pharmacy
+    emergency = await _aggregate_emergency_charge(db, visit_id, invoice_id, context)
+    ipd = await _aggregate_ipd_stay_charges(db, visit_id, invoice_id, context)
+    return emergency + ipd + lab + radiology + pharmacy
 
 
 async def _get_invoice_for_visit(db: AsyncSession, visit_id: uuid.UUID) -> Invoice:
@@ -558,6 +638,7 @@ async def preview_invoice(db: AsyncSession, visit_id: uuid.UUID) -> InvoicePrevi
     priced_total = sum((line.amount for line in new_lines if line.priced), Decimal("0"))
     unpriced_count = sum(1 for line in new_lines if not line.priced)
 
+    warning = await open_admission_warning(db, visit_id)
     return InvoicePreviewResponse(
         visit_id=visit_id,
         invoice_id=invoice_id,
@@ -565,6 +646,7 @@ async def preview_invoice(db: AsyncSession, visit_id: uuid.UUID) -> InvoicePrevi
         already_billed_count=already_billed,
         new_charge_lines=new_lines,
         unpriced_count=unpriced_count,
+        warnings=[warning] if warning else [],
         projected_new_charges_total=_money(priced_total),
         projected_gross_amount=_money(existing_gross + priced_total),
     )
@@ -623,6 +705,12 @@ async def build_invoice(
     )
     priced_lines = [line for line in charge_lines if line.priced]
     skipped = len(charge_lines) - len(priced_lines)
+    # Say which tariffs are missing and whether a stay is still open: "0 charges
+    # added, 0 skipped" for an emergency admission told the desk nothing.
+    notes = {
+        "unpriced_codes": sorted({line.charge_code for line in charge_lines if not line.priced and line.charge_code}),
+        "warnings": [w for w in [await open_admission_warning(db, visit_id)] if w],
+    }
 
     if dry_run or not priced_lines:
         return InvoiceBuildResponse(
@@ -634,6 +722,7 @@ async def build_invoice(
             lines_skipped_unpriced=skipped,
             gross_amount=_money(Decimal(invoice.gross_amount)),
             net_amount=_money(Decimal(invoice.net_amount)),
+            **notes,
         )
 
     added_lines: list[ChargeLine] = []
@@ -654,6 +743,7 @@ async def build_invoice(
             lines_skipped_unpriced=skipped,
             gross_amount=_money(Decimal(invoice.gross_amount)),
             net_amount=_money(Decimal(invoice.net_amount)),
+            **notes,
         )
 
     added_total = sum((line.amount for line in added_lines), Decimal("0"))
@@ -719,6 +809,7 @@ async def build_invoice(
         lines_skipped_unpriced=skipped,
         gross_amount=_money(Decimal(invoice.gross_amount)),
         net_amount=_money(Decimal(invoice.net_amount)),
+        **notes,
     )
 
 

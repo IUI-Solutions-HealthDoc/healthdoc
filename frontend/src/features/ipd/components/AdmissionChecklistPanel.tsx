@@ -42,6 +42,9 @@ export function AdmissionChecklistPanel({
   const [updatingTaskId, setUpdatingTaskId] = React.useState<string | null>(null);
 
   const loadChecklist = React.useCallback(async () => {
+    // Closing the chart left this mounted with an empty id, which requested
+    // /admissions//checklist and logged a 404 (QA 16 Oct 2026).
+    if (!admissionId) return;
     setLoading(true);
     setError(null);
     try {
@@ -57,6 +60,20 @@ export function AdmissionChecklistPanel({
   React.useEffect(() => {
     loadChecklist();
   }, [loadChecklist]);
+
+  const handleReopen = async (taskId: string) => {
+    setUpdatingTaskId(taskId);
+    setError(null);
+    try {
+      await updateAdmissionChecklistTask(admissionId, taskId, { status: "pending" });
+      await loadChecklist();
+      onUpdate?.();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : t("ipd.checklist.errUpdate"));
+    } finally {
+      setUpdatingTaskId(null);
+    }
+  };
 
   const handleComplete = async (taskId: string) => {
     setUpdatingTaskId(taskId);
@@ -83,7 +100,8 @@ export function AdmissionChecklistPanel({
 
   const handleConfirmSkip = async () => {
     if (!selectedTask) return;
-    if (!skipReason.trim()) {
+    // "x" was accepted as the reason to skip identity verification.
+    if (skipReason.trim().length < 10) {
       setSkipReasonError(t("ipd.checklist.skipReasonRequired"));
       return;
     }
@@ -219,6 +237,15 @@ export function AdmissionChecklistPanel({
                       />
                     </Stack>
 
+                    {isSkipped && task.completed_by_name && (
+                      <Typography sx={{ fontSize: "0.75rem", color: "#475569" }}>
+                        {t("ipd.checklist.skippedBy", {
+                          name: task.completed_by_name,
+                          time: task.completed_at ? new Date(task.completed_at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : "",
+                        })}
+                      </Typography>
+                    )}
+
                     {isCompleted && task.completed_by_name && (
                       <Typography sx={{ fontSize: "0.75rem", color: "#166534" }}>
                         {t("ipd.checklist.completedBy", {
@@ -281,12 +308,24 @@ export function AdmissionChecklistPanel({
                         </Button>
                       </>
                     ) : (
-                      <Chip
-                        size="small"
-                        label={isCompleted ? t("ipd.checklist.statusCompleted") : t("ipd.checklist.statusSkipped")}
-                        color={isCompleted ? "success" : "default"}
-                        sx={{ fontWeight: 600 }}
-                      />
+                      <>
+                        <Chip
+                          size="small"
+                          label={isCompleted ? t("ipd.checklist.statusCompleted") : t("ipd.checklist.statusSkipped")}
+                          color={isCompleted ? "success" : "default"}
+                          sx={{ fontWeight: 600 }}
+                        />
+                        {/* A mistaken tick could not be taken back. */}
+                        <Button
+                          variant="text"
+                          size="small"
+                          disabled={updatingTaskId === task.id}
+                          onClick={() => handleReopen(task.id)}
+                          sx={{ fontSize: "0.75rem", py: 0.25, minWidth: 0 }}
+                        >
+                          {t("ipd.checklist.reopen")}
+                        </Button>
+                      </>
                     )}
                   </Stack>
                 </Stack>

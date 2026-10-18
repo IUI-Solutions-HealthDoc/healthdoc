@@ -22,6 +22,29 @@ export interface Admission {
   admitted_at: string;
   reason?: string | null;
   status: AdmissionStatus;
+  patient_name?: string | null;
+  patient_identifier?: string | null;
+  visit_number?: string | null;
+  ward_name?: string | null;
+  ward_name_hi?: string | null;
+  bed_number?: string | null;
+}
+
+/** An open visit a ward can admit (GET /admissions/admittable-visits). */
+export interface AdmittableVisit {
+  visit_id: string;
+  visit_number: string;
+  visit_type: string;
+  visit_date: string;
+  patient_id: string;
+  patient_name: string;
+  patient_identifier: string | null;
+  patient_age: number | null;
+  patient_sex: string | null;
+}
+
+export async function findAdmittableVisits(q: string) {
+  return api<AdmittableVisit[]>(`/admissions/admittable-visits?q=${encodeURIComponent(q.trim())}`, { method: "GET" });
 }
 
 export interface Discharge {

@@ -24,18 +24,60 @@ import {
   type EmergencyDisposition,
 } from "@/features/emergency/api";
 import { PageHeading } from "@/components/common/PageHeading";
+import { toast } from "@/components/ui/toast";
 import { ApiError, formatDateTime, newIdempotencyKey } from "@/lib/api";
+import { canRoleAccessPath } from "@/lib/auth/routes";
 import { useLocale } from "@/lib/i18n";
+import { useUserRole } from "@/providers/auth-provider";
 
-const initial: EmergencyPatientInput = {
-  full_name: "",
-  sex: "unknown",
-  age_years: 0,
-  mobile: "",
-};
+/**
+ * Age starts empty, not 0: a desk that pressed Register without touching the
+ * form saved "estimated age 0", which then read "0 yrs" up to the IPD chart
+ * (QA 16 Oct 2026). Acuity and disposition likewise start unchosen.
+ */
+interface RegistrationDraft {
+  full_name: string;
+  sex: EmergencyPatientInput["sex"];
+  age: string;
+  mobile: string;
+}
+
+const initial: RegistrationDraft = { full_name: "", sex: "unknown", age: "", mobile: "" };
+
+const MOBILE_RE = /^[6-9]\d{9}$/;
+
+function draftErrors(draft: RegistrationDraft): { age?: true; mobile?: true } {
+  const errors: { age?: true; mobile?: true } = {};
+  const age = draft.age.trim();
+  if (!/^\d{1,3}$/.test(age) || Number(age) > 150) errors.age = true;
+  const mobile = draft.mobile.replace(/[\s-]/g, "");
+  if (mobile && !MOBILE_RE.test(mobile.replace(/^(\+?91)/, ""))) errors.mobile = true;
+  return errors;
+}
+
+/** "Unknown (TH-…)" already carries the THID; do not print it twice. */
+function nameWithIdentifier(name: string, identifier: string | null | undefined): string {
+  if (!identifier || name.includes(identifier)) return name;
+  return `${name} (${identifier})`;
+}
+
+const FIELD = "w-full rounded-md border px-3 py-2 text-foreground bg-background";
+const fieldClass = (invalid: boolean) =>
+  `${FIELD} ${invalid ? "border-danger ring-2 ring-danger/30" : "border-border"}`;
+
+function DialogError({ message }: { message: string | null }) {
+  if (!message) return null;
+  return (
+    <div role="alert" className="rounded-md border border-danger/30 bg-danger/10 p-3 text-sm text-danger">
+      {message}
+    </div>
+  );
+}
 
 export default function Page() {
   const { t } = useLocale();
+  const role = useUserRole();
+  const canConsult = canRoleAccessPath(role, "/doctor/consultation");
   const acuityStyles = useMemo(
     (): Record<EmergencyAcuity, { label: string; badge: string; border: string }> => ({
       resuscitation: {
@@ -62,10 +104,23 @@ export default function Page() {
     [t],
   );
 
+  const statusLabel = (status: EmergencyTriageStatus): string =>
+    t(
+      ({
+        waiting: "emergency.statusWaiting",
+        in_treatment: "emergency.statusInTreatment",
+        admitted: "emergency.statusAdmitted",
+        discharged: "emergency.statusDischarged",
+        lwbs: "emergency.statusLwbs",
+      } as const)[status] ?? "emergency.statusWaiting",
+    );
+
   const [activeTab, setActiveTab] = useState<"board" | "registration">("board");
 
   // Registration states
-  const [form, setForm] = useState<EmergencyPatientInput>(initial);
+  const [form, setForm] = useState<RegistrationDraft>(initial);
+  const [showFormErrors, setShowFormErrors] = useState(false);
+  const formErrors = draftErrors(form);
   const [created, setCreated] = useState<EmergencyPatient | null>(null);
   const [createdVisit, setCreatedVisit] = useState<EmergencyVisitResult | null>(null);
   const [worklist, setWorklist] = useState<EmergencyWorklistItem[]>([]);
@@ -86,7 +141,8 @@ export default function Page() {
   // Triage Creation Modal
   const [triageModalOpen, setTriageModalOpen] = useState(false);
   const [triageTargetArrival, setTriageTargetArrival] = useState<EmergencyWorklistItem | null>(null);
-  const [triageAcuity, setTriageAcuity] = useState<EmergencyAcuity>("urgent");
+  const [triageAcuity, setTriageAcuity] = useState<EmergencyAcuity | "">("");
+  const [triageError, setTriageError] = useState<string | null>(null);
   const [triageComplaint, setTriageComplaint] = useState("");
   const [triageNotes, setTriageNotes] = useState("");
   const [triageBay, setTriageBay] = useState("");
@@ -95,14 +151,17 @@ export default function Page() {
   // Re-triage Modal
   const [retriageModalOpen, setRetriageModalOpen] = useState(false);
   const [retriageTarget, setRetriageTarget] = useState<EmergencyTriageOut | null>(null);
-  const [retriageAcuity, setRetriageAcuity] = useState<EmergencyAcuity>("urgent");
+  const [retriageAcuity, setRetriageAcuity] = useState<EmergencyAcuity | "">("");
+  const [retriageError, setRetriageError] = useState<string | null>(null);
   const [retriageReason, setRetriageReason] = useState("");
   const [retriageSubmitting, setRetriageSubmitting] = useState(false);
 
   // Disposition Modal
   const [dispositionModalOpen, setDispositionModalOpen] = useState(false);
   const [dispositionTarget, setDispositionTarget] = useState<EmergencyTriageOut | null>(null);
-  const [dispositionType, setDispositionType] = useState<EmergencyDisposition>("discharge");
+  const [dispositionType, setDispositionType] = useState<EmergencyDisposition | "">("");
+  const [dispositionConfirmed, setDispositionConfirmed] = useState(false);
+  const [dispositionError, setDispositionError] = useState<string | null>(null);
   const [dispositionNotes, setDispositionNotes] = useState("");
   const [dispositionSubmitting, setDispositionSubmitting] = useState(false);
 
@@ -142,10 +201,15 @@ export default function Page() {
   async function submitRegistration(event: React.FormEvent) {
     event.preventDefault();
     if (registrationInFlight.current) return;
+    if (Object.keys(draftErrors(form)).length) {
+      setShowFormErrors(true);
+      return;
+    }
     const payload: EmergencyPatientInput = {
-      ...form,
-      full_name: form.full_name?.trim() || undefined,
-      mobile: form.mobile?.trim() || undefined,
+      sex: form.sex,
+      age_years: Number(form.age.trim()),
+      full_name: form.full_name.trim() || undefined,
+      mobile: form.mobile.replace(/[\s-]/g, "") || undefined,
     };
     const fingerprint = JSON.stringify(payload);
     if (registrationAttempt.current?.fingerprint !== fingerprint) {
@@ -160,6 +224,7 @@ export default function Page() {
       registrationAttempt.current = null;
       setCreated(patient);
       setForm(initial);
+      setShowFormErrors(false);
     } catch (reason) {
       setError(reason instanceof ApiError ? reason.message : t("emergency.errRegistrationFailed"));
     } finally {
@@ -186,7 +251,9 @@ export default function Page() {
 
   function handleOpenTriage(arrival: EmergencyWorklistItem) {
     setTriageTargetArrival(arrival);
-    setTriageAcuity("urgent");
+    setTriageAcuity("");
+    setTriageError(null);
+    setError(null);
     setTriageComplaint("");
     setTriageNotes("");
     setTriageBay("");
@@ -196,13 +263,17 @@ export default function Page() {
   async function handleSubmitTriage(e: React.FormEvent) {
     e.preventDefault();
     if (!triageTargetArrival) return;
+    if (!triageAcuity) {
+      setTriageError(t("emergency.errAcuityRequired"));
+      return;
+    }
     if (!triageComplaint.trim()) {
-      setError(t("emergency.errChiefComplaintRequired"));
+      setTriageError(t("emergency.errChiefComplaintRequired"));
       return;
     }
 
     setTriageSubmitting(true);
-    setError(null);
+    setTriageError(null);
     try {
       await createEmergencyTriage({
         patient_id: triageTargetArrival.patient_id,
@@ -213,10 +284,11 @@ export default function Page() {
         assigned_bay: triageBay.trim() || null,
       });
       setTriageModalOpen(false);
+      toast.success(t("emergency.toastTriageSaved", { name: triageTargetArrival.full_name }));
       void loadBoardData();
       void loadWorklist();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : t("emergency.errSaveTriage"));
+      setTriageError(err instanceof ApiError ? err.message : t("emergency.errSaveTriage"));
     } finally {
       setTriageSubmitting(false);
     }
@@ -224,27 +296,36 @@ export default function Page() {
 
   function handleOpenRetriage(triage: EmergencyTriageOut) {
     setRetriageTarget(triage);
-    setRetriageAcuity(triage.acuity_level);
+    // Opening on the current level made Confirm send "no change", which the
+    // server refuses; the current level is not offered at all.
+    setRetriageAcuity("");
     setRetriageReason("");
+    setRetriageError(null);
+    setError(null);
     setRetriageModalOpen(true);
   }
 
   async function handleSubmitRetriage(e: React.FormEvent) {
     e.preventDefault();
     if (!retriageTarget) return;
-    if (!retriageReason.trim() || retriageReason.trim().length < 10) {
-      setError(t("emergency.errRetriageMinChars"));
+    if (!retriageAcuity) {
+      setRetriageError(t("emergency.errAcuityRequired"));
+      return;
+    }
+    if (retriageReason.trim().length < 10) {
+      setRetriageError(t("emergency.errRetriageMinChars"));
       return;
     }
 
     setRetriageSubmitting(true);
-    setError(null);
+    setRetriageError(null);
     try {
       await reTriageEmergencyPatient(retriageTarget.id, retriageAcuity, retriageReason.trim());
       setRetriageModalOpen(false);
+      toast.success(t("emergency.toastRetriaged", { name: retriageTarget.patient_name ?? "" }));
       void loadBoardData();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : t("emergency.errRetriage"));
+      setRetriageError(err instanceof ApiError ? err.message : t("emergency.errRetriage"));
     } finally {
       setRetriageSubmitting(false);
     }
@@ -252,10 +333,9 @@ export default function Page() {
 
   async function handleMarkSeen(triage: EmergencyTriageOut) {
     try {
-      await updateEmergencyTriage(triage.id, {
-        status: "in_treatment",
-        clinician_seen_at: new Date().toISOString(),
-      });
+      // The server stamps the time; a client clock is not the record.
+      await updateEmergencyTriage(triage.id, { clinician_seen: true });
+      toast.success(t("emergency.toastSeen", { name: triage.patient_name ?? "" }));
       void loadBoardData();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("emergency.errMarkSeen"));
@@ -264,7 +344,10 @@ export default function Page() {
 
   function handleOpenDisposition(triage: EmergencyTriageOut) {
     setDispositionTarget(triage);
-    setDispositionType("discharge");
+    setDispositionType("");
+    setDispositionConfirmed(false);
+    setDispositionError(null);
+    setError(null);
     setDispositionNotes("");
     setDispositionModalOpen(true);
   }
@@ -272,25 +355,35 @@ export default function Page() {
   async function handleSubmitDisposition(e: React.FormEvent) {
     e.preventDefault();
     if (!dispositionTarget) return;
+    if (!dispositionType) {
+      setDispositionError(t("emergency.errDispositionRequired"));
+      return;
+    }
+    const highAcuity = dispositionTarget.acuity_level === "resuscitation" || dispositionTarget.acuity_level === "emergent";
+    if (dispositionType === "discharge" && highAcuity && !dispositionConfirmed) {
+      setDispositionError(t("emergency.errConfirmHighAcuity"));
+      return;
+    }
 
     setDispositionSubmitting(true);
-    setError(null);
+    setDispositionError(null);
     try {
-      const statusMap: Record<EmergencyDisposition, EmergencyTriageStatus> = {
-        admit: "admitted",
-        discharge: "discharged",
-        lwbs: "lwbs",
-        transfer: "discharged",
-      };
       await updateEmergencyTriage(dispositionTarget.id, {
-        status: statusMap[dispositionType],
         disposition: dispositionType,
         disposition_notes: dispositionNotes.trim() || null,
+        confirm_high_acuity_discharge: dispositionType === "discharge" && highAcuity ? dispositionConfirmed : undefined,
       });
       setDispositionModalOpen(false);
+      const name = dispositionTarget.patient_name ?? "";
+      toast.success(
+        dispositionType === "admit"
+          ? t("emergency.toastAdmitQueued", { name })
+          : t("emergency.toastDisposition", { name }),
+      );
       void loadBoardData();
+      void loadWorklist();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : t("emergency.errDisposition"));
+      setDispositionError(err instanceof ApiError ? err.message : t("emergency.errDisposition"));
     } finally {
       setDispositionSubmitting(false);
     }
@@ -343,6 +436,11 @@ export default function Page() {
             <div className="text-xs text-muted-foreground mt-0.5">
               {t("emergency.metricWaitingInTx", { waiting: metrics.waiting_count, inTx: metrics.in_treatment_count })}
             </div>
+            {(metrics.awaiting_triage_count ?? 0) > 0 && (
+              <div className="text-xs font-medium text-amber-700 mt-0.5">
+                {t("emergency.awaitingTriage", { count: metrics.awaiting_triage_count ?? 0 })}
+              </div>
+            )}
           </div>
 
           <div className="surface-card p-4 rounded-lg border border-border">
@@ -420,7 +518,7 @@ export default function Page() {
                         <tr key={tr.id} className={`hover:bg-muted/20 transition-colors ${acuityInfo.border}`}>
                           <td className="px-4 py-3">
                             <span className={`inline-block rounded-full px-2.5 py-1 text-xs ${acuityInfo.badge}`}>
-                              {tr.acuity_level.toUpperCase()}
+                              {acuityInfo.label}
                             </span>
                             <div className="text-[10px] text-muted-foreground mt-1">
                               {t("emergency.triagedAt", { time: formatDateTime(tr.triaged_at) })}
@@ -432,8 +530,14 @@ export default function Page() {
                             {tr.triage_notes && (
                               <p className="text-xs text-muted-foreground mt-0.5 max-w-sm">{tr.triage_notes}</p>
                             )}
-                            <div className="text-[11px] text-muted-foreground mt-1 font-mono">
-                              Patient: {tr.patient_id.slice(0, 8)}… · Visit: {tr.visit_id.slice(0, 8)}…
+                            <div className="text-[11px] text-muted-foreground mt-1">
+                              <span className="font-medium text-foreground">
+                                {nameWithIdentifier(tr.patient_name ?? "", tr.patient_identifier)}
+                              </span>
+                              {" · "}
+                              {formatAgeSexShort(tr.patient_age_years ?? null, tr.patient_sex ?? "unknown")}
+                              {tr.visit_number ? ` · ${tr.visit_number}` : ""}
+                              {tr.arrived_at ? ` · ${t("emergency.arrivedAt", { time: formatDateTime(tr.arrived_at) })}` : ""}
                             </div>
                           </td>
 
@@ -442,21 +546,16 @@ export default function Page() {
                               {t("emergency.bay", { bay: tr.assigned_bay || t("common.unassigned") })}
                             </div>
                             <div className="text-xs text-muted-foreground mt-0.5">
-                              {tr.assigned_doctor_id
-                                ? `Doctor: ${tr.assigned_doctor_id.slice(0, 8)}…`
+                              {tr.doctor_name
+                                ? t("emergency.seenBy", { name: tr.doctor_name })
                                 : t("emergency.noDoctorAssigned")}
                             </div>
                           </td>
 
                           <td className="px-4 py-3">
-                            <span className="capitalize rounded bg-muted px-2 py-0.5 text-xs font-medium">
-                              {tr.status.replace("_", " ")}
+                            <span className="rounded bg-muted px-2 py-0.5 text-xs font-medium">
+                              {statusLabel(tr.status)}
                             </span>
-                            {tr.disposition && (
-                              <div className="text-xs font-semibold text-primary mt-1 capitalize">
-                                Disp: {tr.disposition}
-                              </div>
-                            )}
                           </td>
 
                           <td className="px-4 py-3">
@@ -523,10 +622,7 @@ export default function Page() {
                 <p className="text-sm text-muted-foreground">{t("emergency.thidIssued")}</p>
                 <p className="mt-1 font-mono text-2xl font-semibold text-primary">{created.thid}</p>
                 <p className="mt-1 font-medium">
-                  {created.full_name} · estimated age {created.age_years} · {created.sex}
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Patient ID <span className="font-mono">{created.id}</span>
+                  {nameWithIdentifier(created.full_name, created.thid)} · {formatAgeSexShort(created.age_years, created.sex)}
                 </p>
               </div>
 
@@ -577,12 +673,12 @@ export default function Page() {
               </div>
             </section>
           ) : (
-            <form onSubmit={submitRegistration} className="surface-card space-y-5 p-6">
+            <form onSubmit={submitRegistration} noValidate className="surface-card space-y-5 p-6">
               <label className="block space-y-1 text-sm">
                 <span className="text-muted-foreground">{t("emergency.nameOptional")}</span>
                 <input
                   className="w-full rounded-md border border-border px-3 py-2 text-foreground bg-background"
-                  value={form.full_name ?? ""}
+                  value={form.full_name}
                   onChange={(event) => setForm((current) => ({ ...current, full_name: event.target.value }))}
                 />
               </label>
@@ -608,26 +704,35 @@ export default function Page() {
                 <label className="block space-y-1 text-sm">
                   <span className="text-muted-foreground">{t("emergency.estimatedAge")}</span>
                   <input
-                    type="number"
-                    min="0"
-                    max="150"
-                    required
-                    className="w-full rounded-md border border-border px-3 py-2 text-foreground bg-background"
-                    value={form.age_years}
+                    type="text"
+                    inputMode="numeric"
+                    aria-invalid={showFormErrors && formErrors.age ? true : undefined}
+                    aria-describedby={showFormErrors && formErrors.age ? "ed-age-error" : undefined}
+                    className={fieldClass(Boolean(showFormErrors && formErrors.age))}
+                    value={form.age}
                     onChange={(event) =>
-                      setForm((current) => ({ ...current, age_years: Number(event.target.value) }))
+                      setForm((current) => ({ ...current, age: event.target.value.replace(/[^\d]/g, "").slice(0, 3) }))
                     }
                   />
+                  {showFormErrors && formErrors.age && (
+                    <span id="ed-age-error" className="block text-xs text-danger">{t("emergency.errAgeRequired")}</span>
+                  )}
                 </label>
               </div>
               <label className="block space-y-1 text-sm">
                 <span className="text-muted-foreground">{t("emergency.mobileOptional")}</span>
                 <input
                   type="tel"
-                  className="w-full rounded-md border border-border px-3 py-2 text-foreground bg-background"
-                  value={form.mobile ?? ""}
+                  inputMode="numeric"
+                  aria-invalid={showFormErrors && formErrors.mobile ? true : undefined}
+                  aria-describedby={showFormErrors && formErrors.mobile ? "ed-mobile-error" : undefined}
+                  className={fieldClass(Boolean(showFormErrors && formErrors.mobile))}
+                  value={form.mobile}
                   onChange={(event) => setForm((current) => ({ ...current, mobile: event.target.value }))}
                 />
+                {showFormErrors && formErrors.mobile && (
+                  <span id="ed-mobile-error" className="block text-xs text-danger">{t("emergency.errMobileInvalid")}</span>
+                )}
               </label>
               <button
                 type="submit"
@@ -685,12 +790,16 @@ export default function Page() {
                       >
                         {t("emergency.triagePatient")}
                       </button>
-                      <Link
-                        href={`/doctor/consultation?visit_id=${item.visit_id}`}
-                        className="rounded-md bg-primary text-white px-3 py-1.5 text-xs font-medium hover:bg-primary/90"
-                      >
-                        {t("emergency.consultation")}
-                      </Link>
+                      {canConsult ? (
+                        <Link
+                          href={`/doctor/consultation?visit_id=${item.visit_id}`}
+                          className="rounded-md bg-primary text-white px-3 py-1.5 text-xs font-medium hover:bg-primary/90"
+                        >
+                          {t("emergency.consultation")}
+                        </Link>
+                      ) : (
+                        <span className="max-w-[16rem] text-[11px] text-muted-foreground">{t("emergency.consultByDoctor")}</span>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -708,20 +817,23 @@ export default function Page() {
               <div>
                 <h3 className="text-lg font-semibold">{t("emergency.triageModalTitle")}</h3>
                 <p className="text-xs text-muted-foreground">
-                  {triageTargetArrival.full_name} ({triageTargetArrival.thid ?? triageTargetArrival.uhid ?? "Arrival"})
+                  {nameWithIdentifier(triageTargetArrival.full_name, triageTargetArrival.thid ?? triageTargetArrival.uhid)}
                 </p>
               </div>
               <button type="button" onClick={() => setTriageModalOpen(false)} className="text-muted-foreground hover:text-foreground">✕</button>
             </div>
 
-            <form onSubmit={handleSubmitTriage} className="space-y-4 text-sm">
+            <form onSubmit={handleSubmitTriage} noValidate className="space-y-4 text-sm">
+              <DialogError message={triageError} />
               <label className="block space-y-1">
                 <span className="font-medium text-foreground">{t("emergency.acuityLevel")}</span>
                 <select
-                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-foreground"
+                  className={fieldClass(Boolean(triageError && !triageAcuity))}
+                  aria-invalid={triageError && !triageAcuity ? true : undefined}
                   value={triageAcuity}
                   onChange={(e) => setTriageAcuity(e.target.value as EmergencyAcuity)}
                 >
+                  <option value="" disabled>{t("emergency.chooseAcuity")}</option>
                   <option value="resuscitation">{t("emergency.acuityP1")}</option>
                   <option value="emergent">{t("emergency.acuityP2")}</option>
                   <option value="urgent">{t("emergency.acuityP3")}</option>
@@ -734,8 +846,10 @@ export default function Page() {
                 <input
                   type="text"
                   required
+                  maxLength={500}
                   placeholder={t("emergency.placeholderChiefComplaint")}
-                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-foreground"
+                  aria-invalid={triageError && triageAcuity && !triageComplaint.trim() ? true : undefined}
+                  className={fieldClass(Boolean(triageError && triageAcuity && !triageComplaint.trim()))}
                   value={triageComplaint}
                   onChange={(e) => setTriageComplaint(e.target.value)}
                 />
@@ -795,40 +909,46 @@ export default function Page() {
                 <h3 className="text-lg font-semibold">{t("emergency.retriageTitle")}</h3>
                 <p className="text-xs text-muted-foreground">
                   {t("emergency.currentAcuity")}{" "}
-                  <span className="font-semibold uppercase">{retriageTarget.acuity_level}</span>
+                  <span className="font-semibold">{(acuityStyles[retriageTarget.acuity_level] ?? acuityStyles.urgent).label}</span>
                 </p>
               </div>
               <button type="button" onClick={() => setRetriageModalOpen(false)} className="text-muted-foreground hover:text-foreground">✕</button>
             </div>
 
-            <form onSubmit={handleSubmitRetriage} className="space-y-4 text-sm">
+            <form onSubmit={handleSubmitRetriage} noValidate className="space-y-4 text-sm">
+              <DialogError message={retriageError} />
               <label className="block space-y-1">
                 <span className="font-medium text-foreground">{t("emergency.newAcuityLevel")}</span>
                 <select
-                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-foreground"
+                  className={fieldClass(Boolean(retriageError && !retriageAcuity))}
+                  aria-invalid={retriageError && !retriageAcuity ? true : undefined}
                   value={retriageAcuity}
                   onChange={(e) => setRetriageAcuity(e.target.value as EmergencyAcuity)}
                 >
-                  <option value="resuscitation">{t("emergency.acuityP1")}</option>
-                  <option value="emergent">{t("emergency.acuityP2")}</option>
-                  <option value="urgent">{t("emergency.acuityP3")}</option>
-                  <option value="non_urgent">{t("emergency.acuityP4")}</option>
+                  <option value="" disabled>{t("emergency.chooseAcuity")}</option>
+                  {(["resuscitation", "emergent", "urgent", "non_urgent"] as const)
+                    .filter((level) => level !== retriageTarget.acuity_level)
+                    .map((level) => (
+                      <option key={level} value={level}>
+                        {t(({ resuscitation: "emergency.acuityP1", emergent: "emergency.acuityP2", urgent: "emergency.acuityP3", non_urgent: "emergency.acuityP4" } as const)[level])}
+                      </option>
+                    ))}
                 </select>
               </label>
 
               <label className="block space-y-1">
-                <span className="font-medium text-danger">{t("emergency.retriageJustification")}</span>
+                <span className="font-medium text-foreground">{t("emergency.retriageJustification")}</span>
                 <textarea
                   rows={3}
                   required
-                  minLength={10}
                   placeholder={t("emergency.placeholderRetriageJustification")}
-                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-foreground"
+                  aria-invalid={retriageError && retriageAcuity && retriageReason.trim().length < 10 ? true : undefined}
+                  className={fieldClass(Boolean(retriageError && retriageAcuity && retriageReason.trim().length < 10))}
                   value={retriageReason}
                   onChange={(e) => setRetriageReason(e.target.value)}
                 />
-                <span className="text-[11px] text-muted-foreground">
-                  {t("emergency.retriageMinChars", { count: retriageReason.length })}
+                <span className={`text-[11px] ${retriageReason.trim().length >= 10 ? "text-emerald-700" : "text-muted-foreground"}`}>
+                  {t("emergency.retriageMinChars", { count: retriageReason.trim().length })}
                 </span>
               </label>
 
@@ -865,20 +985,43 @@ export default function Page() {
               <button type="button" onClick={() => setDispositionModalOpen(false)} className="text-muted-foreground hover:text-foreground">✕</button>
             </div>
 
-            <form onSubmit={handleSubmitDisposition} className="space-y-4 text-sm">
+            <form onSubmit={handleSubmitDisposition} noValidate className="space-y-4 text-sm">
+              <DialogError message={dispositionError} />
+              <p className="text-xs text-muted-foreground">
+                {nameWithIdentifier(dispositionTarget.patient_name ?? "", dispositionTarget.patient_identifier)} ·{" "}
+                {(acuityStyles[dispositionTarget.acuity_level] ?? acuityStyles.urgent).label}
+              </p>
               <label className="block space-y-1">
                 <span className="font-medium text-foreground">{t("emergency.dispositionDecision")}</span>
                 <select
-                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-foreground"
+                  className={fieldClass(Boolean(dispositionError && !dispositionType))}
+                  aria-invalid={dispositionError && !dispositionType ? true : undefined}
                   value={dispositionType}
-                  onChange={(e) => setDispositionType(e.target.value as EmergencyDisposition)}
+                  onChange={(e) => {
+                    setDispositionType(e.target.value as EmergencyDisposition);
+                    setDispositionConfirmed(false);
+                  }}
                 >
+                  <option value="" disabled>{t("emergency.chooseDisposition")}</option>
                   <option value="discharge">{t("emergency.dispDischargeHome")}</option>
-                  <option value="admit">{t("emergency.dispAdmit")}</option>
+                  {dispositionTarget.clinician_seen_at && <option value="admit">{t("emergency.dispAdmit")}</option>}
                   <option value="transfer">{t("emergency.dispTransfer")}</option>
-                  <option value="lwbs">{t("emergency.dispLwbs")}</option>
+                  {!dispositionTarget.clinician_seen_at && <option value="lwbs">{t("emergency.dispLwbs")}</option>}
                 </select>
+                <span className="block text-[11px] text-muted-foreground">{t("emergency.admitAfterSeenHint")}</span>
               </label>
+              {dispositionType === "discharge" &&
+                (dispositionTarget.acuity_level === "resuscitation" || dispositionTarget.acuity_level === "emergent") && (
+                  <label className="flex items-start gap-2 rounded-md border border-danger/40 bg-danger/5 p-3">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5"
+                      checked={dispositionConfirmed}
+                      onChange={(e) => setDispositionConfirmed(e.target.checked)}
+                    />
+                    <span className="text-sm text-danger">{t("emergency.confirmHighAcuityDischarge")}</span>
+                  </label>
+                )}
 
               <label className="block space-y-1">
                 <span className="font-medium text-foreground">{t("emergency.dispositionNotes")}</span>

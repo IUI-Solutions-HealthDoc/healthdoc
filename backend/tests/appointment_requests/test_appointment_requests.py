@@ -212,3 +212,13 @@ async def test_the_patient_can_cancel_a_booked_appointment_once(db):
     with pytest.raises(HTTPException) as again:
         await portal.cancel_my_appointment(asked.id, binding=w.binding, db=db)
     assert again.value.status_code == 409
+
+
+async def test_one_pm_is_outside_the_morning_session():
+    # QA 16 Oct 2026: 13:00 was treated as morning; only 13:01 asked for the
+    # patient's agreement.
+    from app.appointments.requests import _in_session
+
+    assert _in_session("morning", "12:59")
+    assert not _in_session("morning", "13:00")
+    assert _in_session("afternoon", "13:00")

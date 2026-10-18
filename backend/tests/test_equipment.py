@@ -96,3 +96,13 @@ async def test_another_facilitys_machine_is_not_found(db):
     with pytest.raises(HTTPException) as refused:
         await _status(db, other_admin, machine.id, "down", "x")
     assert refused.value.status_code == 404
+
+
+async def test_an_asset_tag_is_unique_whatever_its_case(db):
+    # QA 16 Oct 2026: XR-01 was refused but xr-01 registered a second machine.
+    _facility, admin, _nurse = await _setup(db)
+    first = await _register(db, admin, asset_tag="XR-01")
+    assert first.asset_tag == "XR-01"
+    with pytest.raises(HTTPException) as refused:
+        await _register(db, admin, asset_tag="xr-01")
+    assert refused.value.status_code == 409
