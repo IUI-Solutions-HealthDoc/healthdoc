@@ -1,3 +1,4 @@
+import { translate } from "@/lib/i18n";
 /**
  * Mirrors `MedicationAdministrationOut` from
  * `GET /nursing/admissions/{admission_id}/medication-administrations`.
@@ -19,9 +20,9 @@
 export type MedicationStatus = "given" | "held" | "refused";
 
 export const MEDICATION_STATUS_LABELS: Record<MedicationStatus, string> = {
-  given: "Given",
-  held: "Held",
-  refused: "Refused",
+  get given() { return translate("nurse.ui.given"); },
+  get held() { return translate("nurse.ui.held"); },
+  get refused() { return translate("nurse.ui.refused"); },
 };
 
 export interface MedicationRecord {

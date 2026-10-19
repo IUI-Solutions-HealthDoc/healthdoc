@@ -103,12 +103,12 @@ export function AuditEntryDetail({ entry, loading }: Props) {
           mb: 2.5,
         }}
       >
-        <Field label="Resource" value={`${entry.resource_type} / ${entry.resource_id ?? "—"}`} />
-        <Field label="User" value={entry.user_display ?? entry.user_id ?? "—"} />
-        <Field label="Patient" value={entry.patient_display ?? entry.patient_id ?? "—"} />
-        {entry.ip_address ? <Field label="IP address" value={entry.ip_address} /> : null}
+        <Field label={t("consent.resource")} value={`${entry.resource_type} / ${entry.resource_id ?? "—"}`} />
+        <Field label={t("consent.user")} value={entry.user_display ?? entry.user_id ?? "—"} />
+        <Field label={t("common.patient")} value={entry.patient_display ?? entry.patient_id ?? "—"} />
+        {entry.ip_address ? <Field label={t("audit.ui.ipAddress")} value={entry.ip_address} /> : null}
         <Field
-          label="entry_hash"
+          label={t("audit.ui.entryHash")}
           value={
             <Stack direction="row" useFlexGap sx={{ gap: 1, alignItems: "center" }}>
               <span>{truncateHash(entry.entry_hash)}</span>
@@ -126,10 +126,7 @@ export function AuditEntryDetail({ entry, loading }: Props) {
         />
       </Box>
 
-      <Typography sx={{ m: 0, mb: 1, fontSize: "0.75rem", color: meridian.textSecondary }}>
-        The trail list carries who, what, when and which record. Chain signatures, visit
-        and network address are kept on the server and are not shown here.
-      </Typography>
+      <Typography sx={{ m: 0, mb: 1, fontSize: "0.75rem", color: meridian.textSecondary }}>{t("audit.ui.theTrailListCarriesWhoWhat")}</Typography>
 
       <Box
         sx={{
@@ -139,7 +136,7 @@ export function AuditEntryDetail({ entry, loading }: Props) {
         }}
       >
         <Box>
-          <Typography sx={{ mb: 0.75, fontSize: "0.8125rem", fontWeight: 700 }}>old_value</Typography>
+          <Typography sx={{ mb: 0.75, fontSize: "0.8125rem", fontWeight: 700 }}>{t("audit.ui.oldValue")}</Typography>
           <Box
             component="pre"
             sx={{
@@ -156,7 +153,7 @@ export function AuditEntryDetail({ entry, loading }: Props) {
           </Box>
         </Box>
         <Box>
-          <Typography sx={{ mb: 0.75, fontSize: "0.8125rem", fontWeight: 700 }}>new_value</Typography>
+          <Typography sx={{ mb: 0.75, fontSize: "0.8125rem", fontWeight: 700 }}>{t("audit.ui.newValue")}</Typography>
           <Box
             component="pre"
             sx={{

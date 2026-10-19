@@ -21,7 +21,7 @@ import type {
   PrescriptionItem,
 } from "@/features/pharmacy/types";
 import { ApiError, formatDateTime, newIdempotencyKey } from "@/lib/api";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 interface LineDraft {
   quantity: string;
@@ -214,9 +214,7 @@ function DispenseLine({
                   >
                     <option value="">{t("pharmacy.dispense.selectBatch")}</option>
                     {prescribedStock.batches.map((batch) => (
-                      <option key={batch.batch_id} value={batch.batch_id}>
-                        {batch.batch_number} · exp {batch.expiry_date} · {batch.quantity} available
-                      </option>
+                      <option key={batch.batch_id} value={batch.batch_id}>{t("pharmacy.ui.batchNumberExpExpiryDateQuantity", { batch_number: batch.batch_number, expiry_date: batch.expiry_date, quantity: batch.quantity })}</option>
                     ))}
                   </select>
                 </label>
@@ -321,7 +319,7 @@ function ResultCard({ result }: { result: DispenseResult }) {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-lg font-medium">{t("pharmacy.dispense.recordedTitle")}</h2>
         <span className={`rounded-full px-3 py-1 text-sm ${tone.chip}`}>
-          {nothing ? "Nothing dispensed" : result.status.replaceAll("_", " ")}
+          {nothing ? t("pharmacy.ui.nothingDispensed") : result.status.replaceAll("_", " ")}
         </span>
       </div>
       <p className="text-sm text-muted-foreground">
@@ -382,7 +380,7 @@ function Dispense() {
       setResult(null);
       setError(null);
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Could not load prescription");
+      setError(reason instanceof ApiError ? reason.message : translate("pharmacy.msg.couldNotLoadPrescription"));
     } finally {
       setLoading(false);
     }
@@ -411,11 +409,11 @@ function Dispense() {
       const draft = drafts[item.id];
       if (!draft || Number(draft.quantity) <= 0) continue;
       if (draft.manualBatch && !draft.batchId) {
-        setError(`Select a batch for ${item.medicine_name}.`);
+        setError(translate("pharmacy.msg.selectABatchForMedicineName", undefined, { medicine_name: item.medicine_name }));
         return;
       }
       if (draft.substitute && (!draft.substituteItemId || !draft.substituteReason.trim())) {
-        setError(`Select a substitute and enter a reason for ${item.medicine_name}.`);
+        setError(translate("pharmacy.msg.selectASubstituteAndEnterA", undefined, { medicine_name: item.medicine_name }));
         return;
       }
       items.push({
@@ -437,7 +435,7 @@ function Dispense() {
       });
     }
     if (items.length === 0) {
-      setError("Enter a quantity for at least one prescription item.");
+      setError(translate("pharmacy.msg.enterAQuantityForAtLeast"));
       return;
     }
 
@@ -451,7 +449,7 @@ function Dispense() {
       setResult(response);
       setIdempotencyKey(newIdempotencyKey());
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Dispense could not be recorded");
+      setError(reason instanceof ApiError ? reason.message : translate("pharmacy.msg.dispenseCouldNotBeRecorded"));
     } finally {
       setSubmitting(false);
     }

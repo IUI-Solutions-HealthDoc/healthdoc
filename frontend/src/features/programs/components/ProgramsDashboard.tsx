@@ -518,14 +518,13 @@ export function ProgramsDashboard() {
 
       {/* Record Follow-up Visit Modal */}
       <Dialog open={visitModalOpen} onClose={() => setVisitModalOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ fontWeight: 800 }}>Record Longitudinal Follow-up Visit</DialogTitle>
+        <DialogTitle sx={{ fontWeight: 800 }}>{t("programs.ui.recordLongitudinalFollowUpVisit")}</DialogTitle>
         <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 1 }}>
-          <Typography variant="body2" color="text.secondary">
-            Patient: {activeEnrolment?.patient_name} — {activeEnrolment?.program_name}
+          <Typography variant="body2" color="text.secondary">{t("programs.ui.patient")}{" "}{activeEnrolment?.patient_name} — {activeEnrolment?.program_name}
           </Typography>
 
           <TextField
-            label="Visit Date"
+            label={t("receptionist.visitDate")}
             type="date"
             value={visitForm.scheduled_date}
             onChange={(e) => setVisitForm({ ...visitForm, scheduled_date: e.target.value })}
@@ -534,19 +533,19 @@ export function ProgramsDashboard() {
 
           <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 1.5 }}>
             <TextField
-              label="HbA1c (%)"
+              label={t("programs.ui.hba1c")}
               value={visitForm.hba1c}
               onChange={(e) => setVisitForm({ ...visitForm, hba1c: e.target.value })}
               fullWidth
             />
             <TextField
-              label="BP Systolic"
+              label={t("programs.ui.bpSystolic")}
               value={visitForm.bp_systolic}
               onChange={(e) => setVisitForm({ ...visitForm, bp_systolic: e.target.value })}
               fullWidth
             />
             <TextField
-              label="BP Diastolic"
+              label={t("programs.ui.bpDiastolic")}
               value={visitForm.bp_diastolic}
               onChange={(e) => setVisitForm({ ...visitForm, bp_diastolic: e.target.value })}
               fullWidth
@@ -554,14 +553,14 @@ export function ProgramsDashboard() {
           </Box>
 
           <TextField
-            label="Weight (kg)"
+            label={t("nurse.vitalsWeight")}
             value={visitForm.weight_kg}
             onChange={(e) => setVisitForm({ ...visitForm, weight_kg: e.target.value })}
             fullWidth
           />
 
           <TextField
-            label="Clinical Summary & Medication Adherence"
+            label={t("programs.ui.clinicalSummaryMedicationAdherence")}
             multiline
             rows={3}
             value={visitForm.clinical_summary}
@@ -571,31 +570,25 @@ export function ProgramsDashboard() {
         </DialogContent>
         <DialogActions sx={{ p: 2 }}>
           <Button onClick={() => setVisitModalOpen(false)}>{t("common.cancel")}</Button>
-          <Button variant="contained" color="success" onClick={handleRecordVisit} sx={{ fontWeight: 700 }}>
-            Commit Visit Metrics
-          </Button>
+          <Button variant="contained" color="success" onClick={handleRecordVisit} sx={{ fontWeight: 700 }}>{t("programs.ui.commitVisitMetrics")}</Button>
         </DialogActions>
       </Dialog>
 
       {/* Trajectory / Timeline Modal */}
       <Dialog open={timelineModalOpen} onClose={() => setTimelineModalOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle sx={{ fontWeight: 800 }}>
-          Clinical Trajectory & Metric Timeline: {activeEnrolment?.patient_name}
+        <DialogTitle sx={{ fontWeight: 800 }}>{t("programs.ui.clinicalTrajectoryMetricTimeline")}{" "}{activeEnrolment?.patient_name}
         </DialogTitle>
         <DialogContent sx={{ pt: 1 }}>
           {timelineError && <Alert severity="error" sx={{ mb: 2 }}>{timelineError}</Alert>}
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Program: {activeEnrolment?.program_name} | Enrolled: {activeEnrolment?.enrolment_date}
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>{t("programs.ui.program")}{" "}{activeEnrolment?.program_name}{" "}{t("programs.ui.enrolled")}{" "}{activeEnrolment?.enrolment_date}
           </Typography>
 
           <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
             {activeTimeline?.visits.map((v, idx) => (
               <Card key={v.id} variant="outlined" sx={{ borderRadius: 1.5, p: 2, bgcolor: "action.hover" }}>
                 <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1 }}>
-                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
-                    Visit Encounter #{idx + 1} — {v.completed_date || v.scheduled_date}
-                  </Typography>
-                  <Chip label="COMPLETED" size="small" color="success" sx={{ fontWeight: 700 }} />
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{t("programs.ui.visitEncounterValueScheduledDate", { value: idx + 1, scheduled_date: v.completed_date || v.scheduled_date })}</Typography>
+                  <Chip label={t("reports.reception.completed")} size="small" color="success" sx={{ fontWeight: 700 }} />
                 </Box>
 
                 {v.metrics && (
@@ -620,19 +613,19 @@ export function ProgramsDashboard() {
           </Box>
         </DialogContent>
         <DialogActions sx={{ p: 2 }}>
-          <Button onClick={() => setTimelineModalOpen(false)}>Close</Button>
+          <Button onClick={() => setTimelineModalOpen(false)}>{t("common.close")}</Button>
         </DialogActions>
       </Dialog>
 
       {/* Exit Program Dialog */}
       <Dialog open={exitModalOpen} onClose={() => setExitModalOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle sx={{ fontWeight: 800 }}>Exit / Discharge from Program</DialogTitle>
+        <DialogTitle sx={{ fontWeight: 800 }}>{t("programs.ui.exitDischargeFromProgram")}</DialogTitle>
         <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 1 }}>
           <TextField
-            label="Exit Reason"
+            label={t("programs.ui.exitReason")}
             multiline
             rows={3}
-            placeholder="e.g. Clinical targets achieved, transferred care, patient request..."
+            placeholder={t("programs.ui.eGClinicalTargetsAchievedTransferred")}
             value={exitReason}
             onChange={(e) => setExitReason(e.target.value)}
             fullWidth
@@ -641,9 +634,7 @@ export function ProgramsDashboard() {
         </DialogContent>
         <DialogActions sx={{ p: 2 }}>
           <Button onClick={() => setExitModalOpen(false)}>{t("common.cancel")}</Button>
-          <Button variant="contained" color="error" onClick={handleExit} sx={{ fontWeight: 700 }}>
-            Confirm Exit
-          </Button>
+          <Button variant="contained" color="error" onClick={handleExit} sx={{ fontWeight: 700 }}>{t("programs.ui.confirmExit")}</Button>
         </DialogActions>
       </Dialog>
     </Box>

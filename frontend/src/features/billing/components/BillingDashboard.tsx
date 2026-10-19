@@ -8,7 +8,7 @@ import Typography from "@mui/material/Typography";
 
 import { toast } from "@/components/ui/toast";
 import { useAuth } from "@/providers/auth-provider";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 import { meridian } from "@/styles/theme";
 import { createRefund, getInvoice } from "../api";
 import { useCollectPayment } from "../hooks/useCollectPayment";
@@ -132,7 +132,7 @@ function InvoiceWorkspace({ selectedId, refreshList }: {
     editor.draft.status !== "draft" && editor.draft.status !== "cancelled";
 
   return (
-    <Stack spacing={2.5} component="section" aria-label="Invoice details">
+    <Stack spacing={2.5} component="section" aria-label={t("billing.ui.invoiceDetails")}>
       {!selectedId ? (
         <Box
           sx={{
@@ -142,13 +142,11 @@ function InvoiceWorkspace({ selectedId, refreshList }: {
             textAlign: "center",
             color: meridian.textSecondary,
           }}
-        >
-          Select an invoice from the list to open the builder.
-        </Box>
+        >{t("billing.ui.selectAnInvoiceFromTheList")}</Box>
       ) : detailError ? (
         <Box>
           <Typography role="alert" sx={{ color: meridian.danger }}>{detailError}</Typography>
-          <Button onClick={() => void refresh()}>Retry invoice</Button>
+          <Button onClick={() => void refresh()}>{t("billing.ui.retryInvoice")}</Button>
         </Box>
       ) : detailLoading || !editor.draft || editor.draft.id !== selectedId ? (
         <Typography sx={{ color: meridian.textSecondary }}>{t("billing.loadingInvoice")}</Typography>
@@ -165,16 +163,11 @@ function InvoiceWorkspace({ selectedId, refreshList }: {
                 fontSize: "0.875rem",
                 fontWeight: 600,
               }}
-            >
-              This invoice is not a draft — financial fields are read-only. Use Payments to
-              collect or reverse.
-            </Typography>
+            >{t("billing.ui.thisInvoiceIsNotADraft")}</Typography>
           ) : null}
 
           <InvoiceHeader invoice={editor.draft} />
-          <Typography sx={{ color: meridian.textSecondary, fontSize: "0.875rem" }}>
-            Charges and totals are server-calculated. Manual line, discount and scheme edits are unavailable.
-          </Typography>
+          <Typography sx={{ color: meridian.textSecondary, fontSize: "0.875rem" }}>{t("billing.ui.chargesAndTotalsAreServerCalculated")}</Typography>
 
           <Box
             sx={{
@@ -233,7 +226,7 @@ function InvoiceWorkspace({ selectedId, refreshList }: {
                 disabled={editor.busy || !editor.canIssue}
                 onClick={() => {
                   editor.setPreviewOpen(true);
-                  toast.info("Review totals", "Confirm Issue from the preview dialog");
+                  toast.info(translate("billing.msg.reviewTotals"), translate("billing.msg.confirmIssueFromThePreviewDialog"));
                 }}
                 sx={{ textTransform: "none", fontWeight: 600, borderRadius: "10px" }}
               >
@@ -270,10 +263,10 @@ function InvoiceWorkspace({ selectedId, refreshList }: {
                   // Returns the refund alone; re-read the invoice for the
                   // new balance rather than assuming it.
                   const refund = await createRefund(paymentId, body);
-                  toast.success("Payment reversed", refund.refund_number);
+                  toast.success(translate("billing.msg.paymentReversed"), refund.refund_number);
                   if (selectedId) onPaymentSaved(await getInvoice(selectedId));
                 } catch (e) {
-                  toast.error(e instanceof Error ? e.message : "Reversal failed");
+                  toast.error(e instanceof Error ? e.message : translate("billing.msg.reversalFailed"));
                   throw e;
                 } finally {
                   setRefundBusy(false);

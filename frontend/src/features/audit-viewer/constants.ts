@@ -2,45 +2,46 @@
 // consumers once the audit endpoints started scoping server-side from the
 // token. Removed (P1.1) — never send a facility from the browser.
 import type { AccessChannel, AuditAction, FileAccessAction, VerificationStatus } from "./types";
+import { translate } from "@/lib/i18n";
 
 export const AUDIT_ACTION_LABELS: Record<string, string> = {
-  create: "Create",
-  update: "Update",
-  delete: "Delete",
-  erase: "Erase",
-  login: "Login",
-  logout: "Logout",
-  view: "View",
-  export: "Export",
-  print: "Print",
+  get create() { return translate("audit.msg.create"); },
+  get update() { return translate("audit.msg.update"); },
+  get delete() { return translate("common.delete"); },
+  get erase() { return translate("audit.msg.erase"); },
+  get login() { return translate("audit.msg.login"); },
+  get logout() { return translate("audit.msg.logout"); },
+  get view() { return translate("audit.msg.view"); },
+  get export() { return translate("consent.access.export"); },
+  get print() { return translate("common.ui.print"); },
   break_glass_access: "Break-glass access",
   uhid_merge: "UHID merge",
   thid_merge: "THID merge",
   thid_unmerge: "THID unmerge",
-  approve: "Approve",
-  dispense: "Dispense",
-  return: "Return",
-  role_change: "Role change",
+  get approve() { return translate("common.approve"); },
+  get dispense() { return translate("sidebar.dispense"); },
+  get return() { return translate("audit.msg.return"); },
+  get role_change() { return translate("audit.msg.roleChange"); },
 };
 
 export const FILE_ACCESS_ACTION_LABELS: Record<FileAccessAction, string> = {
-  view: "View",
-  download: "Download",
-  upload: "Upload",
-  delete_attempt: "Delete attempt",
+  get view() { return translate("audit.msg.view"); },
+  get download() { return translate("forms.ui.download"); },
+  get upload() { return translate("audit.msg.upload"); },
+  get delete_attempt() { return translate("audit.msg.deleteAttempt"); },
 };
 
 export const ACCESS_CHANNEL_LABELS: Record<AccessChannel, string> = {
   ui: "UI",
   api: "API",
   abdm_hiu: "ABDM HIU",
-  export: "Export",
+  get export() { return translate("consent.access.export"); },
 };
 
 export const VERIFICATION_STATUS_LABELS: Record<VerificationStatus, string> = {
-  pending: "Pending",
-  verified: "Verified",
-  failed: "Failed",
+  get pending() { return translate("doctor.soapStatusPending"); },
+  get verified() { return translate("consent.verified"); },
+  get failed() { return translate("bloodBank.screening.failed"); },
 };
 
 // EVERY action the backend can write, taken from app/audit/actions.py.

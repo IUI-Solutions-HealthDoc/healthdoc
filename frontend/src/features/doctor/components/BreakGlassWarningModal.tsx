@@ -119,7 +119,7 @@ export function BreakGlassWarningModal({
           fullWidth
           autoFocus
           error={Boolean(error)}
-          placeholder="e.g. Unconscious trauma patient, need allergy and current medication history before surgery."
+          placeholder={t("doctor.ui.eGUnconsciousTraumaPatientNeed")}
           helperText={
             error ??
             (justificationReady

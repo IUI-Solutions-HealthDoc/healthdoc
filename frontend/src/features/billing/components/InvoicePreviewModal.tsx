@@ -35,22 +35,18 @@ export function InvoicePreviewModal({
     <Modal
       open={open}
       onClose={onClose}
-      title="Invoice preview"
+      title={t("billing.ui.invoicePreview")}
       size="md"
       loading={busy}
       actions={
         <>
-          <Button onClick={onClose} sx={{ textTransform: "none" }}>
-            Close
-          </Button>
+          <Button onClick={onClose} sx={{ textTransform: "none" }}>{t("common.close")}</Button>
           {canIssue ? (
             <Button
               variant="contained"
               onClick={onIssue}
               sx={{ textTransform: "none", fontWeight: 600, borderRadius: "10px" }}
-            >
-              Issue invoice
-            </Button>
+            >{t("billing.ui.issueInvoice")}</Button>
           ) : null}
         </>
       }
@@ -60,8 +56,7 @@ export function InvoicePreviewModal({
           {invoice.invoice_number} ·{" "}
           {invoice.patient?.full_name && invoice.patient?.uhid && invoice.patient.full_name.includes(invoice.patient.uhid)
             ? invoice.patient.full_name
-            : `${invoice.patient?.full_name ?? ""} (${invoice.patient?.uhid ?? "—"})`}{" "}
-          · Scheme:{" "}
+            : `${invoice.patient?.full_name ?? ""} (${invoice.patient?.uhid ?? "—"})`}{" "}{t("billing.ui.scheme")}{" "}
           {invoice.scheme_code ?? "Self-pay"}
         </Typography>
 
@@ -84,18 +79,10 @@ export function InvoicePreviewModal({
         </Stack>
 
         <Stack spacing={0.75} sx={{ borderTop: `1px solid ${meridian.border}`, pt: 1.5 }}>
-          <Typography sx={{ fontSize: "0.875rem" }}>
-            Gross: {formatINR(invoice.gross_amount)}
-          </Typography>
-          <Typography sx={{ fontSize: "0.875rem" }}>
-            Discount: {formatINR(invoice.discount_amount)}
-          </Typography>
-          <Typography sx={{ fontSize: "0.875rem" }}>
-            Scheme adjustment: {formatINR(invoice.scheme_adjustment)}
-          </Typography>
-          <Typography sx={{ fontWeight: 700, fontSize: "1rem", color: meridian.textPrimary }}>
-            Net: {formatINR(invoice.net_amount)}
-          </Typography>
+          <Typography sx={{ fontSize: "0.875rem" }}>{t("billing.ui.grossGrossAmount", { gross_amount: formatINR(invoice.gross_amount) })}</Typography>
+          <Typography sx={{ fontSize: "0.875rem" }}>{t("billing.ui.discountDiscountAmount", { discount_amount: formatINR(invoice.discount_amount) })}</Typography>
+          <Typography sx={{ fontSize: "0.875rem" }}>{t("billing.ui.schemeAdjustmentSchemeAdjustment", { scheme_adjustment: formatINR(invoice.scheme_adjustment) })}</Typography>
+          <Typography sx={{ fontWeight: 700, fontSize: "1rem", color: meridian.textPrimary }}>{t("billing.ui.netNetAmount", { net_amount: formatINR(invoice.net_amount) })}</Typography>
         </Stack>
       </Stack>
     </Modal>

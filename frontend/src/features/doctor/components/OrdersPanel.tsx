@@ -15,7 +15,7 @@ import { doctorPanelSx, doctorButtonSx } from "../panelSx";
 import type { ActiveEncounter, OrderPriority, PlacedOrder } from "../types";
 import { OrderFormModal } from "./OrderFormModal";
 import { ExternalResultPanel } from "./ExternalResultPanel";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 const PRIORITY_BADGE: Record<OrderPriority, BadgeVariant> = {
   routine: "secondary",
@@ -97,7 +97,7 @@ function EncounterOrders({ encounter, patientLabel }: OrdersPanelProps) {
                   }}
                 >
                   {order.detail_status === "failed"
-                    ? `${order.order_number} · department item failed`
+                    ? translate("doctor.msg.orderNumberDepartmentItemFailed", undefined, { order_number: order.order_number })
                     : order.accession_number
                       ? `${order.order_number} · ${order.accession_number}`
                       : order.order_number}

@@ -14,6 +14,7 @@ import {
 import { downloadCsv, importCsv, validateCsv } from "../api";
 import { useClinicalWrite } from "@/lib/useClinicalWrite";
 import type { CsvImportResult, CsvValidationResult } from "../types";
+import { useLocale, translate } from "@/lib/i18n";
 
 interface CsvAdministrationModalProps {
   isOpen: boolean;
@@ -26,6 +27,7 @@ export function CsvAdministrationModal({
   onClose,
   onSuccess,
 }: CsvAdministrationModalProps) {
+  const { t } = useLocale();
   const [entityType, setEntityType] = useState<string>("vaccines");
   const [csvText, setCsvText] = useState<string>("");
   const [validationResult, setValidationResult] = useState<CsvValidationResult | null>(null);
@@ -68,7 +70,7 @@ export function CsvAdministrationModal({
       setError(null);
     };
     reader.onerror = () => {
-      if (request === readSequence.current && !write.isPending()) setError("The selected file could not be read.");
+      if (request === readSequence.current && !write.isPending()) setError(translate("forms.msg.theSelectedFileCouldNotBe"));
     };
     reader.readAsText(file);
   };
@@ -76,7 +78,7 @@ export function CsvAdministrationModal({
   const handleValidate = async () => {
     const snapshot = { csvText, entityType };
     if (!snapshot.csvText.trim()) {
-      setError("Please upload a CSV file or paste raw CSV content.");
+      setError(translate("forms.msg.pleaseUploadACsvFileOr"));
       return;
     }
     const request = ++validateSequence.current;
@@ -94,7 +96,7 @@ export function CsvAdministrationModal({
       if (request !== validateSequence.current || version !== draftVersion.current) return;
       setValidationResult(res);
     } catch (err: unknown) {
-      if (request === validateSequence.current) setError(err instanceof Error ? err.message : "Validation failed.");
+      if (request === validateSequence.current) setError(err instanceof Error ? err.message : translate("forms.msg.validationFailed"));
     } finally {
       if (request === validateSequence.current) setIsValidating(false);
     }
@@ -124,7 +126,7 @@ export function CsvAdministrationModal({
       setImportResult(res);
       onSuccess();
     } catch (err: unknown) {
-      if (write.isCurrent()) setError(err instanceof Error ? err.message : "Import failed.");
+      if (write.isCurrent()) setError(err instanceof Error ? err.message : translate("forms.msg.importFailed"));
     } finally {
       if (write.isCurrent()) setIsImporting(false);
     }
@@ -137,7 +139,7 @@ export function CsvAdministrationModal({
       const link = document.createElement("a");
       link.href = url; link.download = entityType + ".csv"; link.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch (err) { setError(err instanceof Error ? err.message : "Export failed."); }
+    } catch (err) { setError(err instanceof Error ? err.message : translate("forms.msg.exportFailed")); }
   };
 
   return (
@@ -147,10 +149,8 @@ export function CsvAdministrationModal({
           <div className="flex items-center gap-2">
             <FileSpreadsheet className="h-5 w-5 text-primary" />
             <div>
-              <h3 className="text-lg font-bold text-card-foreground">CSV Administration & Ingestion</h3>
-              <p className="text-xs text-muted-foreground">
-                Formula-injection hardened bulk upload & export
-              </p>
+              <h3 className="text-lg font-bold text-card-foreground">{t("forms.ui.csvAdministrationIngestion")}</h3>
+              <p className="text-xs text-muted-foreground">{t("forms.ui.formulaInjectionHardenedBulkUploadExport")}</p>
             </div>
           </div>
           <button
@@ -172,9 +172,7 @@ export function CsvAdministrationModal({
         <div className="mt-4 space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
-                Target Entity
-              </label>
+              <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">{t("forms.ui.targetEntity")}</label>
               <select
                 disabled={locked}
                 value={entityType}
@@ -184,30 +182,24 @@ export function CsvAdministrationModal({
                 }}
                 className="w-full rounded-xl border border-input bg-background px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary"
               >
-                <option value="vaccines">Vaccine Catalogue</option>
+                <option value="vaccines">{t("immunization.tab.catalogue")}</option>
 
               </select>
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
-                Export Current Data
-              </label>
+              <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">{t("forms.ui.exportCurrentData")}</label>
               <button
                 type="button"
                 onClick={handleDownloadExport}
                 className="w-full flex items-center justify-center gap-1.5 rounded-xl border border-border bg-background px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted transition-colors"
               >
-                <Download className="h-3.5 w-3.5" />
-                Download {entityType}.csv
-              </button>
+                <Download className="h-3.5 w-3.5" />{t("forms.ui.download")}{" "}{entityType}{t("forms.ui.csv")}</button>
             </div>
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
-              Upload CSV File
-            </label>
+            <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">{t("forms.ui.uploadCsvFile")}</label>
             <input
               type="file"
               disabled={locked}
@@ -218,13 +210,11 @@ export function CsvAdministrationModal({
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
-              Or Paste Raw CSV Content
-            </label>
+            <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">{t("forms.ui.orPasteRawCsvContent")}</label>
             <textarea
               disabled={locked}
               rows={4}
-              placeholder="code,name,target_disease,standard_doses,min_age_days,route,site,dose_quantity"
+              placeholder={t("forms.ui.codeNameTargetDiseaseStandardDoses")}
               value={csvText}
               onChange={(e) => {
                 setCsvText(e.target.value);
@@ -247,25 +237,24 @@ export function CsvAdministrationModal({
                 {validationResult.valid ? (
                   <>
                     <ShieldCheck className="h-4 w-4 text-emerald-500" />
-                    <span>CSV Validation Passed — Safe to Ingest</span>
+                    <span>{t("forms.ui.csvValidationPassedSafeToIngest")}</span>
                   </>
                 ) : (
                   <>
                     <ShieldAlert className="h-4 w-4 text-destructive" />
-                    <span>CSV Validation Failed</span>
+                    <span>{t("forms.ui.csvValidationFailed")}</span>
                   </>
                 )}
               </div>
 
               <div className="text-[11px] space-y-1">
-                <p>
-                  Rows detected: <strong>{validationResult.row_count}</strong> • Columns:{" "}
+                <p>{t("forms.ui.rowsDetected")}{" "}<strong>{validationResult.row_count}</strong>{" "}{t("forms.ui.columns")}{" "}
                   <strong>{validationResult.columns.join(", ")}</strong>
                 </p>
 
                 {validationResult.warnings.length > 0 && (
                   <div className="pt-1 text-amber-600 dark:text-amber-400">
-                    <span className="font-semibold block">Rejected Formula-like Values:</span>
+                    <span className="font-semibold block">{t("forms.ui.rejectedFormulaLikeValues")}</span>
                     <ul className="list-disc list-inside">
                       {validationResult.warnings.map((w, i) => (
                         <li key={i}>{w}</li>
@@ -276,7 +265,7 @@ export function CsvAdministrationModal({
 
                 {validationResult.errors.length > 0 && (
                   <div className="pt-1 text-destructive">
-                    <span className="font-semibold block">Validation Errors:</span>
+                    <span className="font-semibold block">{t("forms.ui.validationErrors")}</span>
                     <ul className="list-disc list-inside">
                       {validationResult.errors.map((e, i) => (
                         <li key={i}>{e}</li>
@@ -292,9 +281,7 @@ export function CsvAdministrationModal({
           {importResult && (
             <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 flex items-center gap-2 text-xs">
               <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
-              <span>
-                {importResult.message} ({importResult.imported_count} records imported).
-              </span>
+              <span>{t("forms.ui.messageImportedCountRecordsImported", { message: importResult.message, imported_count: importResult.imported_count })}</span>
             </div>
           )}
 
@@ -304,9 +291,7 @@ export function CsvAdministrationModal({
               onClick={handleClose}
               disabled={locked}
               className="rounded-xl border border-border px-4 py-2 text-xs font-semibold text-muted-foreground hover:bg-muted transition-colors"
-            >
-              Close
-            </button>
+            >{t("common.close")}</button>
 
             <button
               type="button"
@@ -314,7 +299,7 @@ export function CsvAdministrationModal({
               onClick={handleValidate}
               className="rounded-xl bg-secondary px-4 py-2 text-xs font-semibold text-secondary-foreground hover:bg-secondary/80 transition-colors disabled:opacity-50"
             >
-              {isValidating ? "Validating..." : "Validate Security"}
+              {isValidating ? translate("forms.msg.validating") : t("forms.ui.validateSecurity")}
             </button>
 
             {validationResult?.valid && (
@@ -325,7 +310,7 @@ export function CsvAdministrationModal({
                 className="flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors shadow-sm disabled:opacity-50"
               >
                 <Upload className="h-3.5 w-3.5" />
-                {isImporting ? "Importing..." : write.retryPending ? "Retry unchanged import" : "Execute Import"}
+                {isImporting ? translate("forms.msg.importing") : write.retryPending ? t("forms.ui.retryUnchangedImport") : t("forms.ui.executeImport")}
               </button>
             )}
           </div>

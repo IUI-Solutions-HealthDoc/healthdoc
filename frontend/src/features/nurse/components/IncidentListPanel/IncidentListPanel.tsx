@@ -35,19 +35,15 @@ export function IncidentListPanel({ incidents, loading, error }: Props) {
 
   if (incidents.length === 0) {
     return (
-      <div className="surface-card p-5 text-sm text-muted-foreground">
-        No clinical incidents filed for this patient yet.
-      </div>
+      <div className="surface-card p-5 text-sm text-muted-foreground">{t("nurse.ui.noClinicalIncidentsFiledForThis")}</div>
     );
   }
 
   return (
     <div className="surface-card overflow-hidden">
       <div className="border-b border-border px-5 py-3">
-        <h3 className="font-semibold">Filed incidents</h3>
-        <p className="text-xs text-muted-foreground">
-          Live register from `GET /nursing/incidents` (read-only for nurses; review is HOD/admin).
-        </p>
+        <h3 className="font-semibold">{t("nurse.ui.filedIncidents")}</h3>
+        <p className="text-xs text-muted-foreground">{t("nurse.ui.liveRegisterFromGetNursingIncidents")}</p>
       </div>
       <ul className="divide-y divide-border">
         {incidents.map((row) => (
@@ -62,9 +58,7 @@ export function IncidentListPanel({ incidents, loading, error }: Props) {
               {row.severity.replaceAll("_", " ")} · {formatDateTime(row.occurred_at)}
             </p>
             <p>{row.description}</p>
-            <p className="text-xs text-muted-foreground">
-              Action: {row.immediate_action} · Reporter {shortId(row.reported_by)}
-            </p>
+            <p className="text-xs text-muted-foreground">{t("nurse.ui.actionImmediateActionReporterReportedBy", { immediate_action: row.immediate_action, reported_by: shortId(row.reported_by) })}</p>
           </li>
         ))}
       </ul>

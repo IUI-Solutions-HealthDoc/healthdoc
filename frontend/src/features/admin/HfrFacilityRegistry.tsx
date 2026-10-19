@@ -16,6 +16,7 @@ import {
   type HfrSearch,
   type HfrSearchResult,
 } from "./api/hfr";
+import { useLocale, translate } from "@/lib/i18n";
 
 function failure(reason: unknown, fallback: string): string {
   return reason instanceof ApiError ? reason.message : fallback;
@@ -32,6 +33,7 @@ const FACILITY_ID = /^IN[0-9A-Z]{10}$/;
  * a list that fails to load says so instead of showing an empty dropdown.
  */
 export function HfrFacilityRegistry() {
+  const { t } = useLocale();
   const [owners, setOwners] = useState<HfrOption[] | null>(null);
   const [states, setStates] = useState<HfrOption[] | null>(null);
   const [districts, setDistricts] = useState<HfrOption[] | null>(null);
@@ -53,9 +55,9 @@ export function HfrFacilityRegistry() {
     if (!byName) return;
     let disposed = false;
     hfrMaster("OWNER").then((rows) => { if (!disposed) setOwners(rows); },
-      (reason: unknown) => { if (!disposed) setListError(failure(reason, "HFR ownership list could not be loaded.")); });
+      (reason: unknown) => { if (!disposed) setListError(failure(reason, translate("admin.msg.hfrOwnershipListCouldNotBe"))); });
     hfrStates().then((rows) => { if (!disposed) setStates(rows); },
-      (reason: unknown) => { if (!disposed) setListError(failure(reason, "HFR state list could not be loaded.")); });
+      (reason: unknown) => { if (!disposed) setListError(failure(reason, translate("admin.msg.hfrStateListCouldNotBe"))); });
     return () => { disposed = true; };
   }, [byName]);
 
@@ -63,7 +65,7 @@ export function HfrFacilityRegistry() {
     if (!criteria.state_lgd_code) return;
     let disposed = false;
     hfrDistricts(criteria.state_lgd_code).then((rows) => { if (!disposed) setDistricts(rows); },
-      (reason: unknown) => { if (!disposed) setListError(failure(reason, "HFR district list could not be loaded.")); });
+      (reason: unknown) => { if (!disposed) setListError(failure(reason, translate("admin.msg.hfrDistrictListCouldNotBe"))); });
     return () => { disposed = true; };
   }, [criteria.state_lgd_code]);
 
@@ -71,7 +73,7 @@ export function HfrFacilityRegistry() {
     if (!criteria.district_lgd_code) return;
     let disposed = false;
     hfrSubdistricts(criteria.district_lgd_code).then((rows) => { if (!disposed) setSubdistricts(rows); },
-      (reason: unknown) => { if (!disposed) setListError(failure(reason, "HFR sub-district list could not be loaded.")); });
+      (reason: unknown) => { if (!disposed) setListError(failure(reason, translate("admin.msg.hfrSubDistrictListCouldNot"))); });
     return () => { disposed = true; };
   }, [criteria.district_lgd_code]);
 
@@ -105,7 +107,7 @@ export function HfrFacilityRegistry() {
       setResult(await searchHfr(body));
     } catch (reason) {
       setResult(null);
-      setSearchError(failure(reason, "HFR search failed."));
+      setSearchError(failure(reason, translate("admin.msg.hfrSearchFailed")));
     } finally {
       setBusy(false);
     }
@@ -114,54 +116,54 @@ export function HfrFacilityRegistry() {
   return (
     <div className="space-y-5">
       <section className="surface-card space-y-3 p-5">
-        <h2 className="text-lg font-semibold">Search the Health Facility Registry</h2>
-        <p className="text-sm text-muted-foreground">Search by HFR facility id, or by name with ownership and state.</p>
-        <label className="block space-y-1 text-sm"><span className="text-muted-foreground">HFR facility id</span>
+        <h2 className="text-lg font-semibold">{t("admin.ui.searchTheHealthFacilityRegistry")}</h2>
+        <p className="text-sm text-muted-foreground">{t("admin.ui.searchByHfrFacilityIdOr")}</p>
+        <label className="block space-y-1 text-sm"><span className="text-muted-foreground">{t("platform.hfrId")}</span>
           <input name="facility_id" value={criteria.facility_id} onChange={(e) => change("facility_id", e.target.value.toUpperCase())}
-            maxLength={12} placeholder="IN0000000000" aria-invalid={byId && !idValid} className={input} />
-          {byId && !idValid ? <span role="alert" className="text-danger">A facility id is 12 characters and starts with IN.</span> : null}
+            maxLength={12} placeholder={t("admin.ui.in0000000000")} aria-invalid={byId && !idValid} className={input} />
+          {byId && !idValid ? <span role="alert" className="text-danger">{t("admin.ui.aFacilityIdIs12Characters")}</span> : null}
         </label>
         {!byName ? (
-          <button type="button" onClick={() => setByName(true)} className="mb-2 block text-sm underline">Search by name, ownership and location instead</button>
+          <button type="button" onClick={() => setByName(true)} className="mb-2 block text-sm underline">{t("admin.ui.searchByNameOwnershipAndLocation")}</button>
         ) : (
         <fieldset disabled={byId} className="grid gap-3 md:grid-cols-3">
-          <label className="block space-y-1 text-sm md:col-span-3"><span className="text-muted-foreground">Facility name (full or part)</span>
+          <label className="block space-y-1 text-sm md:col-span-3"><span className="text-muted-foreground">{t("admin.ui.facilityNameFullOrPart")}</span>
             <input name="facility_name" value={criteria.facility_name} onChange={(e) => change("facility_name", e.target.value)} className={input} /></label>
-          <label className="block space-y-1 text-sm"><span className="text-muted-foreground">Ownership</span>
+          <label className="block space-y-1 text-sm"><span className="text-muted-foreground">{t("platform.ownership")}</span>
             <select name="ownership_code" value={criteria.ownership_code} onChange={(e) => change("ownership_code", e.target.value)} disabled={!owners} className={input}>
-              <option value="">{owners ? "Select ownership" : "Loading…"}</option>
+              <option value="">{owners ? t("admin.ui.selectOwnership") : "Loading…"}</option>
               {(owners ?? []).map((row) => <option key={row.code} value={row.code}>{label(row)}</option>)}
             </select></label>
-          <label className="block space-y-1 text-sm"><span className="text-muted-foreground">State / UT</span>
+          <label className="block space-y-1 text-sm"><span className="text-muted-foreground">{t("admin.ui.stateUt")}</span>
             <select name="state_lgd_code" value={criteria.state_lgd_code} onChange={(e) => change("state_lgd_code", e.target.value)} disabled={!states} className={input}>
-              <option value="">{states ? "Select State / UT" : "Loading…"}</option>
+              <option value="">{states ? t("admin.ui.selectStateUt") : "Loading…"}</option>
               {(states ?? []).map((row) => <option key={row.code} value={row.code}>{label(row)}</option>)}
             </select></label>
-          <label className="block space-y-1 text-sm"><span className="text-muted-foreground">District</span>
+          <label className="block space-y-1 text-sm"><span className="text-muted-foreground">{t("field.district")}</span>
             <select name="district_lgd_code" value={criteria.district_lgd_code} onChange={(e) => change("district_lgd_code", e.target.value)} disabled={!districts} className={input}>
-              <option value="">Select District</option>
+              <option value="">{t("admin.ui.selectDistrict")}</option>
               {(districts ?? []).map((row) => <option key={row.code} value={row.code}>{label(row)}</option>)}
             </select></label>
-          <label className="block space-y-1 text-sm"><span className="text-muted-foreground">Sub-district</span>
+          <label className="block space-y-1 text-sm"><span className="text-muted-foreground">{t("admin.ui.subDistrict")}</span>
             <select name="subdistrict_lgd_code" value={criteria.subdistrict_lgd_code} onChange={(e) => change("subdistrict_lgd_code", e.target.value)} disabled={!subdistricts} className={input}>
-              <option value="">Select Sub-District</option>
+              <option value="">{t("admin.ui.selectSubDistrict")}</option>
               {(subdistricts ?? []).map((row) => <option key={row.code} value={row.code}>{label(row)}</option>)}
             </select></label>
-          <label className="block space-y-1 text-sm"><span className="text-muted-foreground">PIN code</span>
+          <label className="block space-y-1 text-sm"><span className="text-muted-foreground">{t("admin.ui.pinCode")}</span>
             <input name="pincode" value={criteria.pincode} onChange={(e) => change("pincode", e.target.value.replace(/\D/g, ""))} inputMode="numeric" maxLength={6} className={input} /></label>
         </fieldset>
         )}
         {listError ? <p role="alert" className="text-sm text-danger">{listError}</p> : null}
         <button type="button" disabled={busy || !canSearch} onClick={() => void search(1)} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
-          {busy ? "Searching…" : "Search HFR"}
+          {busy ? "Searching…" : t("admin.ui.searchHfr")}
         </button>
         {searchError ? <p role="alert" className="text-sm text-danger">{searchError}</p> : null}
       </section>
 
       {result ? (
-        <section className="surface-card space-y-3 p-5" aria-label="HFR results">
+        <section className="surface-card space-y-3 p-5" aria-label={t("admin.ui.hfrResults")}>
           <p className="text-sm text-muted-foreground">
-            {result.facilities.length === 0 ? "No HFR facility matches." : `${result.total ?? result.facilities.length} facilities found.`}
+            {result.facilities.length === 0 ? t("admin.ui.noHfrFacilityMatches") : translate("admin.msg.countFacilitiesFound", undefined, { count: result.total ?? result.facilities.length })}
           </p>
           <ul className="divide-y divide-border">
             {result.facilities.map((facility) => (
@@ -172,15 +174,15 @@ export function HfrFacilityRegistry() {
                     {[facility.facilityType, facility.ownership, facility.districtName, facility.stateName, facility.facilityStatus].filter(Boolean).join(" · ")}
                   </span>
                 </span>
-                <button type="button" onClick={() => setSelected(facility)} className="rounded-md border border-border px-3 py-1.5 text-xs">Link to HealthDoc bridge</button>
+                <button type="button" onClick={() => setSelected(facility)} className="rounded-md border border-border px-3 py-1.5 text-xs">{t("admin.ui.linkToHealthdocBridge")}</button>
               </li>
             ))}
           </ul>
           {result.pages && result.pages > 1 ? (
             <div className="flex items-center gap-2 text-sm">
-              <button type="button" disabled={busy || result.page <= 1} onClick={() => void search(result.page - 1)} className="rounded-md border border-border px-3 py-1">Previous</button>
-              <span>Page {result.page} of {result.pages}</span>
-              <button type="button" disabled={busy || result.page >= result.pages} onClick={() => void search(result.page + 1)} className="rounded-md border border-border px-3 py-1">Next</button>
+              <button type="button" disabled={busy || result.page <= 1} onClick={() => void search(result.page - 1)} className="rounded-md border border-border px-3 py-1">{t("common.previous")}</button>
+              <span>{t("common.pageOf", { page: result.page, pages: result.pages })}</span>
+              <button type="button" disabled={busy || result.page >= result.pages} onClick={() => void search(result.page + 1)} className="rounded-md border border-border px-3 py-1">{t("common.next")}</button>
             </div>
           ) : null}
         </section>
@@ -193,6 +195,7 @@ export function HfrFacilityRegistry() {
 
 /** HFR-118 to 123: HIP and HIU services of this facility on HealthDoc's bridge. */
 function BridgeLink({ facility }: { facility: HfrFacility }) {
+  const { t } = useLocale();
   const [services, setServices] = useState<Record<"HIP" | "HIU", HfrBridgeService & { include: boolean }>>({
     HIP: { type: "HIP", hip_name: facility.facilityName, active: true, include: true },
     HIU: { type: "HIU", hip_name: `${facility.facilityName} HIU`, active: true, include: false },
@@ -221,37 +224,33 @@ function BridgeLink({ facility }: { facility: HfrFacility }) {
         chosen.map(({ type, hip_name, active }) => ({ type, hip_name: hip_name.trim(), active })),
         key.current,
       );
-      setDone(`${linked.facility_name} is linked to bridge ${linked.bridge_id}.`);
+      setDone(translate("admin.msg.facilityNameIsLinkedToBridge", undefined, { facility_name: linked.facility_name, bridge_id: linked.bridge_id }));
     } catch (reason) {
-      setError(failure(reason, "HFR did not link the bridge."));
+      setError(failure(reason, translate("admin.msg.hfrDidNotLinkTheBridge")));
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <section className="surface-card space-y-3 p-5" aria-label="Bridge linkage">
-      <h2 className="text-lg font-semibold">Link {facility.facilityName} to HealthDoc</h2>
-      <p className="text-sm text-muted-foreground">
-        Facility <span className="font-mono">{facility.facilityId}</span>. The name below is what patients see when they search for this hospital in a PHR app.
-      </p>
+    <section className="surface-card space-y-3 p-5" aria-label={t("admin.ui.bridgeLinkage")}>
+      <h2 className="text-lg font-semibold">{t("admin.ui.linkFacilitynameToHealthdoc", { facilityName: facility.facilityName })}</h2>
+      <p className="text-sm text-muted-foreground">{t("monitor.colFacility")}{" "}<span className="font-mono">{facility.facilityId}</span>{t("admin.ui.theNameBelowIsWhatPatients")}</p>
       {(["HIP", "HIU"] as const).map((type) => (
         <fieldset key={type} className="grid gap-2 rounded-md border border-border p-3 md:grid-cols-[auto_1fr_auto]">
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" name={`${type}-include`} checked={services[type].include} onChange={(e) => update(type, { include: e.target.checked })} />
-            {type === "HIP" ? "Shares records (HIP)" : "Requests records (HIU)"}
+            {type === "HIP" ? t("admin.ui.sharesRecordsHip") : t("admin.ui.requestsRecordsHiu")}
           </label>
           <input name={`${type}-name`} value={services[type].hip_name} onChange={(e) => update(type, { hip_name: e.target.value })} disabled={!services[type].include} className={input} />
           <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" name={`${type}-active`} checked={services[type].active} onChange={(e) => update(type, { active: e.target.checked })} disabled={!services[type].include} />
-            Active
-          </label>
+            <input type="checkbox" name={`${type}-active`} checked={services[type].active} onChange={(e) => update(type, { active: e.target.checked })} disabled={!services[type].include} />{t("monitor.activeToday")}</label>
         </fieldset>
       ))}
       {error ? <p role="alert" className="text-sm text-danger">{error}</p> : null}
       {done ? <p role="status" className="text-sm text-success">{done}</p> : null}
       <button type="button" disabled={busy || !ready} onClick={() => void submit()} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
-        {busy ? "Linking…" : "Link bridge"}
+        {busy ? "Linking…" : t("admin.ui.linkBridge")}
       </button>
     </section>
   );

@@ -6,6 +6,7 @@ import Stack from "@mui/material/Stack";
 import { Button } from "@/components/ui/Button";
 import { ApiError, getUserFacingError } from "@/lib/api";
 import { prepareResultDownload, uploadResultFile, validateResultFile, type ResultFile } from "../api/externalAttachments";
+import { useLocale, translate } from "@/lib/i18n";
 
 export interface AttachmentSelection { fileId: string | null; blocked: boolean }
 
@@ -13,6 +14,7 @@ export interface AttachmentSelection { fileId: string | null; blocked: boolean }
 export function ExternalResultUpload({ patientId, disabled, onChange }: {
   patientId: string; disabled: boolean; onChange: (selection: AttachmentSelection) => void;
 }) {
+  const { t } = useLocale();
   const [file, setFile] = useState<File | null>(null);
   const [saved, setSaved] = useState<ResultFile | null>(null);
   const [busy, setBusy] = useState(false);
@@ -35,32 +37,33 @@ export function ExternalResultUpload({ patientId, disabled, onChange }: {
       if (!live.current) return;
       const rejected = cause instanceof ApiError && [400, 403, 404, 413, 415, 422].includes(cause.code);
       setUncertain(!rejected);
-      setError(rejected ? getUserFacingError(cause, "The attachment was rejected.") :
-        "Upload outcome is unknown. A patient file may already exist. Do not upload it again; ask an administrator to reconcile the upload before continuing. Leaving this page loses this warning.");
+      setError(rejected ? getUserFacingError(cause, translate("doctor.msg.theAttachmentWasRejected")) :
+        translate("doctor.msg.uploadOutcomeIsUnknownAPatient"));
     } finally {
       writing.current = false;
       if (live.current) setBusy(false);
     }
   }
   return <Stack spacing={1}>
-    <label>Outside report attachment (optional)<input key={inputKey} type="file" accept=".pdf,.png,.jpg,.jpeg"
+    <label>{t("doctor.ui.outsideReportAttachmentOptional")}<input key={inputKey} type="file" accept=".pdf,.png,.jpg,.jpeg"
       disabled={disabled || busy || uncertain || !!saved} onChange={(event) => {
         const chosen = event.target.files?.[0] ?? null;
         setFile(chosen); setError(chosen ? validateResultFile(chosen) : null);
         onChange({ fileId: null, blocked: !!chosen });
       }} /></label>
-    <p>PDF, PNG or JPEG, up to 25 MB. Upload first, then record the result to attach it. File contents are validated by the server.</p>
+    <p>{t("doctor.ui.pdfPngOrJpegUpTo")}</p>
     {error && <Alert severity="error">{error}</Alert>}
-    {saved ? <Alert severity="info">Uploaded: {saved.original_name || "Outside report"}. It will be linked when this result is recorded. Removing the selection does not erase the uploaded patient file.</Alert> :
-      <Button disabled={disabled || busy || uncertain || !file || !!(file && validateResultFile(file))} onClick={() => void upload()}>{busy ? "Uploading attachment…" : "Upload attachment"}</Button>}
+    {saved ? <Alert severity="info">{t("doctor.ui.uploaded")}{" "}{saved.original_name || t("doctor.ui.outsideReport")}{t("doctor.ui.itWillBeLinkedWhenThis")}</Alert> :
+      <Button disabled={disabled || busy || uncertain || !file || !!(file && validateResultFile(file))} onClick={() => void upload()}>{busy ? t("doctor.ui.uploadingAttachment") : t("doctor.ui.uploadAttachment")}</Button>}
     {(file || saved) && <Button disabled={disabled || busy || uncertain} onClick={() => {
       setFile(null); setSaved(null); setError(null); setInputKey((key) => key + 1);
       onChange({ fileId: null, blocked: false });
-    }}>Remove attachment selection</Button>}
+    }}>{t("doctor.ui.removeAttachmentSelection")}</Button>}
   </Stack>;
 }
 
 export function ExternalResultDownload({ fileId, patientId }: { fileId: string; patientId: string }) {
+  const { t } = useLocale();
   const [link, setLink] = useState<Awaited<ReturnType<typeof prepareResultDownload>> | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -73,14 +76,14 @@ export function ExternalResultDownload({ fileId, patientId }: { fileId: string; 
       const result = await prepareResultDownload(fileId, patientId);
       if (live.current) setLink(result);
     } catch (cause) {
-      if (live.current) setError(getUserFacingError(cause, "The report cannot be opened. It may be unavailable or its download address needs configuration."));
+      if (live.current) setError(getUserFacingError(cause, translate("doctor.msg.theReportCannotBeOpenedIt")));
     } finally { reading.current = false; if (live.current) setBusy(false); }
   }
   return <Stack spacing={1}>
-    <Button disabled={busy} onClick={() => void prepare()}>{busy ? "Preparing attachment…" : "Prepare attachment download"}</Button>
+    <Button disabled={busy} onClick={() => void prepare()}>{busy ? t("doctor.ui.preparingAttachment") : t("doctor.ui.prepareAttachmentDownload")}</Button>
     {error && <Alert severity="error">{error}</Alert>}
     {link && <a href={link.url} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" className="underline" onClick={(event) => {
-      if (Date.now() >= link.expiresAt) { event.preventDefault(); setLink(null); setError("This download link expired. Prepare a new download."); }
-    }}>Open {link.name} (temporary link)</a>}
+      if (Date.now() >= link.expiresAt) { event.preventDefault(); setLink(null); setError(translate("doctor.msg.thisDownloadLinkExpiredPrepareA")); }
+    }}>{t("doctor.ui.openNameTemporaryLink", { name: link.name })}</a>}
   </Stack>;
 }

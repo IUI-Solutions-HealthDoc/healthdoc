@@ -15,7 +15,7 @@ export function ResultsWorkspace() {
   const [source, setSource] = useState("local");
   const { t } = useLocale();
   return <Box>
-    <Tabs value={source} onChange={(_event, value: string) => setSource(value)} aria-label="Results source" sx={{ mb: 2 }}>
+    <Tabs value={source} onChange={(_event, value: string) => setSource(value)} aria-label={t("doctor.ui.resultsSource")} sx={{ mb: 2 }}>
       <Tab id="local-results-tab" aria-controls="local-results-panel" value="local" label={t("doctor.resultsTabLocal")} />
       <Tab id="external-results-tab" aria-controls="external-results-panel" value="external" label={t("doctor.resultsTabExternal")} />
     </Tabs>

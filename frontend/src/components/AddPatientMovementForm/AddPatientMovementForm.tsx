@@ -23,7 +23,7 @@ export default function AddPatientMovementForm({
   isSubmitting = false,
   onSubmit,
 }: AddPatientMovementFormProps) {
-  const { localizeField } = useLocale();
+  const { t, localizeField } = useLocale();
   const {
     register,
     handleSubmit,
@@ -64,13 +64,13 @@ export default function AddPatientMovementForm({
 
   return (
     <FormSection
-      title="In-hospital ward / bed transfer"
-      description="Records a patient_movement_log inside this facility. This is not a discharge with type transferred (leaving for another facility)."
+      title={t("common.ui.inHospitalWardBedTransfer")}
+      description={t("common.ui.recordsAPatientMovementLogInside")}
     >
       <form onSubmit={handleSubmit(submitHandler)} className="space-y-6">
         <div className="grid gap-5 md:grid-cols-2">
           <SelectField
-            label="Destination Ward"
+            label={t("common.ui.destinationWard")}
             options={wards.map((ward) => ({
               label: localizeField(ward.name, ward.name_hi),
               value: ward.id,
@@ -82,12 +82,10 @@ export default function AddPatientMovementForm({
           />
 
           {destinationBeds.length === 0 ? (
-            <p className="self-end text-sm text-muted-foreground">
-              No vacant beds in this ward.
-            </p>
+            <p className="self-end text-sm text-muted-foreground">{t("common.ui.noVacantBedsInThisWard")}</p>
           ) : (
             <SelectField
-              label="Destination Bed"
+              label={t("common.ui.destinationBed")}
               options={destinationBeds.map((bed) => ({
                 label: bed.bed_number,
                 value: bed.bed_id,
@@ -100,8 +98,8 @@ export default function AddPatientMovementForm({
         </div>
 
         <TextAreaField
-          label="Reason for Movement"
-          placeholder="Enter reason for patient transfer..."
+          label={t("common.ui.reasonForMovement")}
+          placeholder={t("common.ui.enterReasonForPatientTransfer")}
           rows={4}
           registration={register("reason")}
           error={errors.reason}
@@ -109,7 +107,7 @@ export default function AddPatientMovementForm({
 
         <FormActions
           isSubmitting={isSubmitting}
-          submitLabel="Record Movement"
+          submitLabel={t("common.ui.recordMovement")}
           resetLabel="Reset"
           onReset={handleReset}
         />

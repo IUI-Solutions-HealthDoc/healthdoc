@@ -19,6 +19,7 @@ import TableChartOutlinedIcon from "@mui/icons-material/TableChartOutlined";
 import GridOnOutlinedIcon from "@mui/icons-material/GridOnOutlined";
 import PictureAsPdfOutlinedIcon from "@mui/icons-material/PictureAsPdfOutlined";
 import { meridian } from "@/styles/theme";
+import { translate } from "@/lib/i18n";
 
 export type ExportFormat = "csv" | "xlsx" | "pdf";
 
@@ -50,13 +51,13 @@ const FORMAT_META: Record<
     icon: TableChartOutlinedIcon,
   },
   xlsx: {
-    label: "Excel",
-    hint: "Workbook (.xlsx)",
+    get label() { return translate("common.msg.excel"); },
+    get hint() { return translate("common.msg.workbookXlsx"); },
     icon: GridOnOutlinedIcon,
   },
   pdf: {
     label: "PDF",
-    hint: "Printable report",
+    get hint() { return translate("common.msg.printableReport"); },
     icon: PictureAsPdfOutlinedIcon,
   },
 };
@@ -68,7 +69,7 @@ export const ExportButton = forwardRef<HTMLButtonElement, ExportButtonProps>(
     {
       onExport,
       formats = DEFAULT_FORMATS,
-      label = "Export",
+      label = translate("consent.access.export"),
       loading: loadingProp = false,
       variant = "outlined",
       size = "medium",

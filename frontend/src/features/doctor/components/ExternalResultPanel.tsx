@@ -14,6 +14,7 @@ import { listExternalResults, recordExternalResult, type ExternalResult, type Ex
 import { externalResultSchema } from "../lib/external-result-form";
 import type { PlacedOrder } from "../types";
 import { ExternalResultDownload, ExternalResultUpload, type AttachmentSelection } from "./ExternalResultAttachment";
+import { useLocale, translate } from "@/lib/i18n";
 
 interface Props {
   order: PlacedOrder;
@@ -42,12 +43,14 @@ function DraftField({ id, label, value, onChange, disabled, error, helperText, m
 }
 
 export function ExternalResultPanel(props: Props) {
-  if (props.order.fulfilment_mode !== "external_referral") return <Alert severity="warning">This order is not confirmed as an external referral.</Alert>;
+  const { t } = useLocale();
+  if (props.order.fulfilment_mode !== "external_referral") return <Alert severity="warning">{t("doctor.ui.thisOrderIsNotConfirmedAs")}</Alert>;
   // Reset before paint, including an in-flight save, not after a fetch finishes.
   return <ResultSession key={`${props.patientId}:${props.order.id}`} {...props} />;
 }
 
 function ResultSession({ order, patientId, patientLabel, onSaved }: Props) {
+  const { t } = useLocale();
   const [rows, setRows] = useState<ExternalResult[]>([]);
   const [loading, setLoading] = useState(true);
   const [readError, setReadError] = useState<string | null>(null);
@@ -70,7 +73,7 @@ function ResultSession({ order, patientId, patientLabel, onSaved }: Props) {
     } catch (cause) {
       if (live.current && request === generation.current) {
         setRows([]);
-        setReadError(getUserFacingError(cause, "Outside result history could not be loaded."));
+        setReadError(getUserFacingError(cause, translate("doctor.msg.outsideResultHistoryCouldNotBe")));
       }
     } finally {
       if (live.current && request === generation.current) setLoading(false);
@@ -91,7 +94,7 @@ function ResultSession({ order, patientId, patientLabel, onSaved }: Props) {
     const parsed = externalResultSchema(localDate).safeParse(form);
     if (!attempt && (!parsed.success || !confirmed)) {
       setErrors({ ...(!parsed.success ? Object.fromEntries(parsed.error.issues.map((issue) => [String(issue.path[0]), issue.message])) : {}),
-        ...(!confirmed ? { confirmed: "Confirm the patient and order before recording." } : {}) });
+        ...(!confirmed ? { confirmed: translate("doctor.msg.confirmThePatientAndOrderBefore") } : {}) });
       return;
     }
     if (!attempt && !parsed.success) return;
@@ -108,7 +111,7 @@ function ResultSession({ order, patientId, patientLabel, onSaved }: Props) {
       onSaved();
     } catch (cause) {
       if (!live.current) return;
-      setWriteError(getUserFacingError(cause, "Submission was not confirmed. Retry this same result; review history before starting a different entry."));
+      setWriteError(getUserFacingError(cause, translate("doctor.msg.submissionWasNotConfirmedRetryThis")));
       // Network/server/409 ambiguity retains the original payload and key.
       if (cause instanceof ApiError && [400, 403, 404, 422].includes(cause.code)) setAttempt(null);
     } finally {
@@ -117,33 +120,33 @@ function ResultSession({ order, patientId, patientLabel, onSaved }: Props) {
     }
   }
 
-  return <Stack spacing={2} aria-label="Outside result details">
-    <Typography component="h3" sx={{ fontWeight: 700 }}>Outside results — {order.order_number}</Typography>
-    <Typography>{patientLabel || `Patient record: ${patientId}`}</Typography>
-    <Alert severity="info">Recording an outside report completes the referred order. It does not locally verify the report, sign it off, or publish an ABDM document. Corrections are new entries; earlier entries remain unchanged.</Alert>
+  return <Stack spacing={2} aria-label={t("doctor.ui.outsideResultDetails")}>
+    <Typography component="h3" sx={{ fontWeight: 700 }}>{t("doctor.ui.outsideResultsOrderNumber", { order_number: order.order_number })}</Typography>
+    <Typography>{patientLabel || translate("doctor.msg.patientRecordPatientid", undefined, { patientId })}</Typography>
+    <Alert severity="info">{t("doctor.ui.recordingAnOutsideReportCompletesThe")}</Alert>
     <Box>
-      <Button disabled={loading || saving} onClick={() => void refresh()}>Refresh result history</Button>
-      {loading ? <p role="status">Loading outside results…</p> : readError ? <Alert severity="error">{readError}</Alert> : rows.length === 0 ? <p>{attempt ? "History may predate this submission. Refresh history or retry the same entry." : "No outside results recorded."}</p> :
+      <Button disabled={loading || saving} onClick={() => void refresh()}>{t("doctor.ui.refreshResultHistory")}</Button>
+      {loading ? <p role="status">{t("doctor.ui.loadingOutsideResults")}</p> : readError ? <Alert severity="error">{readError}</Alert> : rows.length === 0 ? <p>{attempt ? t("doctor.ui.historyMayPredateThisSubmissionRefresh") : t("doctor.ui.noOutsideResultsRecorded")}</p> :
         <ol>{rows.map((row) => <li key={row.id} className="my-3 border-b pb-3">
-          <p><strong>{row.provider_name || "Provider not recorded"}</strong> · Observed: {row.observed_on || "Not recorded"}</p>
+          <p><strong>{row.provider_name || t("doctor.ui.providerNotRecorded")}</strong>{" "}{t("doctor.ui.observed")}{" "}{row.observed_on || t("receptionist.scanShare.notRecorded")}</p>
           <p className="whitespace-pre-wrap break-words">{row.summary}</p>
-          <p>Recorded {formatDateTime(row.recorded_at)} · Staff ID: {row.recorded_by}</p>
+          <p>{t("doctor.ui.recordedRecordedAtStaffIdRecorded", { recorded_at: formatDateTime(row.recorded_at), recorded_by: row.recorded_by })}</p>
           {row.result_file_id && <ExternalResultDownload key={`${patientId}:${row.result_file_id}`} fileId={row.result_file_id} patientId={patientId} />}
         </li>)}</ol>}
     </Box>
-    {order.status === "cancelled" ? <Alert severity="warning">This order is cancelled. History is read-only.</Alert> : receipt ? <>
-      <Alert severity="success">Result recorded for {order.order_number}. Entry ID: {receipt.id}. Do not submit it again.</Alert>
-      <Button onClick={() => { setReceipt(null); setAttempt(null); setConfirmed(false); setAttachment({ fileId: null, blocked: false }); setForm({ provider_name: "", observed_on: "", summary: "" }); }}>Record another result / correction</Button>
+    {order.status === "cancelled" ? <Alert severity="warning">{t("doctor.ui.thisOrderIsCancelledHistoryIs")}</Alert> : receipt ? <>
+      <Alert severity="success">{t("doctor.ui.resultRecordedForOrderNumberEntry", { order_number: order.order_number, id: receipt.id })}</Alert>
+      <Button onClick={() => { setReceipt(null); setAttempt(null); setConfirmed(false); setAttachment({ fileId: null, blocked: false }); setForm({ provider_name: "", observed_on: "", summary: "" }); }}>{t("doctor.ui.recordAnotherResultCorrection")}</Button>
     </> : <Box component="form" noValidate onSubmit={(event) => { event.preventDefault(); void submit(); }}>
       <Stack spacing={2}>
-        {writeError && <Alert severity="error">{writeError}{attempt && " The original entry is locked for a safe retry. Leaving this patient or reloading loses that retry key; inspect history before entering it again."}</Alert>}
-        <DraftField id={`${order.id}-provider`} label="Outside provider (optional)" value={form.provider_name} disabled={!!attempt} error={errors.provider_name} onChange={(value) => setForm((current) => ({ ...current, provider_name: value }))} />
-        <DraftField id={`${order.id}-observed`} label="Observed date (optional)" type="date" value={form.observed_on} disabled={!!attempt} error={errors.observed_on} onChange={(value) => setForm((current) => ({ ...current, observed_on: value }))} />
-        <DraftField id={`${order.id}-summary`} label="Outside result summary" required multiline value={form.summary} disabled={!!attempt} error={errors.summary} helperText="Transcribe the outside report accurately. This is not local verification." onChange={(value) => setForm((current) => ({ ...current, summary: value }))} />
+        {writeError && <Alert severity="error">{writeError}{attempt && translate("doctor.msg.theOriginalEntryIsLockedFor")}</Alert>}
+        <DraftField id={`${order.id}-provider`} label={t("doctor.ui.outsideProviderOptional")} value={form.provider_name} disabled={!!attempt} error={errors.provider_name} onChange={(value) => setForm((current) => ({ ...current, provider_name: value }))} />
+        <DraftField id={`${order.id}-observed`} label={t("doctor.ui.observedDateOptional")} type="date" value={form.observed_on} disabled={!!attempt} error={errors.observed_on} onChange={(value) => setForm((current) => ({ ...current, observed_on: value }))} />
+        <DraftField id={`${order.id}-summary`} label={t("doctor.ui.outsideResultSummary")} required multiline value={form.summary} disabled={!!attempt} error={errors.summary} helperText={t("doctor.ui.transcribeTheOutsideReportAccuratelyThis")} onChange={(value) => setForm((current) => ({ ...current, summary: value }))} />
         <ExternalResultUpload patientId={patientId} disabled={!!attempt || loading || !!readError} onChange={setAttachment} />
-        <label><input type="checkbox" checked={confirmed} disabled={!!attempt} onChange={(e) => setConfirmed(e.target.checked)} /> I confirm this result belongs to the patient and order shown above.</label>
+        <label><input type="checkbox" checked={confirmed} disabled={!!attempt} onChange={(e) => setConfirmed(e.target.checked)} />{" "}{t("doctor.ui.iConfirmThisResultBelongsTo")}</label>
         {errors.confirmed && <Alert severity="error">{errors.confirmed}</Alert>}
-        <Button type="submit" variant="contained" disabled={saving || loading || !!readError || attachment.blocked}>{saving ? "Recording…" : attempt ? "Retry same result" : "Record outside result"}</Button>
+        <Button type="submit" variant="contained" disabled={saving || loading || !!readError || attachment.blocked}>{saving ? "Recording…" : attempt ? t("doctor.ui.retrySameResult") : t("doctor.ui.recordOutsideResult")}</Button>
       </Stack>
     </Box>}
   </Stack>;

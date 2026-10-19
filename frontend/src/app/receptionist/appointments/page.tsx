@@ -1178,7 +1178,7 @@ export default function AppointmentsPage() {
               {services.map((s) => (
                 <div key={s.id} className="py-2 text-xs">
                   <div className="font-semibold text-slate-900 dark:text-slate-100">{localizeField(s.name, s.name_hi)}</div>
-                  <div className="text-slate-500">{s.duration_minutes} minutes {s.description && `— ${s.description}`}</div>
+                  <div className="text-slate-500">{s.duration_minutes}{" "}{t("receptionist.ui.minutes")}{" "}{s.description && `— ${s.description}`}</div>
                 </div>
               ))}
             </div>

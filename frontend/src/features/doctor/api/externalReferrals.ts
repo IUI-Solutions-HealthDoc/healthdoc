@@ -1,5 +1,6 @@
 import { api } from "@/lib/api";
 import type { PlacedOrder } from "../types";
+import { translate } from "@/lib/i18n";
 
 export type ReferralState = "pending" | "completed" | "cancelled" | "all";
 export interface ExternalReferral extends Omit<PlacedOrder, "item_label" | "detail_status"> {
@@ -25,7 +26,7 @@ export async function listExternalReferrals(state: ReferralState, offset: number
   if (!Array.isArray(page?.items) || !Number.isSafeInteger(page.total) || page.total < 0 ||
       page.offset !== offset || page.limit !== limit || page.items.length > limit ||
       page.items.some((row) => row.fulfilment_mode !== "external_referral" || !row.patient_id || !row.id)) {
-    throw new Error("Invalid external-referral page");
+    throw new Error(translate("doctor.msg.invalidExternalReferralPage"));
   }
   return page;
 }

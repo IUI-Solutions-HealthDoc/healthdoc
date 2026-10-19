@@ -20,6 +20,7 @@ import type {
   ReportIncidentPayload,
   Vitals,
 } from "../types";
+import { translate } from "@/lib/i18n";
 
 export type {
   AdmissionTransferResult,
@@ -34,7 +35,7 @@ export type {
 
 export class UnsupportedWorkflowError extends Error {
   constructor(workflow: string) {
-    super(`${workflow} is not available yet.`);
+    super(translate("nurse.msg.workflowIsNotAvailableYet", undefined, { workflow }));
     this.name = "UnsupportedWorkflowError";
   }
 }
@@ -172,10 +173,10 @@ export async function addPatientMovement(data: AddPatientMovementSchema) {
 
 export async function addProcedureAssistance(data: AddProcedureAssistanceSchema) {
   void data;
-  throw new UnsupportedWorkflowError("Procedure assistance entry");
+  throw new UnsupportedWorkflowError(translate("nurse.msg.procedureAssistanceEntry"));
 }
 
 export async function addNursingNote(data: AddNursingNoteSchema) {
   void data;
-  throw new UnsupportedWorkflowError("Nursing note entry");
+  throw new UnsupportedWorkflowError(translate("nurse.msg.nursingNoteEntry"));
 }

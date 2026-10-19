@@ -6,6 +6,7 @@ import { getFacilityCapabilities } from "@/features/admin/api/facilityModules";
 import { MODULE_CODE_LABELS } from "@/features/admin/constants";
 import type { ModuleCode } from "@/features/admin/types";
 import { ApiError } from "@/lib/api";
+import { useLocale } from "@/lib/i18n";
 
 type GateState = "loading" | "enabled" | "disabled" | "error";
 
@@ -21,6 +22,7 @@ export function ModuleCapabilityGate({
   module: ModuleCode;
   children: ReactNode;
 }) {
+  const { t } = useLocale();
   const [state, setState] = useState<GateState>("loading");
 
   useEffect(() => {
@@ -45,7 +47,7 @@ export function ModuleCapabilityGate({
   if (state === "loading") {
     return (
       <main style={{ padding: "2rem" }}>
-        <p>Loading facility capabilities…</p>
+        <p>{t("common.ui.loadingFacilityCapabilities")}</p>
       </main>
     );
   }
@@ -54,7 +56,7 @@ export function ModuleCapabilityGate({
     return (
       <main style={{ padding: "2rem" }}>
         <h1>{MODULE_CODE_LABELS[module]}</h1>
-        <p>Not offered at this facility.</p>
+        <p>{t("common.ui.notOfferedAtThisFacility")}</p>
       </main>
     );
   }
@@ -63,7 +65,7 @@ export function ModuleCapabilityGate({
     return (
       <main style={{ padding: "2rem" }}>
         <h1>{MODULE_CODE_LABELS[module]}</h1>
-        <p>Could not load facility capabilities. Retry or contact an administrator.</p>
+        <p>{t("common.ui.couldNotLoadFacilityCapabilitiesRetry")}</p>
       </main>
     );
   }

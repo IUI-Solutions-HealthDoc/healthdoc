@@ -1,4 +1,5 @@
 "use client";
+import { useLocale } from "@/lib/i18n";
 
 /**
  * A child on a prescribing or dispensing screen. HealthDoc has no clinically
@@ -10,18 +11,14 @@
 export const PAEDIATRIC_AGE_YEARS = 12;
 
 export function PaediatricDoseNotice({ ageYears }: { ageYears: number | null | undefined }) {
+  const { t } = useLocale();
   if (ageYears === null || ageYears === undefined) {
     return (
-      <p role="alert" className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-        Age unknown: confirm the patient&apos;s age and weight before choosing a dose.
-      </p>
+      <p role="alert" className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">{t("common.ui.ageUnknownConfirmThePatientS")}</p>
     );
   }
   if (ageYears >= PAEDIATRIC_AGE_YEARS) return null;
   return (
-    <p role="alert" className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm font-medium text-red-900">
-      Child, {ageYears} {ageYears === 1 ? "year" : "years"}: check every dose and form against the child&apos;s weight.
-      HealthDoc does not check paediatric doses automatically.
-    </p>
+    <p role="alert" className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm font-medium text-red-900">{t("common.ui.child")}{" "}{ageYears} {ageYears === 1 ? "year" : "years"}{t("common.ui.checkEveryDoseAndFormAgainst")}</p>
   );
 }

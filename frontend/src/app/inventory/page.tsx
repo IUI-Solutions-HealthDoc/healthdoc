@@ -12,7 +12,7 @@ import { IndentWorkspace, type DraftLine } from "@/features/inventory/IndentWork
 import { listReorderAlerts } from "@/features/pharmacy/api";
 import type { ReorderAlertItem } from "@/features/pharmacy/types";
 import { ApiError } from "@/lib/api";
-import { useLocale, type MessageKey } from "@/lib/i18n";
+import { useLocale, type MessageKey, translate } from "@/lib/i18n";
 import { useAuth } from "@/providers/auth-provider";
 
 type StockTab = "purchase-orders" | "grn" | "transfers" | "indents" | "adjustments";
@@ -57,7 +57,7 @@ function Inventory() {
       setAlerts(response.items);
       setError(null);
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Could not load inventory alerts");
+      setError(reason instanceof ApiError ? reason.message : translate("inventory.msg.couldNotLoadInventoryAlerts"));
     }
   }, [authLoading, isHod]);
 

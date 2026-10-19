@@ -2,16 +2,18 @@
 
 import Chip from "@mui/material/Chip";
 import { meridian } from "@/styles/theme";
+import { useLocale } from "@/lib/i18n";
 
 export interface FEFOIndicatorProps {
   fefo: boolean;
 }
 
 export default function FEFOIndicator({ fefo }: FEFOIndicatorProps) {
+  const { t } = useLocale();
   return (
     <Chip
       size="small"
-      label={fefo ? "FEFO" : "Not FEFO"}
+      label={fefo ? "FEFO" : t("common.ui.notFefo")}
       sx={{
         height: 24,
         borderRadius: "999px",

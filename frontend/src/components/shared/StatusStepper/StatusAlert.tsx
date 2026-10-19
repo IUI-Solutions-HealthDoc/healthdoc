@@ -5,6 +5,7 @@ import Typography from "@mui/material/Typography";
 
 import { meridian } from "@/styles/theme";
 import type { StatusStep } from "./types";
+import { useLocale } from "@/lib/i18n";
 
 interface StatusAlertProps {
   status: string;
@@ -17,6 +18,7 @@ export default function StatusAlert({
   workflow,
   reason,
 }: StatusAlertProps) {
+  const { t } = useLocale();
   const currentStatus = workflow.find((step) => step.value === status);
 
   if (!currentStatus?.alert) {
@@ -76,9 +78,7 @@ export default function StatusAlert({
             lineHeight: 1.3,
             color: meridian.textSecondary,
           }}
-        >
-          Reason: {reason}
-        </Typography>
+        >{t("common.ui.reasonReason", { reason })}</Typography>
       ) : null}
     </Alert>
   );

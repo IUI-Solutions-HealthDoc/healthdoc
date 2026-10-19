@@ -63,10 +63,7 @@ export function PrescriptionWorkspace({ context, encounter }: PrescriptionWorksp
         <Stack direction="row" spacing={2} sx={{ alignItems: "flex-start", justifyContent: "space-between" }}>
           <Box>
             <Typography sx={{ fontSize: "1.0625rem", fontWeight: 700 }}>{t("doctor.prescription")}</Typography>
-            <Typography sx={{ fontSize: "0.8125rem", color: meridian.textSecondary, mt: 0.25 }}>
-              {context.patient_name} · {formatAgeSex(context.age_years, context.sex)} · UHID {context.uhid} · Token{" "}
-              {context.token_display}
-            </Typography>
+            <Typography sx={{ fontSize: "0.8125rem", color: meridian.textSecondary, mt: 0.25 }}>{t("doctor.ui.patientNameSexUhidUhidToken", { patient_name: context.patient_name, sex: formatAgeSex(context.age_years, context.sex), uhid: context.uhid, token_display: context.token_display })}</Typography>
           </Box>
           <Button variant="outlined" size="small" sx={doctorButtonSx} onClick={() => setPickOpen(true)}>
             {t("doctor.addMedicine")}

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { listArchives, listIntegrityChecks } from "../api";
 import type { AuditIntegrityCheck, AuditLogArchive } from "../types";
+import { translate } from "@/lib/i18n";
 
 export function useIntegritySummary() {
   const [checks, setChecks] = useState<AuditIntegrityCheck[]>([]);
@@ -26,7 +27,7 @@ export function useIntegritySummary() {
       setChecks([]);
       setArchives([]);
       setAnyChainInvalid(false);
-      setError(reason instanceof Error ? reason.message : "Failed to load integrity records");
+      setError(reason instanceof Error ? reason.message : translate("audit.msg.failedToLoadIntegrityRecords"));
     } finally {
       setLoading(false);
     }

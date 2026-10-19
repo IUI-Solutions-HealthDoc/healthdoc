@@ -13,8 +13,10 @@ import {
 import { getDefaultRouteForRole } from "@/lib/auth/routes";
 import { safeReturnUrl } from "@/lib/auth/return-url";
 import { useAuth } from "@/providers/auth-provider";
+import { useLocale } from "@/lib/i18n";
 
 export function LoginScreen() {
+  const { t } = useLocale();
   const searchParams = useSearchParams();
   const { user, isAuthenticated, isLoading } = useAuth();
   const [busy, setBusy] = useState(false);
@@ -51,14 +53,10 @@ export function LoginScreen() {
           preload
           className="items-center"
           nameClassName="brand-gradient text-3xl font-bold tracking-tight"
-          subtitle="Enterprise HIMS"
+          subtitle={t("auth.ui.enterpriseHims")}
         />
-        <h1 className="mt-5 text-2xl font-bold tracking-tight text-foreground">
-          Clinical Portal Sign-In
-        </h1>
-        <p className="mt-1.5 text-sm text-muted-foreground">
-          Authenticate using your authorized hospital credentials
-        </p>
+        <h1 className="mt-5 text-2xl font-bold tracking-tight text-foreground">{t("auth.ui.clinicalPortalSignIn")}</h1>
+        <p className="mt-1.5 text-sm text-muted-foreground">{t("auth.ui.authenticateUsingYourAuthorizedHospitalCredentials")}</p>
       </div>
 
       <div className="mt-6 space-y-4">
@@ -69,8 +67,7 @@ export function LoginScreen() {
           >
             <span className="mt-0.5 text-amber-600 dark:text-amber-400">⚠️</span>
             <p className="leading-snug">
-              <strong>Session Expired:</strong> Please sign in again to continue. Unsaved clinical drafts were not retained.
-            </p>
+              <strong>{t("auth.ui.sessionExpired")}</strong>{" "}{t("auth.ui.pleaseSignInAgainToContinue")}</p>
           </div>
         )}
 
@@ -90,36 +87,26 @@ export function LoginScreen() {
             role="alert"
           >
             <span className="mt-0.5 text-red-600 dark:text-red-400">⚠️</span>
-            <p className="leading-snug">
-              Sign-in is not configured for this deployment. Contact your hospital system administrator.
-            </p>
+            <p className="leading-snug">{t("auth.ui.signInIsNotConfiguredFor")}</p>
           </div>
         )}
 
         <Button type="button" onClick={() => void handleLogin()}
           className="w-full h-12 text-base font-semibold shadow-md"
           disabled={busy || isLoading || !keycloakConfigured}>
-          {busy ? "Redirecting…" : isLoading ? "Preparing sign-in…" : "Sign in with Keycloak"}
+          {busy ? "Redirecting…" : isLoading ? t("auth.ui.preparingSignIn") : t("auth.ui.signInWithKeycloak")}
         </Button>
 
         <div className="mt-6 border-t border-border/60 pt-5">
           <div className="flex flex-col items-center gap-2 text-xs text-muted-foreground">
             <div className="flex items-center gap-4">
-              <span className="inline-flex items-center gap-1">
-                🔒 Keycloak sign-in
-              </span>
+              <span className="inline-flex items-center gap-1">{t("auth.ui.keycloakSignIn")}</span>
               <span>•</span>
-              <span className="inline-flex items-center gap-1">
-                🛡️ Role-based access
-              </span>
+              <span className="inline-flex items-center gap-1">{t("auth.ui.roleBasedAccess")}</span>
               <span>•</span>
-              <span className="inline-flex items-center gap-1">
-                ⚖️ Consent controls
-              </span>
+              <span className="inline-flex items-center gap-1">{t("auth.ui.consentControls")}</span>
             </div>
-            <p className="mt-1 text-center text-[11px] text-muted-foreground/80">
-              Authorized personnel only. Use the workspace assigned to your role.
-            </p>
+            <p className="mt-1 text-center text-[11px] text-muted-foreground/80">{t("auth.ui.authorizedPersonnelOnlyUseTheWorkspace")}</p>
           </div>
         </div>
       </div>

@@ -1,8 +1,9 @@
+import { translate } from "@/lib/i18n";
 export const SETTINGS = [
   { label: "OPD Minor Procedure", value: "opd_minor" },
-  { label: "Bedside", value: "bedside" },
-  { label: "Emergency", value: "emergency" },
-  { label: "Operation Theatre", value: "ot" },
+  { get label() { return translate("doctor.procedureSetting.bedside"); }, value: "bedside" },
+  { get label() { return translate("role.emergency"); }, value: "emergency" },
+  { get label() { return translate("nurse.msg.operationTheatre"); }, value: "ot" },
 ] as const;
 
 export const DEFAULT_VALUES = {

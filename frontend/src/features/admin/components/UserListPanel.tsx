@@ -74,9 +74,7 @@ export function UserListPanel({
         >
           {t("admin.users.staffDirectory")}
         </Typography>
-        <Typography sx={{ m: 0, mt: 0.4, fontSize: "0.8125rem", color: meridian.textSecondary }}>
-          Search and manage staff profiles for this facility ({users.length} total).
-        </Typography>
+        <Typography sx={{ m: 0, mt: 0.4, fontSize: "0.8125rem", color: meridian.textSecondary }}>{t("admin.ui.searchAndManageStaffProfilesFor", { count: users.length })}</Typography>
       </Box>
 
       <Stack spacing={1.25} sx={{ px: 2.5, pb: 2 }}>
@@ -182,9 +180,7 @@ export function UserListPanel({
             bgcolor: "#fafbfc",
           }}
         >
-          <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary }}>
-            Page {currentPage} of {totalPages}
-          </Typography>
+          <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary }}>{t("admin.ui.pageCurrentpageOfTotalpages", { currentPage, totalPages })}</Typography>
           <Stack direction="row" spacing={1}>
             <button
               type="button"
@@ -199,9 +195,7 @@ export function UserListPanel({
                 cursor: currentPage <= 1 ? "not-allowed" : "pointer",
                 opacity: currentPage <= 1 ? 0.5 : 1,
               }}
-            >
-              Prev
-            </button>
+            >{t("patientPortal.ui.prev")}</button>
             <button
               type="button"
               disabled={currentPage >= totalPages}
@@ -215,9 +209,7 @@ export function UserListPanel({
                 cursor: currentPage >= totalPages ? "not-allowed" : "pointer",
                 opacity: currentPage >= totalPages ? 0.5 : 1,
               }}
-            >
-              Next
-            </button>
+            >{t("common.next")}</button>
           </Stack>
         </Box>
       )}

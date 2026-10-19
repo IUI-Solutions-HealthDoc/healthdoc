@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 import { ApiError, getUserFacingError } from "@/lib/api";
 
@@ -138,7 +138,7 @@ export function FacilityOnboarding({ facilities, onChanged }: {
             });
             setSelected(created.id);
             setForm({ code: "", name: "", state_code: "", ownership: "", hfr_facility_id: "" });
-            return `${created.name} created. Now give it its first admin.`;
+            return translate("platform.msg.nameCreatedNowGiveItIts", undefined, { name: created.name });
           }, t("platform.errFacility"));
           }}>{t("platform.createFacility")}</button>
       </div>
@@ -157,13 +157,13 @@ export function FacilityOnboarding({ facilities, onChanged }: {
           <div className="flex flex-wrap items-end gap-3">
             <label className="flex-1 space-y-1 text-sm">
               <span className="text-muted-foreground">{t("platform.hfrId")}</span>
-              <input aria-label={t("platform.setHfr")} className={input} value={hfr} placeholder="IN0910034387"
+              <input aria-label={t("platform.setHfr")} className={input} value={hfr} placeholder={t("platform.ui.in0910034387")}
                 onChange={(e) => setHfr(e.target.value.trim())} />
             </label>
             <button type="button" className={primary} disabled={busy || (hfr !== "" && !HFR_ID.test(hfr))}
               onClick={() => void run(async () => {
                 await updatePlatformFacility(target.id, { hfr_facility_id: hfr || null });
-                return hfr ? `HFR id ${hfr} saved for ${target.name}.` : `HFR id cleared for ${target.name}.`;
+                return hfr ? translate("platform.msg.hfrIdHfrSavedForName", undefined, { hfr, name: target.name }) : translate("platform.msg.hfrIdClearedForName", undefined, { name: target.name });
               }, t("platform.errHfr"))}>{t("platform.saveHfr")}</button>
           </div>
 
@@ -174,8 +174,8 @@ export function FacilityOnboarding({ facilities, onChanged }: {
                 void run(async () => {
                   await updatePlatformFacility(target.id, { publish_availability: publish });
                   return publish
-                    ? `${target.name}'s free beds and blood stock are now on the public availability page.`
-                    : `${target.name} is no longer on the public availability page.`;
+                    ? translate("platform.msg.nameSFreeBedsAndBlood", undefined, { name: target.name })
+                    : translate("platform.msg.nameIsNoLongerOnThe", undefined, { name: target.name });
                 }, t("platform.errPublish"));
               }} />{t("platform.publishAvailability")}</label>
 
@@ -212,7 +212,7 @@ export function FacilityOnboarding({ facilities, onChanged }: {
                   email: admin.email || null, temporary_password: admin.temporary_password,
                 });
                 setAdmin({ username: "", full_name: "", email: "", temporary_password: "" });
-                return `Admin ${created.username} created at ${target.name}. They change the password at first sign-in.`;
+                return translate("platform.msg.adminUsernameCreatedAtNameThey", undefined, { username: created.username, name: target.name });
               }, t("platform.errAdmin"));
               }}>{t("platform.createFirstAdmin")}</button>
           </div>
@@ -228,8 +228,8 @@ export function FacilityOnboarding({ facilities, onChanged }: {
             <button type="button" className={primary} disabled={busy || !source}
               onClick={() => void run(async () => {
                 const copied = await copyPlatformFacilitySetup(target.id, source);
-                return `Copied ${copied.departments} departments, ${copied.rooms} rooms, ${copied.wards} wards, `
-                  + `${copied.stock_locations} stores and ${copied.tariff_rows} tariff rows.`;
+                return translate("platform.msg.copiedDepartmentsDepartmentsRoomsRoomsWards", undefined, { departments: copied.departments, rooms: copied.rooms, wards: copied.wards })
+                  + translate("platform.msg.stockLocationsStoresAndTariffRows", undefined, { stock_locations: copied.stock_locations, tariff_rows: copied.tariff_rows });
               }, t("platform.errCopy"))}>{t("platform.copySetup")}</button>
           </div>
         </div>

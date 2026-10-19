@@ -8,6 +8,7 @@ import Typography from "@mui/material/Typography";
 import { meridian } from "@/styles/theme";
 import { formatINR } from "../lib/formatters";
 import { fromMoney, type Money } from "../lib/money";
+import { useLocale } from "@/lib/i18n";
 
 type Props = {
   gross_amount: Money;
@@ -52,6 +53,7 @@ export function InvoiceTotals({
   canEdit,
   onDiscountChange,
 }: Props) {
+  const { t } = useLocale();
   return (
     <Box
       sx={{
@@ -70,28 +72,26 @@ export function InvoiceTotals({
           fontWeight: 700,
           color: meridian.textPrimary,
         }}
-      >
-        Totals
-      </Typography>
+      >{t("billing.ui.totals")}</Typography>
 
       <Stack spacing={1.5}>
-        <Row label="Gross amount" value={formatINR(gross_amount)} />
+        <Row label={t("billing.ui.grossAmount")} value={formatINR(gross_amount)} />
         {canEdit ? (
           <TextField
             type="number"
             size="small"
-            label="Discount amount (₹)"
+            label={t("billing.ui.discountAmount")}
             value={fromMoney(discount_amount)}
             onChange={(e) => onDiscountChange(Number(e.target.value) || 0)}
             slotProps={{ htmlInput: { min: 0, step: 1 } }}
             fullWidth
           />
         ) : (
-          <Row label="Discount amount" value={formatINR(discount_amount)} />
+          <Row label={t("billing.ui.discountAmount2")} value={formatINR(discount_amount)} />
         )}
-        <Row label="Scheme adjustment" value={formatINR(scheme_adjustment)} />
+        <Row label={t("billing.ui.schemeAdjustment")} value={formatINR(scheme_adjustment)} />
         <Box sx={{ borderTop: `1px solid ${meridian.border}`, pt: 1.5 }}>
-          <Row label="Net amount" value={formatINR(net_amount)} emphasize />
+          <Row label={t("billing.ui.netAmount")} value={formatINR(net_amount)} emphasize />
         </Box>
       </Stack>
     </Box>

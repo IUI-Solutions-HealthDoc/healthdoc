@@ -106,7 +106,7 @@ export function QueueDisplayBoard({ departmentId }: { departmentId: string | nul
           <HealthDocBrand
             size={64}
             preload
-            subtitle="HIMS"
+            subtitle={t("common.ui.hims")}
             nameClassName="text-xl sm:text-2xl"
             className="text-white"
             imageClassName="bg-white"

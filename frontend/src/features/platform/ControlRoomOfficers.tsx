@@ -9,7 +9,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 import { ApiError, getUserFacingError } from "@/lib/api";
 
@@ -43,7 +43,7 @@ function said(reason: unknown, fallback: string): string {
 }
 
 function area(scope: Pick<MonitorScope, "state_code" | "district">): string {
-  return scope.district ? `${scope.district}, ${scope.state_code}` : `${scope.state_code} (whole state)`;
+  return scope.district ? `${scope.district}, ${scope.state_code}` : translate("platform.msg.stateCodeWholeState", undefined, { state_code: scope.state_code });
 }
 
 export function ControlRoomOfficers({ facilities }: { facilities: PlatformFacility[] }) {
@@ -168,7 +168,7 @@ export function ControlRoomOfficers({ facilities }: { facilities: PlatformFacili
               district: form.district.trim() || null,
             });
             setForm({ username: "", full_name: "", email: "", temporary_password: "", state_code: "", district: "" });
-            return `${created.username} can sign in and see ${area(created)}. They change the temporary password at first sign-in.`;
+            return translate("platform.msg.usernameCanSignInAndSee", undefined, { username: created.username, created: area(created) });
           }, t("platform.errOfficer"));
           }}>{t("platform.createOfficer")}</button>
       </div>
@@ -193,21 +193,21 @@ export function ControlRoomOfficers({ facilities }: { facilities: PlatformFacili
                   <li key={scope.id} className="flex items-center gap-2 rounded border border-border px-2 py-1 text-xs">
                     {area(scope)}
                     <button type="button" className="underline disabled:opacity-50" disabled={busy}
-                      aria-label={`Remove ${area(scope)} from ${officer.username}`}
+                      aria-label={translate("platform.msg.removeScopeFromUsername", undefined, { scope: area(scope), username: officer.username })}
                       onClick={() => void run(async () => {
                         await removeMonitorScope(scope.id);
                         return officer.scopes.length === 1
-                          ? `${officer.username} has no area left; their control room is closed until one is granted.`
-                          : `${area(scope)} removed from ${officer.username}.`;
+                          ? translate("platform.msg.usernameHasNoAreaLeftTheir", undefined, { username: officer.username })
+                          : translate("platform.msg.scopeRemovedFromUsername", undefined, { scope: area(scope), username: officer.username });
                       }, t("platform.errRemoveArea"))}>{t("platform.remove")}</button>
                   </li>
                 ))}
               </ul>
               <div className="mt-2 flex flex-wrap items-center gap-2">
-                <input aria-label={`State to add for ${officer.username}`} placeholder={t("platform.state")} className="w-24 rounded-md border border-border px-2 py-1 text-xs"
+                <input aria-label={translate("platform.msg.stateToAddForUsername", undefined, { username: officer.username })} placeholder={t("platform.state")} className="w-24 rounded-md border border-border px-2 py-1 text-xs"
                   value={draft.state_code}
                   onChange={(e) => setExtra((all) => ({ ...all, [sub]: { ...draft, state_code: e.target.value.toUpperCase().trim() } }))} />
-                <input aria-label={`District to add for ${officer.username}`} placeholder={t("platform.districtBlank")} list={listId}
+                <input aria-label={translate("platform.msg.districtToAddForUsername", undefined, { username: officer.username })} placeholder={t("platform.districtBlank")} list={listId}
                   className="min-w-48 rounded-md border border-border px-2 py-1 text-xs" value={draft.district}
                   onChange={(e) => setExtra((all) => ({ ...all, [sub]: { ...draft, district: e.target.value } }))} />
                 {districtList(listId, draft.state_code)}
@@ -216,7 +216,7 @@ export function ControlRoomOfficers({ facilities }: { facilities: PlatformFacili
                   onClick={() => void run(async () => {
                     const added = await addMonitorScope(sub, { state_code: draft.state_code, district: draft.district.trim() || null });
                     setExtra((all) => ({ ...all, [sub]: { state_code: "", district: "" } }));
-                    return `${officer.username} can now also see ${area(added)}.`;
+                    return translate("platform.msg.usernameCanNowAlsoSeeAdded", undefined, { username: officer.username, added: area(added) });
                   }, t("platform.errAddArea"))}>{t("platform.addArea")}</button>
               </div>
             </li>

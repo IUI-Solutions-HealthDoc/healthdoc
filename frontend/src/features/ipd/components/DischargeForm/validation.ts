@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { translate } from "@/lib/i18n";
 
 export const DISCHARGE_TYPES = [
   "discharged",
@@ -10,10 +11,10 @@ export const DISCHARGE_TYPES = [
 
 export const addDischargeSchema = z
   .object({
-    admission_id: z.guid("Admission ID must be a UUID"),
-    discharged_at: z.string().min(1, "Enter the discharge date and time"),
+    admission_id: z.guid({ error: () => translate("ipd.msg.admissionIdMustBeAUuid") }),
+    discharged_at: z.string().min(1, { error: () => translate("ipd.msg.enterTheDischargeDateAndTime") }),
     discharge_type: z.enum(DISCHARGE_TYPES),
-    discharge_summary: z.string().min(1, "Discharge summary is required"),
+    discharge_summary: z.string().min(1, { error: () => translate("ipd.msg.dischargeSummaryIsRequired") }),
     // Normalised on the way out, in dischargePatient — see the note there.
     follow_up_date: z.string().optional(),
     // Backend: DischargeRequest.destination_facility_id / destination_facility_name.
@@ -27,7 +28,7 @@ export const addDischargeSchema = z
   })
   .refine(
     (data) => !data.follow_up_date || !data.discharged_at || data.follow_up_date.slice(0, 10) >= data.discharged_at.slice(0, 10),
-    { message: "The follow-up date must be on or after the discharge date", path: ["follow_up_date"] },
+    { error: () => translate("ipd.msg.theFollowUpDateMustBe"), path: ["follow_up_date"] },
   )
   .refine(
     (data) =>
@@ -35,8 +36,7 @@ export const addDischargeSchema = z
       !!data.destination_facility_id ||
       !!data.destination_facility_name?.length,
     {
-      message:
-        "Destination facility (ID or name) is required for a transferred discharge",
+      error: () => translate("ipd.msg.destinationFacilityIdOrNameIs"),
       path: ["destination_facility_name"],
     },
   );

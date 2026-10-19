@@ -10,7 +10,7 @@ const code = ts.transpileModule(source, {
 const catalogue = {};
 new Function("exports", code)(catalogue);
 
-export function translate(key, vars) {
+function fill(key, vars) {
   let value = catalogue.en[key];
   if (value === undefined) throw new Error(`Missing English translation: ${key}`);
   for (const [name, replacement] of Object.entries(vars ?? {})) {
@@ -19,9 +19,14 @@ export function translate(key, vars) {
   return value;
 }
 
+// Same signature as the real translate(key, locale?, vars?).
+export function translate(key, _locale, vars) {
+  return fill(key, vars);
+}
+
 const locale = {
   locale: "en",
-  t: translate,
+  t: fill,
   localizeField: (english) => english,
   setLocale: () => {},
   locales: [{ code: "en", label: "English", nativeLabel: "English" }],

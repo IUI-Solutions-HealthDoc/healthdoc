@@ -2,6 +2,7 @@
 
 import { frequencyLabel, formatAgeSex, routeLabel } from "../lib/formatters";
 import type { DraftPrescriptionItem, EncounterContext } from "../types";
+import { useLocale } from "@/lib/i18n";
 
 export interface PrescriptionPrintViewProps {
   context: EncounterContext;
@@ -17,6 +18,7 @@ export interface PrescriptionPrintViewProps {
  * Rendered plain HTML so the printed Rx is clean B/W, not the app chrome.
  */
 export function PrescriptionPrintView({ context, items, notes, allergyNames = [], facilityName }: PrescriptionPrintViewProps) {
+  const { t } = useLocale();
   const now = new Date().toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 
   return (
@@ -35,18 +37,18 @@ export function PrescriptionPrintView({ context, items, notes, allergyNames = []
         <div>
           <div><strong>{context.patient_name}</strong></div>
           <div>{formatAgeSex(context.age_years, context.sex)}</div>
-          <div>UHID: {context.uhid} · Token: {context.token_display}</div>
+          <div>{t("doctor.ui.uhidUhidTokenTokenDisplay", { uhid: context.uhid, token_display: context.token_display })}</div>
         </div>
         <div style={{ textAlign: "right" }}>
           <div>{context.provider_name}</div>
-          <div>Visit: {context.visit_number ?? "—"}</div>
+          <div>{t("doctor.ui.visitValue", { value: context.visit_number ?? "—" })}</div>
           <div>{now}</div>
         </div>
       </div>
 
       {allergyNames.length > 0 && (
         <div style={{ fontSize: 12, marginTop: 8 }}>
-          <strong>Known allergies:</strong> {allergyNames.join(", ")}
+          <strong>{t("doctor.ui.knownAllergies")}</strong> {allergyNames.join(", ")}
         </div>
       )}
 
@@ -54,12 +56,12 @@ export function PrescriptionPrintView({ context, items, notes, allergyNames = []
         <thead>
           <tr>
             <th style={{ width: 24 }}>#</th>
-            <th>Medicine</th>
-            <th>Dosage</th>
-            <th>Frequency</th>
-            <th>Route</th>
-            <th>Duration</th>
-            <th>Instructions</th>
+            <th>{t("pharmacy.expiry.col.medicine")}</th>
+            <th>{t("common.ui.dosage")}</th>
+            <th>{t("doctor.ui.frequency")}</th>
+            <th>{t("immunization.col.route")}</th>
+            <th>{t("doctor.ui.duration")}</th>
+            <th>{t("doctor.ui.instructions")}</th>
           </tr>
         </thead>
         <tbody>
@@ -73,7 +75,7 @@ export function PrescriptionPrintView({ context, items, notes, allergyNames = []
               <td>{it.dosage || "—"}</td>
               <td>{frequencyLabel(it.frequency)}</td>
               <td>{routeLabel(it.route)}</td>
-              <td>{it.duration_days ? `${it.duration_days} days` : "As needed"}</td>
+              <td>{it.duration_days ? `${it.duration_days} days` : t("doctor.ui.asNeeded")}</td>
               <td>{it.instructions || "—"}</td>
             </tr>
           ))}
@@ -82,7 +84,7 @@ export function PrescriptionPrintView({ context, items, notes, allergyNames = []
 
       {notes && (
         <div style={{ fontSize: 12, marginTop: 12 }}>
-          <strong>Notes:</strong> {notes}
+          <strong>{t("pharmacy.dispense.notes")}</strong> {notes}
         </div>
       )}
 

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { ApiError, api, newIdempotencyKey } from "@/lib/api";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 import { createConsentRecord, listConsentPurposes } from "../api";
 import { consentChannelFormLabel } from "../i18nLabels";
 import type {
@@ -21,9 +21,9 @@ type Props = {
 const GRANT_FORM_CHANNELS: ConsentChannel[] = ["written", "verbal", "digital_otp"];
 
 const GRANTERS: Array<{ value: GrantedByType; label: string }> = [
-  { value: "patient", label: "Patient" },
-  { value: "guardian", label: "Guardian" },
-  { value: "nominee", label: "Nominee" },
+  { value: "patient", get label() { return translate("common.patient"); } },
+  { value: "guardian", get label() { return translate("receptionist.ui.guardian"); } },
+  { value: "nominee", get label() { return translate("consent.msg.nominee"); } },
 ];
 
 function humanise(code: string) {
@@ -98,7 +98,7 @@ export function ConsentGrantForm({ patientId, onCreated }: Props) {
       .catch((reason: unknown) => {
         if (!cancelled) {
           setPurposes([]);
-          setError(reason instanceof ApiError ? reason.message : "Could not load consent purposes.");
+          setError(reason instanceof ApiError ? reason.message : translate("consent.msg.couldNotLoadConsentPurposes"));
         }
       });
     return () => {
@@ -124,7 +124,7 @@ export function ConsentGrantForm({ patientId, onCreated }: Props) {
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     if (!canSubmit) {
-      setError("Complete the required consent fields before recording the decision.");
+      setError(translate("consent.msg.completeTheRequiredConsentFieldsBefore"));
       return;
     }
 
@@ -147,7 +147,7 @@ export function ConsentGrantForm({ patientId, onCreated }: Props) {
       setCreated(record);
       onCreated(record);
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Could not record consent.");
+      setError(reason instanceof ApiError ? reason.message : translate("consent.msg.couldNotRecordConsent"));
     } finally {
       setBusy(false);
     }
@@ -156,10 +156,8 @@ export function ConsentGrantForm({ patientId, onCreated }: Props) {
   if (created) {
     return (
       <section className="surface-card space-y-2 border border-success/30 bg-success-muted p-5">
-        <h2 className="text-base font-semibold text-success">Consent recorded</h2>
-        <p className="text-sm text-muted-foreground">
-          The decision is now in the patient&apos;s consent history and can be reviewed below.
-        </p>
+        <h2 className="text-base font-semibold text-success">{t("consent.ui.consentRecorded")}</h2>
+        <p className="text-sm text-muted-foreground">{t("consent.ui.theDecisionIsNowInThe")}</p>
         <button
           type="button"
           className="text-sm font-medium underline"
@@ -168,9 +166,7 @@ export function ConsentGrantForm({ patientId, onCreated }: Props) {
             setError(null);
             setIdempotencyKey(newIdempotencyKey());
           }}
-        >
-          Record another consent
-        </button>
+        >{t("consent.ui.recordAnotherConsent")}</button>
       </section>
     );
   }
@@ -179,17 +175,13 @@ export function ConsentGrantForm({ patientId, onCreated }: Props) {
     <form onSubmit={submit} className="surface-card space-y-4 p-5">
       <div>
         <h2 className="text-base font-semibold">{t("consent.recordConsent")}</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Record the decision communicated by the patient or their authorised representative.
-        </p>
+        <p className="mt-1 text-sm text-muted-foreground">{t("consent.ui.recordTheDecisionCommunicatedByThe")}</p>
       </div>
 
       {purposes === null ? (
         <p className="text-sm text-muted-foreground">{t("consent.loadingPurposes")}</p>
       ) : purposes.length === 0 ? (
-        <p role="alert" className="text-sm text-danger">
-          No active consent purpose is configured. Ask an administrator to configure one.
-        </p>
+        <p role="alert" className="text-sm text-danger">{t("consent.ui.noActiveConsentPurposeIsConfigured")}</p>
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
           <label className="space-y-1 text-sm">
@@ -225,7 +217,7 @@ export function ConsentGrantForm({ patientId, onCreated }: Props) {
           </label>
 
           <label className="space-y-1 text-sm">
-            <span className="text-muted-foreground">Decision given by *</span>
+            <span className="text-muted-foreground">{t("consent.ui.decisionGivenBy")}</span>
             <select
               required
               value={grantedBy}
@@ -254,13 +246,13 @@ export function ConsentGrantForm({ patientId, onCreated }: Props) {
               onChange={(event) => setExpiresOn(event.target.value)}
               className="w-full rounded-md border border-border px-3 py-2"
             />
-            <span className="block text-xs text-muted-foreground">Leave blank only when the purpose has no expiry.</span>
+            <span className="block text-xs text-muted-foreground">{t("consent.ui.leaveBlankOnlyWhenThePurpose")}</span>
           </label>
 
           {needsRepresentative ? (
             <>
               <label className="space-y-1 text-sm">
-                <span className="text-muted-foreground">Representative name *</span>
+                <span className="text-muted-foreground">{t("consent.ui.representativeName")}</span>
                 <input
                   required
                   minLength={2}
@@ -271,7 +263,7 @@ export function ConsentGrantForm({ patientId, onCreated }: Props) {
                 />
               </label>
               <label className="space-y-1 text-sm">
-                <span className="text-muted-foreground">Relationship *</span>
+                <span className="text-muted-foreground">{t("consent.ui.relationship")}</span>
                 <input
                   required
                   minLength={2}

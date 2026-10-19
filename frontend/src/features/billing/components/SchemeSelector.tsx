@@ -9,6 +9,7 @@ import Typography from "@mui/material/Typography";
 import { meridian } from "@/styles/theme";
 import { SCHEME_OPTIONS } from "../constants";
 import type { SchemeOptionCode } from "../types";
+import { useLocale } from "@/lib/i18n";
 
 type Props = {
   value: SchemeOptionCode;
@@ -25,6 +26,7 @@ export function SchemeSelector({
   onChange,
   onSchemeAdjustmentChange,
 }: Props) {
+  const { t } = useLocale();
   return (
     <Box
       sx={{
@@ -43,11 +45,9 @@ export function SchemeSelector({
           fontWeight: 700,
           color: meridian.textPrimary,
         }}
-      >
-        Invoice scheme
-      </Typography>
+      >{t("billing.ui.invoiceScheme")}</Typography>
       <Typography sx={{ m: 0, mb: 2, fontSize: "0.8125rem", color: meridian.textSecondary }}>
-        {disabled ? "Read-only scheme recorded on this invoice." : "Choose the invoice scheme."}
+        {disabled ? t("billing.ui.readOnlySchemeRecordedOnThis") : t("billing.ui.chooseTheInvoiceScheme")}
       </Typography>
 
       <Stack direction="row" useFlexGap sx={{ gap: 1, flexWrap: "wrap", mb: 2 }}>
@@ -76,13 +76,13 @@ export function SchemeSelector({
       <TextField
         type="number"
         size="small"
-        label="Scheme adjustment (₹)"
+        label={t("billing.ui.schemeAdjustment2")}
         value={schemeAdjustment}
         disabled={disabled}
         onChange={(e) => onSchemeAdjustmentChange(Number(e.target.value) || 0)}
         slotProps={{ htmlInput: { min: 0, step: 1 } }}
         fullWidth
-        helperText="Subtracted from the gross amount, together with any discount, to give the net amount."
+        helperText={t("billing.ui.subtractedFromTheGrossAmountTogether")}
       />
     </Box>
   );

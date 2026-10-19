@@ -1,6 +1,7 @@
 import { MEDICATION_STATUS_STYLES } from "./constants";
 import { MedicationRecord, MEDICATION_STATUS_LABELS } from "./EMARTable.types";
 import { formatDateTime } from "@/lib/api";
+import { useLocale } from "@/lib/i18n";
 
 type MedicationRowProps = {
   medication: MedicationRecord;
@@ -18,6 +19,7 @@ export default function MedicationRow({
   onCorrect,
   onAcknowledge,
 }: MedicationRowProps) {
+  const { t } = useLocale();
   const notGiven = medication.status !== "given";
   const priority = medication.priority?.toLowerCase();
 
@@ -26,30 +28,24 @@ export default function MedicationRow({
       <td className="px-4 py-3">
         <div className="flex items-center gap-1.5 flex-wrap">
           {priority === "stat" && (
-            <span className="rounded bg-danger px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
-              STAT
-            </span>
+            <span className="rounded bg-danger px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">{t("doctor.orderPriority.stat")}</span>
           )}
           {priority === "urgent" && (
-            <span className="rounded bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
-              URGENT
-            </span>
+            <span className="rounded bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">{t("common.ui.urgent")}</span>
           )}
           {priority === "prn" && (
-            <span className="rounded bg-purple-600 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-white">
-              PRN
-            </span>
+            <span className="rounded bg-purple-600 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-white">{t("common.ui.prn")}</span>
           )}
           <span className="font-medium text-foreground">
             {medication.medicine_name ?? (
-              <span className="text-muted-foreground italic">Unknown medication</span>
+              <span className="text-muted-foreground italic">{t("common.ui.unknownMedication")}</span>
             )}
           </span>
         </div>
 
         {medication.is_correction && (
           <div className="mt-1 rounded bg-blue-500/10 border border-blue-500/30 px-2 py-1 text-xs text-blue-700 dark:text-blue-300">
-            <span className="font-semibold">Correction:</span> {medication.correction_reason ?? "Dose record corrected"}
+            <span className="font-semibold">{t("common.ui.correction")}</span> {medication.correction_reason ?? t("common.ui.doseRecordCorrected")}
           </div>
         )}
       </td>
@@ -57,7 +53,7 @@ export default function MedicationRow({
       <td className="px-4 py-3">
         <div>{medication.dosage ?? "—"}</div>
         {medication.dose_given && medication.dose_given !== medication.dosage && (
-          <div className="text-xs text-muted-foreground">Given: {medication.dose_given}</div>
+          <div className="text-xs text-muted-foreground">{t("common.ui.givenDoseGiven", { dose_given: medication.dose_given })}</div>
         )}
       </td>
 
@@ -85,22 +81,16 @@ export default function MedicationRow({
         {medication.requires_acknowledgement && (
           <div className="mt-1.5">
             {medication.acknowledged_at ? (
-              <span className="inline-flex items-center gap-1 rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
-                ✓ Dr Ack
-              </span>
+              <span className="inline-flex items-center gap-1 rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">{t("common.ui.drAck")}</span>
             ) : (
               <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="inline-flex items-center rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300 border border-amber-500/30">
-                  Ack Required
-                </span>
+                <span className="inline-flex items-center rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300 border border-amber-500/30">{t("common.ui.ackRequired")}</span>
                 {onAcknowledge && (
                   <button
                     type="button"
                     onClick={() => onAcknowledge(medication)}
                     className="rounded bg-amber-600 px-1.5 py-0.5 text-[10px] font-medium text-white hover:bg-amber-700"
-                  >
-                    Acknowledge
-                  </button>
+                  >{t("common.ui.acknowledge")}</button>
                 )}
               </div>
             )}
@@ -114,9 +104,7 @@ export default function MedicationRow({
             type="button"
             onClick={() => onCorrect(medication)}
             className="text-xs text-primary underline hover:text-primary/80"
-          >
-            Correct dose
-          </button>
+          >{t("common.ui.correctDose")}</button>
         )}
       </td>
     </tr>

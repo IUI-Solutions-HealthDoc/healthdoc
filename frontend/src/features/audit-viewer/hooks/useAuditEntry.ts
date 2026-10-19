@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { getAuditEntry } from "../api";
 import type { AuditLog } from "../types";
+import { translate } from "@/lib/i18n";
 
 export function useAuditEntry(id: string | null, created_at: string | null) {
   const [entry, setEntry] = useState<AuditLog | null>(null);
@@ -29,7 +30,7 @@ export function useAuditEntry(id: string | null, created_at: string | null) {
       .catch((reason: unknown) => {
         if (!cancelled) {
           setEntry(null);
-          setError(reason instanceof Error ? reason.message : "Failed to load the audit entry");
+          setError(reason instanceof Error ? reason.message : translate("audit.msg.failedToLoadTheAuditEntry"));
         }
       })
       .finally(() => {

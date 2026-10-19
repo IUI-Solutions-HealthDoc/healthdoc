@@ -6,6 +6,7 @@ import Typography from "@mui/material/Typography";
 
 import { meridian } from "@/styles/theme";
 import type { LabResult } from "../types";
+import { useLocale } from "@/lib/i18n";
 
 const headCellSx = {
   fontSize: "0.6875rem",
@@ -46,25 +47,20 @@ export interface LabResultViewerProps {
  * guess presented as a clinical judgement.
  */
 export function LabResultViewer({ result }: LabResultViewerProps) {
+  const { t } = useLocale();
   const entries = Object.entries(result.result_data ?? {});
 
   return (
     <Stack spacing={2}>
       {entries.length === 0 ? (
-        <Typography sx={{ fontSize: "0.875rem", color: meridian.textSecondary }}>
-          The lab returned no result values.
-        </Typography>
+        <Typography sx={{ fontSize: "0.875rem", color: meridian.textSecondary }}>{t("doctor.ui.theLabReturnedNoResultValues")}</Typography>
       ) : (
         <Box sx={{ overflowX: "auto" }}>
           <Box component="table" sx={{ width: "100%", borderCollapse: "collapse", minWidth: 420 }}>
             <Box component="thead">
               <Box component="tr">
-                <Box component="th" sx={headCellSx}>
-                  Analyte
-                </Box>
-                <Box component="th" sx={{ ...headCellSx, textAlign: "right" }}>
-                  Result
-                </Box>
+                <Box component="th" sx={headCellSx}>{t("doctor.ui.analyte")}</Box>
+                <Box component="th" sx={{ ...headCellSx, textAlign: "right" }}>{t("common.ui.result")}</Box>
               </Box>
             </Box>
             <Box component="tbody">
@@ -96,9 +92,7 @@ export function LabResultViewer({ result }: LabResultViewerProps) {
             backgroundColor: meridian.muted,
           }}
         >
-          <Typography sx={{ ...headCellSx, px: 0, py: 0, borderBottom: "none", mb: 0.5 }}>
-            Lab remarks
-          </Typography>
+          <Typography sx={{ ...headCellSx, px: 0, py: 0, borderBottom: "none", mb: 0.5 }}>{t("doctor.ui.labRemarks")}</Typography>
           <Typography sx={{ fontSize: "0.8125rem" }}>{result.remarks}</Typography>
         </Box>
       )}

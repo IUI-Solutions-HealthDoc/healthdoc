@@ -13,6 +13,7 @@ import {
 } from "./api";
 import { digitsOnly } from "./patientValidation";
 import type { AbhaDeclaration, AbhaIdentityLinked, ConsentLanguage } from "./types";
+import { useLocale, translate } from "@/lib/i18n";
 
 const ENROLMENT_CONSENT = { granted: true, code: "abha-enrollment", version: "1.4" };
 const GENDERS: Partial<Record<string, "M" | "F" | "O">> = { male: "M", female: "F", other: "O" };
@@ -48,6 +49,7 @@ export function DemographicAbhaEnrolment({ patient, onLinked }: {
   patient: Patient;
   onLinked: (linked: AbhaIdentityLinked) => void;
 }) {
+  const { t } = useLocale();
   const [declaration, setDeclaration] = useState<AbhaDeclaration | null>(null);
   const [declarationError, setDeclarationError] = useState<string | null>(null);
   const [ticks, setTicks] = useState<Record<string, boolean>>({});
@@ -77,7 +79,7 @@ export function DemographicAbhaEnrolment({ patient, onLinked }: {
     let disposed = false;
     getAbhaEnrolmentDeclaration(patient.id, consentLanguage).then(
       (shown) => { if (!disposed) { setDeclaration(shown); setTicks(defaultTicks(shown)); } },
-      (reason: unknown) => { if (!disposed) setDeclarationError(failure(reason, "The ABHA consent could not be loaded.")); },
+      (reason: unknown) => { if (!disposed) setDeclarationError(failure(reason, translate("receptionist.msg.theAbhaConsentCouldNotBe"))); },
     );
     return () => { disposed = true; };
   }, [patient.id, consentLanguage]);
@@ -86,7 +88,7 @@ export function DemographicAbhaEnrolment({ patient, onLinked }: {
     let disposed = false;
     listLgdStates().then(
       (rows) => { if (!disposed) setStates(rows); },
-      (reason: unknown) => { if (!disposed) setLgdError(failure(reason, "The LGD state list could not be loaded.")); },
+      (reason: unknown) => { if (!disposed) setLgdError(failure(reason, translate("receptionist.msg.theLgdStateListCouldNot"))); },
     );
     return () => { disposed = true; };
   }, [patient.id]);
@@ -96,7 +98,7 @@ export function DemographicAbhaEnrolment({ patient, onLinked }: {
     let disposed = false;
     listLgdDistricts(form.state_code).then(
       (rows) => { if (!disposed) setDistricts(rows); },
-      (reason: unknown) => { if (!disposed) setLgdError(failure(reason, "The LGD district list could not be loaded.")); },
+      (reason: unknown) => { if (!disposed) setLgdError(failure(reason, translate("receptionist.msg.theLgdDistrictListCouldNot"))); },
     );
     return () => { disposed = true; };
   }, [form.state_code]);
@@ -132,7 +134,7 @@ export function DemographicAbhaEnrolment({ patient, onLinked }: {
       setForm((current) => ({ ...current, aadhaar: "" })); // never left on screen
       onLinked(linked);
     } catch (reason) {
-      setError(failure(reason, "ABDM could not create the ABHA. Try again."));
+      setError(failure(reason, translate("receptionist.msg.abdmCouldNotCreateTheAbha")));
     } finally {
       setBusy(false);
     }
@@ -141,36 +143,36 @@ export function DemographicAbhaEnrolment({ patient, onLinked }: {
   const input = "w-full rounded-md border border-border px-3 py-2";
   return (
     <div className="space-y-3">
-      <p className="text-sm text-muted-foreground">Enter the details exactly as printed on the patient&apos;s Aadhaar card. ABDM checks them with UIDAI; no OTP is sent.</p>
+      <p className="text-sm text-muted-foreground">{t("receptionist.ui.enterTheDetailsExactlyAsPrinted")}</p>
       <label className="block space-y-1 text-sm">
-        <span className="text-muted-foreground">Aadhaar number</span>
+        <span className="text-muted-foreground">{t("receptionist.abha.fieldAadhaar")}</span>
         <input name="aadhaar" value={form.aadhaar} onChange={(e) => change("aadhaar", e.target.value)} inputMode="numeric" autoComplete="off" maxLength={14}
           aria-invalid={Boolean(form.aadhaar) && !aadhaarValid} className={input} />
-        {form.aadhaar && !aadhaarValid ? <span role="alert" className="text-danger">Aadhaar Number is not valid</span> : null}
+        {form.aadhaar && !aadhaarValid ? <span role="alert" className="text-danger">{t("receptionist.ui.aadhaarNumberIsNotValid")}</span> : null}
       </label>
       <div className="grid gap-3 md:grid-cols-2">
-        <label className="block space-y-1 text-sm"><span className="text-muted-foreground">Name as on Aadhaar</span>
+        <label className="block space-y-1 text-sm"><span className="text-muted-foreground">{t("receptionist.ui.nameAsOnAadhaar")}</span>
           <input name="name" value={form.name} onChange={(e) => change("name", e.target.value)} className={input} /></label>
-        <label className="block space-y-1 text-sm"><span className="text-muted-foreground">Date of birth</span>
+        <label className="block space-y-1 text-sm"><span className="text-muted-foreground">{t("field.dob")}</span>
           <input name="date_of_birth" type="date" value={form.date_of_birth} onChange={(e) => change("date_of_birth", e.target.value)} className={input} /></label>
-        <label className="block space-y-1 text-sm"><span className="text-muted-foreground">Gender</span>
+        <label className="block space-y-1 text-sm"><span className="text-muted-foreground">{t("admin.ui.gender")}</span>
           <select name="gender" value={form.gender} onChange={(e) => change("gender", e.target.value)} className={input}>
-            <option value="">Choose</option><option value="M">Male</option><option value="F">Female</option><option value="O">Other</option>
+            <option value="">{t("platform.choose")}</option><option value="M">{t("mch.sex.male")}</option><option value="F">{t("mch.sex.female")}</option><option value="O">{t("equipment.category.other")}</option>
           </select></label>
-        <label className="block space-y-1 text-sm"><span className="text-muted-foreground">Mobile (10 digits)</span>
+        <label className="block space-y-1 text-sm"><span className="text-muted-foreground">{t("receptionist.ui.mobile10Digits")}</span>
           <input name="mobile" value={form.mobile} onChange={(e) => change("mobile", digitsOnly(e.target.value))} inputMode="tel" maxLength={10} className={input} /></label>
-        <label className="block space-y-1 text-sm md:col-span-2"><span className="text-muted-foreground">Address</span>
+        <label className="block space-y-1 text-sm md:col-span-2"><span className="text-muted-foreground">{t("field.address")}</span>
           <input name="address" value={form.address} onChange={(e) => change("address", e.target.value)} className={input} /></label>
-        <label className="block space-y-1 text-sm"><span className="text-muted-foreground">PIN code</span>
+        <label className="block space-y-1 text-sm"><span className="text-muted-foreground">{t("admin.ui.pinCode")}</span>
           <input name="pincode" value={form.pincode} onChange={(e) => change("pincode", digitsOnly(e.target.value))} inputMode="numeric" maxLength={6} className={input} /></label>
-        <label className="block space-y-1 text-sm"><span className="text-muted-foreground">State (LGD)</span>
+        <label className="block space-y-1 text-sm"><span className="text-muted-foreground">{t("receptionist.ui.stateLgd")}</span>
           <select name="state_code" value={form.state_code} onChange={(e) => change("state_code", e.target.value)} disabled={!states} className={input}>
-            <option value="">{states ? "Choose" : "Loading…"}</option>
+            <option value="">{states ? t("platform.choose") : "Loading…"}</option>
             {(states ?? []).map((row) => <option key={row.code} value={row.code}>{row.name}</option>)}
           </select></label>
-        <label className="block space-y-1 text-sm"><span className="text-muted-foreground">District (LGD)</span>
+        <label className="block space-y-1 text-sm"><span className="text-muted-foreground">{t("receptionist.ui.districtLgd")}</span>
           <select name="district_code" value={form.district_code} onChange={(e) => change("district_code", e.target.value)} disabled={!districts} className={input}>
-            <option value="">{form.state_code ? (districts ? "Choose" : "Loading…") : "Choose a state first"}</option>
+            <option value="">{form.state_code ? (districts ? t("platform.choose") : "Loading…") : t("receptionist.ui.chooseAStateFirst")}</option>
             {(districts ?? []).map((row) => <option key={row.code} value={row.code}>{row.name}</option>)}
           </select></label>
       </div>
@@ -192,7 +194,7 @@ export function DemographicAbhaEnrolment({ patient, onLinked }: {
       />
       {error ? <p role="alert" className="text-sm text-danger">{error}</p> : null}
       <button type="button" disabled={busy || !ready} onClick={() => void submit()} className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
-        {busy ? "Creating ABHA…" : "Create ABHA from these details"}
+        {busy ? t("receptionist.ui.creatingAbha") : t("receptionist.ui.createAbhaFromTheseDetails")}
       </button>
     </div>
   );

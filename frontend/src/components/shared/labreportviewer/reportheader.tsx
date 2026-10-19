@@ -2,6 +2,7 @@
 
 import { Mail, Phone } from "lucide-react";
 import StripeBar from "./StripeBar";
+import { useLocale } from "@/lib/i18n";
 
 interface Laboratory {
   name: string;
@@ -20,6 +21,7 @@ interface ReportHeaderProps {
 }
 
 export default function ReportHeader({ laboratory }: ReportHeaderProps) {
+  const { t } = useLocale();
   return (
     <header className="drlogy-header">
       <div className="flex items-start justify-between gap-4 px-1 pt-1">
@@ -60,9 +62,7 @@ export default function ReportHeader({ laboratory }: ReportHeaderProps) {
               {laboratory.address}
             </p>
             {laboratory.nablNumber && (
-              <p className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-[#0b5cab]">
-                NABL Accredited · {laboratory.nablNumber}
-              </p>
+              <p className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-[#0b5cab]">{t("common.ui.nablAccreditedNablnumber", { nablNumber: laboratory.nablNumber })}</p>
             )}
           </div>
         </div>

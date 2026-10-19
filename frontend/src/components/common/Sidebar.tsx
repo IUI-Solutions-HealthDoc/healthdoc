@@ -203,7 +203,7 @@ export default function Sidebar({ open, setOpen }: SidebarProps) {
           <div>
             <HealthDocBrand
               size={36}
-              subtitle="HIMS"
+              subtitle={t("common.ui.hims")}
               nameClassName="text-base font-bold text-foreground"
             />
             <p className="text-[11px] font-medium text-foreground/80 mt-0.5">
@@ -235,7 +235,7 @@ export default function Sidebar({ open, setOpen }: SidebarProps) {
           />
         </div>
 
-        <nav aria-label="HealthDoc modules" className="space-y-4">
+        <nav aria-label={t("common.ui.healthdocModules")} className="space-y-4">
           {groups.length === 0 ? (
             <p className="px-2 text-xs text-foreground/70">{t("sidebar.noScreens")}</p>
           ) : (

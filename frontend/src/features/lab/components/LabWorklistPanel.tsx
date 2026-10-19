@@ -32,7 +32,7 @@ import type {
 } from "@/features/lab/types";
 import { ApiError, formatDateTime } from "@/lib/api";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/AsyncState";
-import { useLocale, type MessageKey } from "@/lib/i18n";
+import { useLocale, type MessageKey, translate } from "@/lib/i18n";
 import { useAuth } from "@/providers/auth-provider";
 import StructuredResultForm from "./StructuredResultForm";
 
@@ -62,20 +62,20 @@ const PAGE_SIZE = 20;
 // has been entered and NOT yet verified; showing the bare word next to an
 // unverified value read as final (QA 12 Oct 2026).
 const LAB_STATUS_LABELS: Record<string, string> = {
-  placed: "Ordered",
-  in_progress: "In progress",
-  completed: "Entered · awaiting verification",
-  released: "Verified · released",
-  cancelled: "Cancelled",
+  get placed() { return translate("nurse.taskColOrdered"); },
+  get in_progress() { return translate("lab.filter.inProgress"); },
+  get completed() { return translate("lab.msg.enteredAwaitingVerification"); },
+  get released() { return translate("lab.msg.verifiedReleased"); },
+  get cancelled() { return translate("appointment.status.cancelled"); },
 };
 
 const SPECIMEN_STATUS_LABELS: Record<string, string> = {
-  pending_collection: "Awaiting collection",
-  collected: "Collected",
-  received: "Received in lab",
-  rejected: "Rejected",
-  recollected: "Recollection ordered",
-  not_recorded: "Collection not recorded",
+  get pending_collection() { return translate("lab.msg.awaitingCollection"); },
+  get collected() { return translate("reports.billingMis.col.collected"); },
+  get received() { return translate("lab.msg.receivedInLab"); },
+  get rejected() { return translate("admin.accountRequests.status.rejected"); },
+  get recollected() { return translate("lab.msg.recollectionOrdered"); },
+  get not_recorded() { return translate("lab.msg.collectionNotRecorded"); },
 };
 
 function StatusChip({ status }: { status: string }) {
@@ -119,28 +119,26 @@ function SpecimenStatusChip({ status, itemStatus }: { status?: string | null; it
 }
 
 function ResultHistory({ items }: { items: LabResult[] }) {
+  const { t } = useLocale();
   if (items.length === 0) return null;
   return (
     <section className="space-y-3">
-      <h3 className="font-medium">Result history</h3>
+      <h3 className="font-medium">{t("lab.ui.resultHistory")}</h3>
       {items.map((result) => (
         <article key={result.id} className="rounded-md border border-border p-4 text-sm">
           <div className="flex flex-wrap justify-between gap-3">
-            <strong>
-              Version {result.version} · {result.status}
-              {result.is_current ? " · current" : ""}
-            </strong>
+            <strong>{t("lab.ui.versionVersionStatusValue", { version: result.version, status: result.status, value: result.is_current ? t("lab.ui.currentSuffix") : "" })}</strong>
             <span className="text-muted-foreground">{formatDateTime(result.created_at)}</span>
           </div>
           {result.amendment_reason ? (
-            <p className="mt-2 text-warning">Amendment: {result.amendment_reason}</p>
+            <p className="mt-2 text-warning">{t("lab.ui.amendmentAmendmentReason", { amendment_reason: result.amendment_reason })}</p>
           ) : null}
           <pre className="mt-3 overflow-x-auto rounded-md bg-muted p-3 text-xs">
             {JSON.stringify(result.result_data, null, 2)}
           </pre>
-          {result.remarks ? <p className="mt-2">Remarks: {result.remarks}</p> : null}
+          {result.remarks ? <p className="mt-2">{t("lab.ui.remarksRemarks", { remarks: result.remarks })}</p> : null}
           {result.tat_minutes != null ? (
-            <p className="mt-1 text-muted-foreground">TAT: {result.tat_minutes} minutes</p>
+            <p className="mt-1 text-muted-foreground">{t("lab.ui.tatTatMinutesMinutes", { tat_minutes: result.tat_minutes })}</p>
           ) : null}
         </article>
       ))}
@@ -279,7 +277,7 @@ export function LabWorklistPanel() {
 
   async function collectSample() {
     if (!selected || !barcode.trim()) {
-      setError("Scan or enter a barcode before collecting the sample.");
+      setError(translate("lab.msg.scanOrEnterABarcodeBefore"));
       return;
     }
     setBusy(true);
@@ -287,7 +285,7 @@ export function LabWorklistPanel() {
     try {
       const updated = await collectLabSample(selected.id, barcode.trim());
       updateRow(updated);
-      setMessage("Sample collected. Result entry is now available.");
+      setMessage(translate("lab.msg.sampleCollectedResultEntryIsNow"));
     } catch (reason) {
       setError(reason instanceof ApiError ? reason.message : t("lab.errSampleCollection"));
     } finally {
@@ -302,9 +300,9 @@ export function LabWorklistPanel() {
     try {
       const updated = await receiveLabSpecimen(selected.id);
       updateRow(updated);
-      setMessage("Specimen successfully received at laboratory bench.");
+      setMessage(translate("lab.msg.specimenSuccessfullyReceivedAtLaboratoryBench"));
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Failed to receive specimen");
+      setError(reason instanceof ApiError ? reason.message : translate("lab.msg.failedToReceiveSpecimen"));
     } finally {
       setBusy(false);
     }
@@ -320,10 +318,10 @@ export function LabWorklistPanel() {
       setRejectModalOpen(false);
       setRejectionNotes("");
       setMessage(
-        `Specimen rejected (${rejectionReason.replaceAll("_", " ")}). Recollection can now be ordered.`,
+        translate("lab.msg.specimenRejectedValueRecollectionCanNow", undefined, { value: rejectionReason.replaceAll("_", " ") }),
       );
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Failed to reject specimen");
+      setError(reason instanceof ApiError ? reason.message : translate("lab.msg.failedToRejectSpecimen"));
     } finally {
       setBusy(false);
     }
@@ -335,11 +333,11 @@ export function LabWorklistPanel() {
     setError(null);
     try {
       const newLinkedItem = await recollectLabSpecimen(selected.id);
-      setMessage(`Recollection ordered! New linked accession: ${newLinkedItem.accession_number}`);
+      setMessage(translate("lab.msg.recollectionOrderedNewLinkedAccessionAccession", undefined, { accession_number: newLinkedItem.accession_number }));
       void load();
       selectRow(newLinkedItem);
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Failed to order specimen recollection");
+      setError(reason instanceof ApiError ? reason.message : translate("lab.msg.failedToOrderSpecimenRecollection"));
     } finally {
       setBusy(false);
     }
@@ -365,15 +363,15 @@ export function LabWorklistPanel() {
     try {
       parsed = JSON.parse(resultJson);
     } catch {
-      setError("Result data must be valid JSON.");
+      setError(translate("lab.msg.resultDataMustBeValidJson"));
       return;
     }
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      setError("Result data must be a JSON object.");
+      setError(translate("lab.msg.resultDataMustBeAJson"));
       return;
     }
     if (Object.keys(parsed).length === 0) {
-      setError("Enter at least one result field.");
+      setError(translate("lab.msg.enterAtLeastOneResultField"));
       return;
     }
     setBusy(true);
@@ -387,7 +385,7 @@ export function LabWorklistPanel() {
       updateRow({ ...selected, status: "completed" });
       setHistory([result]);
       setMessage(
-        "Preliminary result saved. A different lab professional must verify and release it.",
+        translate("lab.msg.preliminaryResultSavedADifferentLab"),
       );
     } catch (reason) {
       setError(reason instanceof ApiError ? reason.message : t("lab.errResultEntry"));
@@ -406,10 +404,10 @@ export function LabWorklistPanel() {
       setHistory((current) =>
         current.map((result) => (result.id === verified.id ? verified : result)),
       );
-      setMessage("Result verified and released.");
+      setMessage(translate("lab.ui.resultVerifiedAndReleased"));
     } catch (reason) {
       if (reason instanceof ApiError && (reason.code === 403 || /different from the person/i.test(reason.message))) {
-        setError("Another lab professional must verify this result. The person who entered it cannot release it.");
+        setError(translate("lab.msg.anotherLabProfessionalMustVerifyThis"));
       } else {
         setError(reason instanceof ApiError ? reason.message : t("lab.errVerification"));
       }
@@ -420,7 +418,7 @@ export function LabWorklistPanel() {
 
   async function submitAmendment() {
     if (!selected || !amendReason.trim()) {
-      setError("An amendment reason is required.");
+      setError(translate("lab.msg.anAmendmentReasonIsRequired"));
       return;
     }
     let parsed: Record<string, unknown> | null = null;
@@ -428,12 +426,12 @@ export function LabWorklistPanel() {
       try {
         const value = JSON.parse(amendJson);
         if (!value || typeof value !== "object" || Array.isArray(value)) {
-          setError("Amended result data must be a JSON object.");
+          setError(translate("lab.msg.amendedResultDataMustBeA"));
           return;
         }
         parsed = value as Record<string, unknown>;
       } catch {
-        setError("Amended result data must be valid JSON.");
+        setError(translate("lab.msg.amendedResultDataMustBeValid"));
         return;
       }
     }
@@ -446,7 +444,7 @@ export function LabWorklistPanel() {
         parsed,
         amendRemarks.trim() || null,
       );
-      setMessage("Result amended. A new corrected version is now current.");
+      setMessage(translate("lab.msg.resultAmendedANewCorrectedVersion"));
       setAmendReason("");
       await loadHistory({ ...selected, status: "released" });
       void load();
@@ -461,7 +459,7 @@ export function LabWorklistPanel() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <p className="text-sm text-muted-foreground">
-          {rows === null ? "Loading live orders…" : `${total} order${total === 1 ? "" : "s"}`}
+          {rows === null ? t("lab.ui.loadingLiveOrders") : `${total} order${total === 1 ? "" : "s"}`}
         </p>
         <button type="button" className="text-sm underline" onClick={() => void load()}>
           {t("common.refresh")}
@@ -505,7 +503,7 @@ export function LabWorklistPanel() {
           <div className="surface-card overflow-hidden">
             <div className="overflow-x-auto">
               <table className="min-w-full border-collapse text-sm">
-                <caption className="sr-only">Live laboratory worklist</caption>
+                <caption className="sr-only">{t("lab.ui.liveLaboratoryWorklist")}</caption>
                 <thead className="bg-muted">
                   <tr>
                     {WORKLIST_COLUMNS.map((labelKey) => (
@@ -552,9 +550,7 @@ export function LabWorklistPanel() {
               >
                 {t("common.previous")}
               </button>
-              <span className="text-muted-foreground">
-                Page {page} of {totalPages}
-              </span>
+              <span className="text-muted-foreground">{t("lab.ui.pagePageOfTotalpages", { page, totalPages })}</span>
               <button
                 type="button"
                 disabled={page >= totalPages}
@@ -580,9 +576,7 @@ export function LabWorklistPanel() {
               {selected.patient_age_years == null || selected.patient_age_years < 18 ? (
                 <p role="note" className="mt-1 text-xs font-medium text-amber-800">
                   {/* No approved age-specific ranges exist yet (QA 12 Oct 2026):
-                      say so rather than flag a child against adult values silently. */}
-                  Reference ranges and flags here are adult ranges. Interpret this result against
-                  {selected.patient_age_years == null ? " the patient's age" : " paediatric ranges"}.
+                      say so rather than flag a child against adult values silently. */}{t("lab.ui.referenceRangesAndFlagsHereAre")}{selected.patient_age_years == null ? " the patient's age" : " paediatric ranges"}.
                 </p>
               ) : null}
             </div>
@@ -590,23 +584,17 @@ export function LabWorklistPanel() {
           </div>
 
           {!canManageResults && (
-            <p className="text-sm text-muted-foreground">
-              Read-only result view. Sample collection, result entry and verification are handled by lab professionals.
-            </p>
+            <p className="text-sm text-muted-foreground">{t("lab.ui.readOnlyResultViewSampleCollection")}</p>
           )}
 
           {/* Specimen Quality Control & Lifecycle */}
           <div className="rounded-lg border border-border bg-muted/20 p-4 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Specimen Status:
-                </span>
+                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t("lab.ui.specimenStatus")}</span>
                 <SpecimenStatusChip status={selected.specimen_status} itemStatus={selected.status} />
                 {selected.recollected_from_id && (
-                  <span className="rounded-full bg-purple-500/10 px-2 py-0.5 text-[10px] font-medium text-purple-600 dark:text-purple-300">
-                    Linked Recollection
-                  </span>
+                  <span className="rounded-full bg-purple-500/10 px-2 py-0.5 text-[10px] font-medium text-purple-600 dark:text-purple-300">{t("lab.ui.linkedRecollection")}</span>
                 )}
               </div>
               <button
@@ -614,18 +602,15 @@ export function LabWorklistPanel() {
                 onClick={() => void handleOpenTimeline()}
                 className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
               >
-                <History size={13} /> Specimen Timeline
-              </button>
+                <History size={13} />{" "}{t("lab.ui.specimenTimeline")}</button>
             </div>
 
             {selected.specimen_status === "rejected" && (
               <div className="rounded-md border border-red-300 bg-red-50 p-3 text-xs text-red-800 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200">
                 <div className="font-semibold flex items-center gap-1.5 text-red-700 dark:text-red-300">
-                  <XCircle size={15} /> Specimen Rejected: {selected.rejection_reason?.replaceAll("_", " ")}
+                  <XCircle size={15} />{" "}{t("lab.ui.specimenRejected")}{" "}{selected.rejection_reason?.replaceAll("_", " ")}
                 </div>
-                <p className="mt-1 text-muted-foreground">
-                  The collected sample did not meet lab quality standards. Order a linked recollection to notify phlebotomy.
-                </p>
+                <p className="mt-1 text-muted-foreground">{t("lab.ui.theCollectedSampleDidNotMeet")}</p>
                 {canManageResults && (
                   <button
                     type="button"
@@ -633,8 +618,7 @@ export function LabWorklistPanel() {
                     onClick={() => void handleRecollectSpecimen()}
                     className="mt-3 inline-flex items-center gap-1.5 rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-red-700 disabled:opacity-50"
                   >
-                    <RotateCcw size={13} /> Order Recollection (Spawn Linked Specimen)
-                  </button>
+                    <RotateCcw size={13} />{" "}{t("lab.ui.orderRecollectionSpawnLinkedSpecimen")}</button>
                 )}
               </div>
             )}
@@ -662,17 +646,13 @@ export function LabWorklistPanel() {
 
             {canManageResults && selected.specimen_status === "received" && (
               <div className="flex flex-wrap items-center gap-2 pt-1">
-                <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
-                  ✓ Sample verified & ready for bench testing
-                </span>
+                <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">{t("lab.ui.sampleVerifiedReadyForBenchTesting")}</span>
                 <button
                   type="button"
                   disabled={busy}
                   onClick={() => setRejectModalOpen(true)}
                   className="rounded-md border border-red-200 px-2.5 py-1 text-xs text-red-600 hover:bg-red-50 dark:border-red-900 dark:hover:bg-red-950/30"
-                >
-                  Reject on Bench Defect
-                </button>
+                >{t("lab.ui.rejectOnBenchDefect")}</button>
               </div>
             )}
           </div>
@@ -680,12 +660,12 @@ export function LabWorklistPanel() {
           {canManageResults && selected.status === "placed" ? (
             <div className="space-y-3">
               <label className="block max-w-md space-y-1 text-sm">
-                <span className="text-muted-foreground">Sample barcode</span>
+                <span className="text-muted-foreground">{t("lab.ui.sampleBarcode")}</span>
                 <input
                   className="w-full rounded-md border border-border px-3 py-2"
                   value={barcode}
                   onChange={(event) => setBarcode(event.target.value)}
-                  placeholder="Scan or enter barcode"
+                  placeholder={t("lab.ui.scanOrEnterBarcode")}
                 />
               </label>
               <button
@@ -705,8 +685,8 @@ export function LabWorklistPanel() {
                 <div className="flex items-center justify-between border-b border-border pb-2">
                   <span className="text-xs text-muted-foreground">
                     {useStructured
-                      ? "Structured analyte entry mode"
-                      : "Raw JSON object mode"}
+                      ? t("lab.ui.structuredAnalyteEntryMode")
+                      : t("lab.ui.rawJsonObjectMode")}
                   </span>
                   <button
                     type="button"
@@ -714,8 +694,8 @@ export function LabWorklistPanel() {
                     className="text-xs text-primary underline hover:text-primary/80"
                   >
                     {useStructured
-                      ? "Switch to Raw JSON"
-                      : "Switch to Structured Form"}
+                      ? t("lab.ui.switchToRawJson")
+                      : t("lab.ui.switchToStructuredForm")}
                   </button>
                 </div>
               )}
@@ -738,7 +718,7 @@ export function LabWorklistPanel() {
                       updateRow({ ...selected, status: "completed" });
                       setHistory([result]);
                       setMessage(
-                        "Preliminary result saved with structured clinical flags. A different lab professional must verify and release it.",
+                        translate("lab.msg.preliminaryResultSavedWithStructuredClinical"),
                       );
                     } catch (reason) {
                       setError(
@@ -754,7 +734,7 @@ export function LabWorklistPanel() {
               ) : (
                 <>
                   <label className="block space-y-1 text-sm">
-                    <span className="text-muted-foreground">Result data (JSON object)</span>
+                    <span className="text-muted-foreground">{t("lab.ui.resultDataJsonObject")}</span>
                     <textarea
                       className="min-h-48 w-full rounded-md border border-border px-3 py-2 font-mono text-sm"
                       value={resultJson}
@@ -763,17 +743,12 @@ export function LabWorklistPanel() {
                     />
                   </label>
                   {selected.test_name.toLowerCase().includes("hemoglobin") ? (
-                    <p className="text-xs text-muted-foreground">
-                      Use numeric field <code>hemoglobin_g_dl</code>; configured critical limits are
-                      below 7.0 or above 20.0 g/dL.
-                    </p>
+                    <p className="text-xs text-muted-foreground">{t("lab.ui.useNumericField")}{" "}<code>{t("lab.ui.hemoglobinGDl")}</code>{t("lab.ui.configuredCriticalLimitsAreBelow7")}</p>
                   ) : (
-                    <p className="text-xs text-muted-foreground">
-                      Enter fields authorized by the lab SOP; the server preserves the JSON exactly.
-                    </p>
+                    <p className="text-xs text-muted-foreground">{t("lab.ui.enterFieldsAuthorizedByTheLab")}</p>
                   )}
                   <label className="block space-y-1 text-sm">
-                    <span className="text-muted-foreground">Remarks</span>
+                    <span className="text-muted-foreground">{t("lab.ui.remarks")}</span>
                     <textarea
                       className="min-h-20 w-full rounded-md border border-border px-3 py-2"
                       value={remarks}
@@ -796,10 +771,7 @@ export function LabWorklistPanel() {
 
           {canManageResults && selected.status === "completed" ? (
             <div className="space-y-3 rounded-md border border-warning bg-warning-muted p-4 text-sm">
-              <p>
-                This preliminary result needs independent verification. The user who entered it is
-                blocked by the server from verifying it.
-              </p>
+              <p>{t("lab.ui.thisPreliminaryResultNeedsIndependentVerification")}</p>
               <button
                 type="button"
                 disabled={busy}
@@ -813,26 +785,22 @@ export function LabWorklistPanel() {
 
           {selected.status === "released" ? (
             <div className="space-y-4">
-              <p className="rounded-md bg-success-muted p-3 text-sm text-success">
-                Result verified and released.
-              </p>
+              <p className="rounded-md bg-success-muted p-3 text-sm text-success">{t("lab.ui.resultVerifiedAndReleased")}</p>
               {canManageResults && (currentResult?.status === "final" || currentResult?.status === "corrected") ? (
                 <div className="space-y-3 rounded-md border border-border p-4">
-                  <h3 className="font-medium">Amend released result</h3>
-                  <p className="text-xs text-muted-foreground">
-                    Creates a new corrected version. The original final result stays in history.
-                  </p>
+                  <h3 className="font-medium">{t("lab.ui.amendReleasedResult")}</h3>
+                  <p className="text-xs text-muted-foreground">{t("lab.ui.createsANewCorrectedVersionThe")}</p>
                   <label className="block space-y-1 text-sm">
-                    <span className="text-muted-foreground">Amendment reason</span>
+                    <span className="text-muted-foreground">{t("lab.ui.amendmentReason")}</span>
                     <input
                       className="w-full rounded-md border border-border px-3 py-2"
                       value={amendReason}
                       onChange={(event) => setAmendReason(event.target.value)}
-                      placeholder="Why is this result being corrected?"
+                      placeholder={t("lab.ui.whyIsThisResultBeingCorrected")}
                     />
                   </label>
                   <label className="block space-y-1 text-sm">
-                    <span className="text-muted-foreground">Updated result data (optional JSON)</span>
+                    <span className="text-muted-foreground">{t("lab.ui.updatedResultDataOptionalJson")}</span>
                     <textarea
                       className="min-h-32 w-full rounded-md border border-border px-3 py-2 font-mono text-sm"
                       value={amendJson}
@@ -841,7 +809,7 @@ export function LabWorklistPanel() {
                     />
                   </label>
                   <label className="block space-y-1 text-sm">
-                    <span className="text-muted-foreground">Updated remarks</span>
+                    <span className="text-muted-foreground">{t("lab.ui.updatedRemarks")}</span>
                     <textarea
                       className="min-h-16 w-full rounded-md border border-border px-3 py-2"
                       value={amendRemarks}
@@ -888,28 +856,28 @@ export function LabWorklistPanel() {
 
             <div className="mt-4 space-y-4">
               <label className="block space-y-1 text-xs">
-                <span className="font-semibold text-foreground">Rejection Reason *</span>
+                <span className="font-semibold text-foreground">{t("lab.ui.rejectionReason")}</span>
                 <select
                   value={rejectionReason}
                   onChange={(e) => setRejectionReason(e.target.value)}
                   className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
                 >
-                  <option value="hemolyzed">Hemolyzed sample</option>
-                  <option value="clotted">Clotted sample</option>
-                  <option value="insufficient_quantity">Insufficient specimen volume (QNS)</option>
-                  <option value="wrong_container">Wrong specimen container / additive</option>
-                  <option value="unlabeled">Unlabeled or mislabeled specimen</option>
-                  <option value="broken_tube">Broken container or leak in transit</option>
-                  <option value="other">Other reason</option>
+                  <option value="hemolyzed">{t("lab.ui.hemolyzedSample")}</option>
+                  <option value="clotted">{t("lab.ui.clottedSample")}</option>
+                  <option value="insufficient_quantity">{t("lab.ui.insufficientSpecimenVolumeQns")}</option>
+                  <option value="wrong_container">{t("lab.ui.wrongSpecimenContainerAdditive")}</option>
+                  <option value="unlabeled">{t("lab.ui.unlabeledOrMislabeledSpecimen")}</option>
+                  <option value="broken_tube">{t("lab.ui.brokenContainerOrLeakInTransit")}</option>
+                  <option value="other">{t("lab.ui.otherReason")}</option>
                 </select>
               </label>
 
               <label className="block space-y-1 text-xs">
-                <span className="font-semibold text-foreground">Notes / Observations</span>
+                <span className="font-semibold text-foreground">{t("lab.ui.notesObservations")}</span>
                 <textarea
                   value={rejectionNotes}
                   onChange={(e) => setRejectionNotes(e.target.value)}
-                  placeholder="Describe specimen defect or reason for rejection..."
+                  placeholder={t("lab.ui.describeSpecimenDefectOrReasonFor")}
                   rows={3}
                   className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
                 />
@@ -947,8 +915,7 @@ export function LabWorklistPanel() {
           <div className="w-full max-w-lg rounded-xl border border-border bg-card p-6 shadow-xl">
             <div className="flex items-center justify-between border-b border-border pb-3">
               <h3 className="font-semibold text-base text-foreground flex items-center gap-2">
-                <History size={18} /> Specimen Audit Timeline
-              </h3>
+                <History size={18} />{" "}{t("lab.ui.specimenAuditTimeline")}</h3>
               <button
                 type="button"
                 onClick={() => setTimelineModalOpen(false)}
@@ -960,13 +927,9 @@ export function LabWorklistPanel() {
 
             <div className="mt-4 max-h-80 overflow-y-auto space-y-3">
               {loadingEvents ? (
-                <div className="py-8 text-center text-xs text-muted-foreground animate-pulse">
-                  Loading specimen events...
-                </div>
+                <div className="py-8 text-center text-xs text-muted-foreground animate-pulse">{t("lab.ui.loadingSpecimenEvents")}</div>
               ) : specimenEvents.length === 0 ? (
-                <div className="py-8 text-center text-xs text-muted-foreground">
-                  No lifecycle events recorded for this specimen yet.
-                </div>
+                <div className="py-8 text-center text-xs text-muted-foreground">{t("lab.ui.noLifecycleEventsRecordedForThis")}</div>
               ) : (
                 <div className="relative pl-6 space-y-4 border-l-2 border-primary/30 ml-2">
                   {specimenEvents.map((evt) => (
@@ -979,9 +942,7 @@ export function LabWorklistPanel() {
                         <Clock size={11} /> {formatDateTime(evt.created_at)}
                       </div>
                       {evt.rejection_reason && (
-                        <div className="mt-1 text-red-600 dark:text-red-400 font-medium">
-                          Reason: {evt.rejection_reason.replaceAll("_", " ")}
-                        </div>
+                        <div className="mt-1 text-red-600 dark:text-red-400 font-medium">{t("lab.ui.reasonValue", { value: evt.rejection_reason.replaceAll("_", " ") })}</div>
                       )}
                       {evt.notes && (
                         <div className="mt-1 text-muted-foreground italic">&ldquo;{evt.notes}&rdquo;</div>
@@ -997,9 +958,7 @@ export function LabWorklistPanel() {
                 type="button"
                 onClick={() => setTimelineModalOpen(false)}
                 className="rounded-lg border border-border px-4 py-1.5 text-xs font-medium text-foreground hover:bg-muted"
-              >
-                Close
-              </button>
+              >{t("common.close")}</button>
             </div>
           </div>
         </div>

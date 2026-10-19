@@ -8,6 +8,7 @@ import { retryDelayMs } from "@/lib/resilience.mjs";
 import { useAuth } from "@/providers/auth-provider";
 
 import type { CriticalLabAlert } from "./types";
+import { translate } from "@/lib/i18n";
 
 function wait(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
@@ -23,8 +24,8 @@ function showAlert(raw: string) {
   try {
     const alert = JSON.parse(raw) as CriticalLabAlert;
     toast.warning(
-      "Critical lab result",
-      `Accession ${alert.accession_number} requires immediate review.`,
+      translate("lab.msg.criticalLabResult"),
+      translate("lab.msg.accessionAccessionNumberRequiresImmediateReview", undefined, { accession_number: alert.accession_number }),
     );
   } catch {
     console.warn("[lab] ignored malformed critical-alert event");
@@ -88,7 +89,7 @@ export function CriticalAlertListener() {
             cache: "no-store",
             signal: controller.signal,
           });
-          if (!response.ok) throw new Error(`Critical-alert stream returned ${response.status}`);
+          if (!response.ok) throw new Error(translate("lab.msg.criticalAlertStreamReturnedStatus", undefined, { status: response.status }));
           failedAttempts = 0;
           await readEventStream(response, controller.signal);
         } catch (reason) {

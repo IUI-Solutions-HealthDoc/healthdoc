@@ -10,7 +10,7 @@ import {
 } from "@/features/emergency/api";
 import { PageHeading } from "@/components/common/PageHeading";
 import { ApiError } from "@/lib/api";
-import { useLocale, type MessageKey } from "@/lib/i18n";
+import { useLocale, type MessageKey, translate } from "@/lib/i18n";
 
 type Tab = "request" | "approve" | "unmerge";
 
@@ -29,54 +29,49 @@ function errorMessage(reason: unknown): string {
       return "Maker–checker: the supervisor who approved cannot also unmerge.";
     }
     if (code === "patient_not_thid") {
-      return "This patient is not on the THID path — only temporary emergency charts can be promoted.";
+      return translate("supervisor.msg.thisPatientIsNotOnThe");
     }
     if (code === "promotion_already_pending") {
-      return "A promotion is already pending for this patient.";
+      return translate("supervisor.msg.aPromotionIsAlreadyPendingFor");
     }
     if (code === "patient_not_found") {
-      return "No THID patient with that ID exists in this facility.";
+      return translate("supervisor.msg.noThidPatientWithThatId");
     }
     if (code === "merge_log_not_found") {
-      return "No identity merge with that ID exists in this facility.";
+      return translate("supervisor.msg.noIdentityMergeWithThatId");
     }
     if (code === "not_pending") {
-      return "This identity merge is no longer pending approval.";
+      return translate("supervisor.msg.thisIdentityMergeIsNoLonger");
     }
     if (code === "not_approved") {
-      return "Only an approved identity merge can be unmerged.";
+      return translate("supervisor.msg.onlyAnApprovedIdentityMergeCan");
     }
     if (code === "patient_already_promoted" || code === "patient_already_has_uhid") {
-      return "This patient already has a permanent UHID.";
+      return translate("supervisor.msg.thisPatientAlreadyHasAPermanent");
     }
     if (reason.code === 422) {
-      return "Check that the patient or merge-log ID is a valid UUID.";
+      return translate("supervisor.msg.checkThatThePatientOrMerge");
     }
     return reason.message;
   }
-  return "Request failed";
+  return translate("supervisor.msg.requestFailed");
 }
 
 function ResultCard({ log }: { log: PromotionLog }) {
+  const { t } = useLocale();
   return (
     <div className="surface-card space-y-2 border border-success p-4" aria-live="polite">
-      <p className="text-sm text-muted-foreground">Merge log</p>
+      <p className="text-sm text-muted-foreground">{t("supervisor.ui.mergeLog")}</p>
       <p className="break-all font-mono text-sm font-semibold">{log.id}</p>
-      <p className="text-sm">
-        Status: <span className="font-medium">{log.status}</span>
+      <p className="text-sm">{t("bloodBank.inventory.filterStatus")}{" "}<span className="font-medium">{log.status}</span>
       </p>
-      <p className="text-xs text-muted-foreground">
-        Patient <span className="font-mono">{log.source_patient_id}</span>
+      <p className="text-xs text-muted-foreground">{t("common.patient")}{" "}<span className="font-mono">{log.source_patient_id}</span>
       </p>
       {log.status === "pending" ? (
-        <p className="text-sm text-muted-foreground">
-          Hand this merge log ID to a different supervisor to approve.
-        </p>
+        <p className="text-sm text-muted-foreground">{t("supervisor.ui.handThisMergeLogIdTo")}</p>
       ) : null}
       {log.status === "approved" ? (
-        <p className="text-sm text-muted-foreground">
-          UHID assigned. A third supervisor (not the approver) can unmerge if needed.
-        </p>
+        <p className="text-sm text-muted-foreground">{t("supervisor.ui.uhidAssignedAThirdSupervisorNot")}</p>
       ) : null}
     </div>
   );
@@ -133,7 +128,7 @@ export function IdentityMergeWorkspace() {
     const id = mergeLogId.trim();
     const explanation = reason.trim();
     if (!id || !explanation) return;
-    if (!window.confirm("Unmerge this identity promotion and clear its assigned UHID?")) return;
+    if (!window.confirm(translate("supervisor.msg.unmergeThisIdentityPromotionAndClear"))) return;
     setBusy(true);
     resetFeedback();
     try {
@@ -155,7 +150,7 @@ export function IdentityMergeWorkspace() {
     <div className="mx-auto max-w-3xl space-y-6 p-6">
       <PageHeading titleKey="supervisor.mergesTitle" titleClassName="text-3xl font-semibold" />
 
-      <nav className="flex flex-wrap gap-2" aria-label="Identity merge steps">
+      <nav className="flex flex-wrap gap-2" aria-label={t("supervisor.ui.identityMergeSteps")}>
         {tabs.map((item) => (
           <button
             key={item.id}
@@ -187,11 +182,7 @@ export function IdentityMergeWorkspace() {
       {tab === "request" ? (
         <form onSubmit={onRequest} className="surface-card space-y-4 p-6">
           <h2 className="text-lg font-medium">{t("supervisor.merge.requestTitle")}</h2>
-          <p className="text-sm text-muted-foreground">
-            Paste the patient ID from emergency registration. Only charts on the
-            THID identity path can be promoted. Patient search is not available
-            to records supervisors; use the ID from the emergency handoff.
-          </p>
+          <p className="text-sm text-muted-foreground">{t("supervisor.ui.pasteThePatientIdFromEmergency")}</p>
           <label className="block space-y-1 text-sm">
             <span className="text-muted-foreground">{t("supervisor.merge.patientId")}</span>
             <input
@@ -223,9 +214,7 @@ export function IdentityMergeWorkspace() {
       {tab === "approve" ? (
         <form onSubmit={onApprove} className="surface-card space-y-4 p-6">
           <h2 className="text-lg font-medium">{t("supervisor.merge.approveTitle")}</h2>
-          <p className="text-sm text-muted-foreground">
-            Must be a different supervisor from the requester. Assigns the UHID.
-          </p>
+          <p className="text-sm text-muted-foreground">{t("supervisor.ui.mustBeADifferentSupervisorFrom")}</p>
           <label className="block space-y-1 text-sm">
             <span className="text-muted-foreground">{t("supervisor.merge.mergeLogId")}</span>
             <input
@@ -249,10 +238,7 @@ export function IdentityMergeWorkspace() {
       {tab === "unmerge" ? (
         <form onSubmit={onUnmerge} className="surface-card space-y-4 p-6">
           <h2 className="text-lg font-medium">{t("supervisor.merge.unmergeTitle")}</h2>
-          <p className="text-sm text-muted-foreground">
-            Clears the UHID and returns the chart to THID. Cannot be the same
-            supervisor who approved.
-          </p>
+          <p className="text-sm text-muted-foreground">{t("supervisor.ui.clearsTheUhidAndReturnsThe")}</p>
           <label className="block space-y-1 text-sm">
             <span className="text-muted-foreground">{t("supervisor.merge.mergeLogId")}</span>
             <input

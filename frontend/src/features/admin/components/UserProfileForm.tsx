@@ -17,7 +17,7 @@ import type { User } from "../types";
 import type { FieldErrors } from "../validation";
 import type { Department } from "../api/departments";
 import { UserHeader } from "./UserHeader";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 type Props = {
   draft: User;
@@ -31,15 +31,15 @@ type Props = {
 };
 
 const FIELDS: { key: keyof User; label: string }[] = [
-  { key: "full_name", label: "Full name" },
-  { key: "email", label: "Email" },
-  { key: "mobile", label: "Mobile" },
-  { key: "designation", label: "Designation" },
-  { key: "employee_id", label: "Employee ID" },
-  { key: "registration_number", label: "Registration number" },
-  { key: "registration_identifier_type", label: "ABDM registration identifier type" },
-  { key: "registration_identifier_system", label: "Issuing registry URI" },
-  { key: "qualification", label: "Qualification" },
+  { key: "full_name", get label() { return translate("field.fullName"); } },
+  { key: "email", get label() { return translate("admin.ui.email"); } },
+  { key: "mobile", get label() { return translate("field.mobile"); } },
+  { key: "designation", get label() { return translate("common.ui.designation"); } },
+  { key: "employee_id", get label() { return translate("admin.ui.employeeId2"); } },
+  { key: "registration_number", get label() { return translate("admin.ui.registrationNumber"); } },
+  { key: "registration_identifier_type", get label() { return translate("admin.msg.abdmRegistrationIdentifierType"); } },
+  { key: "registration_identifier_system", get label() { return translate("admin.msg.issuingRegistryUri"); } },
+  { key: "qualification", get label() { return translate("common.ui.qualification"); } },
 ];
 
 export function UserProfileForm({
@@ -52,7 +52,7 @@ export function UserProfileForm({
   onSave,
   onToggleActive,
 }: Props) {
-  const { localizeField } = useLocale();
+  const { t, localizeField } = useLocale();
   const saveDisabled = busy || !isDirty;
 
   return (
@@ -79,15 +79,8 @@ export function UserProfileForm({
             fontWeight: 700,
             color: meridian.textPrimary,
           }}
-        >
-          Profile
-        </Typography>
-        <Typography sx={{ m: 0, mb: 2, fontSize: "0.8125rem", color: meridian.textSecondary }}>
-          Update the staff member&apos;s editable profile details and department assignment.
-          {" "}For ABDM consent requests, verify the clinician&apos;s real registration number,
-          identifier type and issuing registry URI. Leave both ABDM fields blank for other staff;
-          do not enter sample or invented credentials.
-        </Typography>
+        >{t("admin.ui.profile")}</Typography>
+        <Typography sx={{ m: 0, mb: 2, fontSize: "0.8125rem", color: meridian.textSecondary }}>{t("admin.ui.updateTheStaffMemberSEditable")}{" "}{t("admin.ui.forAbdmConsentRequestsVerifyThe")}</Typography>
 
         <Stack direction="row" useFlexGap spacing={1.5} sx={{ flexWrap: "wrap" }}>
           {FIELDS.map(({ key, label }) => (
@@ -105,15 +98,15 @@ export function UserProfileForm({
           ))}
           <TextField
             select
-            label="Department"
+            label={t("monitor.department")}
             size="small"
             sx={{ width: { xs: "100%", sm: "calc(50% - 6px)" } }}
             value={draft.department_id ?? ""}
             onChange={(event) => onChange("department_id", event.target.value)}
             disabled={busy}
-            helperText="Optional for facility-wide roles"
+            helperText={t("admin.ui.optionalForFacilityWideRoles")}
           >
-            <MenuItem value="">No department</MenuItem>
+            <MenuItem value="">{t("admin.ui.noDepartment")}</MenuItem>
             {departments.filter((department) => department.is_active).map((department) => (
               <MenuItem key={department.id} value={department.id}>
                 {localizeField(department.name, department.name_hi)} ({department.code})
@@ -133,7 +126,7 @@ export function UserProfileForm({
             color: isDirty ? meridian.warning : meridian.textSecondary,
           }}
         >
-          {isDirty ? "Unsaved changes" : "No changes"}
+          {isDirty ? t("doctor.statusUnsavedChanges") : t("admin.ui.noChanges")}
         </Typography>
         <Stack direction="row" useFlexGap sx={{ gap: 1.25, flexWrap: "wrap" }}>
           <Button
@@ -142,7 +135,7 @@ export function UserProfileForm({
             onClick={onToggleActive}
             sx={{ textTransform: "none", fontWeight: 600, borderRadius: "10px" }}
           >
-            {draft.is_active ? "Deactivate" : "Activate"}
+            {draft.is_active ? t("dpdp.consentManagerDeactivate") : t("admin.ui.activate")}
           </Button>
           <Button
             color="primary"
@@ -150,9 +143,7 @@ export function UserProfileForm({
             disabled={saveDisabled}
             onClick={onSave}
             sx={adminSaveButtonSx(isDirty, saveDisabled)}
-          >
-            Save profile
-          </Button>
+          >{t("admin.ui.saveProfile")}</Button>
         </Stack>
       </Box>
     </Box>

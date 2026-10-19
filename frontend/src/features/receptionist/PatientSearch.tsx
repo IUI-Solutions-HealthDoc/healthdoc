@@ -5,7 +5,7 @@ import { Printer, Scan, Check } from "lucide-react";
 
 import { PatientAvatar } from "@/components/ui";
 import { ApiError } from "@/lib/api";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 import { searchPatients } from "./api";
 import {
@@ -48,7 +48,7 @@ function MatchBadge({ matchedOn, fields, score }: { matchedOn: string; fields?: 
   const all = fields && fields.length ? fields : [matchedOn];
   return (
     <span
-      title={`Match score ${score.toFixed(2)}`}
+      title={translate("receptionist.msg.matchScoreValue", undefined, { value: score.toFixed(2) })}
       className={`rounded-full px-2 py-1 text-xs font-medium ${
         identity ? "bg-success-muted text-success" : "bg-warning-muted text-warning"
       }`}
@@ -118,7 +118,7 @@ export function PatientSearch({ onSelect, selectLabel }: Props) {
     if (!norm) return;
     if (!isValidUhidInput(norm)) {
       setResults(null);
-      setError("Scan & Find takes the UHID or THID printed on the patient card. Use the search form for a name or mobile.");
+      setError(translate("receptionist.msg.scanFindTakesTheUhidOr"));
       return;
     }
     if (await runQuery({ uhid: norm }, 1)) setScanValue("");
@@ -253,7 +253,7 @@ export function PatientSearch({ onSelect, selectLabel }: Props) {
               <input
                 inputMode="numeric"
                 maxLength={3}
-                placeholder="About how old (years)"
+                placeholder={t("receptionist.ui.aboutHowOldYears")}
                 aria-label={t("field.age")}
                 className={inputClass(nameNeedsDob || ageInvalid)}
                 aria-invalid={nameNeedsDob || ageInvalid}
@@ -285,7 +285,7 @@ export function PatientSearch({ onSelect, selectLabel }: Props) {
               value={criteria.uhid ?? ""}
               onChange={(e) => set("uhid", e.target.value)}
               autoComplete="off"
-              placeholder="IN-DL-DEV001-2026-000001-4"
+              placeholder={t("receptionist.ui.inDlDev00120260000014")}
             />
           </label>
 
@@ -371,15 +371,13 @@ export function PatientSearch({ onSelect, selectLabel }: Props) {
 
                 {exactMatch.matched_on === "merged_identifier" && (
                   <div className="mt-3 rounded bg-blue-50 p-2.5 text-xs text-blue-800 border border-blue-200">
-                    <strong>Notice:</strong> This patient card was merged from previous identifier{" "}
-                    <span className="font-mono font-semibold">{exactMatch.merged_from_uhid}</span>. Displaying the active canonical record.
-                  </div>
+                    <strong>{t("receptionist.ui.notice")}</strong>{" "}{t("receptionist.ui.thisPatientCardWasMergedFrom")}{" "}
+                    <span className="font-mono font-semibold">{exactMatch.merged_from_uhid}</span>{t("receptionist.ui.displayingTheActiveCanonicalRecord")}</div>
                 )}
 
                 {exactMatch.thid && !exactMatch.uhid && (
                   <div className="mt-3 rounded bg-amber-50 p-2.5 text-xs text-amber-800 border border-amber-200">
-                    <strong>Provisional Emergency Record (THID):</strong> This patient has a temporary emergency identifier.
-                  </div>
+                    <strong>{t("receptionist.ui.provisionalEmergencyRecordThid")}</strong>{" "}{t("receptionist.ui.thisPatientHasATemporaryEmergency")}</div>
                 )}
 
                 <div className="mt-4 flex flex-wrap items-center justify-between gap-4">

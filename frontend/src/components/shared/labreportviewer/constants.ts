@@ -1,11 +1,12 @@
+import { translate } from "@/lib/i18n";
 // reportviewer/constants.ts
 
 export const REPORT_STATUS = {
-  DRAFT: "Draft",
-  IN_PROGRESS: "In Progress",
-  VERIFIED: "Verified",
-  FINAL: "Final",
-  CANCELLED: "Cancelled",
+  get DRAFT() { return translate("billing.invoiceStatus.draft"); },
+  get IN_PROGRESS() { return translate("common.msg.inProgress"); },
+  get VERIFIED() { return translate("consent.verified"); },
+  get FINAL() { return translate("doctor.diagnosisType.final"); },
+  get CANCELLED() { return translate("appointment.status.cancelled"); },
 } as const;
 
 export const REPORT_STATUS_COLORS = {
@@ -25,8 +26,8 @@ export const RESULT_FLAG_COLORS = {
 } as const;
 
 export const GENDER_LABELS = {
-  Male: "Male",
-  Female: "Female",
+  get Male() { return translate("mch.sex.male"); },
+  get Female() { return translate("mch.sex.female"); },
   Other: "Other",
 } as const;
 

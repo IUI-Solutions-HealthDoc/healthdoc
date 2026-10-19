@@ -8,6 +8,7 @@ import Typography from "@mui/material/Typography";
 import { meridian } from "@/styles/theme";
 import type { User } from "../types";
 import { ActiveStatusChip } from "./ActiveStatusChip";
+import { useLocale } from "@/lib/i18n";
 
 type Props = {
   user: User;
@@ -16,6 +17,7 @@ type Props = {
 
 /** Embedded header (no panel chrome) — parent supplies the card. */
 export function UserHeader({ user, isDirty = false }: Props) {
+  const { t } = useLocale();
   return (
     <Stack
       direction={{ xs: "column", sm: "row" }}
@@ -33,9 +35,7 @@ export function UserHeader({ user, isDirty = false }: Props) {
         >
           {user.full_name}
         </Typography>
-        <Typography sx={{ mt: 0.5, fontSize: "0.875rem", color: meridian.textSecondary }}>
-          {user.designation ?? "—"} · Employee ID {user.employee_id ?? "—"}
-        </Typography>
+        <Typography sx={{ mt: 0.5, fontSize: "0.875rem", color: meridian.textSecondary }}>{t("admin.ui.valueEmployeeIdValue2", { value: user.designation ?? "—", value2: user.employee_id ?? "—" })}</Typography>
         <Typography
           sx={{
             mt: 0.75,
@@ -52,7 +52,7 @@ export function UserHeader({ user, isDirty = false }: Props) {
         {isDirty ? (
           <Chip
             size="small"
-            label="Unsaved"
+            label={t("admin.ui.unsaved")}
             sx={{
               fontWeight: 700,
               height: 26,

@@ -5,6 +5,7 @@ import Typography from "@mui/material/Typography";
 
 import { Modal } from "@/components/ui/Modal";
 import { meridian } from "@/styles/theme";
+import { translate } from "@/lib/i18n";
 
 interface ConfirmationDialogProps {
   open: boolean;
@@ -22,8 +23,8 @@ export default function ConfirmationDialog({
   open,
   title,
   description,
-  confirmText = "Confirm",
-  cancelText = "Cancel",
+  confirmText = translate("receptionist.confirmAppointment"),
+  cancelText = translate("common.cancel"),
   confirmColor = "primary",
   loading = false,
   onConfirm,

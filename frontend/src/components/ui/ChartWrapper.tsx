@@ -11,6 +11,7 @@ import {
   type ResponsiveContainerProps,
 } from "recharts";
 import { meridian } from "@/styles/theme";
+import { translate } from "@/lib/i18n";
 
 export type ChartEmptyState =
   | boolean
@@ -34,14 +35,14 @@ function normalizeEmpty(empty: ChartEmptyState | undefined) {
   if (!empty) return null;
   if (empty === true) {
     return {
-      title: "No data available",
-      description: "There is nothing to display for this period.",
+      title: translate("common.msg.noDataAvailable"),
+      description: translate("common.msg.thereIsNothingToDisplayFor"),
     };
   }
   return {
-    title: empty.title ?? "No data available",
+    title: empty.title ?? translate("common.msg.noDataAvailable"),
     description:
-      empty.description ?? "There is nothing to display for this period.",
+      empty.description ?? translate("common.msg.thereIsNothingToDisplayFor"),
   };
 }
 

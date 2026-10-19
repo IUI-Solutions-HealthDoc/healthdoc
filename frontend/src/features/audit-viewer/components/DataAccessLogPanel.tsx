@@ -9,7 +9,7 @@ import Typography from "@mui/material/Typography";
 
 import { DataTable, type DataTableColumn } from "@/components/tables/DataTable";
 import { StatusChip } from "@/components/ui/StatusChip";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 import { meridian } from "@/styles/theme";
 import { ACCESS_CHANNEL_LABELS } from "../constants";
 import { formatDateTime } from "../lib/formatters";
@@ -44,33 +44,33 @@ export function DataAccessLogPanel({
   const columns: DataTableColumn<DataAccessLog>[] = [
     {
       key: "accessed_at",
-      label: "Accessed",
+      label: translate("consent.accessed"),
       render: (r) => formatDateTime(r.accessed_at),
     },
     {
       key: "user_display",
-      label: "User",
+      label: translate("consent.user"),
       render: (r) => `${r.user_display ?? r.user_id} (${r.role})`,
     },
     {
       key: "patient_display",
-      label: "Patient",
+      label: translate("common.patient"),
       render: (r) => r.patient_display ?? r.patient_id,
     },
     {
       key: "resource_type",
-      label: "Resource",
+      label: translate("consent.resource"),
       render: (r) =>
         r.resource_id ? `${r.resource_type} · ${r.resource_id.slice(0, 8)}…` : r.resource_type,
     },
     {
       key: "purpose_code",
-      label: "Purpose",
+      label: translate("field.purpose"),
       render: (r) => r.purpose_code,
     },
     {
       key: "access_channel",
-      label: "Channel",
+      label: translate("audit.dataAccess.channel"),
       render: (r) => (
         <StatusChip
           status={r.access_channel}
@@ -80,7 +80,7 @@ export function DataAccessLogPanel({
     },
     {
       key: "emergency_access",
-      label: "Flags",
+      label: translate("consent.flags"),
       render: (r) => {
         const flags = [
           r.emergency_access ? "emergency" : null,
@@ -102,12 +102,8 @@ export function DataAccessLogPanel({
       }}
     >
       <Box sx={{ px: 2.5, pt: 2.25, pb: 1.75 }}>
-        <Typography sx={{ m: 0, fontSize: "1.0625rem", fontWeight: 700, color: meridian.textPrimary }}>
-          Data access log
-        </Typography>
-        <Typography sx={{ m: 0, mt: 0.4, fontSize: "0.8125rem", color: meridian.textSecondary }}>
-          Review who accessed patient data, why, and whether consent was verified.
-        </Typography>
+        <Typography sx={{ m: 0, fontSize: "1.0625rem", fontWeight: 700, color: meridian.textPrimary }}>{t("consent.dataAccessLog")}</Typography>
+        <Typography sx={{ m: 0, mt: 0.4, fontSize: "0.8125rem", color: meridian.textSecondary }}>{t("audit.dataAccess.subtitle")}</Typography>
       </Box>
 
       <Stack direction={{ xs: "column", sm: "row" }} spacing={1.25} sx={{ px: 2.5, pb: 2 }}>
@@ -121,14 +117,14 @@ export function DataAccessLogPanel({
         <TextField
           select
           size="small"
-          label="Channel"
+          label={t("audit.dataAccess.channel")}
           value={accessChannel}
           onChange={(e) =>
             onAccessChannelChange(e.target.value as AccessChannel | "all")
           }
           sx={{ minWidth: 160 }}
         >
-          <MenuItem value="all">All</MenuItem>
+          <MenuItem value="all">{t("common.all")}</MenuItem>
           {(Object.keys(ACCESS_CHANNEL_LABELS) as AccessChannel[]).map((c) => (
             <MenuItem key={c} value={c}>
               {ACCESS_CHANNEL_LABELS[c]}

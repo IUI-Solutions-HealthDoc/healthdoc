@@ -17,6 +17,7 @@ import {
 import { prepareLicencePhoto } from "./licencePhoto";
 import { digitsOnly } from "./patientValidation";
 import type { AbhaDeclaration, ConsentLanguage, DrivingLicenceEnrolmentResult } from "./types";
+import { useLocale, translate } from "@/lib/i18n";
 
 const ENROLMENT_CONSENT = { granted: true, code: "abha-enrollment", version: "1.4" };
 const GENDERS: Partial<Record<string, "M" | "F" | "O">> = { male: "M", female: "F", other: "O" };
@@ -61,6 +62,7 @@ function nameParts(fullName: string): { first_name: string; middle_name: string;
  * either approves (submits) or rejects it; a rejected licence is never sent.
  */
 export function DrivingLicenceAbhaEnrolment({ patient }: { patient: Patient }) {
+  const { t } = useLocale();
   const [step, setStep] = useState<Step>("start");
   const [declaration, setDeclaration] = useState<AbhaDeclaration | null>(null);
   const [declarationError, setDeclarationError] = useState<string | null>(null);
@@ -95,7 +97,7 @@ export function DrivingLicenceAbhaEnrolment({ patient }: { patient: Patient }) {
     let disposed = false;
     getAbhaEnrolmentDeclaration(patient.id, consentLanguage, "document").then(
       (shown) => { if (!disposed) { setDeclaration(shown); setTicks(defaultTicks(shown)); } },
-      (reason: unknown) => { if (!disposed) setDeclarationError(failure(reason, "The ABHA consent could not be loaded.")); },
+      (reason: unknown) => { if (!disposed) setDeclarationError(failure(reason, translate("receptionist.msg.theAbhaConsentCouldNotBe"))); },
     );
     return () => { disposed = true; };
   }, [patient.id, consentLanguage]);
@@ -105,7 +107,7 @@ export function DrivingLicenceAbhaEnrolment({ patient }: { patient: Patient }) {
     let disposed = false;
     listLgdStates().then(
       (rows) => { if (!disposed) setStates(rows); },
-      (reason: unknown) => { if (!disposed) setLgdError(failure(reason, "The LGD state list could not be loaded.")); },
+      (reason: unknown) => { if (!disposed) setLgdError(failure(reason, translate("receptionist.msg.theLgdStateListCouldNot"))); },
     );
     return () => { disposed = true; };
   }, [step, states]);
@@ -115,7 +117,7 @@ export function DrivingLicenceAbhaEnrolment({ patient }: { patient: Patient }) {
     let disposed = false;
     listLgdDistricts(form.state_code).then(
       (rows) => { if (!disposed) setDistricts(rows); },
-      (reason: unknown) => { if (!disposed) setLgdError(failure(reason, "The LGD district list could not be loaded.")); },
+      (reason: unknown) => { if (!disposed) setLgdError(failure(reason, translate("receptionist.msg.theLgdDistrictListCouldNot"))); },
     );
     return () => { disposed = true; };
   }, [form.state_code]);
@@ -151,7 +153,7 @@ export function DrivingLicenceAbhaEnrolment({ patient }: { patient: Patient }) {
       const encoded = await prepareLicencePhoto(file);
       setPhotos((current) => ({ ...current, [side]: encoded }));
     } catch (reason) {
-      setError(failure(reason, "The photo could not be read."));
+      setError(failure(reason, translate("receptionist.msg.thePhotoCouldNotBeRead")));
     }
   }
 
@@ -168,7 +170,7 @@ export function DrivingLicenceAbhaEnrolment({ patient }: { patient: Patient }) {
       setSentTo(requested.masked_mobile ?? null);
       setStep("otp");
     } catch (reason) {
-      setError(failure(reason, "ABDM could not send the OTP. Try again."));
+      setError(failure(reason, translate("receptionist.msg.abdmCouldNotSendTheOtp")));
     } finally {
       setBusy(false);
     }
@@ -181,9 +183,9 @@ export function DrivingLicenceAbhaEnrolment({ patient }: { patient: Patient }) {
     try {
       const requested = await resendLicenceEnrolmentOtp(patient.id, sessionId, mobile, newIdempotencyKey());
       setSentTo(requested.masked_mobile ?? null);
-      setNotice(`A new OTP was sent. ${requested.resends_remaining} more can be requested.`);
+      setNotice(translate("receptionist.msg.aNewOtpWasSentResends", undefined, { resends_remaining: requested.resends_remaining ?? 0 }));
     } catch (reason) {
-      setError(failure(reason, "ABDM could not send another OTP."));
+      setError(failure(reason, translate("receptionist.msg.abdmCouldNotSendAnotherOtp")));
     } finally {
       setBusy(false);
     }
@@ -199,7 +201,7 @@ export function DrivingLicenceAbhaEnrolment({ patient }: { patient: Patient }) {
       setNotice(null);
       setStep("details");
     } catch (reason) {
-      setError(failure(reason, "ABDM did not accept this OTP."));
+      setError(failure(reason, translate("receptionist.msg.abdmDidNotAcceptThisOtp")));
     } finally {
       setBusy(false);
     }
@@ -230,7 +232,7 @@ export function DrivingLicenceAbhaEnrolment({ patient }: { patient: Patient }) {
       setResult(enrolled);
       setStep("done");
     } catch (reason) {
-      setError(failure(reason, "ABDM could not take this driving licence. Check the details and try again."));
+      setError(failure(reason, translate("receptionist.msg.abdmCouldNotTakeThisDriving")));
     } finally {
       setBusy(false);
     }
@@ -242,14 +244,10 @@ export function DrivingLicenceAbhaEnrolment({ patient }: { patient: Patient }) {
   if (step === "done" && result) {
     return (
       <div className="space-y-2" role="status">
-        <p className="text-sm font-medium">Enrolment number: <span className="font-mono">{result.enrolment_number}</span></p>
-        {result.enrolment_state ? <p className="text-sm">State: {result.enrolment_state}</p> : null}
-        {result.abha_address ? <p className="text-sm">ABHA address: {result.abha_address}</p> : null}
-        <p className="text-sm text-muted-foreground">
-          This is not yet an ABHA number. NHA issues the ABHA after a participating facility verifies the driving
-          licence against the patient. It is not linked to this chart; once the ABHA is issued, link it here with
-          &ldquo;Use existing ABHA&rdquo;.
-        </p>
+        <p className="text-sm font-medium">{t("receptionist.ui.enrolmentNumber")}{" "}<span className="font-mono">{result.enrolment_number}</span></p>
+        {result.enrolment_state ? <p className="text-sm">{t("receptionist.ui.stateEnrolmentState", { enrolment_state: result.enrolment_state })}</p> : null}
+        {result.abha_address ? <p className="text-sm">{t("receptionist.ui.abhaAddressAbhaAddress", { abha_address: result.abha_address })}</p> : null}
+        <p className="text-sm text-muted-foreground">{t("receptionist.ui.thisIsNotYetAnAbha")}</p>
       </div>
     );
   }
@@ -259,7 +257,7 @@ export function DrivingLicenceAbhaEnrolment({ patient }: { patient: Patient }) {
       {notice ? <p role="status" className="text-sm text-muted-foreground">{notice}</p> : null}
       {step === "start" ? (
         <>
-          <p className="text-sm text-muted-foreground">For a patient without Aadhaar. ABDM sends an OTP to the mobile, then checks the driving licence.</p>
+          <p className="text-sm text-muted-foreground">{t("receptionist.ui.forAPatientWithoutAadhaarAbdm")}</p>
           <AbhaConsentDeclaration
             declaration={declaration}
             error={declarationError}
@@ -275,90 +273,88 @@ export function DrivingLicenceAbhaEnrolment({ patient }: { patient: Patient }) {
             }}
           />
           <label className="block space-y-1 text-sm">
-            <span className="text-muted-foreground">Mobile for communication (10 digits)</span>
+            <span className="text-muted-foreground">{t("receptionist.ui.mobileForCommunication10Digits")}</span>
             <input name="licence_mobile" value={mobile} onChange={(e) => setMobile(digitsOnly(e.target.value))} inputMode="tel" maxLength={10} className={input} />
           </label>
           <button type="button" disabled={busy || !declarationAccepted(declaration, ticks) || !/^[6-9]\d{9}$/.test(mobile)} onClick={() => void sendOtp()} className={primary}>
-            {busy ? "Sending OTP…" : "Send OTP"}
+            {busy ? t("receptionist.ui.sendingOtp") : t("receptionist.abha.sendOtp")}
           </button>
         </>
       ) : null}
 
       {step === "otp" ? (
         <>
-          <p className="text-sm text-muted-foreground">{sentTo ?? "ABDM sent an OTP to the mobile."}</p>
+          <p className="text-sm text-muted-foreground">{sentTo ?? translate("receptionist.msg.abdmSentAnOtpToThe")}</p>
           <label className="block space-y-1 text-sm">
-            <span className="text-muted-foreground">OTP</span>
+            <span className="text-muted-foreground">{t("receptionist.abha.fieldOtp")}</span>
             <input name="licence_otp" value={otp} onChange={(e) => setOtp(digitsOnly(e.target.value))} inputMode="numeric" autoComplete="one-time-code" maxLength={6} className={input} />
           </label>
           <div className="flex flex-wrap gap-2">
-            <button type="button" disabled={busy || !/^\d{6}$/.test(otp)} onClick={() => void verifyOtp()} className={primary}>Verify OTP</button>
-            <button type="button" disabled={busy} onClick={() => void resendOtp()} className="rounded-md border border-border px-3 py-2 text-sm">Send again</button>
+            <button type="button" disabled={busy || !/^\d{6}$/.test(otp)} onClick={() => void verifyOtp()} className={primary}>{t("admin.ui.verifyOtp")}</button>
+            <button type="button" disabled={busy} onClick={() => void resendOtp()} className="rounded-md border border-border px-3 py-2 text-sm">{t("admin.ui.sendAgain")}</button>
           </div>
         </>
       ) : null}
 
       {step === "details" ? (
         <>
-          <p className="text-sm text-muted-foreground">Enter the details exactly as printed on the driving licence.</p>
+          <p className="text-sm text-muted-foreground">{t("receptionist.ui.enterTheDetailsExactlyAsPrinted2")}</p>
           <div className="grid gap-3 md:grid-cols-2">
-            <label className="block space-y-1 text-sm md:col-span-2"><span className="text-muted-foreground">Driving licence number</span>
+            <label className="block space-y-1 text-sm md:col-span-2"><span className="text-muted-foreground">{t("receptionist.ui.drivingLicenceNumber")}</span>
               <input name="licence_number" value={form.licence_number} onChange={(e) => change("licence_number", e.target.value)} autoComplete="off" maxLength={20}
                 aria-invalid={Boolean(form.licence_number) && !LICENCE.test(form.licence_number.trim())} className={input} />
-              {form.licence_number && !LICENCE.test(form.licence_number.trim()) ? <span role="alert" className="text-danger">Driving licence number is not valid</span> : null}
+              {form.licence_number && !LICENCE.test(form.licence_number.trim()) ? <span role="alert" className="text-danger">{t("receptionist.ui.drivingLicenceNumberIsNotValid")}</span> : null}
             </label>
-            <label className="block space-y-1 text-sm"><span className="text-muted-foreground">First name</span>
+            <label className="block space-y-1 text-sm"><span className="text-muted-foreground">{t("receptionist.ui.firstName")}</span>
               <input name="first_name" value={form.first_name} onChange={(e) => change("first_name", e.target.value)} className={input} /></label>
-            <label className="block space-y-1 text-sm"><span className="text-muted-foreground">Middle name</span>
+            <label className="block space-y-1 text-sm"><span className="text-muted-foreground">{t("receptionist.ui.middleName")}</span>
               <input name="middle_name" value={form.middle_name} onChange={(e) => change("middle_name", e.target.value)} className={input} /></label>
-            <label className="block space-y-1 text-sm"><span className="text-muted-foreground">Last name</span>
+            <label className="block space-y-1 text-sm"><span className="text-muted-foreground">{t("receptionist.ui.lastName")}</span>
               <input name="last_name" value={form.last_name} onChange={(e) => change("last_name", e.target.value)} className={input} /></label>
-            <label className="block space-y-1 text-sm"><span className="text-muted-foreground">Date of birth</span>
+            <label className="block space-y-1 text-sm"><span className="text-muted-foreground">{t("field.dob")}</span>
               <input name="date_of_birth" type="date" value={form.date_of_birth} onChange={(e) => change("date_of_birth", e.target.value)} className={input} /></label>
-            <label className="block space-y-1 text-sm"><span className="text-muted-foreground">Gender</span>
+            <label className="block space-y-1 text-sm"><span className="text-muted-foreground">{t("admin.ui.gender")}</span>
               <select name="gender" value={form.gender} onChange={(e) => change("gender", e.target.value)} className={input}>
-                <option value="">Choose</option><option value="M">Male</option><option value="F">Female</option><option value="O">Other</option>
+                <option value="">{t("platform.choose")}</option><option value="M">{t("mch.sex.male")}</option><option value="F">{t("mch.sex.female")}</option><option value="O">{t("equipment.category.other")}</option>
               </select></label>
-            <label className="block space-y-1 text-sm md:col-span-2"><span className="text-muted-foreground">Address</span>
+            <label className="block space-y-1 text-sm md:col-span-2"><span className="text-muted-foreground">{t("field.address")}</span>
               <input name="address" value={form.address} onChange={(e) => change("address", e.target.value)} className={input} /></label>
-            <label className="block space-y-1 text-sm"><span className="text-muted-foreground">PIN code</span>
+            <label className="block space-y-1 text-sm"><span className="text-muted-foreground">{t("admin.ui.pinCode")}</span>
               <input name="pincode" value={form.pincode} onChange={(e) => change("pincode", digitsOnly(e.target.value))} inputMode="numeric" maxLength={6} className={input} /></label>
-            <label className="block space-y-1 text-sm"><span className="text-muted-foreground">State</span>
+            <label className="block space-y-1 text-sm"><span className="text-muted-foreground">{t("field.state")}</span>
               <select name="state_code" value={form.state_code} onChange={(e) => change("state_code", e.target.value)} disabled={!states} className={input}>
-                <option value="">{states ? "Choose" : "Loading…"}</option>
+                <option value="">{states ? t("platform.choose") : "Loading…"}</option>
                 {(states ?? []).map((row) => <option key={row.code} value={row.code}>{row.name}</option>)}
               </select></label>
-            <label className="block space-y-1 text-sm"><span className="text-muted-foreground">District</span>
+            <label className="block space-y-1 text-sm"><span className="text-muted-foreground">{t("field.district")}</span>
               <select name="district_code" value={form.district_code} onChange={(e) => change("district_code", e.target.value)} disabled={!districts} className={input}>
-                <option value="">{form.state_code ? (districts ? "Choose" : "Loading…") : "Choose a state first"}</option>
+                <option value="">{form.state_code ? (districts ? t("platform.choose") : "Loading…") : t("receptionist.ui.chooseAStateFirst")}</option>
                 {(districts ?? []).map((row) => <option key={row.code} value={row.code}>{row.name}</option>)}
               </select></label>
             {(["front", "back"] as const).map((side) => (
-              <label key={side} className="block space-y-1 text-sm"><span className="text-muted-foreground">{side === "front" ? "Front of the licence" : "Back of the licence"}</span>
+              <label key={side} className="block space-y-1 text-sm"><span className="text-muted-foreground">{side === "front" ? t("receptionist.ui.frontOfTheLicence") : t("receptionist.ui.backOfTheLicence")}</span>
                 <input name={`licence_${side}`} type="file" accept="image/jpeg,image/png" capture="environment" onChange={(e) => void choosePhoto(side, e.target.files?.[0])} className={input} />
                 {photos[side] ? (
                   // eslint-disable-next-line @next/next/no-img-element -- a local data URI the operator checks, not an optimisable asset
-                  <img src={`data:image/jpeg;base64,${photos[side]}`} alt={`${side} of the driving licence`} className="max-h-48 rounded-md border border-border" />
+                  <img src={`data:image/jpeg;base64,${photos[side]}`} alt={translate("receptionist.msg.sideOfTheDrivingLicence", undefined, { side })} className="max-h-48 rounded-md border border-border" />
                 ) : null}
               </label>
             ))}
           </div>
           {lgdError ? <p role="alert" className="text-sm text-danger">{lgdError}</p> : null}
           <fieldset className="space-y-2 rounded-md border border-border p-3 text-sm">
-            <legend className="px-1 font-medium">Check the licence (CRT_ABHA_407)</legend>
+            <legend className="px-1 font-medium">{t("receptionist.ui.checkTheLicenceCrtAbha407")}</legend>
             <label className="flex items-start gap-2">
               <input type="checkbox" name="operator_verified" checked={checked} disabled={!complete} onChange={(e) => setChecked(e.target.checked)} />
-              <span>I have compared the licence, its photograph, number, name, date of birth and gender with the person at the desk, and they match.</span>
+              <span>{t("receptionist.ui.iHaveComparedTheLicenceIts")}</span>
             </label>
           </fieldset>
           {error ? <p role="alert" className="text-sm text-danger">{error}</p> : null}
           <div className="flex flex-wrap gap-2">
             <button type="button" disabled={busy || !complete || !checked} onClick={() => void submit()} className={primary}>
-              {busy ? "Sending to ABDM…" : "Approve and send for enrolment"}
+              {busy ? t("receptionist.ui.sendingToAbdm") : t("receptionist.ui.approveAndSendForEnrolment")}
             </button>
-            <button type="button" disabled={busy} onClick={() => startOver("Licence rejected. Nothing was sent to ABDM.")} className="rounded-md border border-border px-3 py-2 text-sm">
-              Reject licence
-            </button>
+            <button type="button" disabled={busy} onClick={() => startOver(translate("receptionist.msg.licenceRejectedNothingWasSentTo"))} className="rounded-md border border-border px-3 py-2 text-sm">{t("receptionist.ui.rejectLicence")}</button>
           </div>
         </>
       ) : null}

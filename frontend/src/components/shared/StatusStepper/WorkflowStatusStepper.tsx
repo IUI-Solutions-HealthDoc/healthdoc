@@ -7,6 +7,7 @@ import StatusChip from "./StatusChip";
 import { workflowActionButtonSx } from "./StatusActionMenu";
 import type { WorkflowStatusStepperProps } from "./types";
 import { meridian } from "@/styles/theme";
+import { translate } from "@/lib/i18n";
 
 export default function WorkflowStatusStepper({
   currentStatus,
@@ -56,7 +57,7 @@ export default function WorkflowStatusStepper({
             },
           }}
         >
-          {buttonText ?? `Mark ${nextStep.label}`}
+          {buttonText ?? translate("common.msg.markLabel", undefined, { label: nextStep.label })}
         </Button>
       )}
 

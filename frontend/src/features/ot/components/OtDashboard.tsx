@@ -659,10 +659,8 @@ export function OtDashboard() {
               control={<Checkbox checked={checklist.sign_in} onChange={(e) => setChecklist({ ...checklist, sign_in: e.target.checked })} />}
               label={
                 <Box>
-                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>1. SIGN-IN (Before induction of anesthesia)</Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    Patient identity, site & procedure confirmed. Consent verified. Pulse oximeter active. Known allergies and difficult airway risk assessed.
-                  </Typography>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{t("ot.ui.1SignInBeforeInductionOf")}</Typography>
+                  <Typography variant="caption" color="text.secondary">{t("ot.ui.patientIdentitySiteProcedureConfirmedConsent")}</Typography>
                 </Box>
               }
             />
@@ -673,10 +671,8 @@ export function OtDashboard() {
               control={<Checkbox checked={checklist.time_out} onChange={(e) => setChecklist({ ...checklist, time_out: e.target.checked })} />}
               label={
                 <Box>
-                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>2. TIME-OUT (Before skin incision)</Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    All team members introduced. Surgeon, anesthetist, and nurse verbal review. Antibiotic prophylaxis given within past 60 mins. Essential imaging displayed.
-                  </Typography>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{t("ot.ui.2TimeOutBeforeSkinIncision")}</Typography>
+                  <Typography variant="caption" color="text.secondary">{t("ot.ui.allTeamMembersIntroducedSurgeonAnesthetist")}</Typography>
                 </Box>
               }
             />
@@ -687,10 +683,8 @@ export function OtDashboard() {
               control={<Checkbox checked={checklist.sign_out} onChange={(e) => setChecklist({ ...checklist, sign_out: e.target.checked })} />}
               label={
                 <Box>
-                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>3. SIGN-OUT (Before patient leaves operating room)</Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    Name of procedure recorded. Sponge and needle counts correct. Specimen labelled with patient identifiers. Equipment problems addressed. PACU recovery concerns.
-                  </Typography>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{t("ot.ui.3SignOutBeforePatientLeaves")}</Typography>
+                  <Typography variant="caption" color="text.secondary">{t("ot.ui.nameOfProcedureRecordedSpongeAnd")}</Typography>
                 </Box>
               }
             />

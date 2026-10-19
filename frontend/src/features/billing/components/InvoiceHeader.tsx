@@ -7,8 +7,10 @@ import Typography from "@mui/material/Typography";
 import { meridian } from "@/styles/theme";
 import { InvoiceStatusChip } from "./InvoiceStatusChip";
 import type { InvoiceWithItems } from "../types";
+import { useLocale } from "@/lib/i18n";
 
 export function InvoiceHeader({ invoice }: { invoice: InvoiceWithItems }) {
+  const { t } = useLocale();
   return (
     <Box
       sx={{
@@ -33,11 +35,11 @@ export function InvoiceHeader({ invoice }: { invoice: InvoiceWithItems }) {
               color: meridian.textPrimary,
             }}
           >
-            {invoice.patient?.full_name ?? "Patient"}
+            {invoice.patient?.full_name ?? t("common.patient")}
           </Typography>
           <Typography sx={{ mt: 0.5, fontSize: "0.875rem", color: meridian.textSecondary }}>
             {/* An emergency patient's identifier is a THID, not a UHID (QA 16 Oct 2026). */}
-            {/^TH-/i.test(invoice.patient?.uhid ?? "") ? "THID" : "UHID"} {invoice.patient?.uhid ?? "—"} · Visit {invoice.visit?.visit_number ?? "—"} (
+            {/^TH-/i.test(invoice.patient?.uhid ?? "") ? "THID" : "UHID"} {invoice.patient?.uhid ?? "—"}{" "}{t("billing.ui.visit")}{" "}{invoice.visit?.visit_number ?? "—"} (
             {invoice.visit?.visit_type
               ? invoice.visit.visit_type.toUpperCase()
               : "—"}

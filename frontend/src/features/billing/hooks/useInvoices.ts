@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { listInvoices } from "../api";
 import type { InvoiceListFilters, InvoiceStatus, InvoiceWithItems } from "../types";
+import { translate } from "@/lib/i18n";
 
 export function useInvoices(initial: InvoiceListFilters = { status: "all" }) {
   const [filters, setFilters] = useState<InvoiceListFilters>(initial);
@@ -27,7 +28,7 @@ export function useInvoices(initial: InvoiceListFilters = { status: "all" }) {
       if (sequence !== requestSequence.current) return;
       setInvoices([]);
       setTotal(0);
-      setError(e instanceof Error ? e.message : "Failed to load invoices");
+      setError(e instanceof Error ? e.message : translate("billing.msg.failedToLoadInvoices"));
     } finally {
       if (sequence === requestSequence.current) setLoading(false);
     }

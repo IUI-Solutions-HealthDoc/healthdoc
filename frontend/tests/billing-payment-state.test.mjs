@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import ts from "typescript";
+import { i18nStub } from "./helpers/i18n-stub.mjs";
 
 function harness() {
   const hooks = [], requests = [];
@@ -31,7 +32,7 @@ function harness() {
     "../lib/money": { DEFAULT_CURRENCY: "INR", moneyZero: () => ({ amount: "0.00", currency: "INR" }) },
   };
   const exports = {};
-  new Function("require", "exports", code)((name) => { assert.ok(name in dependencies, name); return dependencies[name]; }, exports);
+  new Function("require", "exports", code)((name) => { if (name === "@/lib/i18n") return i18nStub; assert.ok(name in dependencies, name); return dependencies[name]; }, exports);
   return { requests,
     render(id, revision) { cursor = 0; return exports.useInvoicePayments(id, revision); },
     effects() { for (const h of hooks) if (h?.pending) { h.cleanup?.(); h.cleanup = h.fn(); h.pending = false; } },

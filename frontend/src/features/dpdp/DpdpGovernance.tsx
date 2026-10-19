@@ -288,7 +288,7 @@ export function DpdpGovernance() {
                   aria-invalid={contactUnreachable}
                 />
                 {contactUnreachable ? (
-                  <span className="text-xs text-danger">Include an email address or a phone number people can use.</span>
+                  <span className="text-xs text-danger">{t("admin.ui.includeAnEmailAddressOrA")}</span>
                 ) : null}
               </label>
             </div>
@@ -473,7 +473,7 @@ export function DpdpGovernance() {
                 <span className="block text-muted-foreground">{t("dpdp.endpointUrl")}</span>
                 <input
                   className="mt-1 w-full rounded border border-gray-300 p-2"
-                  placeholder="https://…"
+                  placeholder={t("admin.ui.https")}
                   value={cmEndpoint}
                   onChange={(e) => setCmEndpoint(e.target.value)}
                 />

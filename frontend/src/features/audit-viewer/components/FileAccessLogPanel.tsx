@@ -9,7 +9,7 @@ import Typography from "@mui/material/Typography";
 
 import { DataTable, type DataTableColumn } from "@/components/tables/DataTable";
 import { StatusChip } from "@/components/ui/StatusChip";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 import { meridian } from "@/styles/theme";
 import { FILE_ACCESS_ACTION_LABELS } from "../constants";
 import { formatDateTime } from "../lib/formatters";
@@ -44,22 +44,22 @@ export function FileAccessLogPanel({
   const columns: DataTableColumn<FileAccessLog>[] = [
     {
       key: "accessed_at",
-      label: "Accessed",
+      label: translate("consent.accessed"),
       render: (r) => formatDateTime(r.accessed_at),
     },
     {
       key: "file_name",
-      label: "File",
+      label: translate("audit.msg.file"),
       render: (r) => r.file_name ?? r.file_id,
     },
     {
       key: "user_display",
-      label: "User",
+      label: translate("consent.user"),
       render: (r) => r.user_display ?? r.user_id,
     },
     {
       key: "action",
-      label: "Action",
+      label: translate("receptionist.action"),
       render: (r) => (
         <StatusChip status={r.action} label={FILE_ACCESS_ACTION_LABELS[r.action]} />
       ),
@@ -82,12 +82,8 @@ export function FileAccessLogPanel({
       }}
     >
       <Box sx={{ px: 2.5, pt: 2.25, pb: 1.75 }}>
-        <Typography sx={{ m: 0, fontSize: "1.0625rem", fontWeight: 700, color: meridian.textPrimary }}>
-          File access log
-        </Typography>
-        <Typography sx={{ m: 0, mt: 0.4, fontSize: "0.8125rem", color: meridian.textSecondary }}>
-          Review uploads, views, downloads, and blocked deletion attempts.
-        </Typography>
+        <Typography sx={{ m: 0, fontSize: "1.0625rem", fontWeight: 700, color: meridian.textPrimary }}>{t("audit.ui.fileAccessLog")}</Typography>
+        <Typography sx={{ m: 0, mt: 0.4, fontSize: "0.8125rem", color: meridian.textSecondary }}>{t("audit.ui.reviewUploadsViewsDownloadsAndBlocked")}</Typography>
       </Box>
 
       <Stack direction={{ xs: "column", sm: "row" }} spacing={1.25} sx={{ px: 2.5, pb: 2 }}>
@@ -101,12 +97,12 @@ export function FileAccessLogPanel({
         <TextField
           select
           size="small"
-          label="Action"
+          label={t("receptionist.action")}
           value={action}
           onChange={(e) => onActionChange(e.target.value as FileAccessAction | "all")}
           sx={{ minWidth: 160 }}
         >
-          <MenuItem value="all">All</MenuItem>
+          <MenuItem value="all">{t("common.all")}</MenuItem>
           {(Object.keys(FILE_ACCESS_ACTION_LABELS) as FileAccessAction[]).map((a) => (
             <MenuItem key={a} value={a}>
               {FILE_ACCESS_ACTION_LABELS[a]}
