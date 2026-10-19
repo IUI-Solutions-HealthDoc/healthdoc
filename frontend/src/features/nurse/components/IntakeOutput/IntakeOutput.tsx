@@ -1,12 +1,12 @@
 import { IntakeOutputProps, EntryType } from "./IntakeOutput.types";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 const ENTRY_TYPE_LABELS: Record<EntryType, string> = {
-  intake_oral: "Oral Intake",
+  get intake_oral() { return translate("nurse.msg.oralIntake"); },
   intake_iv: "IV Intake",
-  output_urine: "Urine Output",
-  output_drain: "Drain Output",
-  output_other: "Other Output",
+  get output_urine() { return translate("nurse.msg.urineOutput"); },
+  get output_drain() { return translate("nurse.msg.drainOutput"); },
+  get output_other() { return translate("nurse.msg.otherOutput"); },
 };
 
 function isIntake(entryType: EntryType): boolean {

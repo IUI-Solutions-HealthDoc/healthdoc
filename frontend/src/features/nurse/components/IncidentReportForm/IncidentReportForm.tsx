@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 import { reportIncident } from "@/features/nurse/api/nursing";
 import { INCIDENT_TYPES, SEVERITIES } from "./constants";
 import { IncidentType, IncidentSeverity, IncidentReportFormProps } from "./IncidentReportForm.types";
@@ -33,13 +33,13 @@ export default function IncidentReportForm({
     setSuccess(false);
 
     if (!incidentType || !severity || !occurredAt || !description.trim() || !immediateAction.trim()) {
-      setError("Please fill all required fields.");
+      setError(translate("nurse.msg.pleaseFillAllRequiredFields"));
       return;
     }
     // Reported after it happened: the server refuses a future time, and used
     // to answer 500 for it (QA 12 Oct 2026).
     if (new Date(occurredAt).getTime() > Date.now() + 5 * 60_000) {
-      setError("The time the incident occurred cannot be in the future.");
+      setError(translate("nurse.msg.theTimeTheIncidentOccurredCannot"));
       return;
     }
 

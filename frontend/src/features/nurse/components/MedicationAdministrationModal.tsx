@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api, ApiError, newIdempotencyKey } from "@/lib/api";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 import type { MedicationRecord, MedicationStatus } from "@/components/tables/EMARTable";
 
 export interface PrescriptionOption {
@@ -85,17 +85,17 @@ export default function MedicationAdministrationModal({
     setError(null);
 
     if (!prescriptionItemId) {
-      setError("Please select a prescription item or medication.");
+      setError(translate("nurse.msg.pleaseSelectAPrescriptionItemOr"));
       return;
     }
 
     if ((status === "held" || status === "refused") && !reason.trim()) {
-      setError(`A clinical reason is mandatory when medication is ${status}.`);
+      setError(translate("nurse.msg.aClinicalReasonIsMandatoryWhen", undefined, { status }));
       return;
     }
 
     if (isCorrection && (!correctionReason.trim() || correctionReason.trim().length < 10)) {
-      setError("Dose correction reason must be at least 10 characters long.");
+      setError(translate("nurse.msg.doseCorrectionReasonMustBeAt"));
       return;
     }
 
@@ -128,7 +128,7 @@ export default function MedicationAdministrationModal({
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.code === 409) {
-          setError(`Cannot record dose: ${err.message}`);
+          setError(translate("nurse.msg.cannotRecordDoseMessage", undefined, { message: err.message }));
         } else {
           setError(err.message);
         }

@@ -17,7 +17,7 @@ import type { User } from "../types";
 import type { FieldErrors } from "../validation";
 import type { Department } from "../api/departments";
 import { UserHeader } from "./UserHeader";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 type Props = {
   draft: User;
@@ -31,15 +31,15 @@ type Props = {
 };
 
 const FIELDS: { key: keyof User; label: string }[] = [
-  { key: "full_name", label: "Full name" },
-  { key: "email", label: "Email" },
-  { key: "mobile", label: "Mobile" },
-  { key: "designation", label: "Designation" },
-  { key: "employee_id", label: "Employee ID" },
-  { key: "registration_number", label: "Registration number" },
-  { key: "registration_identifier_type", label: "ABDM registration identifier type" },
-  { key: "registration_identifier_system", label: "Issuing registry URI" },
-  { key: "qualification", label: "Qualification" },
+  { key: "full_name", get label() { return translate("field.fullName"); } },
+  { key: "email", get label() { return translate("admin.ui.email"); } },
+  { key: "mobile", get label() { return translate("field.mobile"); } },
+  { key: "designation", get label() { return translate("common.ui.designation"); } },
+  { key: "employee_id", get label() { return translate("admin.ui.employeeId2"); } },
+  { key: "registration_number", get label() { return translate("admin.ui.registrationNumber"); } },
+  { key: "registration_identifier_type", get label() { return translate("admin.msg.abdmRegistrationIdentifierType"); } },
+  { key: "registration_identifier_system", get label() { return translate("admin.msg.issuingRegistryUri"); } },
+  { key: "qualification", get label() { return translate("common.ui.qualification"); } },
 ];
 
 export function UserProfileForm({

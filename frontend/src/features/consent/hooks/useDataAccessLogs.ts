@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { listDataAccessLogs } from "../api";
 import type { DataAccessLog } from "../types";
+import { translate } from "@/lib/i18n";
 
 export function useDataAccessLogs(consentId: string | null) {
   const [rows, setRows] = useState<DataAccessLog[]>([]);
@@ -34,7 +35,7 @@ export function useDataAccessLogs(consentId: string | null) {
     } catch (reason) {
       if (!isCurrent()) return;
       setRows([]);
-      setError(reason instanceof Error ? reason.message : "Failed to load access history");
+      setError(reason instanceof Error ? reason.message : translate("consent.msg.failedToLoadAccessHistory"));
     } finally {
       if (isCurrent()) setLoading(false);
     }

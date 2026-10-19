@@ -1,11 +1,11 @@
 import { ProcedureAssistanceProps, ProcedureSetting } from "./ProcedureAssistance.types";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 const SETTING_LABELS: Record<ProcedureSetting, string> = {
   opd_minor: "OPD Minor Procedure",
-  bedside: "Bedside",
-  emergency: "Emergency",
-  ot: "Operation Theatre",
+  get bedside() { return translate("doctor.procedureSetting.bedside"); },
+  get emergency() { return translate("role.emergency"); },
+  get ot() { return translate("nurse.msg.operationTheatre"); },
 };
 
 export default function ProcedureAssistance({

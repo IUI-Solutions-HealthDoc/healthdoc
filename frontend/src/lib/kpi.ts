@@ -1,13 +1,14 @@
 import type { MetricCardProps } from "@/components/ui/MetricCard";
 import type { KpiChartPoint, KpiSnapshot } from "@/types/kpi";
+import { translate } from "@/lib/i18n";
 
 /**
  * Hard-coded labels/units for known kpi_code values.
  * No kpi_code catalogue table exists in schema.
  */
 const KPI_DISPLAY: Record<string, { label: string; unit?: string }> = {
-  avg_opd_wait_minutes: { label: "Avg OPD wait", unit: "min" },
-  sharp_injury_count: { label: "Sharp injuries" },
+  avg_opd_wait_minutes: { get label() { return translate("common.msg.avgOpdWait"); }, unit: "min" },
+  sharp_injury_count: { get label() { return translate("common.msg.sharpInjuries"); } },
 };
 
 export function kpiLabel(kpi_code: string): string {

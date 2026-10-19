@@ -13,7 +13,7 @@ import type { BookableProvider } from "@/features/appointments/types";
 import { ApiError, api, newIdempotencyKey } from "@/lib/api";
 import { apiErrorCode } from "@/lib/api-error-policy.mjs";
 import { formatAge } from "@/lib/format-age";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 interface AppointmentRequest {
   id: string;
@@ -154,7 +154,7 @@ function RequestRow({ item, onDone }: { item: AppointmentRequest; onDone: () => 
           <input value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} placeholder={t("receptionist.requests.declineReason")}
             className="min-w-64 flex-1 rounded-md border border-border px-2 py-1 text-xs" />
           <button type="button" disabled={busy || !reason.trim()}
-            onClick={() => void act(() => declineRequest(item.id, reason.trim(), key), `Declined. ${item.patient_name ?? "The patient"} will see the reason in the portal.`)}
+            onClick={() => void act(() => declineRequest(item.id, reason.trim(), key), translate("receptionist.msg.declinedValueWillSeeTheReason", undefined, { value: item.patient_name ?? "The patient" }))}
             className="rounded-md border border-red-300 px-3 py-1 text-xs font-medium text-red-700 disabled:opacity-50">
             {t("receptionist.requests.decline")}
           </button>
@@ -177,7 +177,7 @@ function RequestRow({ item, onDone }: { item: AppointmentRequest; onDone: () => 
                 doctor_user_id: doctor,
                 ...(outsideSession ? { outside_session_agreed: agreed } : {}),
               }, key),
-              `Booked: ${item.patient_name ?? "patient"} on ${day} at ${time}. The patient sees it in the portal.`,
+              translate("receptionist.msg.bookedValueOnDayAtTime", undefined, { value: item.patient_name ?? "patient", day, time }),
             )}
             className="rounded-md bg-indigo-600 px-3 py-1 text-xs font-medium text-white disabled:opacity-50">
             {t("receptionist.requests.book")}
@@ -186,7 +186,7 @@ function RequestRow({ item, onDone }: { item: AppointmentRequest; onDone: () => 
           {outsideSession ? (
             <label className="flex w-full items-center gap-2 text-xs text-amber-800">
               <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} />
-              {`The patient asked for the ${sessionLabel.toLowerCase()}. ${time} is outside it — the patient agreed to this time.`}
+              {translate("receptionist.msg.thePatientAskedForTheValue", undefined, { value: sessionLabel.toLowerCase(), time })}
             </label>
           ) : null}
         </div>

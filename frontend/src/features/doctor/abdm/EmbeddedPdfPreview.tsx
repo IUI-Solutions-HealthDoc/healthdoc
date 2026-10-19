@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { PDFDocumentLoadingTask, RenderTask } from "pdfjs-dist";
 import { pdfBytes } from "./pdfAttachments";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 /** Canvas only: no PDF scripting manager, forms, annotation links or downloads. */
 export function EmbeddedPdfPreview({ data, title }: { data: string; title: string }) {
@@ -20,7 +20,7 @@ export function EmbeddedPdfPreview({ data, title }: { data: string; title: strin
     const surface = canvas.current;
     const clear = () => { if (surface) { surface.width = 0; surface.height = 0; } };
     const deadline = window.setTimeout(() => {
-      if (!disposed) { disposed = true; clear(); setError("PDF preview timed out. Close it and try again."); rendering?.cancel(); void task?.destroy(); worker?.terminate(); }
+      if (!disposed) { disposed = true; clear(); setError(translate("doctor.msg.pdfPreviewTimedOutCloseIt")); rendering?.cancel(); void task?.destroy(); worker?.terminate(); }
     }, 15000);
     async function render() {
       try {
@@ -34,20 +34,20 @@ export function EmbeddedPdfPreview({ data, title }: { data: string; title: strin
           maxImageSize: 4_000_000, canvasMaxAreaInBytes: 16_000_000, stopAtErrors: true, verbosity: 0 });
         const document = await task.promise;
         if (disposed) return;
-        if (document.numPages > 100) throw new Error("Too many pages");
+        if (document.numPages > 100) throw new Error(translate("doctor.msg.tooManyPages"));
         setPages(document.numPages);
         const current = await document.getPage(page);
         if (disposed || !surface) return;
         const original = current.getViewport({ scale: 1 });
         const scale = Math.min(1.5, 1800 / original.width, 2400 / original.height);
         const viewport = current.getViewport({ scale });
-        if (!Number.isFinite(viewport.width * viewport.height) || viewport.width <= 0 || viewport.height <= 0) throw new Error("Invalid page dimensions");
+        if (!Number.isFinite(viewport.width * viewport.height) || viewport.width <= 0 || viewport.height <= 0) throw new Error(translate("doctor.msg.invalidPageDimensions"));
         surface.width = Math.ceil(viewport.width); surface.height = Math.ceil(viewport.height);
         rendering = current.render({ canvas: surface, viewport, annotationMode: pdf.AnnotationMode.DISABLE });
         await rendering.promise;
         if (!disposed) setError(null);
       } catch {
-        if (!disposed) { clear(); setError("This PDF could not be safely previewed. The structured record remains available."); }
+        if (!disposed) { clear(); setError(translate("doctor.msg.thisPdfCouldNotBeSafely")); }
       } finally { window.clearTimeout(deadline); }
     }
     void render();

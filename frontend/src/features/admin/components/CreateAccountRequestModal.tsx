@@ -22,7 +22,7 @@ import {
   type FieldErrors,
   validateAccountRequest,
 } from "../validation";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 type Props = {
   open: boolean;
@@ -92,7 +92,7 @@ export function CreateAccountRequestModal({ open, onClose, onCreated }: Props) {
     });
     setErrors(validationErrors);
     if (Object.keys(validationErrors).length > 0) {
-      toast.error("Please correct the highlighted fields before submitting the request.");
+      toast.error(translate("admin.msg.pleaseCorrectTheHighlightedFieldsBefore2"));
       return;
     }
     setBusy(true);
@@ -111,12 +111,12 @@ export function CreateAccountRequestModal({ open, onClose, onCreated }: Props) {
         mobile: mobile.trim() || null,
         justification: justification.trim(),
       });
-      toast.success("Account request filed");
+      toast.success(translate("admin.msg.accountRequestFiled"));
       onCreated(row);
       reset();
       onClose();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Create failed");
+      toast.error(e instanceof Error ? e.message : translate("admin.msg.createFailed"));
     } finally {
       setBusy(false);
     }

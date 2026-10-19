@@ -9,7 +9,7 @@ import Barcode from "react-barcode";
 import DownloadPdfButton from "./DownloadPdfButton";
 import { formatDateTime } from "./utils";
 import type { ReportData } from "./types/report";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 interface ReportProps {
   report: ReportData;
@@ -25,11 +25,11 @@ const FLAG_CLASS: Record<string, string> = {
 };
 
 const FLAG_LABEL: Record<string, string> = {
-  HIGH: "High",
+  get HIGH() { return translate("common.msg.high"); },
   LOW: "Low",
-  BORDERLINE: "Borderline",
-  CRITICAL: "Critical",
-  PANIC: "Panic",
+  get BORDERLINE() { return translate("common.msg.borderline"); },
+  get CRITICAL() { return translate("equipment.critical"); },
+  get PANIC() { return translate("common.msg.panic"); },
 };
 
 export default function Report({ report }: ReportProps) {

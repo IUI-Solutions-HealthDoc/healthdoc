@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { ApiError, api, newIdempotencyKey } from "@/lib/api";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 import { createConsentRecord, listConsentPurposes } from "../api";
 import { consentChannelFormLabel } from "../i18nLabels";
 import type {
@@ -21,9 +21,9 @@ type Props = {
 const GRANT_FORM_CHANNELS: ConsentChannel[] = ["written", "verbal", "digital_otp"];
 
 const GRANTERS: Array<{ value: GrantedByType; label: string }> = [
-  { value: "patient", label: "Patient" },
-  { value: "guardian", label: "Guardian" },
-  { value: "nominee", label: "Nominee" },
+  { value: "patient", get label() { return translate("common.patient"); } },
+  { value: "guardian", get label() { return translate("receptionist.ui.guardian"); } },
+  { value: "nominee", get label() { return translate("consent.msg.nominee"); } },
 ];
 
 function humanise(code: string) {
@@ -98,7 +98,7 @@ export function ConsentGrantForm({ patientId, onCreated }: Props) {
       .catch((reason: unknown) => {
         if (!cancelled) {
           setPurposes([]);
-          setError(reason instanceof ApiError ? reason.message : "Could not load consent purposes.");
+          setError(reason instanceof ApiError ? reason.message : translate("consent.msg.couldNotLoadConsentPurposes"));
         }
       });
     return () => {
@@ -124,7 +124,7 @@ export function ConsentGrantForm({ patientId, onCreated }: Props) {
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     if (!canSubmit) {
-      setError("Complete the required consent fields before recording the decision.");
+      setError(translate("consent.msg.completeTheRequiredConsentFieldsBefore"));
       return;
     }
 
@@ -147,7 +147,7 @@ export function ConsentGrantForm({ patientId, onCreated }: Props) {
       setCreated(record);
       onCreated(record);
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Could not record consent.");
+      setError(reason instanceof ApiError ? reason.message : translate("consent.msg.couldNotRecordConsent"));
     } finally {
       setBusy(false);
     }

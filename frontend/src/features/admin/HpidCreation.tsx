@@ -17,7 +17,7 @@ import {
   type HprCategory,
   type HprOption,
 } from "./api/hpr";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 const input = "w-full rounded-md border border-border px-3 py-2 text-sm";
 const primary = "rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50";
@@ -73,7 +73,7 @@ export function HpidCreation({ onSignedIn }: { onSignedIn?: () => void }) {
     const started = await startHpidLink(freshNext);
     setFreshNext(false);
     setStage({ kind: "link", session: started.session_id, url: started.url, waiting: false });
-  }, "HPR did not open NHA's Aadhaar verification.");
+  }, translate("admin.msg.hprDidNotOpenNhaS"));
 
   async function run(action: () => Promise<void>, fallback: string) {
     setBusy(true);
@@ -103,7 +103,7 @@ export function HpidCreation({ onSignedIn }: { onSignedIn?: () => void }) {
                 const result = await checkHpidLink(stage.session);
                 if (!result.authenticated) { setStage({ ...stage, waiting: true }); return; }
                 verified(stage.session, result);
-              }, "HPR did not answer. Check again.")}>{busy ? "Checking…" : "I have verified on NHA's page"}</button>
+              }, translate("admin.msg.hprDidNotAnswerCheckAgain"))}>{busy ? "Checking…" : translate("admin.msg.iHaveVerifiedOnNhaS")}</button>
             <button type="button" className={secondary} disabled={busy} onClick={() => { setStage({ kind: "idle" }); setFreshNext(true); }}>{t("common.cancel")}</button>
           </div>
         </div>
@@ -149,7 +149,7 @@ function Password({ name, label, value, onChange }: { name: string; label: strin
       <span className="flex gap-2">
         <input name={name} type={shown ? "text" : "password"} value={value} onChange={(e) => onChange(e.target.value)}
           autoComplete="new-password" className={input} />
-        <button type="button" className={secondary} aria-pressed={shown} aria-label={`${shown ? "Hide" : "Show"} ${label.toLowerCase()}`}
+        <button type="button" className={secondary} aria-pressed={shown} aria-label={`${shown ? translate("admin.ui.hide") : translate("admin.ui.show")} ${label.toLowerCase()}`}
           onClick={() => setShown((now) => !now)}>{shown ? t("admin.ui.hide") : t("admin.ui.show")}</button>
       </span>
     </label>
@@ -162,7 +162,7 @@ function useOptions(load: (() => Promise<HprOption[]>) | null, key: string | nul
     if (!load || !key) return;
     let live = true;
     load().then((rows) => { if (live) setState({ key, rows, error: null }); },
-      (reason: unknown) => { if (live) setState({ key, rows: null, error: failure(reason, "HPR did not return this list.") }); });
+      (reason: unknown) => { if (live) setState({ key, rows: null, error: failure(reason, translate("admin.msg.hprDidNotReturnThisList")) }); });
     return () => { live = false; };
     // The loader is rebuilt each render; the key says when the list changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -179,7 +179,7 @@ function Pick({ name, label, value, list, onChange, waitingFor }: {
   return (
     <label className="block space-y-1 text-sm"><span className="text-muted-foreground">{label}</span>
       <select name={name} value={value} onChange={(e) => onChange(e.target.value)} disabled={!list.rows} className={input}>
-        <option value="">{list.rows ? t("platform.choose") : list.error ? t("doctor.summaryUnavailable") : waitingFor ? `Choose the ${waitingFor} first` : "Loading…"}</option>
+        <option value="">{list.rows ? t("platform.choose") : list.error ? t("doctor.summaryUnavailable") : waitingFor ? translate("admin.msg.chooseTheWaitingforFirst", undefined, { waitingFor }) : "Loading…"}</option>
         {(list.rows ?? []).map((row) => <option key={row.code} value={row.code}>{row.label}</option>)}
       </select>
       {list.error ? <span role="alert" className="text-danger">{list.error}</span> : null}
@@ -247,7 +247,7 @@ function Verified({ stage, busy, run, update, finish }: {
                 onClick={() => void run(async () => {
                   const result = await verifyHpidMobile(stage.session, mobile);
                   update({ mobileVerified: result.mobile_verified, otpSent: result.otp_sent });
-                }, "HPR did not check this mobile.")}>{t("receptionist.abha.verifyMobile")}</button>
+                }, translate("admin.msg.hprDidNotCheckThisMobile"))}>{t("receptionist.abha.verifyMobile")}</button>
             </>
           ) : (
             <>
@@ -257,7 +257,7 @@ function Verified({ stage, busy, run, update, finish }: {
                 onClick={() => void run(async () => {
                   await confirmHpidMobile(stage.session, otp);
                   update({ mobileVerified: true });
-                }, "HPR did not accept this OTP.")}>{t("admin.ui.verifyOtp")}</button>
+                }, translate("admin.msg.hprDidNotAcceptThisOtp"))}>{t("admin.ui.verifyOtp")}</button>
               {/* A mistyped number: correct it and HPR sends the OTP to the new one. */}
               <button type="button" className={`${secondary} ml-2`} disabled={busy}
                 onClick={() => { setOtp(""); update({ otpSent: false }); }}>{t("admin.ui.changeMobile")}</button>
@@ -279,14 +279,14 @@ function Verified({ stage, busy, run, update, finish }: {
           <label className="block space-y-1 text-sm"><span className="text-muted-foreground">{t("admin.ui.email")}</span>
             <input name="hpid_email" value={form.email} onChange={(e) => set("email", e.target.value.trim())} inputMode="email" className={input} /></label>
           <Pick name="hpid_role" label={t("admin.ui.roleInHpr")} value={form.role} onChange={(v) => set("role", v || "PROFESSIONAL")}
-            list={{ rows: [{ code: "PROFESSIONAL", label: "Healthcare professional" }, { code: "FACILITY_MANAGER", label: "Facility manager" },
-              { code: "BOTH", label: "Healthcare professional and facility manager" }], error: null }} />
+            list={{ rows: [{ code: "PROFESSIONAL", label: translate("admin.msg.healthcareProfessional") }, { code: "FACILITY_MANAGER", label: translate("admin.msg.facilityManager") },
+              { code: "BOTH", label: translate("admin.msg.healthcareProfessionalAndFacilityManager") }], error: null }} />
           <Password name="hpid_password" label={t("admin.ui.hprPassword")} value={form.password} onChange={(v) => set("password", v)} />
           <Password name="hpid_confirm" label={t("admin.ui.confirmPassword")} value={form.confirm} onChange={(v) => set("confirm", v)} />
           <p className="text-xs text-muted-foreground md:col-span-2">{t("admin.ui.8OrMoreCharactersWithUpper")}{form.password && namePart ? <span role="alert" className="text-danger">{" "}{t("admin.ui.thePasswordContainsTheirName")}</span> : null}
             {form.confirm && form.password !== form.confirm ? <span role="alert" className="text-danger">{" "}{t("admin.ui.thePasswordsDiffer")}</span> : null}</p>
           <Pick name="hpid_category" label={t("billing.lineItems.col.category")} value={form.category} onChange={(v) => set("category", v)}
-            list={{ rows: categories, error: categories && !categories.length ? "HPR did not return its categories." : null }} />
+            list={{ rows: categories, error: categories && !categories.length ? translate("admin.msg.hprDidNotReturnItsCategories") : null }} />
           <Pick name="hpid_subcategory" label={t("admin.ui.subcategory")} value={form.subcategory} onChange={(v) => set("subcategory", v)}
             list={{ rows: form.category ? subcategories : null, error: null }} waitingFor={form.category ? null : "category"} />
           <Pick name="hpid_state" label={t("admin.ui.stateHprSList")} value={form.state} list={states} onChange={(v) => set("state", v)} />
@@ -301,7 +301,7 @@ function Verified({ stage, busy, run, update, finish }: {
                   state_id: form.state, district_id: form.district, role: form.role as "PROFESSIONAL" | "FACILITY_MANAGER" | "BOTH",
                 });
                 finish(created.hpr_id, created.hpr_id_number);
-              }, "HPR did not create the HPID.")}>{busy ? "Creating…" : t("admin.ui.createHpid")}</button>
+              }, translate("admin.msg.hprDidNotCreateTheHpid"))}>{busy ? "Creating…" : t("admin.ui.createHpid")}</button>
           </div>
         </div>
       ) : null}

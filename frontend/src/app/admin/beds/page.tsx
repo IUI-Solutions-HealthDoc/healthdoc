@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { ApiError, api, newIdempotencyKey } from "@/lib/api";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 interface Ward {
   id: string;
@@ -40,7 +40,7 @@ export default function Page() {
         setWards(rows);
         if (rows.length) setWardId((current) => current || rows[0].id);
       })
-      .catch((reason) => setError(reason instanceof ApiError ? reason.message : "Wards could not be loaded."));
+      .catch((reason) => setError(reason instanceof ApiError ? reason.message : translate("admin.msg.wardsCouldNotBeLoaded")));
   }, []);
 
   const loadBeds = useCallback(async (id: string) => {
@@ -50,7 +50,7 @@ export default function Page() {
       const grid = await api<{ items: BedItem[] }>(`/wards/${id}/beds`);
       setBeds(grid.items);
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Beds could not be loaded.");
+      setError(reason instanceof ApiError ? reason.message : translate("admin.msg.bedsCouldNotBeLoaded"));
     }
   }, []);
 
@@ -67,7 +67,7 @@ export default function Page() {
       setMessage(done);
       await loadBeds(wardId);
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "The change was not saved.");
+      setError(reason instanceof ApiError ? reason.message : translate("admin.msg.theChangeWasNotSaved"));
     } finally {
       setBusy(false);
     }
@@ -79,7 +79,7 @@ export default function Page() {
       body: JSON.stringify({ bed_number: number.trim() }),
       idempotencyKey: newIdempotencyKey(),
     }).then(() => setNumber("")),
-    `Bed ${number.trim().toUpperCase()} added.`,
+    translate("admin.msg.bedValueAdded", undefined, { value: number.trim().toUpperCase() }),
   );
 
   const setStatus = (bed: BedItem, status: "vacant" | "maintenance") => run(
@@ -87,7 +87,7 @@ export default function Page() {
       method: "PATCH",
       body: JSON.stringify({ status, reason: (reasons[bed.bed_id] ?? "").trim() }),
     }),
-    status === "maintenance" ? `Bed ${bed.bed_number} taken out of service.` : `Bed ${bed.bed_number} back in service.`,
+    status === "maintenance" ? translate("admin.msg.bedBedNumberTakenOutOf", undefined, { bed_number: bed.bed_number }) : translate("admin.msg.bedBedNumberBackInService", undefined, { bed_number: bed.bed_number }),
   );
 
   return (
@@ -148,7 +148,7 @@ export default function Page() {
                         {occupied ? <span className="text-muted-foreground">{t("admin.ui.patientAdmitted")}</span> : (
                           <input value={reasons[bed.bed_id] ?? ""} maxLength={300}
                             onChange={(e) => setReasons((r) => ({ ...r, [bed.bed_id]: e.target.value }))}
-                            placeholder={t("forms.required")} aria-label={`Reason for changing bed ${bed.bed_number}`} className="w-full rounded-md border border-border px-2 py-1" />
+                            placeholder={t("forms.required")} aria-label={translate("admin.msg.reasonForChangingBedBedNumber", undefined, { bed_number: bed.bed_number })} className="w-full rounded-md border border-border px-2 py-1" />
                         )}
                       </td>
                       <td className="px-3 py-2">

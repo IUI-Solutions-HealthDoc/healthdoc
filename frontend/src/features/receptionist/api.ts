@@ -33,6 +33,7 @@ import {
   normaliseIndianMobileInput,
   normaliseUhidInput,
 } from "./patientValidation";
+import { translate } from "@/lib/i18n";
 
 /**
  * Register a patient.
@@ -163,7 +164,7 @@ export function verifyAbhaEnrolmentOtp(
   // digits. Normalize only this boundary, not registration/search storage.
   const normalisedMobile = mobile ? normaliseIndianMobileInput(mobile) : null;
   if (mobile && !normalisedMobile) {
-    throw new Error("Enter a valid Indian mobile number.");
+    throw new Error(translate("receptionist.ui.enterAValidIndianMobileNumber"));
   }
   return api<AbhaIdentityLinked>("/abdm/abha/enrol/aadhaar/verify-otp", {
     method: "POST",
@@ -179,7 +180,7 @@ export function requestEnrolmentMobileOtp(
   idempotencyKey: string,
 ): Promise<AbhaOtpRequested> {
   const normalised = normaliseIndianMobileInput(mobile);
-  if (!normalised) throw new Error("Enter a valid Indian mobile number.");
+  if (!normalised) throw new Error(translate("receptionist.ui.enterAValidIndianMobileNumber"));
   return api<AbhaOtpRequested>("/abdm/abha/enrol/mobile/request-otp", {
     method: "POST",
     body: JSON.stringify({ patient_id: patientId, session_id: sessionId, mobile: normalised.slice(3) }),
@@ -555,7 +556,7 @@ export async function listScanShareTickets(
   const tickets = await api<ScanShareTicketItem[]>(
     `/abdm/scan-share/tickets?status=${encodeURIComponent(status)}&limit=${limit}`,
   );
-  if (!Array.isArray(tickets)) throw new Error("Unexpected reception-ticket response");
+  if (!Array.isArray(tickets)) throw new Error(translate("receptionist.msg.unexpectedReceptionTicketResponse"));
   return tickets;
 }
 

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { ApiError, newIdempotencyKey } from "@/lib/api";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 import {
   downloadNhaAbhaCard,
@@ -133,7 +133,7 @@ function PatientAbhaIdentity({ patient }: Props) {
       },
       (reason: unknown) => {
         if (!disposed) {
-          setDeclarationError(reason instanceof ApiError ? reason.message : "The ABHA consent could not be loaded.");
+          setDeclarationError(reason instanceof ApiError ? reason.message : translate("receptionist.msg.theAbhaConsentCouldNotBe"));
         }
       },
     );
@@ -149,7 +149,7 @@ function PatientAbhaIdentity({ patient }: Props) {
     getAbhaCaptcha().then(
       (issued) => { if (!disposed) setCaptcha(issued); },
       (reason: unknown) => {
-        if (!disposed) setCaptchaError(reason instanceof ApiError ? reason.message : "The image check could not be loaded.");
+        if (!disposed) setCaptchaError(reason instanceof ApiError ? reason.message : translate("receptionist.msg.theImageCheckCouldNotBe"));
       },
     );
     return () => { disposed = true; };
@@ -247,17 +247,17 @@ function PatientAbhaIdentity({ patient }: Props) {
       ? { ...ENROLMENT_CONSENT, language: declaration.language, statements: ticks, declaration_sha256: declaration.sha256 }
       : null;
     if (flow === "new" && !enrolmentConsent) {
-      setError("Complete the patient's ABHA consent before creating an ABHA.");
+      setError(translate("receptionist.msg.completeThePatientSAbhaConsent"));
       return;
     }
     if (!identifierValid) {
       // NHA's expected wording: CRT_ABHA_104/204/304 and VRFY_ABHA_401 for
       // Aadhaar, VRFY_ABHA_301 for the communication mobile.
-      setError(usesAadhaar ? "Aadhaar Number is not valid" : usesMobile ? "Please enter a valid mobile number" : usesAddress ? "Enter the ABHA address." : "Enter a valid 14-digit ABHA number.");
+      setError(usesAadhaar ? translate("receptionist.ui.aadhaarNumberIsNotValid") : usesMobile ? translate("receptionist.msg.pleaseEnterAValidMobileNumber") : usesAddress ? translate("receptionist.msg.enterTheAbhaAddress") : translate("receptionist.msg.enterAValid14DigitAbha"));
       return;
     }
     if (usesMobile && (!captcha || !captchaAnswer.trim())) {
-      setError("Enter the characters shown in the image.");
+      setError(translate("receptionist.msg.enterTheCharactersShownInThe"));
       return;
     }
     const challenge = usesMobile && captcha
@@ -287,7 +287,7 @@ function PatientAbhaIdentity({ patient }: Props) {
       // An Aadhaar number does not stay on screen while the OTP is entered.
       if (usesAadhaar) setIdentifier("");
     } catch (reason) {
-      if (isCurrent(generation)) setError(reason instanceof ApiError ? reason.message : "ABDM could not send the OTP. Try again.");
+      if (isCurrent(generation)) setError(reason instanceof ApiError ? reason.message : translate("receptionist.msg.abdmCouldNotSendTheOtp"));
     } finally {
       if (isCurrent(generation)) {
         lifecycle.current.pending = false;
@@ -321,7 +321,7 @@ function PatientAbhaIdentity({ patient }: Props) {
       } else if (code === "otp_resend_exhausted") {
         setResendsRemaining(0);
       }
-      setError(reason instanceof ApiError ? reason.message : "ABDM could not resend the OTP. Try again.");
+      setError(reason instanceof ApiError ? reason.message : translate("receptionist.msg.abdmCouldNotResendTheOtp"));
     } finally {
       if (isCurrent(generation)) {
         lifecycle.current.pending = false;
@@ -332,11 +332,11 @@ function PatientAbhaIdentity({ patient }: Props) {
 
   async function verifyOtp() {
     if (!sessionId || !otpValid || !mobileValid) {
-      setError("Enter the OTP sent to the patient before continuing.");
+      setError(translate("receptionist.msg.enterTheOtpSentToThe"));
       return;
     }
     if (enrolMobileMissing) {
-      setError("Enter the patient's 10-digit mobile number. ABDM needs it to create the ABHA.");
+      setError(translate("receptionist.msg.enterThePatientS10Digit"));
       return;
     }
     const generation = beginRequest();
@@ -349,7 +349,7 @@ function PatientAbhaIdentity({ patient }: Props) {
         : await verifyAbhaEnrolmentOtp(sessionId, otp, mobileNormalised, newIdempotencyKey());
       if (!isCurrent(generation)) return;
       if (!result.linked || result.linked_patient_id !== patient.id) {
-        setError("ABDM did not confirm identity binding for this patient. Restart verification.");
+        setError(translate("receptionist.msg.abdmDidNotConfirmIdentityBinding"));
         return;
       }
       if (flow === "existing" && result.next_step === "account_select" && result.accounts && result.accounts.length > 1) {
@@ -379,7 +379,7 @@ function PatientAbhaIdentity({ patient }: Props) {
       // session: the desk retypes it or asks for a fresh one. Only clear the
       // typed code so the retry starts from an empty field.
       if (refusalCode(reason) === "otp_rejected") setOtp("");
-      setError(reason instanceof ApiError ? reason.message : "ABDM could not verify the OTP. Try again.");
+      setError(reason instanceof ApiError ? reason.message : translate("receptionist.msg.abdmCouldNotVerifyTheOtp"));
     } finally {
       if (isCurrent(generation)) {
         lifecycle.current.pending = false;
@@ -390,7 +390,7 @@ function PatientAbhaIdentity({ patient }: Props) {
 
   async function chooseAccount() {
     if (!sessionId || !selectedAccount) {
-      setError("Choose the ABHA account the patient confirmed.");
+      setError(translate("receptionist.msg.chooseTheAbhaAccountThePatient"));
       return;
     }
     const generation = beginRequest();
@@ -401,14 +401,14 @@ function PatientAbhaIdentity({ patient }: Props) {
       const result = await selectAbhaLoginAccount(patient.id, sessionId, selectedAccount, newIdempotencyKey());
       if (!isCurrent(generation)) return;
       if (!result.linked || result.linked_patient_id !== patient.id) {
-        setError("ABDM did not confirm identity binding for this patient. Restart verification.");
+        setError(translate("receptionist.msg.abdmDidNotConfirmIdentityBinding"));
         return;
       }
       setLinked(result);
       setAccounts([]);
       setSessionId(null);
     } catch (reason) {
-      if (isCurrent(generation)) setError(reason instanceof ApiError ? reason.message : "ABDM could not confirm that account.");
+      if (isCurrent(generation)) setError(reason instanceof ApiError ? reason.message : translate("receptionist.msg.abdmCouldNotConfirmThatAccount"));
     } finally {
       if (isCurrent(generation)) {
         lifecycle.current.pending = false;
@@ -419,7 +419,7 @@ function PatientAbhaIdentity({ patient }: Props) {
 
   async function sendCommunicationOtp() {
     if (!sessionId || mobileNormalised === null) {
-      setError("Enter the communication mobile number to verify.");
+      setError(translate("receptionist.msg.enterTheCommunicationMobileNumberTo"));
       return;
     }
     const generation = beginRequest();
@@ -432,7 +432,7 @@ function PatientAbhaIdentity({ patient }: Props) {
       communicationMobile.current = mobile;
       applyRequested(result);
     } catch (reason) {
-      if (isCurrent(generation)) setError(reason instanceof ApiError ? reason.message : "ABDM could not send the mobile OTP. Try again.");
+      if (isCurrent(generation)) setError(reason instanceof ApiError ? reason.message : translate("receptionist.msg.abdmCouldNotSendTheMobile"));
     } finally {
       if (isCurrent(generation)) {
         lifecycle.current.pending = false;
@@ -443,7 +443,7 @@ function PatientAbhaIdentity({ patient }: Props) {
 
   async function verifyCommunicationOtp() {
     if (!sessionId || !otpValid) {
-      setError("Enter the OTP sent to the communication mobile.");
+      setError(translate("receptionist.msg.enterTheOtpSentToThe2"));
       return;
     }
     const generation = beginRequest();
@@ -462,7 +462,7 @@ function PatientAbhaIdentity({ patient }: Props) {
     } catch (reason) {
       if (!isCurrent(generation)) return;
       if (refusalCode(reason) === "otp_rejected") setOtp("");
-      setError(reason instanceof ApiError ? reason.message : "ABDM could not verify the mobile OTP. Try again.");
+      setError(reason instanceof ApiError ? reason.message : translate("receptionist.msg.abdmCouldNotVerifyTheMobile"));
     } finally {
       if (isCurrent(generation)) {
         lifecycle.current.pending = false;
@@ -473,7 +473,7 @@ function PatientAbhaIdentity({ patient }: Props) {
 
   async function chooseAddress() {
     if (!sessionId || !selectedAddress) {
-      setError("Choose an ABHA address before continuing.");
+      setError(translate("receptionist.msg.chooseAnAbhaAddressBeforeContinuing"));
       return;
     }
     const generation = beginRequest();
@@ -486,7 +486,7 @@ function PatientAbhaIdentity({ patient }: Props) {
       setLinked(result);
       setSessionId(null);
     } catch (reason) {
-      if (isCurrent(generation)) setError(reason instanceof ApiError ? reason.message : "ABDM could not save this ABHA address. Try again.");
+      if (isCurrent(generation)) setError(reason instanceof ApiError ? reason.message : translate("receptionist.msg.abdmCouldNotSaveThisAbha"));
     } finally {
       if (isCurrent(generation)) {
         lifecycle.current.pending = false;
@@ -510,7 +510,7 @@ function PatientAbhaIdentity({ patient }: Props) {
       anchor.click();
       URL.revokeObjectURL(url);
     } catch (reason) {
-      if (isCurrent(generation)) setError(reason instanceof ApiError ? reason.message : "The NHA ABHA card could not be downloaded.");
+      if (isCurrent(generation)) setError(reason instanceof ApiError ? reason.message : translate("receptionist.msg.theNhaAbhaCardCouldNot"));
     } finally {
       if (isCurrent(generation)) {
         lifecycle.current.pending = false;
@@ -677,7 +677,7 @@ function PatientAbhaIdentity({ patient }: Props) {
           <p className="text-xs text-muted-foreground">
             {(resendsRemaining ?? 0) > 0 ? (
               <button type="button" disabled={!canResend} onClick={() => void resendOtp()} className="underline disabled:no-underline disabled:opacity-60">
-                {resendWaitSeconds > 0 ? `Resend OTP in ${resendWaitSeconds}s` : `Resend OTP (${resendsRemaining} left)`}
+                {resendWaitSeconds > 0 ? translate("receptionist.msg.resendOtpInResendwaitsecondsS", undefined, { resendWaitSeconds }) : translate("receptionist.msg.resendOtpResendsremainingLeft", undefined, { resendsRemaining: resendsRemaining ?? 0 })}
               </button>
             ) : (
               <span>{t("receptionist.ui.noMoreOtpResendsForThis")}</span>

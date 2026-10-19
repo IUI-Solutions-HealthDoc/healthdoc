@@ -7,7 +7,7 @@ import Paper from "@mui/material/Paper";
 import Typography from "@mui/material/Typography";
 
 import { meridian } from "@/styles/theme";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 interface BarcodeDisplayProps {
   value: string;
@@ -37,7 +37,7 @@ function BarcodeDisplay({
     <Paper
       elevation={0}
       role="img"
-      aria-label={`Barcode for ${value}`}
+      aria-label={translate("common.msg.barcodeForValue", undefined, { value })}
       sx={{
         display: "inline-flex",
         alignItems: "center",

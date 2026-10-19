@@ -32,7 +32,7 @@ import type {
 } from "@/features/lab/types";
 import { ApiError, formatDateTime } from "@/lib/api";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/AsyncState";
-import { useLocale, type MessageKey } from "@/lib/i18n";
+import { useLocale, type MessageKey, translate } from "@/lib/i18n";
 import { useAuth } from "@/providers/auth-provider";
 import StructuredResultForm from "./StructuredResultForm";
 
@@ -62,20 +62,20 @@ const PAGE_SIZE = 20;
 // has been entered and NOT yet verified; showing the bare word next to an
 // unverified value read as final (QA 12 Oct 2026).
 const LAB_STATUS_LABELS: Record<string, string> = {
-  placed: "Ordered",
-  in_progress: "In progress",
-  completed: "Entered · awaiting verification",
-  released: "Verified · released",
-  cancelled: "Cancelled",
+  get placed() { return translate("nurse.taskColOrdered"); },
+  get in_progress() { return translate("lab.filter.inProgress"); },
+  get completed() { return translate("lab.msg.enteredAwaitingVerification"); },
+  get released() { return translate("lab.msg.verifiedReleased"); },
+  get cancelled() { return translate("appointment.status.cancelled"); },
 };
 
 const SPECIMEN_STATUS_LABELS: Record<string, string> = {
-  pending_collection: "Awaiting collection",
-  collected: "Collected",
-  received: "Received in lab",
-  rejected: "Rejected",
-  recollected: "Recollection ordered",
-  not_recorded: "Collection not recorded",
+  get pending_collection() { return translate("lab.msg.awaitingCollection"); },
+  get collected() { return translate("reports.billingMis.col.collected"); },
+  get received() { return translate("lab.msg.receivedInLab"); },
+  get rejected() { return translate("admin.accountRequests.status.rejected"); },
+  get recollected() { return translate("lab.msg.recollectionOrdered"); },
+  get not_recorded() { return translate("lab.msg.collectionNotRecorded"); },
 };
 
 function StatusChip({ status }: { status: string }) {
@@ -127,7 +127,7 @@ function ResultHistory({ items }: { items: LabResult[] }) {
       {items.map((result) => (
         <article key={result.id} className="rounded-md border border-border p-4 text-sm">
           <div className="flex flex-wrap justify-between gap-3">
-            <strong>{t("lab.ui.versionVersionStatusValue", { version: result.version, status: result.status, value: result.is_current ? " · current" : "" })}</strong>
+            <strong>{t("lab.ui.versionVersionStatusValue", { version: result.version, status: result.status, value: result.is_current ? t("lab.ui.currentSuffix") : "" })}</strong>
             <span className="text-muted-foreground">{formatDateTime(result.created_at)}</span>
           </div>
           {result.amendment_reason ? (
@@ -277,7 +277,7 @@ export function LabWorklistPanel() {
 
   async function collectSample() {
     if (!selected || !barcode.trim()) {
-      setError("Scan or enter a barcode before collecting the sample.");
+      setError(translate("lab.msg.scanOrEnterABarcodeBefore"));
       return;
     }
     setBusy(true);
@@ -285,7 +285,7 @@ export function LabWorklistPanel() {
     try {
       const updated = await collectLabSample(selected.id, barcode.trim());
       updateRow(updated);
-      setMessage("Sample collected. Result entry is now available.");
+      setMessage(translate("lab.msg.sampleCollectedResultEntryIsNow"));
     } catch (reason) {
       setError(reason instanceof ApiError ? reason.message : t("lab.errSampleCollection"));
     } finally {
@@ -300,9 +300,9 @@ export function LabWorklistPanel() {
     try {
       const updated = await receiveLabSpecimen(selected.id);
       updateRow(updated);
-      setMessage("Specimen successfully received at laboratory bench.");
+      setMessage(translate("lab.msg.specimenSuccessfullyReceivedAtLaboratoryBench"));
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Failed to receive specimen");
+      setError(reason instanceof ApiError ? reason.message : translate("lab.msg.failedToReceiveSpecimen"));
     } finally {
       setBusy(false);
     }
@@ -318,10 +318,10 @@ export function LabWorklistPanel() {
       setRejectModalOpen(false);
       setRejectionNotes("");
       setMessage(
-        `Specimen rejected (${rejectionReason.replaceAll("_", " ")}). Recollection can now be ordered.`,
+        translate("lab.msg.specimenRejectedValueRecollectionCanNow", undefined, { value: rejectionReason.replaceAll("_", " ") }),
       );
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Failed to reject specimen");
+      setError(reason instanceof ApiError ? reason.message : translate("lab.msg.failedToRejectSpecimen"));
     } finally {
       setBusy(false);
     }
@@ -333,11 +333,11 @@ export function LabWorklistPanel() {
     setError(null);
     try {
       const newLinkedItem = await recollectLabSpecimen(selected.id);
-      setMessage(`Recollection ordered! New linked accession: ${newLinkedItem.accession_number}`);
+      setMessage(translate("lab.msg.recollectionOrderedNewLinkedAccessionAccession", undefined, { accession_number: newLinkedItem.accession_number }));
       void load();
       selectRow(newLinkedItem);
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Failed to order specimen recollection");
+      setError(reason instanceof ApiError ? reason.message : translate("lab.msg.failedToOrderSpecimenRecollection"));
     } finally {
       setBusy(false);
     }
@@ -363,15 +363,15 @@ export function LabWorklistPanel() {
     try {
       parsed = JSON.parse(resultJson);
     } catch {
-      setError("Result data must be valid JSON.");
+      setError(translate("lab.msg.resultDataMustBeValidJson"));
       return;
     }
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      setError("Result data must be a JSON object.");
+      setError(translate("lab.msg.resultDataMustBeAJson"));
       return;
     }
     if (Object.keys(parsed).length === 0) {
-      setError("Enter at least one result field.");
+      setError(translate("lab.msg.enterAtLeastOneResultField"));
       return;
     }
     setBusy(true);
@@ -385,7 +385,7 @@ export function LabWorklistPanel() {
       updateRow({ ...selected, status: "completed" });
       setHistory([result]);
       setMessage(
-        "Preliminary result saved. A different lab professional must verify and release it.",
+        translate("lab.msg.preliminaryResultSavedADifferentLab"),
       );
     } catch (reason) {
       setError(reason instanceof ApiError ? reason.message : t("lab.errResultEntry"));
@@ -404,10 +404,10 @@ export function LabWorklistPanel() {
       setHistory((current) =>
         current.map((result) => (result.id === verified.id ? verified : result)),
       );
-      setMessage("Result verified and released.");
+      setMessage(translate("lab.ui.resultVerifiedAndReleased"));
     } catch (reason) {
       if (reason instanceof ApiError && (reason.code === 403 || /different from the person/i.test(reason.message))) {
-        setError("Another lab professional must verify this result. The person who entered it cannot release it.");
+        setError(translate("lab.msg.anotherLabProfessionalMustVerifyThis"));
       } else {
         setError(reason instanceof ApiError ? reason.message : t("lab.errVerification"));
       }
@@ -418,7 +418,7 @@ export function LabWorklistPanel() {
 
   async function submitAmendment() {
     if (!selected || !amendReason.trim()) {
-      setError("An amendment reason is required.");
+      setError(translate("lab.msg.anAmendmentReasonIsRequired"));
       return;
     }
     let parsed: Record<string, unknown> | null = null;
@@ -426,12 +426,12 @@ export function LabWorklistPanel() {
       try {
         const value = JSON.parse(amendJson);
         if (!value || typeof value !== "object" || Array.isArray(value)) {
-          setError("Amended result data must be a JSON object.");
+          setError(translate("lab.msg.amendedResultDataMustBeA"));
           return;
         }
         parsed = value as Record<string, unknown>;
       } catch {
-        setError("Amended result data must be valid JSON.");
+        setError(translate("lab.msg.amendedResultDataMustBeValid"));
         return;
       }
     }
@@ -444,7 +444,7 @@ export function LabWorklistPanel() {
         parsed,
         amendRemarks.trim() || null,
       );
-      setMessage("Result amended. A new corrected version is now current.");
+      setMessage(translate("lab.msg.resultAmendedANewCorrectedVersion"));
       setAmendReason("");
       await loadHistory({ ...selected, status: "released" });
       void load();
@@ -718,7 +718,7 @@ export function LabWorklistPanel() {
                       updateRow({ ...selected, status: "completed" });
                       setHistory([result]);
                       setMessage(
-                        "Preliminary result saved with structured clinical flags. A different lab professional must verify and release it.",
+                        translate("lab.msg.preliminaryResultSavedWithStructuredClinical"),
                       );
                     } catch (reason) {
                       setError(

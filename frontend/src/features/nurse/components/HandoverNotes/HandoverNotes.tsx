@@ -1,10 +1,10 @@
 import { HandoverNotesProps } from "./HandoverNotes.types";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 const SHIFT_LABELS: Record<string, string> = {
-  morning: "Morning",
-  evening: "Evening",
-  night: "Night",
+  get morning() { return translate("patientPortal.appt.morning"); },
+  get evening() { return translate("hod.roster.shift.evening"); },
+  get night() { return translate("hod.roster.shift.night"); },
 };
 
 /** Prefer the resolved name; the id prefix is the fallback when a user row has
@@ -12,7 +12,7 @@ const SHIFT_LABELS: Record<string, string> = {
  *  the patient. */
 function actorLabel(name?: string | null, id?: string): string {
   if (name) return name;
-  return id ? id.slice(0, 8) : "Unknown";
+  return id ? id.slice(0, 8) : translate("mch.sex.unknown");
 }
 
 export default function HandoverNotes({

@@ -14,7 +14,7 @@ import { doctorPanelSx, doctorButtonSx } from "../panelSx";
 import type { OrderPriority, ResultWorklistItem } from "../types";
 import type { ResultsFilter } from "../hooks/useResults";
 import { CriticalBadge } from "./CriticalBadge";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 const PRIORITY_BADGE: Record<OrderPriority, BadgeVariant> = {
   routine: "secondary",
@@ -44,14 +44,14 @@ export function ResultsWorklistPanel({
   const { t } = useLocale();
   const filters: { value: ResultsFilter; label: string; count: number }[] = [
     { value: "all", label: "All", count: counts.total },
-    { value: "unread", label: "Awaiting sign-off", count: counts.unread },
-    { value: "critical", label: "Critical", count: counts.critical },
+    { value: "unread", label: translate("doctor.ui.awaitingSignOff"), count: counts.unread },
+    { value: "critical", label: translate("equipment.critical"), count: counts.critical },
   ];
 
   const columns: DataTableColumn<ResultWorklistItem>[] = [
     {
       key: "accession_number",
-      label: "Accession",
+      label: translate("lab.col.accession"),
       sortable: true,
       width: 170,
       render: (row) => (
@@ -67,7 +67,7 @@ export function ResultsWorklistPanel({
     },
     {
       key: "patient_name",
-      label: "Patient",
+      label: translate("common.patient"),
       sortable: true,
       render: (row) => (
         <Box>
@@ -80,7 +80,7 @@ export function ResultsWorklistPanel({
     },
     {
       key: "test_name",
-      label: "Test / Study",
+      label: translate("doctor.msg.testStudy"),
       sortable: true,
       render: (row) => (
         <Stack direction="row" spacing={1} sx={{ alignItems: "center", flexWrap: "wrap", gap: 0.75 }}>
@@ -93,7 +93,7 @@ export function ResultsWorklistPanel({
     },
     {
       key: "priority",
-      label: "Priority",
+      label: translate("receptionist.priority"),
       width: 110,
       render: (row) =>
         row.priority === "routine" ? null : (
@@ -104,7 +104,7 @@ export function ResultsWorklistPanel({
     },
     {
       key: "result_status",
-      label: "Result",
+      label: translate("common.ui.result"),
       width: 170,
       render: (row) => (
         <Stack direction="row" spacing={0.75} sx={{ alignItems: "center", flexWrap: "wrap", gap: 0.5 }}>
@@ -119,7 +119,7 @@ export function ResultsWorklistPanel({
     },
     {
       key: "reported_at",
-      label: "Reported",
+      label: translate("nurse.msg.reported"),
       sortable: true,
       align: "right",
       width: 150,

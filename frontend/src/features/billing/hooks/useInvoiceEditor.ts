@@ -11,6 +11,7 @@ import type {
   InvoiceWithItems,
   SchemeOptionCode,
 } from "../types";
+import { translate } from "@/lib/i18n";
 
 function schemeCodeFromOption(code: SchemeOptionCode): string | null {
   if (code === "self_pay") return null;
@@ -105,7 +106,7 @@ export function useInvoiceEditor(
    */
   const saveDraft = useCallback(async () => {
     toast.error(
-      "Invoice amounts are not editable. Charges come from the departments " +
+      translate("billing.msg.invoiceAmountsAreNotEditableCharges") +
         "via Build; corrections are cancel-and-reissue.",
     );
   }, []);
@@ -119,15 +120,15 @@ export function useInvoiceEditor(
       const next = await getInvoice(result.invoice_id);
       setDraft(next);
       onSaved?.(next);
-      const missing = result.unpriced_codes?.length ? ` No tariff for: ${result.unpriced_codes.join(", ")}.` : "";
+      const missing = result.unpriced_codes?.length ? translate("billing.msg.noTariffForValue", undefined, { value: result.unpriced_codes.join(", ") }) : "";
       const warning = result.warnings?.length ? ` ${result.warnings.join(" ")}` : "";
       setBuildMessage(
-        `${result.lines_added} charge(s) added. ${result.lines_skipped_unpriced} unpriced charge(s) skipped.${missing}${warning}`,
+        translate("billing.msg.linesAddedChargeSAddedLines", undefined, { lines_added: result.lines_added, lines_skipped_unpriced: result.lines_skipped_unpriced, missing, warning }),
       );
-      if (result.lines_skipped_unpriced) toast.error("Some charges have no tariff. Add them under Tariffs before issuing.");
-      else toast.success("Charges built", "Review the refreshed totals before issuing");
+      if (result.lines_skipped_unpriced) toast.error(translate("billing.msg.someChargesHaveNoTariffAdd"));
+      else toast.success(translate("billing.msg.chargesBuilt"), translate("billing.msg.reviewTheRefreshedTotalsBeforeIssuing"));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Build failed");
+      toast.error(e instanceof Error ? e.message : translate("billing.msg.buildFailed"));
     } finally {
       setBusy(false);
     }
@@ -142,10 +143,10 @@ export function useInvoiceEditor(
       const issued = await issueInvoice(draft.id, draft.row_version ?? 1);
       setDraft(issued);
       onSaved?.(issued);
-      toast.success("Invoice issued", "Financial fields are now frozen");
+      toast.success(translate("billing.msg.invoiceIssued"), translate("billing.msg.financialFieldsAreNowFrozen"));
       setPreviewOpen(false);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Issue failed");
+      toast.error(e instanceof Error ? e.message : translate("billing.msg.issueFailed"));
     } finally {
       setBusy(false);
     }
@@ -165,7 +166,7 @@ export function useInvoiceEditor(
    */
   const refuseEdit = useCallback(() => {
     toast.error(
-      "Invoice lines come from the departments. Use Build to pull in unbilled " +
+      translate("billing.msg.invoiceLinesComeFromTheDepartments") +
         "charges; a line cannot be added or edited by hand.",
     );
   }, []);

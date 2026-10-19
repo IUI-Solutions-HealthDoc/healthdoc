@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { listUsers } from "../api";
 import type { User, UserListFilters } from "../types";
+import { translate } from "@/lib/i18n";
 
 export function useUsers(initial: UserListFilters = {}) {
   const [filters, setFilters] = useState<UserListFilters>({
@@ -27,7 +28,7 @@ export function useUsers(initial: UserListFilters = {}) {
       // BE omits total — fall back to page length when unknown
       setTotal(res.total ?? res.items.length);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load users");
+      setError(e instanceof Error ? e.message : translate("admin.msg.failedToLoadUsers"));
     } finally {
       setLoading(false);
     }

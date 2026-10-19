@@ -4,7 +4,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { toast } from "@/components/ui/toast";
 import { ApiError, newIdempotencyKey } from "@/lib/api";
-import { useLocale, type MessageKey } from "@/lib/i18n";
+import { useLocale, type MessageKey, translate } from "@/lib/i18n";
 
 import {
   createRosterEntry,
@@ -33,7 +33,7 @@ const SHIFTS: ReadonlyArray<{ value: RosterShift; labelKey: MessageKey }> = [
 
 function requestMessage(reason: unknown, fallback: string): string {
   if (reason instanceof ApiError && reason.code === 409) {
-    return "That staff member is already rostered for this date and shift.";
+    return translate("hod.msg.thatStaffMemberIsAlreadyRostered");
   }
   return reason instanceof ApiError ? reason.message : fallback;
 }
@@ -104,11 +104,11 @@ export function RosterManager({ departmentId, today }: RosterManagerProps) {
   const handleCreate = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!staffId) {
-      setFieldError("Select a staff member before adding the roster entry.");
+      setFieldError(translate("hod.msg.selectAStaffMemberBeforeAdding"));
       return;
     }
     if (!rosterDate || rosterDate < today) {
-      setFieldError("Choose today or a future roster date.");
+      setFieldError(translate("hod.msg.chooseTodayOrAFutureRoster"));
       return;
     }
 
@@ -128,8 +128,8 @@ export function RosterManager({ departmentId, today }: RosterManagerProps) {
       );
       const selected = candidateById.get(staffId);
       toast.success(
-        "Roster entry added",
-        `${selected?.staff_name ?? "Staff member"} · ${shift}`,
+        translate("hod.msg.rosterEntryAdded"),
+        `${selected?.staff_name ?? translate("hod.roster.staffMember")} · ${shift}`,
       );
       setCreateKey(newIdempotencyKey());
       setEntries(await listRoster(departmentId, rosterDate));
@@ -149,7 +149,7 @@ export function RosterManager({ departmentId, today }: RosterManagerProps) {
         current.map((item) => (item.id === updated.id ? updated : item)),
       );
       toast.success(
-        updated.is_available ? "Staff marked available" : "Staff marked unavailable",
+        updated.is_available ? translate("hod.msg.staffMarkedAvailable") : translate("hod.msg.staffMarkedUnavailable"),
       );
     } catch (reason) {
       setError(requestMessage(reason, t("hod.roster.errUpdateAvailability")));

@@ -1,20 +1,21 @@
 import { DischargeType } from "./validation";
+import { translate } from "@/lib/i18n";
 
 export const DISCHARGE_TYPE_LABELS: Record<DischargeType, string> = {
-  discharged: "Discharged (Routine)",
+  get discharged() { return translate("ipd.msg.dischargedRoutine"); },
   dama: "DAMA (Discharge Against Medical Advice)",
-  deceased: "Deceased",
-  absconded: "Absconded",
-  transferred: "Transferred to Another Facility",
+  get deceased() { return translate("nurse.msg.deceased"); },
+  get absconded() { return translate("nurse.msg.absconded"); },
+  get transferred() { return translate("ipd.msg.transferredToAnotherFacility"); },
 };
 
 export const MODULE_LABELS: Record<string, string> = {
-  pharmacy: "Pharmacy",
-  billing: "Billing",
-  nursing: "Nursing",
+  get pharmacy() { return translate("doctor.orderType.pharmacy"); },
+  get billing() { return translate("nav.billing"); },
+  get nursing() { return translate("ipd.msg.nursing"); },
   lab: "Lab",
-  radiology: "Radiology",
-  patient: "Patient",
+  get radiology() { return translate("sidebar.radiology"); },
+  get patient() { return translate("common.patient"); },
 };
 
 export const DEFAULT_VALUES = {

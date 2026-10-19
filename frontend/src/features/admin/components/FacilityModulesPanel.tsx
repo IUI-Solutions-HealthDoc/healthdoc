@@ -13,7 +13,7 @@ import { CORE_ALWAYS_ON_MODULES, MODULE_CODE_LABELS } from "../constants";
 import { adminPanelSx } from "../panelSx";
 import type { FacilityModule } from "../types";
 import { ModuleEnabledChip } from "./ModuleEnabledChip";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 type Props = {
   modules: FacilityModule[];
@@ -28,7 +28,7 @@ type Props = {
 
 function configPreview(config: Record<string, unknown>): string {
   const keys = Object.keys(config);
-  if (keys.length === 0) return "No config";
+  if (keys.length === 0) return translate("admin.msg.noConfig");
   try {
     const raw = JSON.stringify(config);
     return raw.length > 72 ? `${raw.slice(0, 72)}…` : raw;
@@ -142,7 +142,7 @@ function ModuleCard({
           }}
           helperText={
             m.is_enabled
-              ? `Required before switching off · current config: ${configPreview(m.config)}`
+              ? translate("admin.msg.requiredBeforeSwitchingOffCurrentConfig", undefined, { config: configPreview(m.config) })
               : t("admin.ui.savedOnBlurFacilityModulesDisabled")
           }
         />

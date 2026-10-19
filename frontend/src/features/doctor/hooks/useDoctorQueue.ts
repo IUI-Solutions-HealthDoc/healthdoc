@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { listQueue } from "../api";
 import type { QueueToken } from "../types";
+import { translate } from "@/lib/i18n";
 
 export function useDoctorQueue() {
   const [patients, setPatients] = useState<QueueToken[]>([]);
@@ -17,7 +18,7 @@ export function useDoctorQueue() {
     try {
       setPatients(await listQueue());
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load queue");
+      setError(e instanceof Error ? e.message : translate("doctor.msg.failedToLoadQueue"));
     } finally {
       setLoading(false);
     }

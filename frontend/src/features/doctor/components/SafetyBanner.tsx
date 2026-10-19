@@ -6,12 +6,12 @@ import Typography from "@mui/material/Typography";
 
 import { meridian } from "@/styles/theme";
 import type { AllergyAlert, AllergyAlertKind } from "../types";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 const TONE: Record<AllergyAlertKind, { bg: string; fg: string; border: string; label: string }> = {
-  block: { bg: "#fee2e2", fg: meridian.danger, border: "rgb(185 28 28 / 0.22)", label: "Do not prescribe" },
-  override_required: { bg: "#fef3c7", fg: meridian.warning, border: "rgb(180 83 9 / 0.22)", label: "Reason required" },
-  uncheckable: { bg: "#e8eef5", fg: meridian.info, border: "rgb(0 31 84 / 0.16)", label: "Not checked" },
+  block: { bg: "#fee2e2", fg: meridian.danger, border: "rgb(185 28 28 / 0.22)", get label() { return translate("doctor.msg.doNotPrescribe"); } },
+  override_required: { bg: "#fef3c7", fg: meridian.warning, border: "rgb(180 83 9 / 0.22)", get label() { return translate("doctor.msg.reasonRequired"); } },
+  uncheckable: { bg: "#e8eef5", fg: meridian.info, border: "rgb(0 31 84 / 0.16)", get label() { return translate("doctor.msg.notChecked"); } },
 };
 
 const ORDER: AllergyAlertKind[] = ["block", "override_required", "uncheckable"];

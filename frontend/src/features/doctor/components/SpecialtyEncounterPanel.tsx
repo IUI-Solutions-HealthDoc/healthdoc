@@ -10,7 +10,7 @@ import MenuItem from "@mui/material/MenuItem";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { toast } from "@/components/ui/toast";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 import { meridian } from "@/styles/theme";
 import { doctorPanelSx, doctorButtonSx } from "../panelSx";
 import {
@@ -82,7 +82,7 @@ export function SpecialtyEncounterPanel({ encounter }: SpecialtyEncounterPanelPr
       setSavedRecord(record);
       toast.success(
         t("doctor.toast.specialtyAssessmentSaved", {
-          title: activeTemplate?.title ?? "Specialty",
+          title: activeTemplate?.title ?? translate("doctor.msg.specialty"),
         }),
       );
     } catch (err) {

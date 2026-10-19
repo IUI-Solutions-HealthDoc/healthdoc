@@ -6,7 +6,7 @@ import Stack from "@mui/material/Stack";
 import { Button } from "@/components/ui/Button";
 import { ApiError, getUserFacingError } from "@/lib/api";
 import { prepareResultDownload, uploadResultFile, validateResultFile, type ResultFile } from "../api/externalAttachments";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 export interface AttachmentSelection { fileId: string | null; blocked: boolean }
 
@@ -37,8 +37,8 @@ export function ExternalResultUpload({ patientId, disabled, onChange }: {
       if (!live.current) return;
       const rejected = cause instanceof ApiError && [400, 403, 404, 413, 415, 422].includes(cause.code);
       setUncertain(!rejected);
-      setError(rejected ? getUserFacingError(cause, "The attachment was rejected.") :
-        "Upload outcome is unknown. A patient file may already exist. Do not upload it again; ask an administrator to reconcile the upload before continuing. Leaving this page loses this warning.");
+      setError(rejected ? getUserFacingError(cause, translate("doctor.msg.theAttachmentWasRejected")) :
+        translate("doctor.msg.uploadOutcomeIsUnknownAPatient"));
     } finally {
       writing.current = false;
       if (live.current) setBusy(false);
@@ -76,14 +76,14 @@ export function ExternalResultDownload({ fileId, patientId }: { fileId: string; 
       const result = await prepareResultDownload(fileId, patientId);
       if (live.current) setLink(result);
     } catch (cause) {
-      if (live.current) setError(getUserFacingError(cause, "The report cannot be opened. It may be unavailable or its download address needs configuration."));
+      if (live.current) setError(getUserFacingError(cause, translate("doctor.msg.theReportCannotBeOpenedIt")));
     } finally { reading.current = false; if (live.current) setBusy(false); }
   }
   return <Stack spacing={1}>
     <Button disabled={busy} onClick={() => void prepare()}>{busy ? t("doctor.ui.preparingAttachment") : t("doctor.ui.prepareAttachmentDownload")}</Button>
     {error && <Alert severity="error">{error}</Alert>}
     {link && <a href={link.url} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" className="underline" onClick={(event) => {
-      if (Date.now() >= link.expiresAt) { event.preventDefault(); setLink(null); setError("This download link expired. Prepare a new download."); }
+      if (Date.now() >= link.expiresAt) { event.preventDefault(); setLink(null); setError(translate("doctor.msg.thisDownloadLinkExpiredPrepareA")); }
     }}>{t("doctor.ui.openNameTemporaryLink", { name: link.name })}</a>}
   </Stack>;
 }

@@ -1,13 +1,13 @@
 import { AdmissionStatusProps } from "./AdmissionStatus.types";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 const STATUS_LABELS: Record<string, string> = {
-  admitted: "Admitted",
-  transferred: "Transferred",
-  discharged: "Discharged",
+  get admitted() { return translate("monitor.kind.admitted"); },
+  get transferred() { return translate("nurse.msg.transferred"); },
+  get discharged() { return translate("monitor.kind.discharged"); },
   dama: "DAMA",
-  deceased: "Deceased",
-  absconded: "Absconded",
+  get deceased() { return translate("nurse.msg.deceased"); },
+  get absconded() { return translate("nurse.msg.absconded"); },
 };
 
 const STATUS_STYLES: Record<string, string> = {

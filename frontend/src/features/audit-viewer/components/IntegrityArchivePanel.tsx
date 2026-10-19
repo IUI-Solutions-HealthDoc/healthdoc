@@ -5,7 +5,7 @@ import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 
 import { StatusChip } from "@/components/ui/StatusChip";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 import { meridian } from "@/styles/theme";
 import { VERIFICATION_STATUS_LABELS } from "../constants";
 import { formatDateTime, truncateHash } from "../lib/formatters";
@@ -61,7 +61,7 @@ export function IntegrityArchivePanel({ checks, archives, loading }: Props) {
                   />
                 </Stack>
                 <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary }}>{t("audit.ui.checked")}{" "}{formatDateTime(c.checked_at)} · {c.rows_checked.toLocaleString("en-IN")}{" "}{t("audit.ui.rows")}</Typography>
-                <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary }}>{t("audit.ui.signaturesValidSignaturesValidInvalidSignatures", { signatures_valid: c.signatures_valid, signatures_invalid: c.signatures_invalid, value: c.first_mismatch_id ? ` · first mismatch ${c.first_mismatch_id}` : "", value2: c.alerted ? " · alerted" : "" })}</Typography>
+                <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary }}>{t("audit.ui.signaturesValidSignaturesValidInvalidSignatures", { signatures_valid: c.signatures_valid, signatures_invalid: c.signatures_invalid, value: c.first_mismatch_id ? translate("audit.msg.firstMismatchFirstMismatchId", undefined, { first_mismatch_id: c.first_mismatch_id }) : "", value2: c.alerted ? " · alerted" : "" })}</Typography>
               </Box>
             ))}
           </Stack>

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { getPatientPhoto } from "@/features/receptionist/api";
+import { translate } from "@/lib/i18n";
 
 export interface PatientAvatarProps {
   patientId?: string;
@@ -77,7 +78,7 @@ export function PatientAvatar({
       >
         <img
           src={imgSrc}
-          alt={`Photo of ${name}`}
+          alt={translate("common.msg.photoOfName", undefined, { name })}
           className="h-full w-full object-cover"
           onError={() => setLoadFailed(true)}
         />

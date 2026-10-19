@@ -1,3 +1,4 @@
+import { translate } from "@/lib/i18n";
 /**
  * An age as people read it on a clinical screen.
  *
@@ -32,7 +33,7 @@ export function formatAgeSexShort(age: number | null | undefined, sex: string | 
  */
 export function formatScheduleAge(days: number | null | undefined): string {
   if (days === null || days === undefined || !Number.isFinite(days)) return "—";
-  if (days <= 0) return "At birth";
+  if (days <= 0) return translate("common.msg.atBirth");
   if (days < 182 && days % 7 === 0) return `${days / 7} weeks`;
   if (days < 730) {
     const months = Math.round(days / 30.4);

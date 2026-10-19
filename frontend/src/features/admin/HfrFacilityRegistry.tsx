@@ -16,7 +16,7 @@ import {
   type HfrSearch,
   type HfrSearchResult,
 } from "./api/hfr";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 function failure(reason: unknown, fallback: string): string {
   return reason instanceof ApiError ? reason.message : fallback;
@@ -55,9 +55,9 @@ export function HfrFacilityRegistry() {
     if (!byName) return;
     let disposed = false;
     hfrMaster("OWNER").then((rows) => { if (!disposed) setOwners(rows); },
-      (reason: unknown) => { if (!disposed) setListError(failure(reason, "HFR ownership list could not be loaded.")); });
+      (reason: unknown) => { if (!disposed) setListError(failure(reason, translate("admin.msg.hfrOwnershipListCouldNotBe"))); });
     hfrStates().then((rows) => { if (!disposed) setStates(rows); },
-      (reason: unknown) => { if (!disposed) setListError(failure(reason, "HFR state list could not be loaded.")); });
+      (reason: unknown) => { if (!disposed) setListError(failure(reason, translate("admin.msg.hfrStateListCouldNotBe"))); });
     return () => { disposed = true; };
   }, [byName]);
 
@@ -65,7 +65,7 @@ export function HfrFacilityRegistry() {
     if (!criteria.state_lgd_code) return;
     let disposed = false;
     hfrDistricts(criteria.state_lgd_code).then((rows) => { if (!disposed) setDistricts(rows); },
-      (reason: unknown) => { if (!disposed) setListError(failure(reason, "HFR district list could not be loaded.")); });
+      (reason: unknown) => { if (!disposed) setListError(failure(reason, translate("admin.msg.hfrDistrictListCouldNotBe"))); });
     return () => { disposed = true; };
   }, [criteria.state_lgd_code]);
 
@@ -73,7 +73,7 @@ export function HfrFacilityRegistry() {
     if (!criteria.district_lgd_code) return;
     let disposed = false;
     hfrSubdistricts(criteria.district_lgd_code).then((rows) => { if (!disposed) setSubdistricts(rows); },
-      (reason: unknown) => { if (!disposed) setListError(failure(reason, "HFR sub-district list could not be loaded.")); });
+      (reason: unknown) => { if (!disposed) setListError(failure(reason, translate("admin.msg.hfrSubDistrictListCouldNot"))); });
     return () => { disposed = true; };
   }, [criteria.district_lgd_code]);
 
@@ -107,7 +107,7 @@ export function HfrFacilityRegistry() {
       setResult(await searchHfr(body));
     } catch (reason) {
       setResult(null);
-      setSearchError(failure(reason, "HFR search failed."));
+      setSearchError(failure(reason, translate("admin.msg.hfrSearchFailed")));
     } finally {
       setBusy(false);
     }
@@ -163,7 +163,7 @@ export function HfrFacilityRegistry() {
       {result ? (
         <section className="surface-card space-y-3 p-5" aria-label={t("admin.ui.hfrResults")}>
           <p className="text-sm text-muted-foreground">
-            {result.facilities.length === 0 ? t("admin.ui.noHfrFacilityMatches") : `${result.total ?? result.facilities.length} facilities found.`}
+            {result.facilities.length === 0 ? t("admin.ui.noHfrFacilityMatches") : translate("admin.msg.countFacilitiesFound", undefined, { count: result.total ?? result.facilities.length })}
           </p>
           <ul className="divide-y divide-border">
             {result.facilities.map((facility) => (
@@ -224,9 +224,9 @@ function BridgeLink({ facility }: { facility: HfrFacility }) {
         chosen.map(({ type, hip_name, active }) => ({ type, hip_name: hip_name.trim(), active })),
         key.current,
       );
-      setDone(`${linked.facility_name} is linked to bridge ${linked.bridge_id}.`);
+      setDone(translate("admin.msg.facilityNameIsLinkedToBridge", undefined, { facility_name: linked.facility_name, bridge_id: linked.bridge_id }));
     } catch (reason) {
-      setError(failure(reason, "HFR did not link the bridge."));
+      setError(failure(reason, translate("admin.msg.hfrDidNotLinkTheBridge")));
     } finally {
       setBusy(false);
     }

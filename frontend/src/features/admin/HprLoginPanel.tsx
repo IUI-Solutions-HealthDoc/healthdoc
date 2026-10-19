@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 
 import { ApiError } from "@/lib/api";
 import { hprLoginState, hprLogout, hprPasswordLogin, startHprOtp, verifyHprOtp, type HprSession } from "./api/hfr";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 type Method = "AADHAAR_OTP" | "PASSWORD";
 const input = "w-full rounded-md border border-border px-3 py-2 text-sm";
@@ -42,7 +42,7 @@ export function HprLoginPanel({ onChange, reloadKey = 0 }: { onChange?: (session
   useEffect(() => {
     let disposed = false;
     hprLoginState().then((next) => { if (!disposed) { setSession(next); onChange?.(next); } },
-      (reason: unknown) => { if (!disposed) setStateError(failure(reason, "HPR login state could not be loaded.")); });
+      (reason: unknown) => { if (!disposed) setStateError(failure(reason, translate("admin.msg.hprLoginStateCouldNotBe"))); });
     return () => { disposed = true; };
     // onChange is a notification hook; reloading on every parent render is not
     // wanted. reloadKey changes when another panel signs someone in.
@@ -52,7 +52,7 @@ export function HprLoginPanel({ onChange, reloadKey = 0 }: { onChange?: (session
   async function run(action: () => Promise<void>) {
     setBusy(true);
     setError(null);
-    try { await action(); } catch (reason) { setError(failure(reason, "HPR did not accept this login.")); } finally { setBusy(false); }
+    try { await action(); } catch (reason) { setError(failure(reason, translate("admin.msg.hprDidNotAcceptThisLogin"))); } finally { setBusy(false); }
   }
 
   const idValid = HPR_ID.test(hprId.trim());

@@ -6,7 +6,7 @@ import { fetchBloodDonors, fetchBloodUnits } from "./api";
 import { BloodCrossmatchModal } from "./components/BloodCrossmatchModal";
 import { BloodDonorRegistry } from "./components/BloodDonorRegistry";
 import { BloodInventoryGrid } from "./components/BloodInventoryGrid";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 import type { BloodDonor, BloodUnit } from "./types";
 
 export function BloodBankPage() {
@@ -35,7 +35,7 @@ export function BloodBankPage() {
       setLoaded(true);
     } catch (err: unknown) {
       if (request === loadSequence.current)
-        setLoadError(err instanceof Error && err.message ? err.message : "Blood bank data could not be loaded.");
+        setLoadError(err instanceof Error && err.message ? err.message : translate("bloodBank.errLoad"));
     } finally {
       if (request === loadSequence.current) setLoading(false);
     }

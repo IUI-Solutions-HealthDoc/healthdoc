@@ -5,7 +5,7 @@ import { Alert, Box, Button, Checkbox, FormControlLabel, Stack, Table, TableBody
   TableContainer, TableHead, TablePagination, TableRow, TextField, Typography } from "@mui/material";
 import { Modal } from "@/components/ui/Modal";
 import { formatMoney, newIdempotencyKey } from "@/lib/api";
-import { useLocale, type MessageKey } from "@/lib/i18n";
+import { useLocale, type MessageKey, translate } from "@/lib/i18n";
 import { useAuth } from "@/providers/auth-provider";
 import { meridian } from "@/styles/theme";
 import { deactivateTariff, listChargeMaster } from "../api/chargeMaster";
@@ -64,7 +64,7 @@ export function TariffWorkspace() {
   const rows = useMemo(() => {
     if (snapshot?.history !== includeRetired) return [];
     const term = query.trim().toLowerCase();
-    return snapshot.rows.filter((row) => [row.charge_code, row.description, row.scheme_code ?? "General", row.charge_category]
+    return snapshot.rows.filter((row) => [row.charge_code, row.description, row.scheme_code ?? translate("billing.tariff.schemeGeneral"), row.charge_category]
       .some((value) => value.toLowerCase().includes(term)));
   }, [snapshot, includeRetired, query]);
   const visiblePage = Math.min(page, Math.max(0, Math.ceil(rows.length / 15) - 1));

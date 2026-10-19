@@ -12,7 +12,7 @@ import Box from "@mui/material/Box";
 import Skeleton from "@mui/material/Skeleton";
 import Typography from "@mui/material/Typography";
 import { meridian } from "@/styles/theme";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 export interface DataTableColumn<T> {
   /** Unique key. If it matches a key on T, sorting works automatically. */
@@ -62,7 +62,7 @@ export function DataTable<T>({
   rows,
   getRowId,
   loading = false,
-  emptyMessage = "No records found.",
+  emptyMessage = translate("common.msg.noRecordsFound"),
   onRowClick,
   selectedRowId = null,
   page,

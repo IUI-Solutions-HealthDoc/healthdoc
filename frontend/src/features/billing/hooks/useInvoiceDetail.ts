@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { getInvoice } from "../api";
 import type { InvoiceWithItems } from "../types";
+import { translate } from "@/lib/i18n";
 
 type Snapshot = {
   invoiceId: string | null;
@@ -24,7 +25,7 @@ export function useInvoiceDetail(invoiceId: string | null) {
     generation.current += 1;
     const mismatch = invoice !== null && invoice.id !== invoiceId;
     setSnapshot({ invoiceId, invoice: mismatch ? null : invoice, loading: false,
-      error: mismatch ? "The response does not match the selected invoice. Retry loading the invoice." : null });
+      error: mismatch ? translate("billing.msg.theResponseDoesNotMatchThe") : null });
   }, [invoiceId]);
 
   const refresh = useCallback(async () => {
@@ -41,7 +42,7 @@ export function useInvoiceDetail(invoiceId: string | null) {
     } catch (e) {
       if (generation.current === request) {
         setSnapshot({ invoiceId, invoice: null, loading: false,
-          error: e instanceof Error ? e.message : "Failed to load invoice" });
+          error: e instanceof Error ? e.message : translate("billing.msg.failedToLoadInvoice") });
       }
     }
   }, [invoiceId, setInvoice]);

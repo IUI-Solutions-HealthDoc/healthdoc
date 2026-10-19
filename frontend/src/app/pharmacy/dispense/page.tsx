@@ -21,7 +21,7 @@ import type {
   PrescriptionItem,
 } from "@/features/pharmacy/types";
 import { ApiError, formatDateTime, newIdempotencyKey } from "@/lib/api";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 interface LineDraft {
   quantity: string;
@@ -380,7 +380,7 @@ function Dispense() {
       setResult(null);
       setError(null);
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Could not load prescription");
+      setError(reason instanceof ApiError ? reason.message : translate("pharmacy.msg.couldNotLoadPrescription"));
     } finally {
       setLoading(false);
     }
@@ -409,11 +409,11 @@ function Dispense() {
       const draft = drafts[item.id];
       if (!draft || Number(draft.quantity) <= 0) continue;
       if (draft.manualBatch && !draft.batchId) {
-        setError(`Select a batch for ${item.medicine_name}.`);
+        setError(translate("pharmacy.msg.selectABatchForMedicineName", undefined, { medicine_name: item.medicine_name }));
         return;
       }
       if (draft.substitute && (!draft.substituteItemId || !draft.substituteReason.trim())) {
-        setError(`Select a substitute and enter a reason for ${item.medicine_name}.`);
+        setError(translate("pharmacy.msg.selectASubstituteAndEnterA", undefined, { medicine_name: item.medicine_name }));
         return;
       }
       items.push({
@@ -435,7 +435,7 @@ function Dispense() {
       });
     }
     if (items.length === 0) {
-      setError("Enter a quantity for at least one prescription item.");
+      setError(translate("pharmacy.msg.enterAQuantityForAtLeast"));
       return;
     }
 
@@ -449,7 +449,7 @@ function Dispense() {
       setResult(response);
       setIdempotencyKey(newIdempotencyKey());
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Dispense could not be recorded");
+      setError(reason instanceof ApiError ? reason.message : translate("pharmacy.msg.dispenseCouldNotBeRecorded"));
     } finally {
       setSubmitting(false);
     }

@@ -19,7 +19,7 @@ import {
   type ClinicalDisposition,
 } from "@/features/ipd/api/ipd";
 import type { Ward } from "@/features/nurse/components/WardSelector/WardSelector.types";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 export interface ClinicalDispositionPanelProps {
   context: EncounterContext;
@@ -85,7 +85,7 @@ export function ClinicalDispositionPanel({
         dispositionType === "admit" ? t("ipd.dispositionAdmitSuccess") : t("ipd.dispositionRecordedSuccess"),
       );
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to record clinical disposition";
+      const msg = err instanceof Error ? err.message : translate("ipd.msg.failedToRecordClinicalDisposition");
       setErrorMessage(msg);
     } finally {
       setSaving(false);
@@ -104,7 +104,7 @@ export function ClinicalDispositionPanel({
         {savedDisposition && (
           <Chip
             size="small"
-            label={`Disposition: ${savedDisposition.disposition_type.toUpperCase()} (${savedDisposition.status})`}
+            label={translate("ipd.msg.dispositionValueStatus", undefined, { value: savedDisposition.disposition_type.toUpperCase(), status: savedDisposition.status })}
             color={savedDisposition.disposition_type === "admit" ? "primary" : "default"}
             sx={{ fontWeight: 600 }}
           />

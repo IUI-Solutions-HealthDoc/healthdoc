@@ -29,7 +29,7 @@ import type {
 import { searchPatients } from "@/features/receptionist/api";
 import type { PatientSearchResult } from "@/features/receptionist/types";
 import { ApiError, formatDateTime } from "@/lib/api";
-import { useLocale, type MessageKey } from "@/lib/i18n";
+import { useLocale, type MessageKey, translate } from "@/lib/i18n";
 
 function DispositionBadge({ disposition }: { disposition: string }) {
   const { t } = useLocale();
@@ -184,20 +184,20 @@ function PharmacyReturnsContent() {
   async function handleCreateReturn(e: React.FormEvent) {
     e.preventDefault();
     if (!selectedPatient) {
-      setFormError("Please select a patient.");
+      setFormError(translate("pharmacy.msg.pleaseSelectAPatient"));
       return;
     }
     if (!selectedMedicine) {
-      setFormError("Please select a medicine.");
+      setFormError(translate("pharmacy.msg.pleaseSelectAMedicine"));
       return;
     }
     const qtyNum = parseFloat(quantity);
     if (isNaN(qtyNum) || qtyNum <= 0) {
-      setFormError("Quantity must be a positive number.");
+      setFormError(translate("pharmacy.msg.quantityMustBeAPositiveNumber"));
       return;
     }
     if (!reason.trim()) {
-      setFormError("Please specify a reason for return.");
+      setFormError(translate("pharmacy.msg.pleaseSpecifyAReasonForReturn"));
       return;
     }
 
@@ -515,7 +515,7 @@ function PharmacyReturnsContent() {
                   <p className="mt-1 text-[11px] text-success">
                     {t("pharmacy.returns.modal.selectedMedicine", {
                       name: selectedMedicine.name,
-                      form: selectedMedicine.form ?? "Medicine",
+                      form: selectedMedicine.form ?? translate("pharmacy.expiry.col.medicine"),
                     })}
                   </p>
                 )}

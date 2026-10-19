@@ -1,7 +1,7 @@
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 type RetryProps = { onRetry?: () => void };
 
-export function LoadingState({ label = "Loading live data…" }: { label?: string }) {
+export function LoadingState({ label = translate("common.msg.loadingLiveData") }: { label?: string }) {
   return (
     <div role="status" aria-live="polite" className="surface-card space-y-3 p-6">
       <span className="sr-only">{label}</span>

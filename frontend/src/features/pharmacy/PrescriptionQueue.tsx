@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 
 import { api, formatDateTime } from "@/lib/api";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/AsyncState";
-import { useLocale, type MessageKey } from "@/lib/i18n";
+import { useLocale, type MessageKey, translate } from "@/lib/i18n";
 
 interface PrescriptionQueueItem {
   prescription_id: string;
@@ -49,7 +49,7 @@ export function PrescriptionQueue({ dispenseMode = false }: { dispenseMode?: boo
       })
       .catch((reason: unknown) => {
         if (!cancelled) {
-          setError(reason instanceof Error ? reason.message : "Failed to load prescription queue");
+          setError(reason instanceof Error ? reason.message : translate("pharmacy.msg.failedToLoadPrescriptionQueue"));
         }
       })
       .finally(() => {

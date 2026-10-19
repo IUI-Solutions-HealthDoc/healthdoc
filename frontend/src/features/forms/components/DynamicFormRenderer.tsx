@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AlertCircle, CheckCircle2, FileText, Send } from "lucide-react";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 import { submitForm } from "../api";
 import { useClinicalWrite } from "@/lib/useClinicalWrite";
@@ -65,12 +65,12 @@ function FormEditor({
       }, async (payload, key) => {
         const result = await submitForm(payload, key);
         if (result.patient_id !== patientId || result.form_id !== formDef.id)
-          throw new Error("Saved form did not match the selected patient and form.");
+          throw new Error(translate("forms.msg.savedFormDidNotMatchThe"));
         return result;
       });
       if (!mounted.current) return;
       if (sub.patient_id !== patientId || sub.form_id !== formDef.id)
-        throw new Error("The saved form does not match the selected patient and form.");
+        throw new Error(translate("forms.msg.theSavedFormDoesNotMatch"));
       setSuccessMsg(t("forms.renderer.submitSuccess"));
       setFormData({});
       onSuccess(sub);

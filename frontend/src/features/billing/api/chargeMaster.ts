@@ -14,6 +14,7 @@
  */
 import { api } from "@/lib/api";
 import type { ChargeMaster, TariffCreateInput } from "../types";
+import { translate } from "@/lib/i18n";
 
 export interface ChargeMasterListFilters {
   /** Server-side active flag, not whether a tariff is effective today. */
@@ -35,7 +36,7 @@ export async function listChargeMaster(
   const params = new URLSearchParams({ active_only: String(filters.active_only ?? true) });
   if (filters.charge_code) params.set("charge_code", filters.charge_code);
   const response = await api<ChargeMaster[]>(`/billing/charge-master?${params}`);
-  if (!Array.isArray(response)) throw new Error("The tariff catalogue returned an invalid response. Reload and try again.");
+  if (!Array.isArray(response)) throw new Error(translate("billing.msg.theTariffCatalogueReturnedAnInvalid"));
   let rows = response;
   if (filters.scheme_code && filters.scheme_code !== "all") {
     rows = rows.filter((r) => r.scheme_code === filters.scheme_code);

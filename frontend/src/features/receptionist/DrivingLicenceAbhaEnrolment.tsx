@@ -17,7 +17,7 @@ import {
 import { prepareLicencePhoto } from "./licencePhoto";
 import { digitsOnly } from "./patientValidation";
 import type { AbhaDeclaration, ConsentLanguage, DrivingLicenceEnrolmentResult } from "./types";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 const ENROLMENT_CONSENT = { granted: true, code: "abha-enrollment", version: "1.4" };
 const GENDERS: Partial<Record<string, "M" | "F" | "O">> = { male: "M", female: "F", other: "O" };
@@ -97,7 +97,7 @@ export function DrivingLicenceAbhaEnrolment({ patient }: { patient: Patient }) {
     let disposed = false;
     getAbhaEnrolmentDeclaration(patient.id, consentLanguage, "document").then(
       (shown) => { if (!disposed) { setDeclaration(shown); setTicks(defaultTicks(shown)); } },
-      (reason: unknown) => { if (!disposed) setDeclarationError(failure(reason, "The ABHA consent could not be loaded.")); },
+      (reason: unknown) => { if (!disposed) setDeclarationError(failure(reason, translate("receptionist.msg.theAbhaConsentCouldNotBe"))); },
     );
     return () => { disposed = true; };
   }, [patient.id, consentLanguage]);
@@ -107,7 +107,7 @@ export function DrivingLicenceAbhaEnrolment({ patient }: { patient: Patient }) {
     let disposed = false;
     listLgdStates().then(
       (rows) => { if (!disposed) setStates(rows); },
-      (reason: unknown) => { if (!disposed) setLgdError(failure(reason, "The LGD state list could not be loaded.")); },
+      (reason: unknown) => { if (!disposed) setLgdError(failure(reason, translate("receptionist.msg.theLgdStateListCouldNot"))); },
     );
     return () => { disposed = true; };
   }, [step, states]);
@@ -117,7 +117,7 @@ export function DrivingLicenceAbhaEnrolment({ patient }: { patient: Patient }) {
     let disposed = false;
     listLgdDistricts(form.state_code).then(
       (rows) => { if (!disposed) setDistricts(rows); },
-      (reason: unknown) => { if (!disposed) setLgdError(failure(reason, "The LGD district list could not be loaded.")); },
+      (reason: unknown) => { if (!disposed) setLgdError(failure(reason, translate("receptionist.msg.theLgdDistrictListCouldNot"))); },
     );
     return () => { disposed = true; };
   }, [form.state_code]);
@@ -153,7 +153,7 @@ export function DrivingLicenceAbhaEnrolment({ patient }: { patient: Patient }) {
       const encoded = await prepareLicencePhoto(file);
       setPhotos((current) => ({ ...current, [side]: encoded }));
     } catch (reason) {
-      setError(failure(reason, "The photo could not be read."));
+      setError(failure(reason, translate("receptionist.msg.thePhotoCouldNotBeRead")));
     }
   }
 
@@ -170,7 +170,7 @@ export function DrivingLicenceAbhaEnrolment({ patient }: { patient: Patient }) {
       setSentTo(requested.masked_mobile ?? null);
       setStep("otp");
     } catch (reason) {
-      setError(failure(reason, "ABDM could not send the OTP. Try again."));
+      setError(failure(reason, translate("receptionist.msg.abdmCouldNotSendTheOtp")));
     } finally {
       setBusy(false);
     }
@@ -183,9 +183,9 @@ export function DrivingLicenceAbhaEnrolment({ patient }: { patient: Patient }) {
     try {
       const requested = await resendLicenceEnrolmentOtp(patient.id, sessionId, mobile, newIdempotencyKey());
       setSentTo(requested.masked_mobile ?? null);
-      setNotice(`A new OTP was sent. ${requested.resends_remaining} more can be requested.`);
+      setNotice(translate("receptionist.msg.aNewOtpWasSentResends", undefined, { resends_remaining: requested.resends_remaining ?? 0 }));
     } catch (reason) {
-      setError(failure(reason, "ABDM could not send another OTP."));
+      setError(failure(reason, translate("receptionist.msg.abdmCouldNotSendAnotherOtp")));
     } finally {
       setBusy(false);
     }
@@ -201,7 +201,7 @@ export function DrivingLicenceAbhaEnrolment({ patient }: { patient: Patient }) {
       setNotice(null);
       setStep("details");
     } catch (reason) {
-      setError(failure(reason, "ABDM did not accept this OTP."));
+      setError(failure(reason, translate("receptionist.msg.abdmDidNotAcceptThisOtp")));
     } finally {
       setBusy(false);
     }
@@ -232,7 +232,7 @@ export function DrivingLicenceAbhaEnrolment({ patient }: { patient: Patient }) {
       setResult(enrolled);
       setStep("done");
     } catch (reason) {
-      setError(failure(reason, "ABDM could not take this driving licence. Check the details and try again."));
+      setError(failure(reason, translate("receptionist.msg.abdmCouldNotTakeThisDriving")));
     } finally {
       setBusy(false);
     }
@@ -284,7 +284,7 @@ export function DrivingLicenceAbhaEnrolment({ patient }: { patient: Patient }) {
 
       {step === "otp" ? (
         <>
-          <p className="text-sm text-muted-foreground">{sentTo ?? "ABDM sent an OTP to the mobile."}</p>
+          <p className="text-sm text-muted-foreground">{sentTo ?? translate("receptionist.msg.abdmSentAnOtpToThe")}</p>
           <label className="block space-y-1 text-sm">
             <span className="text-muted-foreground">{t("receptionist.abha.fieldOtp")}</span>
             <input name="licence_otp" value={otp} onChange={(e) => setOtp(digitsOnly(e.target.value))} inputMode="numeric" autoComplete="one-time-code" maxLength={6} className={input} />
@@ -336,7 +336,7 @@ export function DrivingLicenceAbhaEnrolment({ patient }: { patient: Patient }) {
                 <input name={`licence_${side}`} type="file" accept="image/jpeg,image/png" capture="environment" onChange={(e) => void choosePhoto(side, e.target.files?.[0])} className={input} />
                 {photos[side] ? (
                   // eslint-disable-next-line @next/next/no-img-element -- a local data URI the operator checks, not an optimisable asset
-                  <img src={`data:image/jpeg;base64,${photos[side]}`} alt={`${side} of the driving licence`} className="max-h-48 rounded-md border border-border" />
+                  <img src={`data:image/jpeg;base64,${photos[side]}`} alt={translate("receptionist.msg.sideOfTheDrivingLicence", undefined, { side })} className="max-h-48 rounded-md border border-border" />
                 ) : null}
               </label>
             ))}
@@ -354,7 +354,7 @@ export function DrivingLicenceAbhaEnrolment({ patient }: { patient: Patient }) {
             <button type="button" disabled={busy || !complete || !checked} onClick={() => void submit()} className={primary}>
               {busy ? t("receptionist.ui.sendingToAbdm") : t("receptionist.ui.approveAndSendForEnrolment")}
             </button>
-            <button type="button" disabled={busy} onClick={() => startOver("Licence rejected. Nothing was sent to ABDM.")} className="rounded-md border border-border px-3 py-2 text-sm">{t("receptionist.ui.rejectLicence")}</button>
+            <button type="button" disabled={busy} onClick={() => startOver(translate("receptionist.msg.licenceRejectedNothingWasSentTo"))} className="rounded-md border border-border px-3 py-2 text-sm">{t("receptionist.ui.rejectLicence")}</button>
           </div>
         </>
       ) : null}

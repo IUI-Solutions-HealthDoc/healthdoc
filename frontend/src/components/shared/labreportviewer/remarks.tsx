@@ -1,5 +1,5 @@
 "use client";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 interface Remarks {
   interpretation?: string;
@@ -14,9 +14,9 @@ interface RemarksProps {
 export default function Remarks({ remarks }: RemarksProps) {
   const { t } = useLocale();
   const blocks = [
-    { title: "Interpretation", content: remarks.interpretation },
-    { title: "Comments", content: remarks.comments },
-    { title: "Advice", content: remarks.advice },
+    { title: translate("common.msg.interpretation"), content: remarks.interpretation },
+    { title: translate("common.msg.comments"), content: remarks.comments },
+    { title: translate("common.msg.advice"), content: remarks.advice },
   ].filter((block) => Boolean(block.content));
 
   if (blocks.length === 0) return null;

@@ -13,7 +13,7 @@ import {
 } from "./api";
 import { digitsOnly } from "./patientValidation";
 import type { AbhaDeclaration, AbhaIdentityLinked, ConsentLanguage } from "./types";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 const ENROLMENT_CONSENT = { granted: true, code: "abha-enrollment", version: "1.4" };
 const GENDERS: Partial<Record<string, "M" | "F" | "O">> = { male: "M", female: "F", other: "O" };
@@ -79,7 +79,7 @@ export function DemographicAbhaEnrolment({ patient, onLinked }: {
     let disposed = false;
     getAbhaEnrolmentDeclaration(patient.id, consentLanguage).then(
       (shown) => { if (!disposed) { setDeclaration(shown); setTicks(defaultTicks(shown)); } },
-      (reason: unknown) => { if (!disposed) setDeclarationError(failure(reason, "The ABHA consent could not be loaded.")); },
+      (reason: unknown) => { if (!disposed) setDeclarationError(failure(reason, translate("receptionist.msg.theAbhaConsentCouldNotBe"))); },
     );
     return () => { disposed = true; };
   }, [patient.id, consentLanguage]);
@@ -88,7 +88,7 @@ export function DemographicAbhaEnrolment({ patient, onLinked }: {
     let disposed = false;
     listLgdStates().then(
       (rows) => { if (!disposed) setStates(rows); },
-      (reason: unknown) => { if (!disposed) setLgdError(failure(reason, "The LGD state list could not be loaded.")); },
+      (reason: unknown) => { if (!disposed) setLgdError(failure(reason, translate("receptionist.msg.theLgdStateListCouldNot"))); },
     );
     return () => { disposed = true; };
   }, [patient.id]);
@@ -98,7 +98,7 @@ export function DemographicAbhaEnrolment({ patient, onLinked }: {
     let disposed = false;
     listLgdDistricts(form.state_code).then(
       (rows) => { if (!disposed) setDistricts(rows); },
-      (reason: unknown) => { if (!disposed) setLgdError(failure(reason, "The LGD district list could not be loaded.")); },
+      (reason: unknown) => { if (!disposed) setLgdError(failure(reason, translate("receptionist.msg.theLgdDistrictListCouldNot"))); },
     );
     return () => { disposed = true; };
   }, [form.state_code]);
@@ -134,7 +134,7 @@ export function DemographicAbhaEnrolment({ patient, onLinked }: {
       setForm((current) => ({ ...current, aadhaar: "" })); // never left on screen
       onLinked(linked);
     } catch (reason) {
-      setError(failure(reason, "ABDM could not create the ABHA. Try again."));
+      setError(failure(reason, translate("receptionist.msg.abdmCouldNotCreateTheAbha")));
     } finally {
       setBusy(false);
     }

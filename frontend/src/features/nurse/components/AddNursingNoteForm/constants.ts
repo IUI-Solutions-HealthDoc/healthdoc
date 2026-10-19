@@ -1,10 +1,11 @@
 import type { AddNursingNoteSchema } from "./validation";
+import { translate } from "@/lib/i18n";
 
 export const DEFAULT_VALUES: AddNursingNoteSchema = {
   encounter_id: "",
   patient_id: "",
-  category: "General",
-  priority: "Normal",
+  get category() { return translate("billing.tariff.schemeGeneral"); },
+  get priority() { return translate("mch.mode.normal"); },
   note: "",
 };
 

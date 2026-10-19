@@ -16,7 +16,7 @@ import {
 import { formatDate } from "@/lib/dates";
 import { fetchPatientSchedule } from "../api";
 import type { PatientImmunizationSchedule } from "../types";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 interface ImmunizationScheduleViewProps {
   patientId: string;
@@ -49,7 +49,7 @@ export function ImmunizationScheduleView({
       const data = await fetchPatientSchedule(patientId);
       setSchedule(data);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to load immunization schedule.");
+      setError(err instanceof Error ? err.message : translate("immunization.msg.failedToLoadImmunizationSchedule"));
     } finally {
       setLoading(false);
     }

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { listDataAccessLogs } from "../api";
 import type { AccessChannel, DataAccessFilters, DataAccessLog } from "../types";
+import { translate } from "@/lib/i18n";
 
 export function useDataAccessLogs(
   initial: DataAccessFilters = { access_channel: "all" },
@@ -26,7 +27,7 @@ export function useDataAccessLogs(
     } catch (reason) {
       setRows([]);
       setUnattributed(0);
-      setError(reason instanceof Error ? reason.message : "Failed to load data access logs");
+      setError(reason instanceof Error ? reason.message : translate("audit.msg.failedToLoadDataAccessLogs"));
     } finally {
       setLoading(false);
     }

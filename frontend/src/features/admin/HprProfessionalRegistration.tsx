@@ -31,7 +31,7 @@ import {
   type HprSystem,
 } from "./api/hpr";
 import { HPR_DOCUMENT_ACCEPT, readHprDocument } from "./hprDocument";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 const input = "w-full rounded-md border border-border px-3 py-2 text-sm";
 const primary = "rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50";
@@ -62,7 +62,7 @@ function useList<T = HprOption>(key: string | null, load: () => Promise<T[]>): L
     if (!key) return;
     let live = true;
     load().then((rows) => { if (live) setState({ key, rows, error: null }); },
-      (reason: unknown) => { if (live) setState({ key, rows: null, error: failure(reason, "HPR did not return this list.")[0] }); });
+      (reason: unknown) => { if (live) setState({ key, rows: null, error: failure(reason, translate("admin.msg.hprDidNotReturnThisList"))[0] }); });
     return () => { live = false; };
     // The loader is rebuilt each render; the key says when the list changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -108,7 +108,7 @@ function Attach({ name, label, value, onChange, onError }: {
         onChange={(e) => {
           const file = e.target.files?.[0];
           if (!file) { onChange(null); return; }
-          readHprDocument(file).then(onChange, (reason: unknown) => onError(reason instanceof Error ? reason.message : "The file could not be read."));
+          readHprDocument(file).then(onChange, (reason: unknown) => onError(reason instanceof Error ? reason.message : translate("admin.msg.theFileCouldNotBeRead")));
         }} />
       {value ? <span className="text-xs text-muted-foreground">{t("admin.ui.attachedValue", { value: value.file_type.toUpperCase() })}</span> : null}
     </label>
@@ -184,7 +184,7 @@ function RegistrationForm({ signedIn }: { signedIn: boolean }) {
         setKycMissing(true);
         return;
       }
-      setLoadError(failure(reason, "HPR did not return this professional's profile.")[0]);
+      setLoadError(failure(reason, translate("admin.msg.hprDidNotReturnThisProfessional"))[0]);
     });
     // HPR-078: what HPR already holds, if anything. A failure leaves registering open.
     hprProfessional().then((found) => { if (live) setRegistered(found.practitioner); }, () => undefined);
@@ -265,9 +265,9 @@ function RegistrationForm({ signedIn }: { signedIn: boolean }) {
     try {
       const done = await (update ? updateHprProfessional : registerHprProfessional)(body(), idempotencyKey);
       key.current = null;
-      setNotice(`${update ? "Updated" : "Submitted"} in HPR${done.reference_number ? `, reference ${done.reference_number}` : ""}${done.status ? ` (${done.status})` : ""}. HPR informs the professional by SMS and email.`);
+      setNotice(translate("admin.msg.valueInHprValue2Value3Hpr", undefined, { value: update ? translate("availability.updated") : translate("admin.msg.submitted"), value2: done.reference_number ? `, reference ${done.reference_number}` : "", value3: done.status ? ` (${done.status})` : "" }));
     } catch (reason) {
-      setErrors(failure(reason, "HPR did not accept this registration."));
+      setErrors(failure(reason, translate("admin.msg.hprDidNotAcceptThisRegistration")));
     } finally {
       setBusy(false);
     }
@@ -394,7 +394,7 @@ function RegistrationForm({ signedIn }: { signedIn: boolean }) {
 
       <fieldset className="grid gap-3 md:grid-cols-3"><legend className="mb-2 font-medium">{t("admin.ui.currentWork")}</legend>
         <Pick name="working" label={t("admin.ui.currentlyWorking")} value={work.working}
-          list={{ rows: [{ code: "yes", label: "Yes" }, { code: "no", label: "No" }], error: null }}
+          list={{ rows: [{ code: "yes", label: t("common.yes") }, { code: "no", label: t("common.no") }], error: null }}
           onChange={(v) => edit(() => setWork({ ...work, working: v }))} />
         {work.working === "no" ? (
           <>

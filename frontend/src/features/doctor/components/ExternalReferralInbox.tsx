@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/Button";
 import { formatDateTime, getUserFacingError } from "@/lib/api";
 import { listExternalReferrals, type ExternalReferral, type ReferralPage, type ReferralState } from "../api/externalReferrals";
 import { ExternalResultPanel } from "./ExternalResultPanel";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 const PAGE_SIZE = 25;
 
@@ -48,7 +48,7 @@ function ReferralPageView({ state, offset, onPage }: { state: ReferralState; off
       if (live.current && request === generation.current) setPage(result);
     } catch (cause) {
       if (live.current && request === generation.current) {
-        setPage(null); setError(getUserFacingError(cause, "The referral inbox could not be loaded."));
+        setPage(null); setError(getUserFacingError(cause, translate("doctor.msg.theReferralInboxCouldNotBe")));
       }
     } finally {
       if (live.current && request === generation.current) setLoading(false);
@@ -74,7 +74,7 @@ function ReferralPageView({ state, offset, onPage }: { state: ReferralState; off
             <td className="p-2">{row.order_number} · {row.order_type}<br />{t("doctor.ui.visit")}{" "}{row.visit_number}<br />{formatDateTime(row.ordered_at)}</td>
             <td className="p-2">{row.status} · {row.priority}</td>
             <td className="p-2">{row.result_count}{" "}{t("doctor.ui.entries")}{row.last_received_at && <><br />{formatDateTime(row.last_received_at)}</>}</td>
-            <td className="p-2"><Button aria-label={`Outside results for ${row.order_number}`} onClick={() => setSelected(row)}>{t("doctor.outsideResults")}</Button></td>
+            <td className="p-2"><Button aria-label={translate("doctor.msg.outsideResultsForOrderNumber", undefined, { order_number: row.order_number })} onClick={() => setSelected(row)}>{t("doctor.outsideResults")}</Button></td>
           </tr>)}</tbody>
         </table></Box>}
     </>}
@@ -85,7 +85,7 @@ function ReferralPageView({ state, offset, onPage }: { state: ReferralState; off
     {current && <Box sx={{ border: "1px solid", borderColor: "divider", borderRadius: 3, p: 2 }}>
       <Button onClick={() => setSelected(null)}>{t("doctor.ui.closeOutsideResults")}</Button>
       <ExternalResultPanel order={{ ...current, detail_status: "header_only", item_label: current.order_type }}
-        patientId={current.patient_id} patientLabel={`${current.patient_name} · ${current.patient_identifier || "Identifier not recorded"} · Visit ${current.visit_number}`}
+        patientId={current.patient_id} patientLabel={`${current.patient_name} · ${current.patient_identifier || translate("doctor.ui.identifierNotRecorded")} · Visit ${current.visit_number}`}
         onSaved={refresh} />
     </Box>}
   </Stack>;

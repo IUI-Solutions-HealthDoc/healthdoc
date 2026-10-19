@@ -22,6 +22,7 @@ import type {
   FileAccessFilters,
   FileAccessLog,
 } from "../types";
+import { translate } from "@/lib/i18n";
 
 function auditParams(filters: AuditLogFilters): URLSearchParams {
   const params = new URLSearchParams();
@@ -138,7 +139,7 @@ export async function exportAuditLogsCsv(
     { headers: token ? { Authorization: `Bearer ${token}` } : {} },
   );
   if (!response.ok) {
-    throw new ApiError(response.status, "Audit export failed");
+    throw new ApiError(response.status, translate("audit.msg.auditExportFailed"));
   }
   return response.text();
 }

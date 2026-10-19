@@ -14,7 +14,7 @@ import {
 import { downloadCsv, importCsv, validateCsv } from "../api";
 import { useClinicalWrite } from "@/lib/useClinicalWrite";
 import type { CsvImportResult, CsvValidationResult } from "../types";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 interface CsvAdministrationModalProps {
   isOpen: boolean;
@@ -70,7 +70,7 @@ export function CsvAdministrationModal({
       setError(null);
     };
     reader.onerror = () => {
-      if (request === readSequence.current && !write.isPending()) setError("The selected file could not be read.");
+      if (request === readSequence.current && !write.isPending()) setError(translate("forms.msg.theSelectedFileCouldNotBe"));
     };
     reader.readAsText(file);
   };
@@ -78,7 +78,7 @@ export function CsvAdministrationModal({
   const handleValidate = async () => {
     const snapshot = { csvText, entityType };
     if (!snapshot.csvText.trim()) {
-      setError("Please upload a CSV file or paste raw CSV content.");
+      setError(translate("forms.msg.pleaseUploadACsvFileOr"));
       return;
     }
     const request = ++validateSequence.current;
@@ -96,7 +96,7 @@ export function CsvAdministrationModal({
       if (request !== validateSequence.current || version !== draftVersion.current) return;
       setValidationResult(res);
     } catch (err: unknown) {
-      if (request === validateSequence.current) setError(err instanceof Error ? err.message : "Validation failed.");
+      if (request === validateSequence.current) setError(err instanceof Error ? err.message : translate("forms.msg.validationFailed"));
     } finally {
       if (request === validateSequence.current) setIsValidating(false);
     }
@@ -126,7 +126,7 @@ export function CsvAdministrationModal({
       setImportResult(res);
       onSuccess();
     } catch (err: unknown) {
-      if (write.isCurrent()) setError(err instanceof Error ? err.message : "Import failed.");
+      if (write.isCurrent()) setError(err instanceof Error ? err.message : translate("forms.msg.importFailed"));
     } finally {
       if (write.isCurrent()) setIsImporting(false);
     }
@@ -139,7 +139,7 @@ export function CsvAdministrationModal({
       const link = document.createElement("a");
       link.href = url; link.download = entityType + ".csv"; link.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch (err) { setError(err instanceof Error ? err.message : "Export failed."); }
+    } catch (err) { setError(err instanceof Error ? err.message : translate("forms.msg.exportFailed")); }
   };
 
   return (
@@ -299,7 +299,7 @@ export function CsvAdministrationModal({
               onClick={handleValidate}
               className="rounded-xl bg-secondary px-4 py-2 text-xs font-semibold text-secondary-foreground hover:bg-secondary/80 transition-colors disabled:opacity-50"
             >
-              {isValidating ? "Validating..." : t("forms.ui.validateSecurity")}
+              {isValidating ? translate("forms.msg.validating") : t("forms.ui.validateSecurity")}
             </button>
 
             {validationResult?.valid && (
@@ -310,7 +310,7 @@ export function CsvAdministrationModal({
                 className="flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors shadow-sm disabled:opacity-50"
               >
                 <Upload className="h-3.5 w-3.5" />
-                {isImporting ? "Importing..." : write.retryPending ? t("forms.ui.retryUnchangedImport") : t("forms.ui.executeImport")}
+                {isImporting ? translate("forms.msg.importing") : write.retryPending ? t("forms.ui.retryUnchangedImport") : t("forms.ui.executeImport")}
               </button>
             )}
           </div>

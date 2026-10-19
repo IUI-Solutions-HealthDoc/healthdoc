@@ -1,3 +1,4 @@
+import { translate } from "@/lib/i18n";
 /**
  * Mirrors backend/app/pharmacy/schemas.py. Wire names, no mapping layer.
  *
@@ -209,8 +210,8 @@ export function bucketFor(daysToExpiry: number): ExpiryBucket {
 }
 
 export const BUCKET_LABELS: Record<ExpiryBucket, string> = {
-  expired: "Expired — do not dispense",
-  "30": "Within 30 days",
+  get expired() { return translate("pharmacy.msg.expiredDoNotDispense"); },
+  get "30"() { return translate("pharmacy.msg.within30Days"); },
   "60": "31–60 days",
   "90": "61–90 days",
 };

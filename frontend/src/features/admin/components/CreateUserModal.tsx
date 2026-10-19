@@ -17,7 +17,7 @@ import Link from "next/link";
 import { toast } from "@/components/ui/toast";
 import { meridian } from "@/styles/theme";
 import { useCurrentUser } from "@/features/session/useCurrentUser";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 import { createUser } from "../api";
 import { REALM_ROLE_LABELS } from "../constants";
 import type { RealmRole, User } from "../types";
@@ -115,7 +115,7 @@ export function CreateUserModal({ open, onClose, onCreated }: Props) {
     });
     setErrors(validationErrors);
     if (Object.keys(validationErrors).length > 0) {
-      toast.error("Please correct the highlighted fields before creating the user.");
+      toast.error(translate("admin.msg.pleaseCorrectTheHighlightedFieldsBefore"));
       return;
     }
     setBusy(true);
@@ -136,12 +136,12 @@ export function CreateUserModal({ open, onClose, onCreated }: Props) {
         roles,
         temporary_password,
       });
-      toast.success("Staff account created", "The temporary password must be changed at first sign-in.");
+      toast.success(translate("admin.msg.staffAccountCreated"), translate("admin.msg.theTemporaryPasswordMustBeChanged"));
       onCreated(user);
       reset();
       onClose();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Create failed");
+      toast.error(e instanceof Error ? e.message : translate("admin.msg.createFailed"));
     } finally {
       setBusy(false);
     }
@@ -309,7 +309,7 @@ export function CreateUserModal({ open, onClose, onCreated }: Props) {
             disabled={busy}
             sx={fieldSx}
             error={Boolean(errors.mobile)}
-            helperText={errors.mobile ?? "E.164 e.g. +91XXXXXXXXXX"}
+            helperText={errors.mobile ?? t("admin.ui.indianE164Format91xxxxxxxxxx")}
           />
           <TextField
             label={t("common.ui.designation")}

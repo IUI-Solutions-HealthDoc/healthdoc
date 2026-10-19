@@ -12,7 +12,7 @@ import { formatINR } from "../lib/formatters";
 import { extractValidationErrors } from "../lib/errors";
 import { fromMoney, round2, toMoney } from "../lib/money";
 import type { CreateRefundInput, PaymentWithRefunds } from "../types";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 type Props = {
   open: boolean;
@@ -52,18 +52,18 @@ export function ReversalFormModal({ open, payment, busy, onClose, onSubmit }: Pr
 
     const trimmedReason = reason.trim();
     if (!trimmedReason) {
-      setFieldErrors((prev) => ({ ...prev, reason: "A reversal reason is required." }));
-      setErrorMessage("Please enter a reason for the reversal.");
+      setFieldErrors((prev) => ({ ...prev, reason: translate("billing.msg.reversalReasonRequired") }));
+      setErrorMessage(translate("billing.msg.pleaseEnterAReasonForThe"));
       return;
     }
     if (amount <= 0) {
-      setFieldErrors((prev) => ({ ...prev, amount: "Refund amount must be greater than ₹0.00" }));
-      setErrorMessage("Please enter an amount greater than ₹0.00");
+      setFieldErrors((prev) => ({ ...prev, amount: translate("billing.msg.refundAmountMustBeGreaterThan") }));
+      setErrorMessage(translate("billing.collect.errEnterAmount"));
       return;
     }
     if (amount > maxRefund + 0.001) {
-      setFieldErrors((prev) => ({ ...prev, amount: `Refund cannot exceed ${formatINR(maxRefund)}` }));
-      setErrorMessage(`Refund amount cannot exceed the maximum reversible amount of ${formatINR(maxRefund)}`);
+      setFieldErrors((prev) => ({ ...prev, amount: translate("billing.msg.refundCannotExceedMaxrefund", undefined, { maxRefund: formatINR(maxRefund) }) }));
+      setErrorMessage(translate("billing.msg.refundAmountCannotExceedTheMaximum", undefined, { maxRefund: formatINR(maxRefund) }));
       return;
     }
 
@@ -76,7 +76,7 @@ export function ReversalFormModal({ open, payment, busy, onClose, onSubmit }: Pr
     } catch (err) {
       const extracted = extractValidationErrors(err);
       setFieldErrors(extracted.fieldErrors);
-      setErrorMessage(extracted.summary || (err instanceof Error ? err.message : "Reversal failed"));
+      setErrorMessage(extracted.summary || (err instanceof Error ? err.message : translate("billing.msg.reversalFailed")));
     }
   };
 
@@ -124,7 +124,7 @@ export function ReversalFormModal({ open, payment, busy, onClose, onSubmit }: Pr
           size="small"
           value={amount}
           error={Boolean(fieldErrors.amount)}
-          helperText={fieldErrors.amount || `Max reversible: ${formatINR(maxRefund)}`}
+          helperText={fieldErrors.amount || translate("billing.msg.maxReversibleMaxrefund", undefined, { maxRefund: formatINR(maxRefund) })}
           onChange={(e) => {
             setAmount(Number(e.target.value) || 0);
             if (fieldErrors.amount) {

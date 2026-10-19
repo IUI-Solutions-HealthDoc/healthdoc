@@ -82,6 +82,7 @@ const ALLOW_SAME = new Set([
   "HIMS",
   "English",
   "WhatsApp",
+  "Excel",
   "ABC",
   "AB",
   "HPR ID",

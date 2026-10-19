@@ -17,7 +17,7 @@ import {
   type AdmissionChart,
 } from "@/features/ipd/api/ipd";
 import { AdmissionChecklistPanel } from "./AdmissionChecklistPanel";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 export interface AdmissionChartDrawerProps {
   admissionId: string | null;
@@ -43,7 +43,7 @@ export function AdmissionChartDrawer({
       const data = await getAdmissionChart(id);
       setChart(data);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to load admission chart");
+      setError(err instanceof Error ? err.message : translate("ipd.msg.failedToLoadAdmissionChart"));
     } finally {
       setLoading(false);
     }

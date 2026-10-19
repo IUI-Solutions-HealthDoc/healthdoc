@@ -8,7 +8,7 @@ import Typography from "@mui/material/Typography";
 
 import { toast } from "@/components/ui/toast";
 import { useAuth } from "@/providers/auth-provider";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 import { meridian } from "@/styles/theme";
 import { createRefund, getInvoice } from "../api";
 import { useCollectPayment } from "../hooks/useCollectPayment";
@@ -226,7 +226,7 @@ function InvoiceWorkspace({ selectedId, refreshList }: {
                 disabled={editor.busy || !editor.canIssue}
                 onClick={() => {
                   editor.setPreviewOpen(true);
-                  toast.info("Review totals", "Confirm Issue from the preview dialog");
+                  toast.info(translate("billing.msg.reviewTotals"), translate("billing.msg.confirmIssueFromThePreviewDialog"));
                 }}
                 sx={{ textTransform: "none", fontWeight: 600, borderRadius: "10px" }}
               >
@@ -263,10 +263,10 @@ function InvoiceWorkspace({ selectedId, refreshList }: {
                   // Returns the refund alone; re-read the invoice for the
                   // new balance rather than assuming it.
                   const refund = await createRefund(paymentId, body);
-                  toast.success("Payment reversed", refund.refund_number);
+                  toast.success(translate("billing.msg.paymentReversed"), refund.refund_number);
                   if (selectedId) onPaymentSaved(await getInvoice(selectedId));
                 } catch (e) {
-                  toast.error(e instanceof Error ? e.message : "Reversal failed");
+                  toast.error(e instanceof Error ? e.message : translate("billing.msg.reversalFailed"));
                   throw e;
                 } finally {
                   setRefundBusy(false);

@@ -14,7 +14,7 @@ import {
   type Room,
 } from "@/features/admin/api/departments";
 import { ApiError } from "@/lib/api";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 export default function Page() {
   const { localizeField, t } = useLocale();
@@ -57,11 +57,11 @@ export default function Page() {
     const nextName = name.trim();
     const nextCode = code.trim().toUpperCase();
     if (nextName.length < 2) {
-      setDepartmentFormError("Department name must be at least 2 characters.");
+      setDepartmentFormError(translate("admin.msg.departmentNameMustBeAtLeast"));
       return;
     }
     if (!/^[A-Z0-9_-]{2,12}$/.test(nextCode)) {
-      setDepartmentFormError("Code must be 2–12 letters, numbers, hyphens or underscores.");
+      setDepartmentFormError(translate("admin.msg.codeMustBe212Letters"));
       return;
     }
     setBusy(true);
@@ -74,10 +74,10 @@ export default function Page() {
       setNameHi("");
       setCode("");
       setRoomDepartment((current) => current || created.id);
-      setMessage("Department created in your facility.");
+      setMessage(translate("admin.msg.departmentCreatedInYourFacility"));
       setShowDepartmentForm(false);
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Department could not be created");
+      setError(reason instanceof ApiError ? reason.message : translate("admin.msg.departmentCouldNotBeCreated"));
     } finally {
       setBusy(false);
     }
@@ -86,11 +86,11 @@ export default function Page() {
   async function addRoom(event: React.FormEvent) {
     event.preventDefault();
     if (!roomDepartment) {
-      setRoomFormError("Select a department.");
+      setRoomFormError(translate("admin.msg.selectADepartment"));
       return;
     }
     if (roomNumber.trim().length < 1) {
-      setRoomFormError("Room number or name is required.");
+      setRoomFormError(translate("admin.msg.roomNumberOrNameIsRequired"));
       return;
     }
     setBusy(true);
@@ -100,10 +100,10 @@ export default function Page() {
       const created = await createRoom(roomDepartment, roomNumber.trim());
       setRooms((current) => [...current, created]);
       setRoomNumber("");
-      setMessage("Room created.");
+      setMessage(translate("admin.msg.roomCreated"));
       setShowRoomForm(false);
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Room could not be created");
+      setError(reason instanceof ApiError ? reason.message : translate("admin.msg.roomCouldNotBeCreated"));
     } finally {
       setBusy(false);
     }
@@ -116,7 +116,7 @@ export default function Page() {
         current?.map((item) => (item.id === updated.id ? updated : item)) ?? [],
       );
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Department update failed");
+      setError(reason instanceof ApiError ? reason.message : translate("admin.msg.departmentUpdateFailed"));
     }
   }
 
@@ -125,7 +125,7 @@ export default function Page() {
       const updated = await updateRoom(room.id, { is_active: !room.is_active });
       setRooms((current) => current.map((item) => (item.id === updated.id ? updated : item)));
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Room update failed");
+      setError(reason instanceof ApiError ? reason.message : translate("admin.msg.roomUpdateFailed"));
     }
   }
 

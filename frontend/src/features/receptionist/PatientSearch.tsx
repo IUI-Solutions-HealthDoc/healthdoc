@@ -5,7 +5,7 @@ import { Printer, Scan, Check } from "lucide-react";
 
 import { PatientAvatar } from "@/components/ui";
 import { ApiError } from "@/lib/api";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 import { searchPatients } from "./api";
 import {
@@ -48,7 +48,7 @@ function MatchBadge({ matchedOn, fields, score }: { matchedOn: string; fields?: 
   const all = fields && fields.length ? fields : [matchedOn];
   return (
     <span
-      title={`Match score ${score.toFixed(2)}`}
+      title={translate("receptionist.msg.matchScoreValue", undefined, { value: score.toFixed(2) })}
       className={`rounded-full px-2 py-1 text-xs font-medium ${
         identity ? "bg-success-muted text-success" : "bg-warning-muted text-warning"
       }`}
@@ -118,7 +118,7 @@ export function PatientSearch({ onSelect, selectLabel }: Props) {
     if (!norm) return;
     if (!isValidUhidInput(norm)) {
       setResults(null);
-      setError("Scan & Find takes the UHID or THID printed on the patient card. Use the search form for a name or mobile.");
+      setError(translate("receptionist.msg.scanFindTakesTheUhidOr"));
       return;
     }
     if (await runQuery({ uhid: norm }, 1)) setScanValue("");

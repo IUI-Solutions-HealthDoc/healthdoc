@@ -1,4 +1,5 @@
 import { api } from "@/lib/api";
+import { translate } from "@/lib/i18n";
 
 export interface ExternalResultInput {
   provider_name: string | null;
@@ -19,7 +20,7 @@ export interface ExternalResult extends ExternalResultInput {
 export async function listExternalResults(orderId: string): Promise<ExternalResult[]> {
   const response = await api<{ items: ExternalResult[] }>(`/orders/${encodeURIComponent(orderId)}/external-results`);
   if (!Array.isArray(response?.items) || response.items.some((row) => row.order_id !== orderId)) {
-    throw new Error("Invalid external-result history");
+    throw new Error(translate("doctor.msg.invalidExternalResultHistory"));
   }
   return response.items;
 }
@@ -28,6 +29,6 @@ export async function recordExternalResult(orderId: string, input: ExternalResul
   const result = await api<ExternalResult>(`/orders/${encodeURIComponent(orderId)}/external-results`, {
     method: "POST", body: JSON.stringify(input), idempotencyKey: key,
   });
-  if (result.order_id !== orderId) throw new Error("Invalid external-result receipt");
+  if (result.order_id !== orderId) throw new Error(translate("doctor.msg.invalidExternalResultReceipt"));
   return result;
 }

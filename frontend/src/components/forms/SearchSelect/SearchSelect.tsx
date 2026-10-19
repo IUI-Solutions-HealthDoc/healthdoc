@@ -3,12 +3,12 @@
 import { useMemo, useState } from "react";
 
 import { SearchSelectProps } from "./SearchSelect.types";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 export default function SearchSelect({
   label,
   name,
-  placeholder = "Search...",
+  placeholder = translate("common.msg.search"),
   options,
   value,
   onChange,

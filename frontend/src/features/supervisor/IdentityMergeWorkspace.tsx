@@ -10,7 +10,7 @@ import {
 } from "@/features/emergency/api";
 import { PageHeading } from "@/components/common/PageHeading";
 import { ApiError } from "@/lib/api";
-import { useLocale, type MessageKey } from "@/lib/i18n";
+import { useLocale, type MessageKey, translate } from "@/lib/i18n";
 
 type Tab = "request" | "approve" | "unmerge";
 
@@ -29,32 +29,32 @@ function errorMessage(reason: unknown): string {
       return "Maker–checker: the supervisor who approved cannot also unmerge.";
     }
     if (code === "patient_not_thid") {
-      return "This patient is not on the THID path — only temporary emergency charts can be promoted.";
+      return translate("supervisor.msg.thisPatientIsNotOnThe");
     }
     if (code === "promotion_already_pending") {
-      return "A promotion is already pending for this patient.";
+      return translate("supervisor.msg.aPromotionIsAlreadyPendingFor");
     }
     if (code === "patient_not_found") {
-      return "No THID patient with that ID exists in this facility.";
+      return translate("supervisor.msg.noThidPatientWithThatId");
     }
     if (code === "merge_log_not_found") {
-      return "No identity merge with that ID exists in this facility.";
+      return translate("supervisor.msg.noIdentityMergeWithThatId");
     }
     if (code === "not_pending") {
-      return "This identity merge is no longer pending approval.";
+      return translate("supervisor.msg.thisIdentityMergeIsNoLonger");
     }
     if (code === "not_approved") {
-      return "Only an approved identity merge can be unmerged.";
+      return translate("supervisor.msg.onlyAnApprovedIdentityMergeCan");
     }
     if (code === "patient_already_promoted" || code === "patient_already_has_uhid") {
-      return "This patient already has a permanent UHID.";
+      return translate("supervisor.msg.thisPatientAlreadyHasAPermanent");
     }
     if (reason.code === 422) {
-      return "Check that the patient or merge-log ID is a valid UUID.";
+      return translate("supervisor.msg.checkThatThePatientOrMerge");
     }
     return reason.message;
   }
-  return "Request failed";
+  return translate("supervisor.msg.requestFailed");
 }
 
 function ResultCard({ log }: { log: PromotionLog }) {
@@ -128,7 +128,7 @@ export function IdentityMergeWorkspace() {
     const id = mergeLogId.trim();
     const explanation = reason.trim();
     if (!id || !explanation) return;
-    if (!window.confirm("Unmerge this identity promotion and clear its assigned UHID?")) return;
+    if (!window.confirm(translate("supervisor.msg.unmergeThisIdentityPromotionAndClear"))) return;
     setBusy(true);
     resetFeedback();
     try {

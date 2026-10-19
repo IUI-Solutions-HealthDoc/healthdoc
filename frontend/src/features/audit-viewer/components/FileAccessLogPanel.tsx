@@ -9,7 +9,7 @@ import Typography from "@mui/material/Typography";
 
 import { DataTable, type DataTableColumn } from "@/components/tables/DataTable";
 import { StatusChip } from "@/components/ui/StatusChip";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 import { meridian } from "@/styles/theme";
 import { FILE_ACCESS_ACTION_LABELS } from "../constants";
 import { formatDateTime } from "../lib/formatters";
@@ -44,22 +44,22 @@ export function FileAccessLogPanel({
   const columns: DataTableColumn<FileAccessLog>[] = [
     {
       key: "accessed_at",
-      label: "Accessed",
+      label: translate("consent.accessed"),
       render: (r) => formatDateTime(r.accessed_at),
     },
     {
       key: "file_name",
-      label: "File",
+      label: translate("audit.msg.file"),
       render: (r) => r.file_name ?? r.file_id,
     },
     {
       key: "user_display",
-      label: "User",
+      label: translate("consent.user"),
       render: (r) => r.user_display ?? r.user_id,
     },
     {
       key: "action",
-      label: "Action",
+      label: translate("receptionist.action"),
       render: (r) => (
         <StatusChip status={r.action} label={FILE_ACCESS_ACTION_LABELS[r.action]} />
       ),

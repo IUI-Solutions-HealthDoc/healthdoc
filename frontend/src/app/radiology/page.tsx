@@ -23,17 +23,17 @@ import type {
   RadiologyReport,
 } from "@/features/radiology/types";
 import { ApiError, api, downloadBlob, formatDateTime } from "@/lib/api";
-import { useLocale, type MessageKey } from "@/lib/i18n";
+import { useLocale, type MessageKey, translate } from "@/lib/i18n";
 import { useAuth } from "@/providers/auth-provider";
 import { Download, FileUp, Image as ImageIcon } from "lucide-react";
 
 const WORKFLOW: { status: string; labelKey: MessageKey; hint: string }[] = [
-  { status: "placed", labelKey: "radiology.filter.toSchedule", hint: "Ordered, not yet booked onto a machine" },
-  { status: "scheduled", labelKey: "radiology.filter.booked", hint: "Slot assigned; patient not yet imaged" },
-  { status: "scanned", labelKey: "radiology.filter.toReport", hint: "Imaged, awaiting a radiologist" },
-  { status: "reporting", labelKey: "radiology.filter.preliminary", hint: "Drafted, not signed off" },
-  { status: "released", labelKey: "radiology.filter.released", hint: "Signed and available to the ordering doctor" },
-  { status: "cancelled", labelKey: "radiology.filter.cancelled", hint: "Cancelled before imaging" },
+  { status: "placed", labelKey: "radiology.filter.toSchedule", get hint() { return translate("radiology.msg.orderedNotYetBookedOntoA"); } },
+  { status: "scheduled", labelKey: "radiology.filter.booked", get hint() { return translate("radiology.msg.slotAssignedPatientNotYetImaged"); } },
+  { status: "scanned", labelKey: "radiology.filter.toReport", get hint() { return translate("radiology.msg.imagedAwaitingARadiologist"); } },
+  { status: "reporting", labelKey: "radiology.filter.preliminary", get hint() { return translate("radiology.msg.draftedNotSignedOff"); } },
+  { status: "released", labelKey: "radiology.filter.released", get hint() { return translate("radiology.msg.signedAndAvailableToTheOrdering"); } },
+  { status: "cancelled", labelKey: "radiology.filter.cancelled", get hint() { return translate("radiology.msg.cancelledBeforeImaging"); } },
 ];
 
 const RADIOLOGY_COLUMNS: MessageKey[] = [

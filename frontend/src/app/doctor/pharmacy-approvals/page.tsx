@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { ModuleCapabilityGate } from "@/components/common/ModuleCapabilityGate";
 import { PageHeading } from "@/components/common/PageHeading";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 import {
   decideSubstitution,
   listPendingSubstitutions,
@@ -37,7 +37,7 @@ function Approvals() {
   async function decide(item: PendingSubstitution, approved: boolean) {
     const rejectionReason = reasons[item.item_id]?.trim();
     if (!approved && !rejectionReason) {
-      setError("Enter a rejection reason before rejecting the substitution.");
+      setError(translate("doctor.msg.enterARejectionReasonBeforeRejecting"));
       return;
     }
     setBusyId(item.item_id);
@@ -48,11 +48,11 @@ function Approvals() {
       setItems((current) => current?.filter((entry) => entry.item_id !== item.item_id) ?? []);
       setMessage(
         approved
-          ? `Approved ${item.substitute_medicine_name}; ${result.quantity_dispensed} issued by FEFO.`
-          : `Rejected substitution for ${item.patient_full_name}.`,
+          ? translate("doctor.msg.approvedSubstituteMedicineNameQuantityDispensed", undefined, { substitute_medicine_name: item.substitute_medicine_name, quantity_dispensed: result.quantity_dispensed })
+          : translate("doctor.msg.rejectedSubstitutionForPatientFullName", undefined, { patient_full_name: item.patient_full_name }),
       );
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Decision could not be saved");
+      setError(reason instanceof ApiError ? reason.message : translate("doctor.msg.decisionCouldNotBeSaved"));
     } finally {
       setBusyId(null);
     }

@@ -5,7 +5,7 @@ import { Printer } from "lucide-react";
 
 import { ApiError, newIdempotencyKey } from "@/lib/api";
 import { apiErrorCode } from "@/lib/api-error-policy.mjs";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 import { PatientAvatar } from "@/components/ui/PatientAvatar";
 
 import { registerPatient, uploadPatientPhoto } from "./api";
@@ -120,8 +120,8 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
   const ageError = !ageProvided || ageValid
     ? null
     : ageMode === "dob"
-      ? "Date of birth cannot be in the future."
-      : "Enter an age in whole years between 0 and 130.";
+      ? translate("receptionist.msg.dateOfBirthCannotBeIn")
+      : translate("receptionist.msg.enterAnAgeInWholeYears");
   const ageInYears = ageMode === "dob" ? derivedAge?.years ?? null : ageValid ? Number(ageYears) : null;
   const isMinor = ageInYears !== null && ageInYears < ADULT_AGE_YEARS;
   const guardianNameValid = !guardianName.trim() || isValidPatientName(guardianName);
@@ -199,7 +199,7 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
   async function submit(event: React.FormEvent, confirmNotDuplicate = false) {
     event.preventDefault();
     if (!canSubmit || sex === "") {
-      setError(`Complete: ${blockers.join(", ")}.`);
+      setError(translate("receptionist.msg.completeValue", undefined, { value: blockers.join(", ") }));
       return;
     }
 
@@ -245,7 +245,7 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
       setError(
         reason instanceof ApiError
           ? reason.message
-          : "Registration failed. Do not retry from a new form — reload this page first.",
+          : translate("receptionist.msg.registrationFailedDoNotRetryFrom"),
       );
     } finally {
       setBusy(false);
@@ -496,7 +496,7 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
           onClick={() => setShowAddressDetails((shown) => !shown)}
           className="flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
         >
-          <span>{t("receptionist.ui.valueAdditionalDemographicsAddressValue2", { value: showAddressDetails || isMinor ? "▼" : "▶", value2: isMinor ? " (guardian required)" : " (Optional)" })}</span>
+          <span>{t("receptionist.ui.valueAdditionalDemographicsAddressValue2", { value: showAddressDetails || isMinor ? "▼" : "▶", value2: isMinor ? t("receptionist.ui.guardianRequiredSuffix") : t("receptionist.ui.optionalSuffix") })}</span>
         </button>
 
         {(showAddressDetails || isMinor) && (

@@ -14,7 +14,7 @@ import Typography from "@mui/material/Typography";
 import { StatusChip } from "@/components/ui/StatusChip";
 import { toast } from "@/components/ui/toast";
 import { newIdempotencyKey } from "@/lib/api";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 import { meridian } from "@/styles/theme";
 import { transitionConsentStatus, withdrawConsent } from "../api/consent";
 import { consentChannelLabel, consentPurposeLabel, consentStatusLabel } from "../i18nLabels";
@@ -80,7 +80,7 @@ export function ConsentRecordDetail({
       });
     } catch (e) {
       if (!mounted.current) return;
-      toast.error(e instanceof Error ? e.message : "Withdrawal failed");
+      toast.error(e instanceof Error ? e.message : translate("consent.msg.withdrawalFailed"));
     } finally {
       busyRef.current = false;
       if (mounted.current) setBusy(false);
@@ -97,11 +97,11 @@ export function ConsentRecordDetail({
         const next = await transitionConsentStatus(record.id, { status }, keyFor(scope));
         retryKeys.current.delete(scope);
         if (!mounted.current) return;
-        toast.success(`Consent ${status}`);
+        toast.success(translate("consent.msg.consentStatus", undefined, { status }));
         onRecordUpdated?.(next);
       } catch (e) {
         if (!mounted.current) return;
-        toast.error(e instanceof Error ? e.message : "Transition failed");
+        toast.error(e instanceof Error ? e.message : translate("consent.msg.transitionFailed"));
       } finally {
         busyRef.current = false;
         if (mounted.current) setBusy(false);

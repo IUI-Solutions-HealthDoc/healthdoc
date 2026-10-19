@@ -6,6 +6,7 @@ import { collectPayment, getInvoice } from "../api";
 import { getActionableErrorMessage } from "../lib/errors";
 import { toast } from "@/components/ui/toast";
 import type { CollectPaymentInput, InvoiceWithItems, Payment } from "../types";
+import { translate } from "@/lib/i18n";
 
 export function useCollectPayment(
   invoiceId: string | null,
@@ -25,11 +26,11 @@ export function useCollectPayment(
         // which.
         const payment = await collectPayment(invoiceId, body);
         const invoice = await getInvoice(invoiceId);
-        toast.success("Payment collected", payment.receipt_number);
+        toast.success(translate("billing.msg.paymentCollected"), payment.receipt_number);
         onSaved?.(invoice, payment);
         return { payment, invoice };
       } catch (e) {
-        toast.error(getActionableErrorMessage(e, "Payment failed"));
+        toast.error(getActionableErrorMessage(e, translate("billing.collect.paymentFailed")));
         throw e;
       } finally {
         setBusy(false);

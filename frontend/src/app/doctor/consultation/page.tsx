@@ -7,7 +7,7 @@ import Typography from "@mui/material/Typography";
 
 import { PageHeading } from "@/components/common/PageHeading";
 import { ConsultationWorkspace } from "@/features/doctor";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 import { getPatient, getQueueToken } from "@/features/doctor/api";
 import { doctorPageSx } from "@/features/doctor/panelSx";
 import type { EncounterContext } from "@/features/doctor/types";
@@ -49,7 +49,7 @@ export default function Page() {
     if (!tokenId && !visitId) {
       setMessage({
         tone: "instruction",
-        text: "Open a patient from the live OPD queue or Emergency arrivals to start a consultation.",
+        text: translate("doctor.msg.openAPatientFromTheLive"),
       });
       setContext(null);
       return;
@@ -67,7 +67,7 @@ export default function Page() {
           const token = await getQueueToken(tokenId);
           if (cancelled) return;
           if (!token) {
-            setMessage({ tone: "error", text: "Queue token not found." });
+            setMessage({ tone: "error", text: translate("doctor.msg.queueTokenNotFound") });
             setContext(null);
             return;
           }
@@ -84,7 +84,7 @@ export default function Page() {
             age_years: token.age_years,
             sex: token.sex,
             provider_user_id: token.provider_user_id || me.id,
-            provider_name: token.provider_name || me.full_name || "Assigned doctor",
+            provider_name: token.provider_name || me.full_name || translate("doctor.msg.assignedDoctor"),
             department: token.department ?? "OPD",
             token_display: token.token_display,
           });
@@ -92,14 +92,14 @@ export default function Page() {
           const visit = await api<VisitRecord>(`/visits/${visitId}`);
           if (cancelled) return;
           if (!visit) {
-            setMessage({ tone: "error", text: "Visit not found." });
+            setMessage({ tone: "error", text: translate("doctor.msg.visitNotFound") });
             setContext(null);
             return;
           }
           const patient = await getPatient(visit.patient_id);
           if (cancelled) return;
           if (!patient) {
-            setMessage({ tone: "error", text: "Patient record not found for this visit." });
+            setMessage({ tone: "error", text: translate("doctor.msg.patientRecordNotFoundForThis") });
             setContext(null);
             return;
           }
@@ -111,12 +111,12 @@ export default function Page() {
             visit_number: visit.visit_number,
             patient_id: patient.id,
             patient_name: patient.full_name,
-            uhid: patient.uhid || patient.thid || "No identifier",
+            uhid: patient.uhid || patient.thid || translate("receptionist.noIdentifier"),
             age_years: patient.age_years ?? null,
             sex: patient.sex || "unknown",
             provider_user_id: me.id,
-            provider_name: me.full_name || "Attending Doctor",
-            department: isEmergency ? "Emergency" : isIpd ? "Inpatient" : "OPD",
+            provider_name: me.full_name || translate("doctor.msg.attendingDoctor"),
+            department: isEmergency ? translate("role.emergency") : isIpd ? translate("doctor.msg.inpatient") : "OPD",
             token_display: isEmergency ? `EMERGENCY · ${visit.visit_number}` : visit.visit_number,
           });
         }
@@ -124,7 +124,7 @@ export default function Page() {
         if (cancelled) return;
         setMessage({
           tone: "error",
-          text: e instanceof Error ? e.message : "Failed to load encounter context",
+          text: e instanceof Error ? e.message : translate("doctor.msg.failedToLoadEncounterContext"),
         });
         setContext(null);
       }

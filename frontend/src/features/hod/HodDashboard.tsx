@@ -26,7 +26,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { useCurrentUser } from "@/features/session/useCurrentUser";
 import { ApiError } from "@/lib/api";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 import {
   getOverview,
@@ -213,7 +213,7 @@ export function HodDashboard() {
                   {q.is_open ? "open" : "closed"}
                 </span>
               </div>
-              <p className="mt-1 text-muted-foreground">{t("hod.ui.waitingCountWaitingValue", { waiting_count: q.waiting_count, value: q.now_serving ? ` · now serving ${q.now_serving}` : " · none called yet" })}</p>
+              <p className="mt-1 text-muted-foreground">{t("hod.ui.waitingCountWaitingValue", { waiting_count: q.waiting_count, value: q.now_serving ? translate("hod.msg.nowServingNowServing", undefined, { now_serving: q.now_serving }) : " · none called yet" })}</p>
               <QueueHandOver queue={q} others={overview.queues} onDone={() => void load()} />
             </li>
           ))}

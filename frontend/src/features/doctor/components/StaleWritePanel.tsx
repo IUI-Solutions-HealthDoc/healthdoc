@@ -7,13 +7,13 @@ import Typography from "@mui/material/Typography";
 import { meridian } from "@/styles/theme";
 import type { SoapNote } from "./SoapNotePanel";
 import type { UpdateEncounterInput } from "../types";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 const FIELDS: { key: keyof SoapNote; label: string }[] = [
-  { key: "subjective", label: "Subjective" },
-  { key: "objective", label: "Objective" },
-  { key: "assessment", label: "Assessment" },
-  { key: "plan", label: "Plan" },
+  { key: "subjective", get label() { return translate("doctor.soapSubjective"); } },
+  { key: "objective", get label() { return translate("doctor.soapObjective"); } },
+  { key: "assessment", get label() { return translate("doctor.soapAssessment"); } },
+  { key: "plan", get label() { return translate("doctor.soapPlan"); } },
 ];
 
 export interface StaleWritePanelProps {

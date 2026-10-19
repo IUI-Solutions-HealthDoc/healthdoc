@@ -51,7 +51,7 @@ import {
   type NursingTask,
 } from "@/features/nurse/api/nursing";
 import { ApiError, formatDateTime } from "@/lib/api";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 type PatientAction = "vitals" | "fluid" | "transfer" | "incident" | "handover" | null;
 
@@ -338,7 +338,7 @@ export default function Page() {
           data-status={taskQueueStatus}
           className={taskQueueStatus === "error" ? "text-sm text-danger" : "sr-only"}
         >
-          {taskQueueStatus === "error" ? t("nurse.taskQueueError") : `Nursing API ${taskQueueStatus}`}
+          {taskQueueStatus === "error" ? t("nurse.taskQueueError") : translate("nurse.msg.nursingApiTaskqueuestatus", undefined, { taskQueueStatus })}
         </p>
         <TaskQueue orders={orders} onAccept={acceptOrder} onCheckOff={checkOff} />
       </section>

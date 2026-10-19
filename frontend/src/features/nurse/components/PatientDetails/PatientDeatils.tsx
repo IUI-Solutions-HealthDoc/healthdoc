@@ -1,12 +1,12 @@
 import { PatientAvatar } from "@/components/ui";
 import { PatientDetailsProps } from "./PatientDetails.types";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 const SEX_LABELS: Record<string, string> = {
-  male: "Male",
-  female: "Female",
+  get male() { return translate("mch.sex.male"); },
+  get female() { return translate("mch.sex.female"); },
   other: "Other",
-  unknown: "Unknown",
+  get unknown() { return translate("mch.sex.unknown"); },
 };
 
 export default function PatientDetails({ patient }: PatientDetailsProps) {

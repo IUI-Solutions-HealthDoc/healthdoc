@@ -9,7 +9,7 @@ import {
 import { AppointmentRequestsTab } from "@/features/patientPortal/components/AppointmentRequestsTab";
 import { ReleasedDocumentsTab } from "@/features/patientPortal/components/ReleasedDocumentsTab";
 import { ApiError, formatDateTime } from "@/lib/api";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 type ViewState =
   | { status: "loading" }
@@ -22,16 +22,16 @@ type ViewState =
 const READABLE: Record<string, string> = {
   abha_identity: "ABHA identity",
   abha: "ABHA",
-  patients: "Patient record",
-  patient: "Patient record",
-  encounters: "Consultation notes",
-  lab_results: "Lab results",
-  radiology_reports: "Imaging reports",
-  prescriptions: "Prescriptions",
-  consent_records: "Consent records",
-  admissions: "Admission record",
-  clinical_review: "Clinical review",
-  treatment: "Treatment",
+  get patients() { return translate("patientPortal.msg.patientRecord"); },
+  get patient() { return translate("patientPortal.msg.patientRecord"); },
+  get encounters() { return translate("patientPortal.msg.consultationNotes"); },
+  get lab_results() { return translate("patientPortal.msg.labResults"); },
+  get radiology_reports() { return translate("patientPortal.msg.imagingReports"); },
+  get prescriptions() { return translate("sidebar.prescriptions"); },
+  get consent_records() { return translate("consent.title"); },
+  get admissions() { return translate("patientPortal.msg.admissionRecord"); },
+  get clinical_review() { return translate("patientPortal.msg.clinicalReview"); },
+  get treatment() { return translate("consent.purpose.TREATMENT"); },
 };
 
 function humanise(value: string | null): string {
@@ -233,7 +233,7 @@ export default function Page() {
                   <p className="mt-2 text-xl font-semibold">{view.data.abha.abha_number ?? t("doctor.abdm.notLinked")}</p>
                   <p className="mt-2 text-sm text-muted-foreground">
                     {view.data.abha.linked_at
-                      ? `Linked ${formatDateTime(view.data.abha.linked_at)}`
+                      ? translate("patientPortal.msg.linkedLinkedAt", undefined, { linked_at: formatDateTime(view.data.abha.linked_at) })
                       : t("patientPortal.abhaLinkHint")}
                   </p>
                 </article>
@@ -257,7 +257,7 @@ export default function Page() {
               <p className="mt-2 text-xl font-semibold">{view.data.abha.abha_number ?? t("doctor.abdm.notLinked")}</p>
               <p className="mt-2 text-sm text-muted-foreground">
                 {view.data.abha.linked_at
-                  ? `Linked ${formatDateTime(view.data.abha.linked_at)}`
+                  ? translate("patientPortal.msg.linkedLinkedAt", undefined, { linked_at: formatDateTime(view.data.abha.linked_at) })
                   : t("patientPortal.abhaLinkHint")}
               </p>
             </article>

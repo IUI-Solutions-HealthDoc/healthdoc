@@ -1,11 +1,12 @@
 import { z } from "zod";
+import { translate } from "@/lib/i18n";
 
 export const addIntakeOutputSchema = z.object({
   admission_id: z.guid(),
   recorded_at: z
     .string()
-    .min(1, "Recorded time is required")
-    .refine((val) => !isNaN(Date.parse(val)), "Enter a valid date and time")
+    .min(1, { error: () => translate("nurse.msg.recordedTimeIsRequired") })
+    .refine((val) => !isNaN(Date.parse(val)), { error: () => translate("nurse.msg.enterAValidDateAndTime") })
     .transform((val) => new Date(val).toISOString()),
 
   entry_type: z.enum([
@@ -18,8 +19,8 @@ export const addIntakeOutputSchema = z.object({
 
   volume_ml: z
     .number()
-    .int("Volume must be a whole number (mL)")
-    .positive("Volume must be greater than 0"),
+    .int({ error: () => translate("nurse.msg.volumeMustBeAWholeNumber") })
+    .positive({ error: () => translate("nurse.msg.volumeMustBeGreaterThan0") }),
 
   notes: z.string().max(500).optional(),
 });

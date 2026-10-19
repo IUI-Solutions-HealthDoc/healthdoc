@@ -25,7 +25,7 @@ import {
   type HfrUpload,
 } from "./api/hfr";
 import { readHfrUpload } from "./hfrUpload";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 type Step = "basic" | "additional" | "detailed" | "submit" | "done";
 interface Option { code: string; label: string }
@@ -46,9 +46,9 @@ const RULES = {
 };
 // HFR's own refusal names the only ownership subtypes it takes (C, P, NP).
 const OWNER_SUBTYPES: Record<string, Option[]> = {
-  G: [{ code: "", label: "State / UT government" }, { code: "C", label: "Central government" }],
-  P: [{ code: "P", label: "For profit" }, { code: "NP", label: "Not for profit" }],
-  PP: [{ code: "P", label: "For profit" }, { code: "NP", label: "Not for profit" }],
+  G: [{ code: "", get label() { return translate("admin.msg.stateUtGovernment"); } }, { code: "C", get label() { return translate("admin.msg.centralGovernment"); } }],
+  P: [{ code: "P", get label() { return translate("admin.msg.forProfit"); } }, { code: "NP", get label() { return translate("admin.msg.notForProfit"); } }],
+  PP: [{ code: "P", get label() { return translate("admin.msg.forProfit"); } }, { code: "NP", get label() { return translate("admin.msg.notForProfit"); } }],
 };
 const GENERAL = [
   ["dialysis", "Dialysis centre"], ["pharmacy", "Pharmacy"], ["blood_bank", "Blood bank"],
@@ -87,7 +87,7 @@ function loadList(key: string): Promise<HfrOption[]> {
     case "types": return hfrFacilityTypes(a, b);
     case "subtypes": return hfrFacilitySubtypes(a);
     case "specialities": return hfrSpecialities(a);
-    default: return Promise.reject(new Error(`Unknown HFR list ${kind}`));
+    default: return Promise.reject(new Error(translate("admin.msg.unknownHfrListKind", undefined, { kind })));
   }
 }
 
@@ -105,14 +105,14 @@ function useList(key: string | null): { rows: Option[] | null; error: string | n
         const options = rows.map((row) => ({ code: String(row.code).trim(), label: String(row.value ?? row.name ?? row.code).trim() }));
         setState({ key, rows: options, error: null });
       },
-      (reason: unknown) => { if (live) setState({ key, rows: null, error: failure(reason, "HFR did not return this list.")[0] }); },
+      (reason: unknown) => { if (live) setState({ key, rows: null, error: failure(reason, translate("admin.msg.hfrDidNotReturnThisList"))[0] }); },
     );
     return () => { live = false; };
   }, [key]);
   return state.key === key ? state : { rows: null, error: null };
 }
 
-function Select({ name, label, value, list, onChange, placeholder = "Choose" }: {
+function Select({ name, label, value, list, onChange, placeholder = translate("platform.choose") }: {
   name: string; label: string; value: string; list: { rows: Option[] | null; error: string | null };
   onChange: (value: string) => void; placeholder?: string;
 }) {
@@ -221,7 +221,7 @@ export function HfrRegistration({ signedIn }: { signedIn: boolean }) {
     // HealthDoc's own record of what it registered; this asks HFR nothing.
     listHfrRegistrations().then(
       (rows) => { if (live) setRegistered(rows); },
-      (reason: unknown) => { if (live) setListError(failure(reason, "The registered facilities could not be loaded.")[0]); },
+      (reason: unknown) => { if (live) setListError(failure(reason, translate("admin.msg.theRegisteredFacilitiesCouldNotBe"))[0]); },
     );
     return () => { live = false; };
   }, []);
@@ -239,7 +239,7 @@ export function HfrRegistration({ signedIn }: { signedIn: boolean }) {
           submitted_at: null, updated_at: "", basic: null, additional: null, detailed: null });
         return;
       }
-      setListError(failure(reason, "This registration could not be opened.")[0]);
+      setListError(failure(reason, translate("admin.msg.thisRegistrationCouldNotBeOpened"))[0]);
     } finally {
       setOpening(null);
     }
@@ -344,7 +344,7 @@ function RegistrationSteps({ signedIn, initial }: { signedIn: boolean; initial?:
     try {
       apply(await readHfrUpload(file));
     } catch (reason) {
-      setErrors(failure(reason, "The image could not be read."));
+      setErrors(failure(reason, translate("admin.msg.theImageCouldNotBeRead")));
     }
   }
   function locate() {
@@ -375,7 +375,7 @@ function RegistrationSteps({ signedIn, initial }: { signedIn: boolean; initial?:
       await call(key);
       keys.current[stage] = null;
     } catch (reason) {
-      setErrors(failure(reason, "HFR did not accept this step."));
+      setErrors(failure(reason, translate("admin.msg.hfrDidNotAcceptThisStep")));
     } finally {
       setBusy(false);
     }
@@ -386,7 +386,7 @@ function RegistrationSteps({ signedIn, initial }: { signedIn: boolean; initial?:
     // NHA's HFR document: a facility that is not Functional skips the
     // additional and detailed information and is submitted directly.
     const functional = basic.operational_status === "F";
-    setNotice(`Saved in HFR. Tracking ID ${saved.tracking_id}.${functional ? "" : " Not functional, so it goes straight to submission."}`);
+    setNotice(translate("admin.msg.savedInHfrTrackingIdTracking", undefined, { tracking_id: saved.tracking_id, value: functional ? "" : " Not functional, so it goes straight to submission." }));
     setStep(functional ? "additional" : "submit");
   });
   const saveAdditional = () => run("additional", async (key) => {
@@ -397,7 +397,7 @@ function RegistrationSteps({ signedIn, initial }: { signedIn: boolean; initial?:
       general: additional.general as Record<(typeof GENERAL)[number][0], string>,
       imaging_services: additional.general.imaging === "N" ? [] : imaging,
     }, key);
-    setNotice("Additional information saved in HFR.");
+    setNotice(translate("admin.msg.additionalInformationSavedInHfr"));
     setStep("detailed");
   });
   const saveDetailed = () => run("detailed", async (key) => {
@@ -413,7 +413,7 @@ function RegistrationSteps({ signedIn, initial }: { signedIn: boolean; initial?:
         .map(([service, count]) => ({ service, count: Number(count) })),
       diagnostic_services: detailed.diagnostics,
     }, key);
-    setNotice("Detailed information saved in HFR.");
+    setNotice(translate("admin.msg.detailedInformationSavedInHfr"));
     setStep("submit");
   });
   const submit = () => run("submit", async (key) => {
@@ -448,7 +448,7 @@ function RegistrationSteps({ signedIn, initial }: { signedIn: boolean; initial?:
       ) : null}
       <ol className="flex flex-wrap gap-3 text-xs text-muted-foreground" aria-label={t("admin.ui.registrationSteps")}>
         {(["basic", "additional", "detailed", "submit"] as const).map((name, index) => {
-          const label = `${index + 1}. ${{ basic: "Basic information", additional: "Additional information", detailed: "Detailed information", submit: "Submit" }[name]}`;
+          const label = `${index + 1}. ${{ basic: translate("admin.msg.basicInformation"), additional: translate("admin.msg.additionalInformation"), detailed: translate("admin.msg.detailedInformation"), submit: translate("common.submit") }[name]}`;
           return (
             <li key={name} aria-current={step === name ? "step" : undefined} className={step === name ? "font-semibold text-foreground" : ""}>
               {/* An edit already has its tracking id, so any step can be changed on its own. */}
@@ -534,7 +534,7 @@ function RegistrationSteps({ signedIn, initial }: { signedIn: boolean; initial?:
               onChange={(v) => edit("additional", () => setAdditional((current) => ({ ...current, general: { ...current.general, [field]: v || "N" } })))} />
           ))}
           {additional.general.imaging !== "N" ? (lists.imaging.rows ?? []).map((row) => (
-            <Text key={row.code} name={`imaging:${row.code}`} label={`${row.label}: number of machines`} value={additional.imaging[row.code] ?? ""} valid={twoDigits(additional.imaging[row.code] ?? "")}
+            <Text key={row.code} name={`imaging:${row.code}`} label={translate("admin.msg.labelNumberOfMachines", undefined, { label: row.label })} value={additional.imaging[row.code] ?? ""} valid={twoDigits(additional.imaging[row.code] ?? "")}
               onChange={(v) => edit("additional", () => setAdditional((current) => ({ ...current, imaging: { ...current.imaging, [row.code]: v.replace(/\D/g, "") } })))} inputMode="numeric" maxLength={2} />
           )) : null}
           <div className="md:col-span-2"><button type="button" className={primary} disabled={busy || !signedIn} onClick={() => void saveAdditional()}>{busy ? t("admin.ui.savingInHfr") : t("admin.ui.saveAdditionalInformation")}</button></div>

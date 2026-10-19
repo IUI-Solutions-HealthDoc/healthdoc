@@ -1,3 +1,4 @@
+import { translate } from "@/lib/i18n";
 /**
  * Mirrors the patients API. Field names are the wire's — no mapping layer.
  *
@@ -176,14 +177,14 @@ export interface AbhaDeclaration {
  * right chart and merging two people's histories.
  */
 export const MATCH_LABELS: Record<string, string> = {
-  aadhaar: "Aadhaar match",
+  get aadhaar() { return translate("receptionist.msg.aadhaarMatch"); },
   abha: "ABHA match",
   uhid: "UHID match",
   thid: "THID match",
-  merged_identifier: "Merged UHID match",
-  mobile: "Mobile match",
-  name_dob: "Name + date of birth",
-  name_age: "Name + age",
+  get merged_identifier() { return translate("receptionist.msg.mergedUhidMatch"); },
+  get mobile() { return translate("receptionist.msg.mobileMatch"); },
+  get name_dob() { return translate("receptionist.msg.nameDateOfBirth"); },
+  get name_age() { return translate("receptionist.msg.nameAge"); },
 };
 
 export function isIdentityMatch(matchedOn: string): boolean {
@@ -213,10 +214,10 @@ export const TOKEN_ISSUING_VISIT_TYPES: readonly VisitType[] = ["opd"];
 export const VISIT_TYPE_LABELS: Record<VisitType, string> = {
   opd: "OPD — outpatient",
   ipd: "IPD — admitted",
-  day_care: "Day care — bed, same-day discharge",
-  emergency: "Emergency",
-  teleconsult: "Teleconsult",
-  direct_service: "Direct Service — Walk-in Lab / Pharmacy",
+  get day_care() { return translate("visitType.day_care"); },
+  get emergency() { return translate("role.emergency"); },
+  get teleconsult() { return translate("visitType.teleconsult"); },
+  get direct_service() { return translate("visitType.direct_service"); },
 };
 
 /** The server stamps `visit_date` itself; none is sent. */

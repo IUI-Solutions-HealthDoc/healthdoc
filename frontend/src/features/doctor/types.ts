@@ -1,3 +1,4 @@
+import { translate } from "@/lib/i18n";
 /**
  * Doctor module — entity + input types. Field names follow schema v3.5 §3
  * (encounters, diagnoses, orders, vitals, prescriptions, prescription_items,
@@ -201,7 +202,7 @@ export class StaleWriteError extends Error {
     /** The server's current copy, so the caller can show what differs. */
     public readonly serverCopy: UpdateEncounterInput,
   ) {
-    super("This encounter was changed by someone else while you were editing.");
+    super(translate("doctor.msg.thisEncounterWasChangedBySomeone"));
     this.name = "StaleWriteError";
   }
 }

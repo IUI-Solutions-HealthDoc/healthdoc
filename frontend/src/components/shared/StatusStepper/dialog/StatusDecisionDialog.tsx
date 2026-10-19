@@ -9,6 +9,7 @@ import Typography from "@mui/material/Typography";
 
 import { Modal } from "@/components/ui/Modal";
 import { meridian } from "@/styles/theme";
+import { translate } from "@/lib/i18n";
 
 export interface DecisionOption {
   label: string;
@@ -36,8 +37,8 @@ export default function StatusDecisionDialog({
   options,
   defaultValue = "",
   loading = false,
-  confirmText = "Continue",
-  cancelText = "Cancel",
+  confirmText = translate("doctor.queueContinue"),
+  cancelText = translate("common.cancel"),
   confirmColor = "primary",
   onClose,
   onConfirm,

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { formatDateTime } from "@/lib/api";
-import { useLocale, type MessageKey } from "@/lib/i18n";
+import { useLocale, type MessageKey, translate } from "@/lib/i18n";
 
 import {
   getPortalDocuments,
@@ -313,11 +313,11 @@ export function ReleasedDocumentsTab() {
                             {((activeDoc.content as Record<string, unknown>).items as Array<Record<string, unknown>>).map((item, idx) => (
                               <tr key={idx} className="border-b border-border">
                                 <td className="p-2 font-medium">{idx + 1}</td>
-                                <td className="p-2 font-semibold">{String(item.medicine_name ?? "Medication")}</td>
-                                <td className="p-2">{String(item.dosage ?? "Standard")} ({String(item.route ?? "Oral")})</td>
-                                <td className="p-2">{String(item.frequency ?? "Daily")}</td>
+                                <td className="p-2 font-semibold">{String(item.medicine_name ?? translate("nurse.actionMedication"))}</td>
+                                <td className="p-2">{String(item.dosage ?? translate("patientPortal.msg.standard"))} ({String(item.route ?? translate("nurse.ui.oral"))})</td>
+                                <td className="p-2">{String(item.frequency ?? translate("patientPortal.msg.daily"))}</td>
                                 <td className="p-2">{t("patientPortal.ui.valueDays", { value: String(item.duration_days ?? "5") })}</td>
-                                <td className="p-2 text-muted-foreground">{String(item.instructions ?? "After food")}</td>
+                                <td className="p-2 text-muted-foreground">{String(item.instructions ?? translate("patientPortal.msg.afterFood"))}</td>
                               </tr>
                             ))}
                           </tbody>
@@ -348,7 +348,7 @@ export function ReleasedDocumentsTab() {
                         <div className="flex justify-between border-b border-border py-1.5">
                           <span className="font-medium text-muted-foreground">{t("patientPortal.ui.observedValue")}</span>
                           <span className="font-bold text-primary">
-                            {String((activeDoc.content as Record<string, unknown>).result_value ?? "Normal")}
+                            {String((activeDoc.content as Record<string, unknown>).result_value ?? translate("mch.mode.normal"))}
                           </span>
                         </div>
                         <div className="flex justify-between border-b border-border py-1.5">
@@ -373,7 +373,7 @@ export function ReleasedDocumentsTab() {
                         <div className="mt-2 space-y-2">
                           <div>
                             <span className="font-semibold text-muted-foreground">{t("patientPortal.ui.modalityStudy")}{" "}</span>
-                            <span className="font-bold">{String((activeDoc.content as Record<string, unknown>).modality ?? "Radiograph")}</span>
+                            <span className="font-bold">{String((activeDoc.content as Record<string, unknown>).modality ?? translate("patientPortal.msg.radiograph"))}</span>
                           </div>
                           <div className="rounded bg-muted/20 p-2">
                             <span className="font-semibold block text-foreground">{t("patientPortal.ui.findings")}</span>
@@ -384,7 +384,7 @@ export function ReleasedDocumentsTab() {
                           <div className="rounded border border-primary/20 bg-primary/5 p-2">
                             <span className="font-bold text-primary block">{t("patientPortal.ui.impression")}</span>
                             <p className="mt-1 text-foreground font-medium">
-                              {String((activeDoc.content as Record<string, unknown>).impression ?? "No acute abnormality detected.")}
+                              {String((activeDoc.content as Record<string, unknown>).impression ?? translate("patientPortal.msg.noAcuteAbnormalityDetected"))}
                             </p>
                           </div>
                         </div>
@@ -412,11 +412,11 @@ export function ReleasedDocumentsTab() {
                       </div>
                       <div className="space-y-1">
                         <span className="font-semibold">{t("patientPortal.ui.hospitalCourseTreatment")}</span>
-                        <p className="text-muted-foreground">{String((activeDoc.content as Record<string, unknown>).course_summary ?? "Patient managed conservatively with satisfactory recovery.")}</p>
+                        <p className="text-muted-foreground">{String((activeDoc.content as Record<string, unknown>).course_summary ?? translate("patientPortal.msg.patientManagedConservativelyWithSatisfactoryRecovery"))}</p>
                       </div>
                       <div className="space-y-1 rounded bg-muted/20 p-2">
                         <span className="font-semibold text-foreground">{t("patientPortal.ui.dischargeAdviceFollowUp")}</span>
-                        <p className="text-muted-foreground">{String((activeDoc.content as Record<string, unknown>).discharge_advice ?? "Follow up in OPD after 7 days or SOS in Emergency.")}</p>
+                        <p className="text-muted-foreground">{String((activeDoc.content as Record<string, unknown>).discharge_advice ?? translate("patientPortal.msg.followUpInOpdAfter7"))}</p>
                       </div>
                     </div>
                   )}
@@ -445,7 +445,7 @@ export function ReleasedDocumentsTab() {
                         <div>
                           <span className="text-muted-foreground block">{t("patientPortal.ui.nextDueDate")}</span>
                           <span className="font-medium text-primary">
-                            {String((activeDoc.content as Record<string, unknown>).next_due_date ?? "Complete")}
+                            {String((activeDoc.content as Record<string, unknown>).next_due_date ?? translate("ipd.checklist.complete"))}
                           </span>
                         </div>
                       </div>
