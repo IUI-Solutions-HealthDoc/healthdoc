@@ -1,4 +1,5 @@
 import { IntakeOutputProps, EntryType } from "./IntakeOutput.types";
+import { useLocale } from "@/lib/i18n";
 
 const ENTRY_TYPE_LABELS: Record<EntryType, string> = {
   intake_oral: "Oral Intake",
@@ -16,12 +17,11 @@ export default function IntakeOutput({
   admissionId,
   records,
 }: IntakeOutputProps) {
+  const { t } = useLocale();
   if (!admissionId) {
     return (
       <div className="surface-card p-6">
-        <p className="text-sm text-muted-foreground">
-          Select a patient to view intake / output records.
-        </p>
+        <p className="text-sm text-muted-foreground">{t("nurse.ui.selectAPatientToViewIntake")}</p>
       </div>
     );
   }
@@ -29,9 +29,7 @@ export default function IntakeOutput({
   if (records.length === 0) {
     return (
       <div className="surface-card p-6">
-        <p className="text-sm text-muted-foreground">
-          No intake / output records available.
-        </p>
+        <p className="text-sm text-muted-foreground">{t("nurse.ui.noIntakeOutputRecordsAvailable")}</p>
       </div>
     );
   }
@@ -49,21 +47,16 @@ export default function IntakeOutput({
   return (
     <section className="surface-card overflow-hidden">
       <div className="border-b border-border p-6">
-        <h2 className="text-xl font-semibold">Intake / Output</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Fluid balance for the selected patient.
-        </p>
+        <h2 className="text-xl font-semibold">{t("nurse.ui.intakeOutput")}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">{t("nurse.ui.fluidBalanceForTheSelectedPatient")}</p>
 
         <div className="mt-4 flex gap-6 text-sm">
-          <span>
-            Total Intake: <span className="font-semibold">{totalIntake} mL</span>
+          <span>{t("nurse.ui.totalIntake")}{" "}<span className="font-semibold">{t("nurse.ui.totalintakeMl", { totalIntake })}</span>
           </span>
-          <span>
-            Total Output: <span className="font-semibold">{totalOutput} mL</span>
+          <span>{t("nurse.ui.totalOutput")}{" "}<span className="font-semibold">{t("nurse.ui.totaloutputMl", { totalOutput })}</span>
           </span>
-          <span>
-            Net Balance:{" "}
-            <span className="font-semibold">{totalIntake - totalOutput} mL</span>
+          <span>{t("nurse.ui.netBalance")}{" "}
+            <span className="font-semibold">{t("nurse.ui.totaloutputMl", { totalOutput: totalIntake - totalOutput })}</span>
           </span>
         </div>
       </div>
@@ -72,10 +65,10 @@ export default function IntakeOutput({
         <table className="min-w-full">
           <thead className="bg-muted">
             <tr>
-              <th className="px-4 py-3 text-left text-sm font-semibold">Time</th>
-              <th className="px-4 py-3 text-left text-sm font-semibold">Type</th>
-              <th className="px-4 py-3 text-left text-sm font-semibold">Volume (mL)</th>
-              <th className="px-4 py-3 text-left text-sm font-semibold">Notes</th>
+              <th className="px-4 py-3 text-left text-sm font-semibold">{t("common.ui.time")}</th>
+              <th className="px-4 py-3 text-left text-sm font-semibold">{t("equipment.category")}</th>
+              <th className="px-4 py-3 text-left text-sm font-semibold">{t("nurse.ui.volumeMl")}</th>
+              <th className="px-4 py-3 text-left text-sm font-semibold">{t("mch.notes")}</th>
             </tr>
           </thead>
 

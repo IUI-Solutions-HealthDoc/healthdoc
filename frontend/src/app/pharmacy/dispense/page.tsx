@@ -214,9 +214,7 @@ function DispenseLine({
                   >
                     <option value="">{t("pharmacy.dispense.selectBatch")}</option>
                     {prescribedStock.batches.map((batch) => (
-                      <option key={batch.batch_id} value={batch.batch_id}>
-                        {batch.batch_number} · exp {batch.expiry_date} · {batch.quantity} available
-                      </option>
+                      <option key={batch.batch_id} value={batch.batch_id}>{t("pharmacy.ui.batchNumberExpExpiryDateQuantity", { batch_number: batch.batch_number, expiry_date: batch.expiry_date, quantity: batch.quantity })}</option>
                     ))}
                   </select>
                 </label>
@@ -321,7 +319,7 @@ function ResultCard({ result }: { result: DispenseResult }) {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-lg font-medium">{t("pharmacy.dispense.recordedTitle")}</h2>
         <span className={`rounded-full px-3 py-1 text-sm ${tone.chip}`}>
-          {nothing ? "Nothing dispensed" : result.status.replaceAll("_", " ")}
+          {nothing ? t("pharmacy.ui.nothingDispensed") : result.status.replaceAll("_", " ")}
         </span>
       </div>
       <p className="text-sm text-muted-foreground">

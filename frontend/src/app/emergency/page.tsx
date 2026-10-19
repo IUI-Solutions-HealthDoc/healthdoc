@@ -771,16 +771,14 @@ export default function Page() {
                     <div>
                       <div className="flex items-center gap-2">
                         <span className="font-mono text-sm font-semibold text-primary">
-                          {item.thid ?? item.uhid ?? "Unknown"}
+                          {item.thid ?? item.uhid ?? t("mch.sex.unknown")}
                         </span>
                         <span className="font-medium text-sm">{item.full_name}</span>
                         <span className="text-xs text-muted-foreground">
                           · {formatAgeSexShort(item.age_years, item.sex)}
                         </span>
                       </div>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        Visit {item.visit_number} · Arrived {new Date(item.arrival_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{t("emergency.ui.visitVisitNumberArrivedValue", { visit_number: item.visit_number, value: new Date(item.arrival_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) })}</p>
                     </div>
                     <div className="flex items-center gap-2">
                       <button

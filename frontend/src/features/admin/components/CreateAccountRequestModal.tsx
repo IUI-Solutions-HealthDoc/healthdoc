@@ -22,6 +22,7 @@ import {
   type FieldErrors,
   validateAccountRequest,
 } from "../validation";
+import { useLocale } from "@/lib/i18n";
 
 type Props = {
   open: boolean;
@@ -30,6 +31,7 @@ type Props = {
 };
 
 export function CreateAccountRequestModal({ open, onClose, onCreated }: Props) {
+  const { t } = useLocale();
   const [busy, setBusy] = useState(false);
   const [requested_for_full_name, setName] = useState("");
   const [requested_username, setUsername] = useState("");
@@ -122,16 +124,12 @@ export function CreateAccountRequestModal({ open, onClose, onCreated }: Props) {
 
   return (
     <Dialog open={open} onClose={handleClose} fullWidth maxWidth="sm">
-      <DialogTitle sx={{ fontWeight: 700, color: meridian.textPrimary }}>
-        New account request (0028)
-      </DialogTitle>
+      <DialogTitle sx={{ fontWeight: 700, color: meridian.textPrimary }}>{t("admin.ui.newAccountRequest0028")}</DialogTitle>
       <DialogContent>
-        <Typography sx={{ mb: 2, fontSize: "0.8125rem", color: meridian.textSecondary }}>
-          Maker-checker: a different user must approve. Nobody approves their own request.
-        </Typography>
+        <Typography sx={{ mb: 2, fontSize: "0.8125rem", color: meridian.textSecondary }}>{t("admin.ui.makerCheckerADifferentUserMust")}</Typography>
         <Stack spacing={1.5}>
           <TextField
-            label="Full name"
+            label={t("field.fullName")}
             size="small"
             required
             value={requested_for_full_name}
@@ -143,7 +141,7 @@ export function CreateAccountRequestModal({ open, onClose, onCreated }: Props) {
             helperText={errors.fullName}
           />
           <TextField
-            label="Username"
+            label={t("admin.ui.username")}
             size="small"
             required
             value={requested_username}
@@ -152,10 +150,10 @@ export function CreateAccountRequestModal({ open, onClose, onCreated }: Props) {
               clearError("username");
             }}
             error={Boolean(errors.username)}
-            helperText={errors.username ?? "Letters, numbers, dots, hyphens or underscores; no spaces"}
+            helperText={errors.username ?? t("admin.ui.lettersNumbersDotsHyphensOrUnderscores")}
           />
           <TextField
-            label="Justification"
+            label={t("admin.ui.justification")}
             size="small"
             required
             multiline
@@ -166,22 +164,22 @@ export function CreateAccountRequestModal({ open, onClose, onCreated }: Props) {
               clearError("justification");
             }}
             error={Boolean(errors.justification)}
-            helperText={errors.justification ?? "At least 10 characters for the approver's audit trail"}
+            helperText={errors.justification ?? t("admin.ui.atLeast10CharactersForThe")}
           />
           <TextField
-            label="designation"
+            label={t("admin.ui.designation")}
             size="small"
             value={designation}
             onChange={(e) => setDesignation(e.target.value)}
           />
           <TextField
-            label="employee_id"
+            label={t("admin.ui.employeeId")}
             size="small"
             value={employee_id}
             onChange={(e) => setEmployeeId(e.target.value)}
           />
           <TextField
-            label="Email"
+            label={t("admin.ui.email")}
             type="email"
             size="small"
             value={email}
@@ -193,7 +191,7 @@ export function CreateAccountRequestModal({ open, onClose, onCreated }: Props) {
             helperText={errors.email}
           />
           <TextField
-            label="Mobile"
+            label={t("field.mobile")}
             type="tel"
             size="small"
             value={mobile}
@@ -202,25 +200,22 @@ export function CreateAccountRequestModal({ open, onClose, onCreated }: Props) {
               clearError("mobile");
             }}
             error={Boolean(errors.mobile)}
-            helperText={errors.mobile ?? "Indian E.164 format: +91XXXXXXXXXX"}
+            helperText={errors.mobile ?? t("admin.ui.indianE164Format91xxxxxxxxxx")}
           />
           <TextField
-            label="registration_number"
+            label={t("admin.ui.registrationNumber2")}
             size="small"
             value={registration_number}
             onChange={(e) => setReg(e.target.value)}
           />
           <TextField
-            label="qualification"
+            label={t("admin.ui.qualification")}
             size="small"
             value={qualification}
             onChange={(e) => setQual(e.target.value)}
           />
-          <Typography sx={{ fontSize: "0.8125rem", fontWeight: 600 }}>Staff roles</Typography>
-          <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary }}>
-            Multiple roles are supported. Patient and platform-superadmin roles use separate
-            identity-governance workflows.
-          </Typography>
+          <Typography sx={{ fontSize: "0.8125rem", fontWeight: 600 }}>{t("admin.ui.staffRoles")}</Typography>
+          <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary }}>{t("admin.ui.multipleRolesAreSupportedPatientAnd")}</Typography>
           <Stack direction="row" useFlexGap sx={{ flexWrap: "wrap", gap: 0.5 }}>
             {FACILITY_STAFF_ROLES.map((role) => (
               <FormControlLabel
@@ -244,9 +239,7 @@ export function CreateAccountRequestModal({ open, onClose, onCreated }: Props) {
         </Stack>
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2 }}>
-        <Button onClick={handleClose} disabled={busy} sx={{ textTransform: "none" }}>
-          Cancel
-        </Button>
+        <Button onClick={handleClose} disabled={busy} sx={{ textTransform: "none" }}>{t("common.cancel")}</Button>
         <Button
           variant="contained"
           disabled={busy}
@@ -257,9 +250,7 @@ export function CreateAccountRequestModal({ open, onClose, onCreated }: Props) {
             borderRadius: "10px",
             bgcolor: meridian.brandPrimary,
           }}
-        >
-          Submit request
-        </Button>
+        >{t("admin.ui.submitRequest")}</Button>
       </DialogActions>
     </Dialog>
   );

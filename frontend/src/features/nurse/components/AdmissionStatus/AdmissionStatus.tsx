@@ -1,4 +1,5 @@
 import { AdmissionStatusProps } from "./AdmissionStatus.types";
+import { useLocale } from "@/lib/i18n";
 
 const STATUS_LABELS: Record<string, string> = {
   admitted: "Admitted",
@@ -22,12 +23,11 @@ export default function AdmissionStatus({
   admissionId,
   record,
 }: AdmissionStatusProps) {
+  const { t } = useLocale();
   if (!admissionId) {
     return (
       <div className="surface-card p-6">
-        <p className="text-sm text-muted-foreground">
-          Select a patient to view admission status.
-        </p>
+        <p className="text-sm text-muted-foreground">{t("nurse.ui.selectAPatientToViewAdmission")}</p>
       </div>
     );
   }
@@ -35,19 +35,15 @@ export default function AdmissionStatus({
   if (!record) {
     return (
       <div className="surface-card p-6">
-        <p className="text-sm text-muted-foreground">
-          No admission status available.
-        </p>
+        <p className="text-sm text-muted-foreground">{t("nurse.ui.noAdmissionStatusAvailable")}</p>
       </div>
     );
   }
 
   return (
     <section className="surface-card p-6">
-      <h2 className="text-xl font-semibold">Admission Status</h2>
-      <p className="mt-1 text-sm text-muted-foreground">
-        Current admission workflow status.
-      </p>
+      <h2 className="text-xl font-semibold">{t("nurse.ui.admissionStatus")}</h2>
+      <p className="mt-1 text-sm text-muted-foreground">{t("nurse.ui.currentAdmissionWorkflowStatus")}</p>
 
       <div className="mt-4 flex items-center justify-between rounded-lg border border-border p-4">
         <span

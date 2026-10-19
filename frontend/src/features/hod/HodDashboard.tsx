@@ -127,17 +127,9 @@ export function HodDashboard() {
   if (!department) {
     return (
       <div className="space-y-3 p-6">
-        <h1 className="text-3xl font-semibold">Department dashboard</h1>
-        <p className="max-w-prose text-sm text-muted-foreground">
-          This is a departmental view and your account is not attached to a
-          department. Facility-wide roles such as admin and auditor have no home
-          department, so there is nothing to scope this screen to.
-        </p>
-        <p className="max-w-prose text-sm text-muted-foreground">
-          If you head a department and are seeing this, your user record needs a
-          department set — an administrator can do that from Administration →
-          Users.
-        </p>
+        <h1 className="text-3xl font-semibold">{t("sidebar.hodDashboard")}</h1>
+        <p className="max-w-prose text-sm text-muted-foreground">{t("hod.ui.thisIsADepartmentalViewAnd")}</p>
+        <p className="max-w-prose text-sm text-muted-foreground">{t("hod.ui.ifYouHeadADepartmentAnd")}</p>
       </div>
     );
   }
@@ -149,10 +141,7 @@ export function HodDashboard() {
           <h1 className="text-3xl font-semibold">
             {localizeField(department.name, department.name_hi)}
           </h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Queues, workload and approvals for {facilityToday(user!.facility.timezone)} at{" "}
-            {localizeField(user!.facility.name, user!.facility.name_hi)}.
-          </p>
+          <p className="mt-2 text-sm text-muted-foreground">{t("hod.ui.queuesWorkloadAndApprovalsForTimezone", { timezone: facilityToday(user!.facility.timezone), name_hi: localizeField(user!.facility.name, user!.facility.name_hi) })}</p>
         </div>
         <button type="button" className="text-sm underline" onClick={() => void load()}>
           {t("common.refresh")}
@@ -180,13 +169,8 @@ export function HodDashboard() {
 
       {escalations.length > 0 ? (
         <section className="space-y-3">
-          <h2 className="text-xl font-semibold text-danger">
-            Emergency escalations ({escalations.length})
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            Tokens raised to emergency priority and not yet seen. Listed first
-            because these are the ones where waiting has a clinical cost.
-          </p>
+          <h2 className="text-xl font-semibold text-danger">{t("hod.ui.emergencyEscalationsCount", { count: escalations.length })}</h2>
+          <p className="text-sm text-muted-foreground">{t("hod.ui.tokensRaisedToEmergencyPriorityAnd")}</p>
           <ul className="space-y-2">
             {escalations.map((e) => (
               <li
@@ -229,10 +213,7 @@ export function HodDashboard() {
                   {q.is_open ? "open" : "closed"}
                 </span>
               </div>
-              <p className="mt-1 text-muted-foreground">
-                {q.waiting_count} waiting
-                {q.now_serving ? ` · now serving ${q.now_serving}` : " · none called yet"}
-              </p>
+              <p className="mt-1 text-muted-foreground">{t("hod.ui.waitingCountWaitingValue", { waiting_count: q.waiting_count, value: q.now_serving ? ` · now serving ${q.now_serving}` : " · none called yet" })}</p>
               <QueueHandOver queue={q} others={overview.queues} onDone={() => void load()} />
             </li>
           ))}
@@ -240,27 +221,19 @@ export function HodDashboard() {
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-xl font-semibold">
-          Indents awaiting your approval ({approvals.length})
-        </h2>
-        <p className="text-sm text-muted-foreground">
-          Approval is a departmental budget decision, so these are yours rather
-          than the storekeeper&apos;s. Approve or reject them from Inventory →
-          Indents.
-        </p>
+        <h2 className="text-xl font-semibold">{t("hod.ui.indentsAwaitingYourApprovalCount", { count: approvals.length })}</h2>
+        <p className="text-sm text-muted-foreground">{t("hod.ui.approvalIsADepartmentalBudgetDecision")}</p>
         {approvals.length === 0 ? (
           <p className="text-sm text-muted-foreground">{t("hod.nothingWaiting")}</p>
         ) : (
           <ul className="space-y-2">
             {approvals.map((a) => (
               <li key={a.indent_id} className="rounded border border-border p-3 text-sm">
-                <p className="font-medium">
-                  {a.items.length} item{a.items.length === 1 ? "" : "s"}
-                </p>
+                <p className="font-medium">{t("hod.ui.countItemValue", { count: a.items.length, value: a.items.length === 1 ? "" : "s" })}</p>
                 <ul className="mt-1 text-muted-foreground">
                   {a.items.map((item) => (
                     <li key={item.item_id}>
-                      {item.item_name ?? "Unnamed item"} — {item.quantity_requested}
+                      {item.item_name ?? t("hod.ui.unnamedItem")} — {item.quantity_requested}
                     </li>
                   ))}
                 </ul>
@@ -271,9 +244,7 @@ export function HodDashboard() {
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-xl font-semibold">
-          Outstanding lab work ({labOrders.length})
-        </h2>
+        <h2 className="text-xl font-semibold">{t("hod.ui.outstandingLabWorkCount", { count: labOrders.length })}</h2>
         {labOrders.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             {t("hod.nothingOutstanding")}
@@ -283,10 +254,10 @@ export function HodDashboard() {
             <table className="min-w-full border-collapse text-sm">
               <thead className="bg-muted">
                 <tr>
-                  <th className="px-4 py-3 text-left">Accession</th>
-                  <th className="px-4 py-3 text-left">Test</th>
-                  <th className="px-4 py-3 text-left">Status</th>
-                  <th className="px-4 py-3 text-right">Est. minutes</th>
+                  <th className="px-4 py-3 text-left">{t("lab.col.accession")}</th>
+                  <th className="px-4 py-3 text-left">{t("lab.col.test")}</th>
+                  <th className="px-4 py-3 text-left">{t("common.status")}</th>
+                  <th className="px-4 py-3 text-right">{t("hod.ui.estMinutes")}</th>
                 </tr>
               </thead>
               <tbody>

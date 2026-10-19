@@ -31,6 +31,7 @@ import {
   type HprSystem,
 } from "./api/hpr";
 import { HPR_DOCUMENT_ACCEPT, readHprDocument } from "./hprDocument";
+import { useLocale } from "@/lib/i18n";
 
 const input = "w-full rounded-md border border-border px-3 py-2 text-sm";
 const primary = "rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50";
@@ -72,10 +73,11 @@ function useList<T = HprOption>(key: string | null, load: () => Promise<T[]>): L
 function Pick({ name, label, value, list, onChange }: {
   name: string; label: string; value: string; list: List; onChange: (value: string) => void;
 }) {
+  const { t } = useLocale();
   return (
     <label className="block space-y-1 text-sm"><span className="text-muted-foreground">{label}</span>
       <select name={name} value={value} onChange={(e) => onChange(e.target.value)} disabled={!list.rows} className={input}>
-        <option value="">{list.rows ? "Choose" : list.error ? "Unavailable" : "Loading…"}</option>
+        <option value="">{list.rows ? t("platform.choose") : list.error ? t("doctor.summaryUnavailable") : "Loading…"}</option>
         {(list.rows ?? []).map((row) => <option key={row.code} value={row.code}>{row.label}</option>)}
       </select>
       {list.error ? <span role="alert" className="text-danger">{list.error}</span> : null}
@@ -87,10 +89,11 @@ function Field({ name, label, value, onChange, valid = true, ...rest }: {
   name: string; label: string; value: string; onChange: (value: string) => void; valid?: boolean;
   type?: string; inputMode?: "numeric" | "tel" | "email"; maxLength?: number; max?: string;
 }) {
+  const { t } = useLocale();
   return (
     <label className="block space-y-1 text-sm"><span className="text-muted-foreground">{label}</span>
       <input name={name} value={value} onChange={(e) => onChange(e.target.value)} aria-invalid={value !== "" && !valid} className={input} {...rest} />
-      {value !== "" && !valid ? <span role="alert" className="text-danger">{label} is not valid</span> : null}
+      {value !== "" && !valid ? <span role="alert" className="text-danger">{t("admin.ui.labelIsNotValid", { label })}</span> : null}
     </label>
   );
 }
@@ -98,15 +101,16 @@ function Field({ name, label, value, onChange, valid = true, ...rest }: {
 function Attach({ name, label, value, onChange, onError }: {
   name: string; label: string; value: HprDocument | null; onChange: (value: HprDocument | null) => void; onError: (message: string) => void;
 }) {
+  const { t } = useLocale();
   return (
-    <label className="block space-y-1 text-sm"><span className="text-muted-foreground">{label} (PDF, PNG or JPEG, up to 5 MB)</span>
+    <label className="block space-y-1 text-sm"><span className="text-muted-foreground">{t("admin.ui.labelPdfPngOrJpegUp", { label })}</span>
       <input type="file" name={name} accept={HPR_DOCUMENT_ACCEPT} className={input}
         onChange={(e) => {
           const file = e.target.files?.[0];
           if (!file) { onChange(null); return; }
           readHprDocument(file).then(onChange, (reason: unknown) => onError(reason instanceof Error ? reason.message : "The file could not be read."));
         }} />
-      {value ? <span className="text-xs text-muted-foreground">Attached ({value.file_type.toUpperCase()})</span> : null}
+      {value ? <span className="text-xs text-muted-foreground">{t("admin.ui.attachedValue", { value: value.file_type.toUpperCase() })}</span> : null}
     </label>
   );
 }
@@ -125,15 +129,16 @@ const emptyQualification = (): QualificationDraft => ({
  * never editable; HealthDoc's server reads them from HPR again on submit.
  */
 export function HprProfessionalRegistration({ signedIn }: { signedIn: boolean }) {
+  const { t } = useLocale();
   const [open, setOpen] = useState(false);
   return (
-    <section className="surface-card space-y-3 p-5" aria-label="Register in HPR">
-      <h2 className="text-lg font-semibold">Register a professional in HPR</h2>
+    <section className="surface-card space-y-3 p-5" aria-label={t("admin.ui.registerInHpr")}>
+      <h2 className="text-lg font-semibold">{t("admin.ui.registerAProfessionalInHpr")}</h2>
       {!open ? (
         <>
-          <p className="text-sm text-muted-foreground">Done under the professional&apos;s own HPR login: their registration with a council, qualifications and place of work.</p>
-          <button type="button" className={primary} disabled={!signedIn} onClick={() => setOpen(true)}>Open the HPR registration</button>
-          {!signedIn ? <p className="text-sm text-muted-foreground">Sign in to HPR as the professional above first.</p> : null}
+          <p className="text-sm text-muted-foreground">{t("admin.ui.doneUnderTheProfessionalSOwn")}</p>
+          <button type="button" className={primary} disabled={!signedIn} onClick={() => setOpen(true)}>{t("admin.ui.openTheHprRegistration")}</button>
+          {!signedIn ? <p className="text-sm text-muted-foreground">{t("admin.ui.signInToHprAsThe")}</p> : null}
         </>
       ) : <RegistrationForm signedIn={signedIn} />}
     </section>
@@ -141,6 +146,7 @@ export function HprProfessionalRegistration({ signedIn }: { signedIn: boolean })
 }
 
 function RegistrationForm({ signedIn }: { signedIn: boolean }) {
+  const { t } = useLocale();
   const [profile, setProfile] = useState<HprProfile | null>(null);
   const [registered, setRegistered] = useState<Record<string, unknown> | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -269,56 +275,51 @@ function RegistrationForm({ signedIn }: { signedIn: boolean }) {
 
   if (kycMissing) {
     return (
-      <p role="alert" className="rounded-md border border-border p-3 text-sm">
-        This HPR login carries no Aadhaar details, which HPR registration needs: HPR hands them over only after an Aadhaar
-        verification. Use <strong>Verify Aadhaar on NHA&apos;s page</strong> in the panel above with the professional; it signs
-        them in with their details, whether or not they already have an HPID. Then open this form again.
-      </p>
+      <p role="alert" className="rounded-md border border-border p-3 text-sm">{t("admin.ui.thisHprLoginCarriesNoAadhaar")}{" "}<strong>{t("admin.ui.verifyAadhaarOnNhaSPage")}</strong>{" "}{t("admin.ui.inThePanelAboveWithThe")}</p>
     );
   }
   if (loadError) return <p role="alert" className="text-sm text-danger">{loadError}</p>;
-  if (!profile || !options) return <p role="status" className="text-sm text-muted-foreground">Loading the professional&apos;s HPR profile…</p>;
+  if (!profile || !options) return <p role="status" className="text-sm text-muted-foreground">{t("admin.ui.loadingTheProfessionalSHprProfile")}</p>;
   const reportError = (message: string) => setErrors([message]);
 
   return (
     <div className="space-y-5">
       {registered ? (
-        <p role="status" className="text-sm">HPR already holds a registration for this professional
-          {typeof registered.application_status === "string" ? <> ({registered.application_status})</> : null}. Use <strong>Update in HPR</strong> to change it.</p>
+        <p role="status" className="text-sm">{t("admin.ui.hprAlreadyHoldsARegistrationFor")}{typeof registered.application_status === "string" ? <> ({registered.application_status})</> : null}{t("admin.ui.use")}{" "}<strong>{t("admin.ui.updateInHpr")}</strong>{" "}{t("admin.ui.toChangeIt")}</p>
       ) : null}
 
-      <fieldset className="space-y-2"><legend className="font-medium">From Aadhaar (not editable)</legend>
+      <fieldset className="space-y-2"><legend className="font-medium">{t("admin.ui.fromAadhaarNotEditable")}</legend>
         <div className="flex items-start gap-4 text-sm">
           {profile.photo ? (
             // eslint-disable-next-line @next/next/no-img-element -- the KYC photo as a one-use data URI, not an optimisable asset
-            <img src={`data:image/jpeg;base64,${profile.photo}`} alt="Photograph from Aadhaar" className="h-20 w-16 rounded object-cover" />
+            <img src={`data:image/jpeg;base64,${profile.photo}`} alt={t("admin.ui.photographFromAadhaar")} className="h-20 w-16 rounded object-cover" />
           ) : null}
           <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
-            <dt className="text-muted-foreground">HPR ID</dt><dd className="font-mono">{profile.hpr_id} ({profile.hpr_id_number})</dd>
-            <dt className="text-muted-foreground">Name</dt><dd>{profile.name}</dd>
-            {profile.gender ? <><dt className="text-muted-foreground">Gender</dt><dd>{profile.gender}</dd></> : null}
-            {profile.birth_date ? <><dt className="text-muted-foreground">Date of birth</dt><dd>{profile.birth_date}</dd></> : null}
-            <dt className="text-muted-foreground">Address</dt><dd>{profile.address || "—"}</dd>
-            <dt className="text-muted-foreground">Mobile</dt><dd>{profile.mobile_hint ? `ending ${profile.mobile_hint}` : "—"}</dd>
-            <dt className="text-muted-foreground">Email</dt><dd>{profile.email || "—"}</dd>
+            <dt className="text-muted-foreground">{t("admin.ui.hprId")}</dt><dd className="font-mono">{profile.hpr_id} ({profile.hpr_id_number})</dd>
+            <dt className="text-muted-foreground">{t("field.name")}</dt><dd>{profile.name}</dd>
+            {profile.gender ? <><dt className="text-muted-foreground">{t("admin.ui.gender")}</dt><dd>{profile.gender}</dd></> : null}
+            {profile.birth_date ? <><dt className="text-muted-foreground">{t("field.dob")}</dt><dd>{profile.birth_date}</dd></> : null}
+            <dt className="text-muted-foreground">{t("field.address")}</dt><dd>{profile.address || "—"}</dd>
+            <dt className="text-muted-foreground">{t("field.mobile")}</dt><dd>{profile.mobile_hint ? `ending ${profile.mobile_hint}` : "—"}</dd>
+            <dt className="text-muted-foreground">{t("admin.ui.email")}</dt><dd>{profile.email || "—"}</dd>
           </dl>
         </div>
       </fieldset>
 
-      <fieldset className="grid gap-3 md:grid-cols-3"><legend className="mb-2 font-medium">Personal details</legend>
-        <Pick name="salutation" label="Salutation" value={person.salutation} list={{ rows: options.salutations, error: null }}
+      <fieldset className="grid gap-3 md:grid-cols-3"><legend className="mb-2 font-medium">{t("admin.ui.personalDetails")}</legend>
+        <Pick name="salutation" label={t("admin.ui.salutation")} value={person.salutation} list={{ rows: options.salutations, error: null }}
           onChange={(v) => edit(() => setPerson({ ...person, salutation: v }))} />
-        <Pick name="category" label="Category" value={person.category} list={{ rows: options.categories, error: null }}
+        <Pick name="category" label={t("billing.lineItems.col.category")} value={person.category} list={{ rows: options.categories, error: null }}
           onChange={(v) => edit(() => setPerson({ ...person, category: v, subcategory: "", system: "" }))} />
-        <Pick name="subcategory" label={person.category === "1" ? "System of medicine" : "Subcategory"} value={person.subcategory}
+        <Pick name="subcategory" label={person.category === "1" ? t("admin.ui.systemOfMedicine") : t("admin.ui.subcategory")} value={person.subcategory}
           list={{ rows: person.category ? subcategories : null, error: null }}
           onChange={(v) => { edit(() => setPerson({ ...person, subcategory: v })); if (person.category === "1") { setReg((r) => ({ ...r, council: "" })); setQuals([emptyQualification()]); } }} />
         {person.category && person.category !== "1" ? (
-          <Pick name="system" label="Course system (for HPR's course and college lists)" value={person.system}
+          <Pick name="system" label={t("admin.ui.courseSystemForHprSCourse")} value={person.system}
             list={{ rows: systems.rows ? systemRows : null, error: systems.error }}
             onChange={(v) => { edit(() => setPerson({ ...person, system: v })); setQuals([emptyQualification()]); }} />
         ) : null}
-        <Pick name="nationality" label="Nationality" value={person.nationality} list={countries}
+        <Pick name="nationality" label={t("admin.ui.nationality")} value={person.nationality} list={countries}
           onChange={(v) => edit(() => setPerson({ ...person, nationality: v }))} />
         <span />
         {(["father_name", "mother_name", "spouse_name"] as const).map((field) => (
@@ -326,7 +327,7 @@ function RegistrationForm({ signedIn }: { signedIn: boolean }) {
             value={person[field]} valid={NAME.test(person[field])} maxLength={100}
             onChange={(v) => edit(() => setPerson({ ...person, [field]: v }))} />
         ))}
-        <fieldset className="space-y-1 text-sm md:col-span-3"><legend className="text-muted-foreground">Languages spoken</legend>
+        <fieldset className="space-y-1 text-sm md:col-span-3"><legend className="text-muted-foreground">{t("admin.ui.languagesSpoken")}</legend>
           {languages.error ? <p role="alert" className="text-danger">{languages.error}</p> : null}
           <div className="flex flex-wrap gap-3">
             {(languages.rows ?? []).map((row) => (
@@ -340,49 +341,47 @@ function RegistrationForm({ signedIn }: { signedIn: boolean }) {
         </fieldset>
       </fieldset>
 
-      <fieldset className="grid gap-3 md:grid-cols-3"><legend className="mb-2 font-medium">Communication address</legend>
+      <fieldset className="grid gap-3 md:grid-cols-3"><legend className="mb-2 font-medium">{t("admin.ui.communicationAddress")}</legend>
         <label className="flex items-center gap-2 text-sm md:col-span-3">
-          <input type="checkbox" name="comm_same" checked={comm.same} onChange={(e) => edit(() => setComm({ ...comm, same: e.target.checked }))} />
-          Same as the address from Aadhaar
-        </label>
+          <input type="checkbox" name="comm_same" checked={comm.same} onChange={(e) => edit(() => setComm({ ...comm, same: e.target.checked }))} />{t("admin.ui.sameAsTheAddressFromAadhaar")}</label>
         {!comm.same ? (
           <>
-            <Field name="comm_name" label="Name" value={comm.name} valid={NAME.test(comm.name)} onChange={(v) => edit(() => setComm({ ...comm, name: v }))} />
-            <div className="md:col-span-2"><Field name="comm_address" label="Address" value={comm.address} maxLength={300} onChange={(v) => edit(() => setComm({ ...comm, address: v }))} /></div>
-            <Pick name="comm_state" label="State / UT" value={comm.state} list={states} onChange={(v) => edit(() => setComm({ ...comm, state: v, district: "", sub_district: "" }))} />
-            <Pick name="comm_district" label="District" value={comm.district} list={comm.state ? commDistricts : { rows: null, error: null }}
+            <Field name="comm_name" label={t("field.name")} value={comm.name} valid={NAME.test(comm.name)} onChange={(v) => edit(() => setComm({ ...comm, name: v }))} />
+            <div className="md:col-span-2"><Field name="comm_address" label={t("field.address")} value={comm.address} maxLength={300} onChange={(v) => edit(() => setComm({ ...comm, address: v }))} /></div>
+            <Pick name="comm_state" label={t("admin.ui.stateUt")} value={comm.state} list={states} onChange={(v) => edit(() => setComm({ ...comm, state: v, district: "", sub_district: "" }))} />
+            <Pick name="comm_district" label={t("field.district")} value={comm.district} list={comm.state ? commDistricts : { rows: null, error: null }}
               onChange={(v) => edit(() => setComm({ ...comm, district: v, sub_district: "" }))} />
-            <Pick name="comm_sub_district" label="Sub-district (optional)" value={comm.sub_district} list={comm.district ? commSubDistricts : { rows: null, error: null }}
+            <Pick name="comm_sub_district" label={t("admin.ui.subDistrictOptional")} value={comm.sub_district} list={comm.district ? commSubDistricts : { rows: null, error: null }}
               onChange={(v) => edit(() => setComm({ ...comm, sub_district: v }))} />
-            <Field name="comm_city" label="City / town / village (optional)" value={comm.city} maxLength={100} onChange={(v) => edit(() => setComm({ ...comm, city: v }))} />
-            <Field name="comm_pincode" label="PIN code" value={comm.pincode} valid={PIN.test(comm.pincode)} inputMode="numeric" maxLength={6}
+            <Field name="comm_city" label={t("admin.ui.cityTownVillageOptional")} value={comm.city} maxLength={100} onChange={(v) => edit(() => setComm({ ...comm, city: v }))} />
+            <Field name="comm_pincode" label={t("admin.ui.pinCode")} value={comm.pincode} valid={PIN.test(comm.pincode)} inputMode="numeric" maxLength={6}
               onChange={(v) => edit(() => setComm({ ...comm, pincode: v.replace(/\D/g, "") }))} />
           </>
         ) : null}
         {!profile.mobile_hint ? <HprContactVerifier kind="mobile" contact={verified} onChange={setVerified} /> : null}
         {!profile.email ? <HprContactVerifier kind="email" contact={verified} onChange={setVerified} /> : null}
-        <Field name="public_mobile" label="Public mobile (optional)" value={contact.public_mobile} valid={/^[6-9]\d{9}$/.test(contact.public_mobile)}
+        <Field name="public_mobile" label={t("admin.ui.publicMobileOptional")} value={contact.public_mobile} valid={/^[6-9]\d{9}$/.test(contact.public_mobile)}
           inputMode="tel" maxLength={10} onChange={(v) => edit(() => setContact({ ...contact, public_mobile: v.replace(/\D/g, "") }))} />
-        <Field name="public_email" label="Public email (optional)" value={contact.public_email} inputMode="email"
+        <Field name="public_email" label={t("admin.ui.publicEmailOptional")} value={contact.public_email} inputMode="email"
           valid={/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(contact.public_email)}
           onChange={(v) => edit(() => setContact({ ...contact, public_email: v.trim() }))} />
       </fieldset>
 
-      <fieldset className="grid gap-3 md:grid-cols-3"><legend className="mb-2 font-medium">Registration with a council</legend>
-        <Pick name="council" label="Council" value={reg.council} list={{ rows: councils.rows ? councilRows : null, error: councils.error }}
+      <fieldset className="grid gap-3 md:grid-cols-3"><legend className="mb-2 font-medium">{t("admin.ui.registrationWithACouncil")}</legend>
+        <Pick name="council" label={t("admin.ui.council")} value={reg.council} list={{ rows: councils.rows ? councilRows : null, error: councils.error }}
           onChange={(v) => edit(() => setReg({ ...reg, council: v }))} />
-        <Field name="reg_number" label="Registration number" value={reg.number} valid={REG_NUMBER.test(reg.number)} maxLength={50}
+        <Field name="reg_number" label={t("admin.ui.registrationNumber")} value={reg.number} valid={REG_NUMBER.test(reg.number)} maxLength={50}
           onChange={(v) => edit(() => setReg({ ...reg, number: v.trim() }))} />
-        <Field name="reg_date" label="Registration date" type="date" max={today()} value={reg.registered_on} valid={reg.registered_on <= today()}
+        <Field name="reg_date" label={t("admin.ui.registrationDate")} type="date" max={today()} value={reg.registered_on} valid={reg.registered_on <= today()}
           onChange={(v) => edit(() => setReg({ ...reg, registered_on: v }))} />
-        <Attach name="reg_certificate" label="Registration certificate" value={reg.certificate} onError={reportError}
+        <Attach name="reg_certificate" label={t("admin.ui.registrationCertificate")} value={reg.certificate} onError={reportError}
           onChange={(v) => edit(() => setReg((r) => ({ ...r, certificate: v })))} />
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="reg_renewable" checked={reg.renewable}
-          onChange={(e) => edit(() => setReg({ ...reg, renewable: e.target.checked }))} />Renewable registration</label>
-        {reg.renewable ? <Field name="reg_due" label="Renewal due date" type="date" value={reg.renewal_due} onChange={(v) => edit(() => setReg({ ...reg, renewal_due: v }))} /> : <span />}
+          onChange={(e) => edit(() => setReg({ ...reg, renewable: e.target.checked }))} />{t("admin.ui.renewableRegistration")}</label>
+        {reg.renewable ? <Field name="reg_due" label={t("admin.ui.renewalDueDate")} type="date" value={reg.renewal_due} onChange={(v) => edit(() => setReg({ ...reg, renewal_due: v }))} /> : <span />}
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="reg_name_differs" checked={reg.name_differs}
-          onChange={(e) => edit(() => setReg({ ...reg, name_differs: e.target.checked }))} />The name on the certificate differs</label>
-        {reg.name_differs ? <Attach name="reg_name_proof" label="Proof of name change" value={reg.name_change_proof} onError={reportError}
+          onChange={(e) => edit(() => setReg({ ...reg, name_differs: e.target.checked }))} />{t("admin.ui.theNameOnTheCertificateDiffers")}</label>
+        {reg.name_differs ? <Attach name="reg_name_proof" label={t("admin.ui.proofOfNameChange")} value={reg.name_change_proof} onError={reportError}
           onChange={(v) => edit(() => setReg((r) => ({ ...r, name_change_proof: v })))} /> : null}
       </fieldset>
 
@@ -391,58 +390,58 @@ function RegistrationForm({ signedIn }: { signedIn: boolean }) {
           months={options.months} onChange={(change) => setQual(index, change)} onError={reportError}
           onRemove={quals.length > 1 ? () => edit(() => setQuals((rows) => rows.filter((_, i) => i !== index))) : null} />
       ))}
-      <button type="button" className="text-sm underline" onClick={() => edit(() => setQuals((rows) => [...rows, emptyQualification()]))}>Add another qualification</button>
+      <button type="button" className="text-sm underline" onClick={() => edit(() => setQuals((rows) => [...rows, emptyQualification()]))}>{t("admin.ui.addAnotherQualification")}</button>
 
-      <fieldset className="grid gap-3 md:grid-cols-3"><legend className="mb-2 font-medium">Current work</legend>
-        <Pick name="working" label="Currently working?" value={work.working}
+      <fieldset className="grid gap-3 md:grid-cols-3"><legend className="mb-2 font-medium">{t("admin.ui.currentWork")}</legend>
+        <Pick name="working" label={t("admin.ui.currentlyWorking")} value={work.working}
           list={{ rows: [{ code: "yes", label: "Yes" }, { code: "no", label: "No" }], error: null }}
           onChange={(v) => edit(() => setWork({ ...work, working: v }))} />
         {work.working === "no" ? (
           <>
-            <Pick name="not_working_reason" label="Reason" value={work.reason}
+            <Pick name="not_working_reason" label={t("inventory.adjustment.reason")} value={work.reason}
               list={{ rows: [...options.not_working_reasons, "Other"].map((r) => ({ code: r, label: r })), error: null }}
               onChange={(v) => edit(() => setWork({ ...work, reason: v }))} />
-            {work.reason === "Other" ? <Field name="not_working_other" label="The reason" value={work.other_reason} maxLength={100}
+            {work.reason === "Other" ? <Field name="not_working_other" label={t("admin.ui.theReason")} value={work.other_reason} maxLength={100}
               onChange={(v) => edit(() => setWork({ ...work, other_reason: v }))} /> : null}
           </>
         ) : null}
         {work.working === "yes" ? (
           <>
-            <Pick name="work_purpose" label="Nature of work" value={work.purpose}
+            <Pick name="work_purpose" label={t("admin.ui.natureOfWork")} value={work.purpose}
               list={{ rows: options.purposes.map((p) => ({ code: p, label: p })), error: null }}
               onChange={(v) => edit(() => setWork({ ...work, purpose: v }))} />
-            <Pick name="work_status" label="Government, private or both" value={work.status} list={{ rows: options.work_status, error: null }}
+            <Pick name="work_status" label={t("admin.ui.governmentPrivateOrBoth")} value={work.status} list={{ rows: options.work_status, error: null }}
               onChange={(v) => edit(() => setWork({ ...work, status: v }))} />
             {work.status && work.status !== "PRIVATE" ? (
               <>
-                <Pick name="government_type" label="Central or state government" value={work.government_type}
+                <Pick name="government_type" label={t("admin.ui.centralOrStateGovernment")} value={work.government_type}
                   list={{ rows: options.government_types, error: null }} onChange={(v) => edit(() => setWork({ ...work, government_type: v }))} />
-                {work.government_type === "CENTRAL" ? <Field name="ministry" label="Ministry" value={work.ministry} maxLength={150}
+                {work.government_type === "CENTRAL" ? <Field name="ministry" label={t("admin.ui.ministry")} value={work.ministry} maxLength={150}
                   onChange={(v) => edit(() => setWork({ ...work, ministry: v }))} /> : null}
-                <Attach name="work_proof" label="Payslip or recent transfer order" value={work.proof}
+                <Attach name="work_proof" label={t("admin.ui.payslipOrRecentTransferOrder")} value={work.proof}
                   onError={reportError} onChange={(v) => edit(() => setWork((w) => ({ ...w, proof: v })))} />
               </>
             ) : null}
-            <Field name="facility_id" label="Facility ID (HFR) where they work" value={work.facility_id} valid={FACILITY_ID.test(work.facility_id)}
+            <Field name="facility_id" label={t("admin.ui.facilityIdHfrWhereTheyWork")} value={work.facility_id} valid={FACILITY_ID.test(work.facility_id)}
               maxLength={12} onChange={(v) => edit(() => setWork({ ...work, facility_id: v.trim().toUpperCase() }))} />
-            <Field name="department" label="Department (optional)" value={work.department} maxLength={100} onChange={(v) => edit(() => setWork({ ...work, department: v }))} />
-            <Field name="designation" label="Designation (optional)" value={work.designation} maxLength={100} onChange={(v) => edit(() => setWork({ ...work, designation: v }))} />
+            <Field name="department" label={t("admin.ui.departmentOptional")} value={work.department} maxLength={100} onChange={(v) => edit(() => setWork({ ...work, department: v }))} />
+            <Field name="designation" label={t("admin.ui.designationOptional")} value={work.designation} maxLength={100} onChange={(v) => edit(() => setWork({ ...work, designation: v }))} />
           </>
         ) : null}
       </fieldset>
 
-      <fieldset className="flex flex-wrap gap-4 text-sm"><legend className="mb-2 font-medium">Visibility</legend>
+      <fieldset className="flex flex-wrap gap-4 text-sm"><legend className="mb-2 font-medium">{t("admin.ui.visibility")}</legend>
         <label className="flex items-center gap-2"><input type="checkbox" name="show_photo" checked={visibility.show_photo}
-          onChange={(e) => edit(() => setVisibility({ ...visibility, show_photo: e.target.checked }))} />Show the profile photograph</label>
+          onChange={(e) => edit(() => setVisibility({ ...visibility, show_photo: e.target.checked }))} />{t("admin.ui.showTheProfilePhotograph")}</label>
         <label className="flex items-center gap-2"><input type="checkbox" name="public_profile" checked={visibility.public_profile}
-          onChange={(e) => edit(() => setVisibility({ ...visibility, public_profile: e.target.checked }))} />Profile visible to the public</label>
+          onChange={(e) => edit(() => setVisibility({ ...visibility, public_profile: e.target.checked }))} />{t("admin.ui.profileVisibleToThePublic")}</label>
       </fieldset>
 
       <div className="flex flex-wrap gap-2">
-        {!registered ? <button type="button" className={primary} disabled={busy || !signedIn || !valid} onClick={() => void submit(false)}>{busy ? "Submitting…" : "Submit to HPR"}</button> : null}
-        <button type="button" className={registered ? primary : secondary} disabled={busy || !signedIn || !valid} onClick={() => void submit(true)}>Update in HPR</button>
+        {!registered ? <button type="button" className={primary} disabled={busy || !signedIn || !valid} onClick={() => void submit(false)}>{busy ? "Submitting…" : t("admin.ui.submitToHpr")}</button> : null}
+        <button type="button" className={registered ? primary : secondary} disabled={busy || !signedIn || !valid} onClick={() => void submit(true)}>{t("admin.ui.updateInHpr")}</button>
       </div>
-      {!signedIn ? <p role="alert" className="text-sm text-danger">The HPR login has ended. Sign in again above to continue.</p> : null}
+      {!signedIn ? <p role="alert" className="text-sm text-danger">{t("admin.ui.theHprLoginHasEndedSign")}</p> : null}
       {notice ? (
         <p ref={(node) => node?.scrollIntoView({ block: "center", behavior: "smooth" })} role="status"
           className="rounded-md border border-success/30 bg-success-muted p-3 text-sm font-medium text-success">{notice}</p>
@@ -456,29 +455,30 @@ function Qualification({ index, q, systemName, courses, states, months, onChange
   index: number; q: QualificationDraft; systemName: string; courses: List; states: List; months: string[];
   onChange: (change: Partial<QualificationDraft>) => void; onError: (message: string) => void; onRemove: (() => void) | null;
 }) {
+  const { t } = useLocale();
   const colleges = useList(q.state && systemName ? `colleges:${q.state}:${systemName}` : null, () => hprColleges(q.state, systemName));
   const universities = useList(q.college ? `universities:${q.college}` : null, () => hprUniversities(q.college));
   const n = (name: string) => `q${index}_${name}`;
   return (
     <fieldset className="grid gap-3 rounded-md border border-border p-3 md:grid-cols-3">
-      <legend className="px-1 font-medium">Qualification {index + 1}</legend>
-      {!systemName ? <p className="text-sm text-muted-foreground md:col-span-3">Choose the system of medicine above first.</p> : null}
-      <Pick name={n("degree")} label="Degree or diploma" value={q.degree} list={systemName ? courses : { rows: null, error: null }} onChange={(v) => onChange({ degree: v })} />
-      <Pick name={n("state")} label="State of the college" value={q.state} list={states} onChange={(v) => onChange({ state: v, college: "", university: "" })} />
-      <Pick name={n("college")} label="College" value={q.college} list={q.state && systemName ? colleges : { rows: null, error: null }}
+      <legend className="px-1 font-medium">{t("admin.ui.qualificationValue", { value: index + 1 })}</legend>
+      {!systemName ? <p className="text-sm text-muted-foreground md:col-span-3">{t("admin.ui.chooseTheSystemOfMedicineAbove")}</p> : null}
+      <Pick name={n("degree")} label={t("admin.ui.degreeOrDiploma")} value={q.degree} list={systemName ? courses : { rows: null, error: null }} onChange={(v) => onChange({ degree: v })} />
+      <Pick name={n("state")} label={t("admin.ui.stateOfTheCollege")} value={q.state} list={states} onChange={(v) => onChange({ state: v, college: "", university: "" })} />
+      <Pick name={n("college")} label={t("admin.ui.college")} value={q.college} list={q.state && systemName ? colleges : { rows: null, error: null }}
         onChange={(v) => onChange({ college: v, university: "" })} />
-      <Pick name={n("university")} label="University" value={q.university} list={q.college ? universities : { rows: null, error: null }}
+      <Pick name={n("university")} label={t("admin.ui.university")} value={q.university} list={q.college ? universities : { rows: null, error: null }}
         onChange={(v) => onChange({ university: v })} />
-      <Field name={n("year")} label="Year awarded" value={q.year} inputMode="numeric" maxLength={4}
+      <Field name={n("year")} label={t("admin.ui.yearAwarded")} value={q.year} inputMode="numeric" maxLength={4}
         valid={/^\d{4}$/.test(q.year) && Number(q.year) <= new Date().getFullYear()} onChange={(v) => onChange({ year: v.replace(/\D/g, "") })} />
-      <Pick name={n("month")} label="Month awarded (optional)" value={q.month} list={{ rows: months.map((m) => ({ code: m, label: m })), error: null }}
+      <Pick name={n("month")} label={t("admin.ui.monthAwardedOptional")} value={q.month} list={{ rows: months.map((m) => ({ code: m, label: m })), error: null }}
         onChange={(v) => onChange({ month: v })} />
-      <Attach name={n("certificate")} label="Degree certificate" value={q.certificate} onError={onError} onChange={(v) => onChange({ certificate: v })} />
+      <Attach name={n("certificate")} label={t("admin.ui.degreeCertificate")} value={q.certificate} onError={onError} onChange={(v) => onChange({ certificate: v })} />
       <label className="flex items-center gap-2 text-sm"><input type="checkbox" name={n("name_differs")} checked={q.name_differs}
-        onChange={(e) => onChange({ name_differs: e.target.checked })} />The name on the certificate differs</label>
-      {q.name_differs ? <Attach name={n("name_proof")} label="Proof of name change" value={q.name_change_proof} onError={onError}
+        onChange={(e) => onChange({ name_differs: e.target.checked })} />{t("admin.ui.theNameOnTheCertificateDiffers")}</label>
+      {q.name_differs ? <Attach name={n("name_proof")} label={t("admin.ui.proofOfNameChange")} value={q.name_change_proof} onError={onError}
         onChange={(v) => onChange({ name_change_proof: v })} /> : null}
-      {onRemove ? <button type="button" className="text-sm underline md:col-span-3" onClick={onRemove}>Remove this qualification</button> : null}
+      {onRemove ? <button type="button" className="text-sm underline md:col-span-3" onClick={onRemove}>{t("admin.ui.removeThisQualification")}</button> : null}
     </fieldset>
   );
 }

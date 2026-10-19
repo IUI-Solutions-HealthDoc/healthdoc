@@ -9,6 +9,7 @@ import Barcode from "react-barcode";
 import DownloadPdfButton from "./DownloadPdfButton";
 import { formatDateTime } from "./utils";
 import type { ReportData } from "./types/report";
+import { useLocale } from "@/lib/i18n";
 
 interface ReportProps {
   report: ReportData;
@@ -32,6 +33,7 @@ const FLAG_LABEL: Record<string, string> = {
 };
 
 export default function Report({ report }: ReportProps) {
+  const { t } = useLocale();
   const searchParams = useSearchParams();
   const isPdfMode = searchParams.get("pdf") === "1";
 
@@ -47,7 +49,7 @@ export default function Report({ report }: ReportProps) {
     <div className="lab-report-shell pr-shell print:bg-white print:p-0">
       <div data-pdf-hide className="pr-toolbar print:hidden">
         <div>
-          <h1>Pathology Report Preview</h1>
+          <h1>{t("common.ui.pathologyReportPreview")}</h1>
           <p>
             {report.patient.name} · {report.reportInfo.reportNumber} ·{" "}
             {formatDateTime(report.reportInfo.reportedAt)}
@@ -60,9 +62,7 @@ export default function Report({ report }: ReportProps) {
             onClick={() => window.print()}
           >
             <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <Printer size={15} />
-              Print
-            </span>
+              <Printer size={15} />{t("common.ui.print")}</span>
           </button>
           <DownloadPdfButton
             reportNumber={report.reportInfo.reportNumber}
@@ -78,6 +78,7 @@ export default function Report({ report }: ReportProps) {
 }
 
 function PathologyReportDocument({ report }: { report: ReportData }) {
+  const { t } = useLocale();
   const lab = report.laboratory;
   const signatories =
     report.signatories ??
@@ -109,7 +110,7 @@ function PathologyReportDocument({ report }: { report: ReportData }) {
             {lab.tagline && <p className="pr-tagline">{lab.tagline}</p>}
             <p className="pr-address">{lab.address}</p>
             {lab.nablNumber && (
-              <p className="pr-nabl">NABL Accredited · {lab.nablNumber}</p>
+              <p className="pr-nabl">{t("common.ui.nablAccreditedNablnumber", { nablNumber: lab.nablNumber })}</p>
             )}
           </div>
 
@@ -152,13 +153,11 @@ function PathologyReportDocument({ report }: { report: ReportData }) {
                 <div className="pr-patient-row">
                   <div>
                     <p className="pr-patient-name">{report.patient.name}</p>
-                    <p className="pr-kv">
-                      Age : {report.patient.age} Years{" "}
-                      <span style={{ color: "#cbd5e1" }}>|</span> Sex:{" "}
+                    <p className="pr-kv">{t("common.ui.age")}{" "}{report.patient.age}{" "}{t("common.ui.years")}{" "}
+                      <span style={{ color: "#cbd5e1" }}>|</span>{" "}{t("common.ui.sex")}{" "}
                       {report.patient.gender}
                     </p>
-                    <p className="pr-kv">
-                      PID : <strong>{report.patient.patientId}</strong>
+                    <p className="pr-kv">{t("common.ui.pid")}{" "}<strong>{report.patient.patientId}</strong>
                     </p>
                   </div>
                   <div className="pr-qr">
@@ -172,12 +171,12 @@ function PathologyReportDocument({ report }: { report: ReportData }) {
               </td>
 
               <td className="pr-patient-mid">
-                <p className="pr-label">Sample Collected At:</p>
+                <p className="pr-label">{t("common.ui.sampleCollectedAt")}</p>
                 <p className="pr-muted">
                   {report.sample.collectedAtLocation || lab.address}
                 </p>
                 <p className="pr-kv" style={{ marginTop: 10 }}>
-                  <strong>Ref. By:</strong> {report.doctor.name}
+                  <strong>{t("common.ui.refBy")}</strong> {report.doctor.name}
                 </p>
               </td>
 
@@ -196,15 +195,15 @@ function PathologyReportDocument({ report }: { report: ReportData }) {
                 <table className="pr-time-table">
                   <tbody>
                     <tr>
-                      <td>Registered on</td>
+                      <td>{t("common.ui.registeredOn")}</td>
                       <td>{formatDateTime(report.order.orderedAt)}</td>
                     </tr>
                     <tr>
-                      <td>Collected on</td>
+                      <td>{t("common.ui.collectedOn")}</td>
                       <td>{formatDateTime(report.sample.collectedAt)}</td>
                     </tr>
                     <tr>
-                      <td>Reported on</td>
+                      <td>{t("common.ui.reportedOn")}</td>
                       <td>{formatDateTime(report.reportInfo.reportedAt)}</td>
                     </tr>
                   </tbody>
@@ -218,17 +217,15 @@ function PathologyReportDocument({ report }: { report: ReportData }) {
 
         {/* Results */}
         <div className="pr-results-wrap">
-          <div className="pr-watermark" aria-hidden>
-            ABC
-          </div>
+          <div className="pr-watermark" aria-hidden>{t("common.ui.abc")}</div>
 
           <table className="pr-results">
             <thead>
               <tr>
-                <th>Investigation</th>
-                <th>Result</th>
-                <th>Reference Value</th>
-                <th>Unit</th>
+                <th>{t("common.ui.investigation")}</th>
+                <th>{t("common.ui.result")}</th>
+                <th>{t("common.ui.referenceValue")}</th>
+                <th>{t("common.ui.unit")}</th>
               </tr>
             </thead>
             <tbody>
@@ -274,19 +271,19 @@ function PathologyReportDocument({ report }: { report: ReportData }) {
         <div className="pr-notes">
           {report.reportInfo.instruments && (
             <p>
-              <strong>Instruments:</strong> {report.reportInfo.instruments}
+              <strong>{t("common.ui.instruments")}</strong> {report.reportInfo.instruments}
             </p>
           )}
           {report.remarks.interpretation && (
             <p>
-              <strong>Interpretation:</strong> {report.remarks.interpretation}
+              <strong>{t("common.ui.interpretation")}</strong> {report.remarks.interpretation}
             </p>
           )}
         </div>
 
         <div className="pr-end">
-          <span>Thanks for Reference!!!</span>
-          <span>****End of report****</span>
+          <span>{t("common.ui.thanksForReference")}</span>
+          <span>{t("common.ui.endOfReport")}</span>
         </div>
 
         {/* Signatures */}
@@ -314,7 +311,7 @@ function PathologyReportDocument({ report }: { report: ReportData }) {
 
         <div className="pr-gen">
           <span>
-            <strong>Generated on:</strong>{" "}
+            <strong>{t("common.ui.generatedOn")}</strong>{" "}
             {formatDateTime(report.footer.generatedAt)}
           </span>
         </div>
@@ -323,10 +320,10 @@ function PathologyReportDocument({ report }: { report: ReportData }) {
       <div className="pr-band pr-band-footer">
         <div className="pr-band-stripes" />
         <div className="pr-band-right" />
-        <div className="pr-band-left-label">Sample Collection</div>
+        <div className="pr-band-left-label">{t("common.ui.sampleCollection")}</div>
         {report.footer.whatsapp && (
           <div className="pr-band-right-label">
-            <span>WhatsApp</span>
+            <span>{t("common.ui.whatsapp")}</span>
             <span>{report.footer.whatsapp}</span>
           </div>
         )}

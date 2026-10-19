@@ -72,30 +72,25 @@ export default function IncidentReportForm({
 
   return (
     <form onSubmit={handleSubmit} className="surface-card space-y-4 p-6">
-      <h2 className="text-lg font-semibold">Report a Clinical Incident</h2>
-      <p className="text-sm text-muted-foreground">
-        NABH DHS register (`clinical_incidents`). Patient is optional — staff/equipment
-        events may have none. Severity is harm that reached the patient; near-miss is a type.
-      </p>
+      <h2 className="text-lg font-semibold">{t("nurse.ui.reportAClinicalIncident")}</h2>
+      <p className="text-sm text-muted-foreground">{t("nurse.ui.nabhDhsRegisterClinicalIncidentsPatient")}</p>
 
       {success && (
-        <p className="rounded bg-green-50 p-2 text-sm text-green-700">
-          Incident reported successfully.
-        </p>
+        <p className="rounded bg-green-50 p-2 text-sm text-green-700">{t("nurse.ui.incidentReportedSuccessfully")}</p>
       )}
       {error && (
         <p className="rounded bg-red-50 p-2 text-sm text-red-700">{error}</p>
       )}
 
       <div>
-        <label className="mb-1 block text-sm font-medium">Incident Type *</label>
+        <label className="mb-1 block text-sm font-medium">{t("nurse.ui.incidentType")}</label>
         <select
           value={incidentType}
           onChange={(e) => setIncidentType(e.target.value as IncidentType)}
           className="w-full rounded border border-border p-2 text-sm"
           required
         >
-          <option value="">Select type</option>
+          <option value="">{t("nurse.ui.selectType")}</option>
           {INCIDENT_TYPES.map((t) => (
             <option key={t.value} value={t.value}>{t.label}</option>
           ))}
@@ -103,14 +98,14 @@ export default function IncidentReportForm({
       </div>
 
       <div>
-        <label className="mb-1 block text-sm font-medium">Severity *</label>
+        <label className="mb-1 block text-sm font-medium">{t("nurse.ui.severity")}</label>
         <select
           value={severity}
           onChange={(e) => setSeverity(e.target.value as IncidentSeverity)}
           className="w-full rounded border border-border p-2 text-sm"
           required
         >
-          <option value="">Select severity</option>
+          <option value="">{t("nurse.ui.selectSeverity")}</option>
           {SEVERITIES.map((s) => (
             <option key={s.value} value={s.value}>{s.label}</option>
           ))}
@@ -118,7 +113,7 @@ export default function IncidentReportForm({
       </div>
 
       <div>
-        <label className="mb-1 block text-sm font-medium">Occurred At *</label>
+        <label className="mb-1 block text-sm font-medium">{t("nurse.ui.occurredAt")}</label>
         <input
           type="datetime-local"
           value={occurredAt}
@@ -130,7 +125,7 @@ export default function IncidentReportForm({
       </div>
 
       <div>
-        <label className="mb-1 block text-sm font-medium">Description *</label>
+        <label className="mb-1 block text-sm font-medium">{t("nurse.ui.description")}</label>
         <textarea
           value={description}
           onChange={(e) => setDescription(e.target.value)}
@@ -141,7 +136,7 @@ export default function IncidentReportForm({
       </div>
 
       <div>
-        <label className="mb-1 block text-sm font-medium">Immediate Action Taken *</label>
+        <label className="mb-1 block text-sm font-medium">{t("nurse.ui.immediateActionTaken")}</label>
         <textarea
           value={immediateAction}
           onChange={(e) => setImmediateAction(e.target.value)}

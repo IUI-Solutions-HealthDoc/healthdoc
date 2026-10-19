@@ -102,7 +102,7 @@ export function TariffWorkspace() {
     <Typography variant="body2">{t("billing.tariff.enabledHint")}</Typography>
     {error ? <Alert severity="error">{error} {t("billing.tariff.reloadRetry")}</Alert> : loading || snapshot?.history !== includeRetired ?
       <Typography role="status">{t("billing.tariff.loading")}</Typography> : <Box sx={{ border: `1px solid ${meridian.border}`, borderRadius: 3, overflow: "hidden", backgroundColor: meridian.surface }}>
-        <TableContainer><Table size="small" aria-label="Tariff versions">
+        <TableContainer><Table size="small" aria-label={t("billing.ui.tariffVersions")}>
           <TableHead><TableRow>{TABLE_COLUMN_KEYS.map((key) => <TableCell key={key}>{t(key)}</TableCell>)}</TableRow></TableHead>
           <TableBody>{rows.slice(visiblePage * 15, visiblePage * 15 + 15).map((row) => <TableRow key={row.id}>
             <TableCell><Typography sx={{ fontWeight: 600 }}>{row.charge_code}</Typography>{localizeField(row.description, row.description_hi)}</TableCell>

@@ -263,7 +263,7 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
             name={registered.full_name}
             size="xl"
           />
-          <p className="text-sm text-muted-foreground">Registered Patient</p>
+          <p className="text-sm text-muted-foreground">{t("receptionist.ui.registeredPatient")}</p>
           <p className="font-mono text-3xl font-bold">{registered.uhid ?? registered.thid}</p>
           <p className="text-xl font-medium">{registered.full_name}</p>
           {photoStatus === "uploading" ? (
@@ -291,8 +291,7 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
             {registered.dob ? ` (DOB: ${registered.dob})` : ""}
           </p>
           {registered.guardian_name && (
-            <p className="text-xs text-muted-foreground">
-              Guardian: {registered.guardian_name} ({registered.guardian_relationship ?? "Guardian"})
+            <p className="text-xs text-muted-foreground">{t("nurse.ui.guardian")}{" "}{registered.guardian_name} ({registered.guardian_relationship ?? t("receptionist.ui.guardian")})
             </p>
           )}
           {registered.address_line && (
@@ -309,9 +308,7 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
               onClick={() => setShowCardModal(true)}
               className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-4 py-2 text-sm font-semibold hover:bg-muted shadow-sm"
             >
-              <Printer size={16} />
-              Print Patient Card
-            </button>
+              <Printer size={16} />{t("receptionist.ui.printPatientCard")}</button>
           </div>
         </div>
 
@@ -329,9 +326,7 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
             // replay this registration, visit and token.
             onClick={() => window.location.reload()}
             className="text-sm underline"
-          >
-            Register another patient
-          </button>
+          >{t("emergency.registerAnother")}</button>
         </div>
 
         {showCardModal && (
@@ -359,7 +354,7 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
             minLength={2}
           />
           {fullName && !fullNameValid ? (
-            <span className="text-xs text-danger">Enter a valid name without digits or markup characters.</span>
+            <span className="text-xs text-danger">{t("receptionist.ui.enterAValidNameWithoutDigits")}</span>
           ) : null}
         </label>
 
@@ -384,9 +379,7 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
           <div className="flex items-center justify-between">
             <span className="text-muted-foreground">{t("field.ageDob")} *</span>
             {derivedAge && (
-              <span className="rounded bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
-                Derived: {derivedAge.displayText}
-              </span>
+              <span className="rounded bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">{t("receptionist.ui.derivedDisplaytext", { displayText: derivedAge.displayText })}</span>
             )}
           </div>
           <div className="flex gap-2">
@@ -428,9 +421,7 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
           </div>
           {ageError ? <span className="text-xs text-danger">{ageError}</span> : null}
           {isMinor ? (
-            <span className="text-xs text-muted-foreground">
-              Under 18: enter the guardian under Additional Demographics.
-            </span>
+            <span className="text-xs text-muted-foreground">{t("receptionist.ui.under18EnterTheGuardianUnder")}</span>
           ) : null}
         </div>
 
@@ -446,7 +437,7 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
             placeholder={t("patient.mobilePlaceholder")}
           />
           {!mobileValid ? (
-            <span className="text-xs text-danger">Enter a valid Indian mobile number.</span>
+            <span className="text-xs text-danger">{t("receptionist.ui.enterAValidIndianMobileNumber")}</span>
           ) : null}
         </label>
 
@@ -461,13 +452,13 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
             maxLength={20}
           />
           {!abhaValid ? (
-            <span className="text-xs text-danger">ABHA number must contain 14 digits.</span>
+            <span className="text-xs text-danger">{t("receptionist.ui.abhaNumberMustContain14Digits")}</span>
           ) : null}
         </label>
 
         {/* Patient Photo Selection (HD-08) */}
         <div className="space-y-1 text-sm sm:col-span-2">
-          <span className="text-muted-foreground">Patient Photograph (Optional, max 2MB)</span>
+          <span className="text-muted-foreground">{t("receptionist.ui.patientPhotographOptionalMax2mb")}</span>
           <div className="flex items-center gap-4 pt-1">
             {photoPreview ? (
               <div className="relative">
@@ -476,7 +467,7 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={photoPreview}
-                  alt="Patient preview"
+                  alt={t("receptionist.ui.patientPreview")}
                   className="h-16 w-16 rounded-full border border-border object-cover shadow-sm"
                 />
                 <button
@@ -505,10 +496,7 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
           onClick={() => setShowAddressDetails((shown) => !shown)}
           className="flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
         >
-          <span>
-            {showAddressDetails || isMinor ? "▼" : "▶"} Additional Demographics & Address
-            {isMinor ? " (guardian required)" : " (Optional)"}
-          </span>
+          <span>{t("receptionist.ui.valueAdditionalDemographicsAddressValue2", { value: showAddressDetails || isMinor ? "▼" : "▶", value2: isMinor ? " (guardian required)" : " (Optional)" })}</span>
         </button>
 
         {(showAddressDetails || isMinor) && (
@@ -523,9 +511,9 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
                 placeholder={t("receptionist.phGuardianName")}
               />
               {!guardianNameValid ? (
-                <span className="text-xs text-danger">Enter a valid name without digits or markup characters.</span>
+                <span className="text-xs text-danger">{t("receptionist.ui.enterAValidNameWithoutDigits")}</span>
               ) : guardianMissing ? (
-                <span className="text-xs text-danger">A patient under 18 needs a guardian.</span>
+                <span className="text-xs text-danger">{t("receptionist.ui.aPatientUnder18NeedsA")}</span>
               ) : null}
             </label>
 
@@ -537,15 +525,15 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
                 value={guardianRelationship}
                 onChange={(e) => setGuardianRelationship(e.target.value)}
               >
-                <option value="">Select relationship…</option>
-                <option value="father">Father</option>
-                <option value="mother">Mother</option>
-                <option value="spouse">Spouse</option>
-                <option value="guardian">Guardian</option>
-                <option value="other">Other</option>
+                <option value="">{t("receptionist.ui.selectRelationship")}</option>
+                <option value="father">{t("receptionist.ui.father")}</option>
+                <option value="mother">{t("receptionist.ui.mother")}</option>
+                <option value="spouse">{t("receptionist.ui.spouse")}</option>
+                <option value="guardian">{t("receptionist.ui.guardian")}</option>
+                <option value="other">{t("equipment.category.other")}</option>
               </select>
               {relationshipMissing ? (
-                <span className="text-xs text-danger">Choose how the guardian is related to the patient.</span>
+                <span className="text-xs text-danger">{t("receptionist.ui.chooseHowTheGuardianIsRelated")}</span>
               ) : null}
             </label>
 
@@ -622,25 +610,23 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
 
       {duplicates.length > 0 && (
         <div role="alert" className="space-y-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-          <p className="font-semibold">This patient may already be registered.</p>
-          <p>Same name, age and mobile as:</p>
+          <p className="font-semibold">{t("receptionist.ui.thisPatientMayAlreadyBeRegistered")}</p>
+          <p>{t("receptionist.ui.sameNameAgeAndMobileAs")}</p>
           <ul className="list-disc pl-5">
             {duplicates.map((candidate) => (
               <li key={candidate.patient_id}>
-                {candidate.full_name} · UHID {candidate.uhid ?? "not issued"}
+                {candidate.full_name}{" "}{t("receptionist.ui.uhid")}{" "}{candidate.uhid ?? "not issued"}
                 {candidate.dob ? ` · DOB ${candidate.dob}` : candidate.age_years !== null ? ` · ${candidate.age_years} years` : ""}
               </li>
             ))}
           </ul>
-          <p>Search by UHID to open that record. Register only if this is a different person.</p>
+          <p>{t("receptionist.ui.searchByUhidToOpenThat")}</p>
           <button
             type="button"
             disabled={busy}
             onClick={(event) => void submit(event, true)}
             className="rounded-md border border-amber-400 bg-white px-3 py-1 text-xs font-semibold hover:bg-amber-100 disabled:opacity-50"
-          >
-            Different person: register anyway
-          </button>
+          >{t("receptionist.ui.differentPersonRegisterAnyway")}</button>
         </div>
       )}
 
@@ -652,7 +638,7 @@ export function RegistrationForm({ onRegistered }: { onRegistered?: (p: Patient)
         {busy ? t("forms.saving") : t("receptionist.registerPatient")}
       </button>
       {!busy && blockers.length > 0 ? (
-        <p className="text-xs text-muted-foreground">Still needed: {blockers.join(", ")}.</p>
+        <p className="text-xs text-muted-foreground">{t("receptionist.ui.stillNeededValue", { value: blockers.join(", ") })}</p>
       ) : null}
     </form>
   );

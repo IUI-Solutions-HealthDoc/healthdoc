@@ -93,22 +93,18 @@ function Approvals() {
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
                 <h2 className="font-medium">{item.patient_full_name}</h2>
-                <p className="text-sm text-muted-foreground">
-                  {item.uhid ?? item.patient_id} · requested {formatDateTime(item.requested_at)}
-                </p>
+                <p className="text-sm text-muted-foreground">{t("doctor.ui.patientIdRequestedRequestedAt", { patient_id: item.uhid ?? item.patient_id, requested_at: formatDateTime(item.requested_at) })}</p>
               </div>
-              <span className="rounded-full bg-warning-muted px-3 py-1 text-xs font-medium text-warning">
-                Pending · quantity {item.quantity_requested}
-              </span>
+              <span className="rounded-full bg-warning-muted px-3 py-1 text-xs font-medium text-warning">{t("doctor.ui.pendingQuantityQuantityRequested", { quantity_requested: item.quantity_requested })}</span>
             </div>
 
             <dl className="grid gap-3 text-sm md:grid-cols-2">
               <div>
-                <dt className="text-muted-foreground">Prescribed</dt>
+                <dt className="text-muted-foreground">{t("pharmacy.col.prescribed")}</dt>
                 <dd className="font-medium">{item.prescribed_medicine_name}</dd>
               </div>
               <div>
-                <dt className="text-muted-foreground">Requested substitute</dt>
+                <dt className="text-muted-foreground">{t("doctor.ui.requestedSubstitute")}</dt>
                 <dd className="font-medium">
                   {item.substitute_medicine_name}
                   {item.substitute_strength ? ` ${item.substitute_strength}` : ""}
@@ -116,13 +112,13 @@ function Approvals() {
                 </dd>
               </div>
               <div className="md:col-span-2">
-                <dt className="text-muted-foreground">Pharmacist reason</dt>
+                <dt className="text-muted-foreground">{t("doctor.ui.pharmacistReason")}</dt>
                 <dd>{item.substitute_reason}</dd>
               </div>
             </dl>
 
             <label className="block space-y-1 text-sm">
-              <span className="text-muted-foreground">Rejection reason (required only to reject)</span>
+              <span className="text-muted-foreground">{t("doctor.ui.rejectionReasonRequiredOnlyToReject")}</span>
               <textarea
                 className="min-h-20 w-full rounded-md border border-border px-3 py-2"
                 value={reasons[item.item_id] ?? ""}
@@ -139,16 +135,14 @@ function Approvals() {
                 onClick={() => void decide(item, true)}
                 className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
               >
-                {busyId === item.item_id ? "Saving…" : "Approve and issue stock"}
+                {busyId === item.item_id ? "Saving…" : t("doctor.ui.approveAndIssueStock")}
               </button>
               <button
                 type="button"
                 disabled={busyId === item.item_id}
                 onClick={() => void decide(item, false)}
                 className="rounded-md border border-danger px-4 py-2 text-sm font-medium text-danger disabled:opacity-50"
-              >
-                Reject
-              </button>
+              >{t("common.reject")}</button>
             </div>
           </article>
         ))}

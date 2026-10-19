@@ -8,6 +8,7 @@ import Link from "next/link";
 
 import { meridian } from "@/styles/theme";
 import { adminPageStripSx } from "../panelSx";
+import { useLocale } from "@/lib/i18n";
 
 type Props = {
   eyebrow?: string;
@@ -18,6 +19,7 @@ type Props = {
 };
 
 export function AdminPageHeader({ eyebrow, title, subtitle, actions, backHref }: Props) {
+  const { t } = useLocale();
   return (
     <Box sx={adminPageStripSx}>
       <Stack
@@ -44,9 +46,7 @@ export function AdminPageHeader({ eyebrow, title, subtitle, actions, backHref }:
                 textDecoration: "underline",
                 textUnderlineOffset: 2,
               }}
-            >
-              ← Back to administration
-            </Box>
+            >{t("admin.ui.backToAdministration")}</Box>
           ) : null}
           {eyebrow ? (
             <Typography

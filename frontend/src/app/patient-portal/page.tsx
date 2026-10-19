@@ -229,22 +229,20 @@ export default function Page() {
             <div id="portal-panel-identity" role="tabpanel" aria-labelledby="portal-tab-identity">
               <section className="grid gap-4 md:grid-cols-2">
                 <article className="surface-card p-5">
-                  <p className="text-sm text-muted-foreground">ABHA identity</p>
-                  <p className="mt-2 text-xl font-semibold">{view.data.abha.abha_number ?? "Not linked"}</p>
+                  <p className="text-sm text-muted-foreground">{t("receptionist.abha.title")}</p>
+                  <p className="mt-2 text-xl font-semibold">{view.data.abha.abha_number ?? t("doctor.abdm.notLinked")}</p>
                   <p className="mt-2 text-sm text-muted-foreground">
                     {view.data.abha.linked_at
                       ? `Linked ${formatDateTime(view.data.abha.linked_at)}`
-                      : "Registration can link ABHA only after verified OTP; this portal never accepts an unverified number."}
+                      : t("patientPortal.abhaLinkHint")}
                   </p>
                 </article>
                 <article className="surface-card p-5">
-                  <p className="text-sm text-muted-foreground">Portal identity verified by</p>
+                  <p className="text-sm text-muted-foreground">{t("patientPortal.verifiedBy")}</p>
                   <p className="mt-2 text-xl font-semibold">
                     {verificationLabel(view.data.binding.verification_method)}
                   </p>
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    Verified {formatDateTime(view.data.binding.verified_at)}
-                  </p>
+                  <p className="mt-2 text-sm text-muted-foreground">{t("patientPortal.ui.verifiedVerifiedAt", { verified_at: formatDateTime(view.data.binding.verified_at) })}</p>
                 </article>
               </section>
             </div>
@@ -255,63 +253,57 @@ export default function Page() {
             <div id="portal-panel-permissions" role="tabpanel" aria-labelledby="portal-tab-permissions" className="space-y-8">
           <section className="grid gap-4 md:grid-cols-2">
             <article className="surface-card p-5">
-              <p className="text-sm text-muted-foreground">ABHA identity</p>
-              <p className="mt-2 text-xl font-semibold">{view.data.abha.abha_number ?? "Not linked"}</p>
+              <p className="text-sm text-muted-foreground">{t("receptionist.abha.title")}</p>
+              <p className="mt-2 text-xl font-semibold">{view.data.abha.abha_number ?? t("doctor.abdm.notLinked")}</p>
               <p className="mt-2 text-sm text-muted-foreground">
                 {view.data.abha.linked_at
                   ? `Linked ${formatDateTime(view.data.abha.linked_at)}`
-                  : "Registration can link ABHA only after verified OTP; this portal never accepts an unverified number."}
+                  : t("patientPortal.abhaLinkHint")}
               </p>
             </article>
             <article className="surface-card p-5">
-              <p className="text-sm text-muted-foreground">Portal identity verified by</p>
+              <p className="text-sm text-muted-foreground">{t("patientPortal.verifiedBy")}</p>
               <p className="mt-2 text-xl font-semibold">
                 {verificationLabel(view.data.binding.verification_method)}
               </p>
-              <p className="mt-2 text-sm text-muted-foreground">
-                Verified {formatDateTime(view.data.binding.verified_at)}
-              </p>
+              <p className="mt-2 text-sm text-muted-foreground">{t("patientPortal.ui.verifiedVerifiedAt", { verified_at: formatDateTime(view.data.binding.verified_at) })}</p>
             </article>
           </section>
 
           <section className="surface-card overflow-hidden">
             <div className="border-b border-border p-5">
-              <h2 className="text-lg font-semibold">My consents</h2>
-              <p className="mt-1 text-sm text-muted-foreground">Current and historical consent decisions recorded for you ({consents.length} total).</p>
+              <h2 className="text-lg font-semibold">{t("patientPortal.consentsTitle")}</h2>
+              <p className="mt-1 text-sm text-muted-foreground">{t("patientPortal.consentsSubtitle", { count: consents.length })}</p>
             </div>
             {consents.length === 0 ? (
-              <p className="p-5 text-sm text-muted-foreground">No consent records have been recorded.</p>
+              <p className="p-5 text-sm text-muted-foreground">{t("patientPortal.noConsents")}</p>
             ) : (
               <>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-sm">
-                    <thead className="bg-muted/50 text-muted-foreground"><tr><th className="p-3">Purpose</th><th className="p-3">Status</th><th className="p-3">Granted</th><th className="p-3">Expires</th></tr></thead>
+                    <thead className="bg-muted/50 text-muted-foreground"><tr><th className="p-3">{t("field.purpose")}</th><th className="p-3">{t("common.status")}</th><th className="p-3">{t("consent.status.granted")}</th><th className="p-3">{t("receptionist.scanShare.expires")}</th></tr></thead>
                     <tbody>{paginatedConsents.map((consent) => (
-                      <tr key={consent.id} className="border-t border-border"><td className="p-3"><span className="font-medium">{humanise(consent.purpose_code)}</span>{consent.purpose_description ? <span className="block text-xs text-muted-foreground">{consent.purpose_description}</span> : null}</td><td className="p-3 capitalize">{humanise(consent.status)}</td><td className="p-3">{formatDateTime(consent.granted_at)}</td><td className="p-3">{consent.expires_at ? formatDateTime(consent.expires_at) : "No expiry"}</td></tr>
+                      <tr key={consent.id} className="border-t border-border"><td className="p-3"><span className="font-medium">{humanise(consent.purpose_code)}</span>{consent.purpose_description ? <span className="block text-xs text-muted-foreground">{consent.purpose_description}</span> : null}</td><td className="p-3 capitalize">{humanise(consent.status)}</td><td className="p-3">{formatDateTime(consent.granted_at)}</td><td className="p-3">{consent.expires_at ? formatDateTime(consent.expires_at) : t("patientPortal.noExpiry")}</td></tr>
                     ))}</tbody>
                   </table>
                 </div>
 
                 {consents.length > CONSENT_PAGE_SIZE && (
                   <div className="flex items-center justify-between border-t border-border px-4 py-2.5 bg-muted/20 text-xs">
-                    <span className="text-muted-foreground">Page {consentPage} of {totalConsentPages}</span>
+                    <span className="text-muted-foreground">{t("patientPortal.ui.pageConsentpageOfTotalconsentpages", { consentPage, totalConsentPages })}</span>
                     <div className="flex gap-1.5">
                       <button
                         type="button"
                         disabled={consentPage <= 1}
                         onClick={() => setConsentPage((p) => Math.max(1, p - 1))}
                         className="rounded border border-border bg-card px-2.5 py-1 disabled:opacity-50"
-                      >
-                        Prev
-                      </button>
+                      >{t("patientPortal.ui.prev")}</button>
                       <button
                         type="button"
                         disabled={consentPage >= totalConsentPages}
                         onClick={() => setConsentPage((p) => Math.min(totalConsentPages, p + 1))}
                         className="rounded border border-border bg-card px-2.5 py-1 disabled:opacity-50"
-                      >
-                        Next
-                      </button>
+                      >{t("common.next")}</button>
                     </div>
                   </div>
                 )}
@@ -321,38 +313,34 @@ export default function Page() {
 
           <section className="surface-card overflow-hidden">
             <div className="border-b border-border p-5">
-              <h2 className="text-lg font-semibold">Data access history</h2>
-              <p className="mt-1 text-sm text-muted-foreground">{view.data.accessHistory.total} recorded access events, newest first.</p>
+              <h2 className="text-lg font-semibold">{t("patientPortal.accessHistoryTitle")}</h2>
+              <p className="mt-1 text-sm text-muted-foreground">{t("patientPortal.ui.totalRecordedAccessEventsNewestFirst", { total: view.data.accessHistory.total })}</p>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
-                <thead className="bg-muted/50 text-muted-foreground"><tr><th className="p-3">When</th><th className="p-3">Accessed by</th><th className="p-3">Data</th><th className="p-3">Purpose</th></tr></thead>
+                <thead className="bg-muted/50 text-muted-foreground"><tr><th className="p-3">{t("patientPortal.col.when")}</th><th className="p-3">{t("patientPortal.col.accessedBy")}</th><th className="p-3">{t("patientPortal.col.data")}</th><th className="p-3">{t("field.purpose")}</th></tr></thead>
                 <tbody>{paginatedHistory.map((entry, index) => (
-                  <tr key={`${entry.accessed_at}-${index}`} className="border-t border-border"><td className="p-3">{formatDateTime(entry.accessed_at)}</td><td className="p-3">{entry.staff_name ?? "System"}<span className="block text-xs text-muted-foreground">{humanise(entry.role)}</span></td><td className="p-3">{humanise(entry.resource_type)}{entry.repeats > 1 ? <span className="ml-1 text-xs text-muted-foreground">×{entry.repeats}</span> : null}{entry.emergency_access ? <span className="ml-2 rounded bg-danger-muted px-2 py-0.5 text-xs text-danger">Emergency</span> : null}</td><td className="p-3">{humanise(entry.purpose_code)}</td></tr>
+                  <tr key={`${entry.accessed_at}-${index}`} className="border-t border-border"><td className="p-3">{formatDateTime(entry.accessed_at)}</td><td className="p-3">{entry.staff_name ?? t("consent.access.api")}<span className="block text-xs text-muted-foreground">{humanise(entry.role)}</span></td><td className="p-3">{humanise(entry.resource_type)}{entry.repeats > 1 ? <span className="ml-1 text-xs text-muted-foreground">×{entry.repeats}</span> : null}{entry.emergency_access ? <span className="ml-2 rounded bg-danger-muted px-2 py-0.5 text-xs text-danger">{t("role.emergency")}</span> : null}</td><td className="p-3">{humanise(entry.purpose_code)}</td></tr>
                 ))}</tbody>
               </table>
             </div>
 
             {historyItems.length > HISTORY_PAGE_SIZE && (
               <div className="flex items-center justify-between border-t border-border px-4 py-2.5 bg-muted/20 text-xs">
-                <span className="text-muted-foreground">Page {historyPage} of {totalHistoryPages}</span>
+                <span className="text-muted-foreground">{t("patientPortal.ui.pageHistorypageOfTotalhistorypages", { historyPage, totalHistoryPages })}</span>
                 <div className="flex gap-1.5">
                   <button
                     type="button"
                     disabled={historyPage <= 1}
                     onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
                     className="rounded border border-border bg-card px-2.5 py-1 disabled:opacity-50"
-                  >
-                    Prev
-                  </button>
+                  >{t("patientPortal.ui.prev")}</button>
                   <button
                     type="button"
                     disabled={historyPage >= totalHistoryPages}
                     onClick={() => setHistoryPage((p) => Math.min(totalHistoryPages, p + 1))}
                     className="rounded border border-border bg-card px-2.5 py-1 disabled:opacity-50"
-                  >
-                    Next
-                  </button>
+                  >{t("common.next")}</button>
                 </div>
               </div>
             )}

@@ -377,9 +377,7 @@ function PharmacyReturnsContent() {
                       <div className="font-medium text-foreground">
                         {item.item_name ?? <span className="font-mono text-xs">{item.item_id.slice(0, 8)}…</span>}
                       </div>
-                      <div className="text-[11px] text-muted-foreground font-mono">
-                        Pat: {item.patient_id.slice(0, 8)}…
-                      </div>
+                      <div className="text-[11px] text-muted-foreground font-mono">{t("pharmacy.ui.patValue", { value: item.patient_id.slice(0, 8) })}</div>
                     </td>
                     <td className="px-4 py-3 font-mono text-xs">
                       {item.batch_number ?? (item.batch_id ? item.batch_id.slice(0, 8) + "…" : "—")}
@@ -506,7 +504,7 @@ function PharmacyReturnsContent() {
                         >
                           <span className="font-medium">{m.name}</span>
                           <span className="text-muted-foreground text-[10px]">
-                            {m.form ?? "Item"} • Avail: {m.total_available_quantity} • Batches: {m.batches?.length ?? 0}
+                            {m.form ?? t("inventory.col.item")}{" "}{t("pharmacy.ui.avail")}{" "}{m.total_available_quantity}{" "}{t("pharmacy.ui.batches")}{" "}{m.batches?.length ?? 0}
                           </span>
                         </button>
                       ))}
@@ -536,9 +534,7 @@ function PharmacyReturnsContent() {
                   >
                     <option value="">{t("pharmacy.returns.modal.noBatch")}</option>
                     {selectedMedicine.batches.map((b) => (
-                      <option key={b.batch_id} value={b.batch_id}>
-                        Batch {b.batch_number} (Exp: {b.expiry_date}, Qty: {b.quantity})
-                      </option>
+                      <option key={b.batch_id} value={b.batch_id}>{t("pharmacy.ui.batchBatchNumberExpExpiryDate", { batch_number: b.batch_number, expiry_date: b.expiry_date, quantity: b.quantity })}</option>
                     ))}
                   </select>
                 </div>

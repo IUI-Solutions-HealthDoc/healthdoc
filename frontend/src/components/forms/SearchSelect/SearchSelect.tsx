@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 
 import { SearchSelectProps } from "./SearchSelect.types";
+import { useLocale } from "@/lib/i18n";
 
 export default function SearchSelect({
   label,
@@ -13,6 +14,7 @@ export default function SearchSelect({
   onChange,
   error,
 }: SearchSelectProps) {
+  const { t } = useLocale();
   const [search, setSearch] = useState("");
 
   const filteredOptions = useMemo(() => {
@@ -63,9 +65,7 @@ export default function SearchSelect({
         className="max-h-52 overflow-y-auto rounded-lg border border-border"
       >
         {filteredOptions.length === 0 && (
-          <p className="px-4 py-3 text-sm text-muted-foreground">
-            No matches found.
-          </p>
+          <p className="px-4 py-3 text-sm text-muted-foreground">{t("common.ui.noMatchesFound")}</p>
         )}
 
         {filteredOptions.map((option) => (

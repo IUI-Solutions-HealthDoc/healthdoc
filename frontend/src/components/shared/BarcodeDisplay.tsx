@@ -7,6 +7,7 @@ import Paper from "@mui/material/Paper";
 import Typography from "@mui/material/Typography";
 
 import { meridian } from "@/styles/theme";
+import { useLocale } from "@/lib/i18n";
 
 interface BarcodeDisplayProps {
   value: string;
@@ -25,11 +26,10 @@ function BarcodeDisplay({
   lineColor = meridian.brandPrimary,
   background = meridian.surface,
 }: BarcodeDisplayProps) {
+  const { t } = useLocale();
   if (!value.trim()) {
     return (
-      <Typography sx={{ color: meridian.danger, fontSize: "0.875rem" }}>
-        Barcode value is required.
-      </Typography>
+      <Typography sx={{ color: meridian.danger, fontSize: "0.875rem" }}>{t("common.ui.barcodeValueIsRequired")}</Typography>
     );
   }
 

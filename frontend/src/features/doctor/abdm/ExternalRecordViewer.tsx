@@ -9,7 +9,8 @@ import { embeddedPdfs, type EmbeddedPdf } from "./pdfAttachments";
 
 /** Narratives remain escaped text; PDF bytes are rendered separately to canvas. */
 function Value({ value, depth = 0 }: { value: unknown; depth?: number }) {
-  if (depth > 12) return <span>Nested content omitted from this view.</span>;
+  const { t } = useLocale();
+  if (depth > 12) return <span>{t("doctor.ui.nestedContentOmittedFromThisView")}</span>;
   if (value == null) return <span>—</span>;
   if (typeof value !== "object") return <span className="whitespace-pre-wrap break-words">{String(value)}</span>;
   if (Array.isArray(value)) return <ul className="space-y-2 border-l pl-3">{value.map((entry, index) => <li key={index}><Value value={entry} depth={depth + 1} /></li>)}</ul>;
@@ -56,7 +57,7 @@ function ExternalRecordBody({ id, close }: { id: string; close: () => void }) {
   let attachments: EmbeddedPdf[] = [];
   let attachmentError = false;
   try { attachments = bundle ? embeddedPdfs(bundle) : []; } catch { attachmentError = true; }
-  return <section className="surface-card space-y-4 p-5" aria-label="External clinical record">
+  return <section className="surface-card space-y-4 p-5" aria-label={t("doctor.abdm.externalRecordTitle")}>
     <div className="flex justify-between gap-4">
       <h2 className="text-xl font-semibold">{t("doctor.abdm.externalRecordTitle")}</h2>
       <button type="button" className="underline" onClick={close}>
@@ -68,7 +69,7 @@ function ExternalRecordBody({ id, close }: { id: string; close: () => void }) {
     {!bundle && !error && <p role="status">{t("doctor.abdm.checkingConsent")}</p>}
     {attachmentError && <p role="alert">{t("doctor.abdm.errPdfAttachments")}</p>}
     {attachments.map((pdf, index) => <div key={index} className="space-y-3 rounded border p-3">
-      <button type="button" className="underline" onClick={() => setSelectedPdf(selectedPdf === index ? null : index)}>{selectedPdf === index ? "Close PDF preview" : `Preview ${pdf.title}`}</button>
+      <button type="button" className="underline" onClick={() => setSelectedPdf(selectedPdf === index ? null : index)}>{selectedPdf === index ? t("doctor.ui.closePdfPreview") : `Preview ${pdf.title}`}</button>
       {selectedPdf === index && <EmbeddedPdfPreview key={`${id}:${index}`} data={pdf.data} title={pdf.title} />}
     </div>)}
     {entries.map((entry: unknown, index) => {

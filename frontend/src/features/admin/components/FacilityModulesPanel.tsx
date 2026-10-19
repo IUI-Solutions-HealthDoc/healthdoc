@@ -13,6 +13,7 @@ import { CORE_ALWAYS_ON_MODULES, MODULE_CODE_LABELS } from "../constants";
 import { adminPanelSx } from "../panelSx";
 import type { FacilityModule } from "../types";
 import { ModuleEnabledChip } from "./ModuleEnabledChip";
+import { useLocale } from "@/lib/i18n";
 
 type Props = {
   modules: FacilityModule[];
@@ -45,6 +46,7 @@ function ModuleCard({
   busy: boolean;
   onToggle: Props["onToggle"];
 }) {
+  const { t } = useLocale();
   const [reason, setReason] = useState(m.disabled_reason ?? "");
 
   useEffect(() => {
@@ -102,7 +104,7 @@ function ModuleCard({
 
         <Stack direction="row" sx={{ alignItems: "center", gap: 0.5 }}>
           <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary, mr: 0.5 }}>
-            {m.is_enabled ? "On" : "Off"}
+            {m.is_enabled ? t("admin.ui.on") : t("admin.ui.off")}
           </Typography>
           <Switch
             checked={m.is_enabled}
@@ -128,7 +130,7 @@ function ModuleCard({
           size="small"
           fullWidth
           required={m.is_enabled}
-          label={m.is_enabled ? "Reason for disabling" : "Disabled reason"}
+          label={m.is_enabled ? t("admin.ui.reasonForDisabling") : t("admin.ui.disabledReason")}
           value={reason}
           disabled={busy}
           onChange={(e) => setReason(e.target.value)}
@@ -141,7 +143,7 @@ function ModuleCard({
           helperText={
             m.is_enabled
               ? `Required before switching off · current config: ${configPreview(m.config)}`
-              : "Saved on blur · facility_modules.disabled_reason"
+              : t("admin.ui.savedOnBlurFacilityModulesDisabled")
           }
         />
       </Box>
@@ -150,16 +152,13 @@ function ModuleCard({
 }
 
 export function FacilityModulesPanel({ modules, loading, busyCode, onToggle }: Props) {
+  const { t } = useLocale();
   return (
     <Box sx={adminPanelSx}>
       <Typography
         sx={{ m: 0, fontSize: "1.0625rem", fontWeight: 700, color: meridian.textPrimary }}
-      >
-        Facility modules
-      </Typography>
-      <Typography sx={{ m: 0, mt: 0.5, mb: 2, fontSize: "0.8125rem", color: meridian.textSecondary }}>
-        facility_modules (0027) — ModuleCode toggles. Core modules below cannot be disabled.
-      </Typography>
+      >{t("admin.ui.facilityModules")}</Typography>
+      <Typography sx={{ m: 0, mt: 0.5, mb: 2, fontSize: "0.8125rem", color: meridian.textSecondary }}>{t("admin.ui.facilityModules0027ModulecodeTogglesCore")}</Typography>
 
       <Box
         sx={{
@@ -180,12 +179,8 @@ export function FacilityModulesPanel({ modules, loading, busyCode, onToggle }: P
             textTransform: "uppercase",
             color: meridian.textSecondary,
           }}
-        >
-          Core (always on)
-        </Typography>
-        <Typography sx={{ m: 0, mb: 1.25, fontSize: "0.75rem", color: meridian.textSecondary }}>
-          Display-only legend from schema — not toggleable rows.
-        </Typography>
+        >{t("admin.ui.coreAlwaysOn")}</Typography>
+        <Typography sx={{ m: 0, mb: 1.25, fontSize: "0.75rem", color: meridian.textSecondary }}>{t("admin.ui.displayOnlyLegendFromSchemaNot")}</Typography>
         <Stack direction="row" useFlexGap sx={{ flexWrap: "wrap", gap: 1 }}>
           {CORE_ALWAYS_ON_MODULES.map((name) => (
             <Box
@@ -217,9 +212,7 @@ export function FacilityModulesPanel({ modules, loading, busyCode, onToggle }: P
           textTransform: "uppercase",
           color: meridian.textSecondary,
         }}
-      >
-        Toggleable ModuleCode
-      </Typography>
+      >{t("admin.ui.toggleableModulecode")}</Typography>
 
       {loading ? (
         <Stack spacing={1.25}>

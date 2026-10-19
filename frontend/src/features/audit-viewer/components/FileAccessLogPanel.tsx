@@ -82,12 +82,8 @@ export function FileAccessLogPanel({
       }}
     >
       <Box sx={{ px: 2.5, pt: 2.25, pb: 1.75 }}>
-        <Typography sx={{ m: 0, fontSize: "1.0625rem", fontWeight: 700, color: meridian.textPrimary }}>
-          File access log
-        </Typography>
-        <Typography sx={{ m: 0, mt: 0.4, fontSize: "0.8125rem", color: meridian.textSecondary }}>
-          Review uploads, views, downloads, and blocked deletion attempts.
-        </Typography>
+        <Typography sx={{ m: 0, fontSize: "1.0625rem", fontWeight: 700, color: meridian.textPrimary }}>{t("audit.ui.fileAccessLog")}</Typography>
+        <Typography sx={{ m: 0, mt: 0.4, fontSize: "0.8125rem", color: meridian.textSecondary }}>{t("audit.ui.reviewUploadsViewsDownloadsAndBlocked")}</Typography>
       </Box>
 
       <Stack direction={{ xs: "column", sm: "row" }} spacing={1.25} sx={{ px: 2.5, pb: 2 }}>
@@ -101,12 +97,12 @@ export function FileAccessLogPanel({
         <TextField
           select
           size="small"
-          label="Action"
+          label={t("receptionist.action")}
           value={action}
           onChange={(e) => onActionChange(e.target.value as FileAccessAction | "all")}
           sx={{ minWidth: 160 }}
         >
-          <MenuItem value="all">All</MenuItem>
+          <MenuItem value="all">{t("common.all")}</MenuItem>
           {(Object.keys(FILE_ACCESS_ACTION_LABELS) as FileAccessAction[]).map((a) => (
             <MenuItem key={a} value={a}>
               {FILE_ACCESS_ACTION_LABELS[a]}

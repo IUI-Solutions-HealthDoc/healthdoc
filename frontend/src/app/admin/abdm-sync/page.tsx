@@ -125,11 +125,11 @@ export default function Page() {
 
       <form onSubmit={search} className="surface-card grid gap-4 p-5 md:grid-cols-2 lg:grid-cols-4">
         <label className="space-y-1 text-sm">
-          <span className="text-muted-foreground">UHID</span>
+          <span className="text-muted-foreground">{t("field.uhid")}</span>
           <input aria-invalid={badFields.has("uhid") || undefined} className="w-full rounded-md border border-border px-3 py-2" value={uhid} onChange={(event) => setUhid(event.target.value)} />
         </label>
         <label className="space-y-1 text-sm">
-          <span className="text-muted-foreground">ABHA number</span>
+          <span className="text-muted-foreground">{t("field.abha")}</span>
           <input aria-invalid={badFields.has("abha_number") || undefined} className="w-full rounded-md border border-border px-3 py-2" value={abha} onChange={(event) => setAbha(event.target.value)} />
         </label>
         <label className="space-y-1 text-sm">

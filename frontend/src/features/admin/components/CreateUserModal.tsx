@@ -54,7 +54,7 @@ function SectionLabel({ children }: { children: ReactNode }) {
 
 export function CreateUserModal({ open, onClose, onCreated }: Props) {
   const { user: currentUser } = useCurrentUser();
-  const { localizeField } = useLocale();
+  const { t, localizeField } = useLocale();
   const [busy, setBusy] = useState(false);
   const [username, setUsername] = useState("");
   const [full_name, setFullName] = useState("");
@@ -188,9 +188,7 @@ export function CreateUserModal({ open, onClose, onCreated }: Props) {
                 textTransform: "uppercase",
                 color: meridian.textSecondary,
               }}
-            >
-              Bootstrap · POST /users
-            </Typography>
+            >{t("admin.ui.bootstrapPostUsers")}</Typography>
             <Typography
               component="h2"
               sx={{
@@ -200,9 +198,7 @@ export function CreateUserModal({ open, onClose, onCreated }: Props) {
                 letterSpacing: "-0.02em",
                 color: meridian.textPrimary,
               }}
-            >
-              New user
-            </Typography>
+            >{t("admin.ui.newUser")}</Typography>
             <Typography
               sx={{
                 m: 0,
@@ -212,9 +208,7 @@ export function CreateUserModal({ open, onClose, onCreated }: Props) {
                 lineHeight: 1.45,
                 maxWidth: 520,
               }}
-            >
-              Creates the staff sign-in and profile together. The temporary password must
-              be changed at first sign-in. For day-to-day staffing, prefer{" "}
+            >{t("admin.ui.createsTheStaffSignInAnd")}{" "}
               <Box
                 component={Link}
                 href="/admin/account-requests"
@@ -225,14 +219,12 @@ export function CreateUserModal({ open, onClose, onCreated }: Props) {
                   textDecoration: "underline",
                   textUnderlineOffset: 2,
                 }}
-              >
-                account requests
-              </Box>
+              >{t("admin.ui.accountRequests")}</Box>
               .
             </Typography>
           </Box>
           <IconButton
-            aria-label="Close"
+            aria-label={t("common.close")}
             onClick={handleClose}
             disabled={busy}
             size="small"
@@ -244,10 +236,10 @@ export function CreateUserModal({ open, onClose, onCreated }: Props) {
       </Box>
 
       <DialogContent sx={{ px: 3, py: 2.5 }}>
-        <SectionLabel>Account</SectionLabel>
+        <SectionLabel>{t("admin.ui.account")}</SectionLabel>
         <Stack direction="row" useFlexGap spacing={1.5} sx={{ flexWrap: "wrap", mb: 2.5 }}>
           <TextField
-            label="Username"
+            label={t("admin.ui.username")}
             size="small"
             required
             value={username}
@@ -258,10 +250,10 @@ export function CreateUserModal({ open, onClose, onCreated }: Props) {
             disabled={busy}
             sx={fieldSx}
             error={Boolean(errors.username)}
-            helperText={errors.username ?? "Letters, numbers, dots, hyphens or underscores; no spaces"}
+            helperText={errors.username ?? t("admin.ui.lettersNumbersDotsHyphensOrUnderscores")}
           />
           <TextField
-            label="Temporary password"
+            label={t("admin.accountRequests.temporaryPassword")}
             size="small"
             type="password"
             required
@@ -273,14 +265,14 @@ export function CreateUserModal({ open, onClose, onCreated }: Props) {
             disabled={busy}
             sx={fieldSx}
             error={Boolean(errors.temporaryPassword)}
-            helperText={errors.temporaryPassword ?? "At least 8 characters; the user changes it at first sign-in"}
+            helperText={errors.temporaryPassword ?? t("admin.ui.atLeast8CharactersTheUser")}
           />
         </Stack>
 
-        <SectionLabel>Profile</SectionLabel>
+        <SectionLabel>{t("admin.ui.profile")}</SectionLabel>
         <Stack direction="row" useFlexGap spacing={1.5} sx={{ flexWrap: "wrap", mb: 2.5 }}>
           <TextField
-            label="Full name"
+            label={t("field.fullName")}
             size="small"
             required
             value={full_name}
@@ -294,7 +286,7 @@ export function CreateUserModal({ open, onClose, onCreated }: Props) {
             helperText={errors.fullName}
           />
           <TextField
-            label="Email"
+            label={t("admin.ui.email")}
             size="small"
             value={email}
             onChange={(e) => {
@@ -307,7 +299,7 @@ export function CreateUserModal({ open, onClose, onCreated }: Props) {
             helperText={errors.email}
           />
           <TextField
-            label="Mobile"
+            label={t("field.mobile")}
             size="small"
             value={mobile}
             onChange={(e) => {
@@ -320,7 +312,7 @@ export function CreateUserModal({ open, onClose, onCreated }: Props) {
             helperText={errors.mobile ?? "E.164 e.g. +91XXXXXXXXXX"}
           />
           <TextField
-            label="Designation"
+            label={t("common.ui.designation")}
             size="small"
             value={designation}
             onChange={(e) => setDesignation(e.target.value)}
@@ -328,7 +320,7 @@ export function CreateUserModal({ open, onClose, onCreated }: Props) {
             sx={fieldSx}
           />
           <TextField
-            label="Employee ID"
+            label={t("admin.ui.employeeId2")}
             size="small"
             value={employee_id}
             onChange={(e) => setEmployeeId(e.target.value)}
@@ -336,7 +328,7 @@ export function CreateUserModal({ open, onClose, onCreated }: Props) {
             sx={fieldSx}
           />
           <TextField
-            label="Registration number"
+            label={t("admin.ui.registrationNumber")}
             size="small"
             value={registration_number}
             onChange={(e) => setRegistrationNumber(e.target.value)}
@@ -344,7 +336,7 @@ export function CreateUserModal({ open, onClose, onCreated }: Props) {
             sx={fieldSx}
           />
           <TextField
-            label="Qualification"
+            label={t("common.ui.qualification")}
             size="small"
             value={qualification}
             onChange={(e) => setQualification(e.target.value)}
@@ -353,7 +345,7 @@ export function CreateUserModal({ open, onClose, onCreated }: Props) {
           />
         </Stack>
 
-        <SectionLabel>Application roles</SectionLabel>
+        <SectionLabel>{t("admin.ui.applicationRoles")}</SectionLabel>
         <Box
           sx={{
             p: 1.75,
@@ -362,11 +354,7 @@ export function CreateUserModal({ open, onClose, onCreated }: Props) {
             bgcolor: meridian.muted,
           }}
         >
-          <Typography sx={{ m: 0, mb: 1.25, fontSize: "0.75rem", color: meridian.textSecondary }}>
-            Multiple roles are supported. Patient and platform-superadmin roles are managed
-            outside facility staffing.
-            {roles.length > 0 ? ` · ${roles.length} selected` : ""}
-          </Typography>
+          <Typography sx={{ m: 0, mb: 1.25, fontSize: "0.75rem", color: meridian.textSecondary }}>{t("admin.ui.multipleRolesAreSupportedPatientAnd2", { value: roles.length > 0 ? ` · ${roles.length} selected` : "" })}</Typography>
           <Stack direction="row" useFlexGap sx={{ flexWrap: "wrap", gap: 0.75 }}>
             {FACILITY_STAFF_ROLES.map((role) => {
               const selected = roles.includes(role);
@@ -410,7 +398,7 @@ export function CreateUserModal({ open, onClose, onCreated }: Props) {
         >
           {currentUser
             ? `${localizeField(currentUser.facility.name, currentUser.facility.name_hi)} · ${currentUser.facility.code}`
-            : "Facility resolved from your account on submit"}
+            : t("admin.ui.facilityResolvedFromYourAccountOn")}
         </Typography>
       </DialogContent>
 
@@ -428,9 +416,7 @@ export function CreateUserModal({ open, onClose, onCreated }: Props) {
           disabled={busy}
           variant="outlined"
           sx={{ textTransform: "none", fontWeight: 600, borderRadius: "10px" }}
-        >
-          Cancel
-        </Button>
+        >{t("common.cancel")}</Button>
         <Button
           variant="contained"
           color="primary"
@@ -451,7 +437,7 @@ export function CreateUserModal({ open, onClose, onCreated }: Props) {
             },
           }}
         >
-          {busy ? "Creating…" : "Create user"}
+          {busy ? "Creating…" : t("admin.ui.createUser")}
         </Button>
       </DialogActions>
     </Dialog>

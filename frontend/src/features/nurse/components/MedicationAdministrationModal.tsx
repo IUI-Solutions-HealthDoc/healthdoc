@@ -159,15 +159,15 @@ export default function MedicationAdministrationModal({
             </h2>
             <p className="text-xs text-muted-foreground">
               {isCorrection
-                ? "Submits an audited correction linked to the original dose record."
-                : "Record given, held, or refused dose on the eMAR sheet."}
+                ? t("nurse.ui.submitsAnAuditedCorrectionLinkedTo")
+                : t("nurse.ui.recordGivenHeldOrRefusedDose")}
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
             className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-            aria-label="Close modal"
+            aria-label={t("patientPortal.documents.modal.closeAria")}
           >
             ✕
           </button>
@@ -181,14 +181,14 @@ export default function MedicationAdministrationModal({
 
         {isCorrection && (
           <div className="mt-4 rounded-md bg-blue-500/10 border border-blue-500/30 p-3 text-xs text-blue-800 dark:text-blue-300">
-            <strong>Correcting prior record:</strong> {correctionRecord?.medicine_name ?? "Medication"} (ID: {correctionRecord?.id})
+            <strong>{t("nurse.ui.correctingPriorRecord")}</strong> {correctionRecord?.medicine_name ?? t("nurse.actionMedication")}{" "}{t("nurse.ui.id")}{" "}{correctionRecord?.id})
           </div>
         )}
 
         <form onSubmit={handleSubmit} className="mt-4 space-y-4 text-sm">
           {!isCorrection && prescriptionItems.length > 0 ? (
             <label className="block space-y-1">
-              <span className="font-medium text-foreground">Prescription Item</span>
+              <span className="font-medium text-foreground">{t("nurse.ui.prescriptionItem")}</span>
               <select
                 className="w-full rounded-md border border-border bg-background px-3 py-2 text-foreground"
                 value={prescriptionItemId}
@@ -214,12 +214,12 @@ export default function MedicationAdministrationModal({
             </label>
           ) : !isCorrection ? (
             <label className="block space-y-1">
-              <span className="font-medium text-foreground">Prescription Item ID</span>
+              <span className="font-medium text-foreground">{t("nurse.ui.prescriptionItemId")}</span>
               <input
                 type="text"
                 required
                 className="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-foreground"
-                placeholder="UUID of prescription item"
+                placeholder={t("nurse.ui.uuidOfPrescriptionItem")}
                 value={prescriptionItemId}
                 onChange={(e) => setPrescriptionItemId(e.target.value)}
               />
@@ -228,52 +228,52 @@ export default function MedicationAdministrationModal({
 
           <div className="grid grid-cols-2 gap-4">
             <label className="block space-y-1">
-              <span className="font-medium text-foreground">Administration Status</span>
+              <span className="font-medium text-foreground">{t("nurse.ui.administrationStatus")}</span>
               <select
                 className="w-full rounded-md border border-border bg-background px-3 py-2 text-foreground"
                 value={status}
                 onChange={(e) => setStatus(e.target.value as MedicationStatus)}
                 required
               >
-                <option value="given">Given</option>
-                <option value="held">Held</option>
-                <option value="refused">Refused</option>
+                <option value="given">{t("nurse.ui.given")}</option>
+                <option value="held">{t("nurse.ui.held")}</option>
+                <option value="refused">{t("nurse.ui.refused")}</option>
               </select>
             </label>
 
             <label className="block space-y-1">
-              <span className="font-medium text-foreground">Route</span>
+              <span className="font-medium text-foreground">{t("immunization.col.route")}</span>
               <select
                 className="w-full rounded-md border border-border bg-background px-3 py-2 text-foreground"
                 value={route}
                 onChange={(e) => setRoute(e.target.value)}
               >
-                <option value="oral">Oral</option>
-                <option value="IV">Intravenous (IV)</option>
-                <option value="IM">Intramuscular (IM)</option>
-                <option value="subcutaneous">Subcutaneous (SC)</option>
-                <option value="topical">Topical</option>
-                <option value="inhalation">Inhalation</option>
-                <option value="rectal">Rectal</option>
-                <option value="sublingual">Sublingual</option>
+                <option value="oral">{t("nurse.ui.oral")}</option>
+                <option value="IV">{t("nurse.ui.intravenousIv")}</option>
+                <option value="IM">{t("nurse.ui.intramuscularIm")}</option>
+                <option value="subcutaneous">{t("nurse.ui.subcutaneousSc")}</option>
+                <option value="topical">{t("nurse.ui.topical")}</option>
+                <option value="inhalation">{t("nurse.ui.inhalation")}</option>
+                <option value="rectal">{t("nurse.ui.rectal")}</option>
+                <option value="sublingual">{t("nurse.ui.sublingual")}</option>
               </select>
             </label>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <label className="block space-y-1">
-              <span className="font-medium text-foreground">Dose Given / Prepared</span>
+              <span className="font-medium text-foreground">{t("nurse.ui.doseGivenPrepared")}</span>
               <input
                 type="text"
                 className="w-full rounded-md border border-border bg-background px-3 py-2 text-foreground"
-                placeholder="e.g. 500 mg, 1 tab"
+                placeholder={t("nurse.ui.eG500Mg1Tab")}
                 value={doseGiven}
                 onChange={(e) => setDoseGiven(e.target.value)}
               />
             </label>
 
             <label className="block space-y-1">
-              <span className="font-medium text-foreground">Scheduled Time (optional)</span>
+              <span className="font-medium text-foreground">{t("nurse.ui.scheduledTimeOptional")}</span>
               <input
                 type="datetime-local"
                 className="w-full rounded-md border border-border bg-background px-3 py-2 text-foreground"
@@ -285,14 +285,12 @@ export default function MedicationAdministrationModal({
 
           {(status === "held" || status === "refused") && (
             <label className="block space-y-1">
-              <span className="font-medium text-danger">
-                Clinical Reason for {status === "held" ? "Holding" : "Refusing"} Dose (Required)
-              </span>
+              <span className="font-medium text-danger">{t("nurse.ui.clinicalReasonFor")}{" "}{status === "held" ? t("nurse.ui.holding") : t("nurse.ui.refusing")}{" "}{t("nurse.ui.doseRequired")}</span>
               <input
                 type="text"
                 required
                 className="w-full rounded-md border border-danger/50 bg-background px-3 py-2 text-foreground focus:border-danger"
-                placeholder="e.g. Systolic BP < 90 mmHg, patient nauseous, pending surgery"
+                placeholder={t("nurse.ui.eGSystolicBp90Mmhg")}
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
               />
@@ -301,30 +299,26 @@ export default function MedicationAdministrationModal({
 
           {isCorrection && (
             <label className="block space-y-1">
-              <span className="font-medium text-foreground">
-                Correction Reason (Mandatory, min 10 characters)
-              </span>
+              <span className="font-medium text-foreground">{t("nurse.ui.correctionReasonMandatoryMin10Characters")}</span>
               <textarea
                 required
                 rows={2}
                 minLength={10}
                 className="w-full rounded-md border border-border bg-background px-3 py-2 text-foreground"
-                placeholder="Detailed reason for amending the original dose administration entry..."
+                placeholder={t("nurse.ui.detailedReasonForAmendingTheOriginal")}
                 value={correctionReason}
                 onChange={(e) => setCorrectionReason(e.target.value)}
               />
-              <span className="text-[11px] text-muted-foreground">
-                {correctionReason.length}/10 minimum characters
-              </span>
+              <span className="text-[11px] text-muted-foreground">{t("emergency.retriageMinChars", { count: correctionReason.length })}</span>
             </label>
           )}
 
           <label className="block space-y-1">
-            <span className="font-medium text-foreground">Notes (Optional)</span>
+            <span className="font-medium text-foreground">{t("nurse.ui.notesOptional")}</span>
             <input
               type="text"
               className="w-full rounded-md border border-border bg-background px-3 py-2 text-foreground"
-              placeholder="e.g. Administered after light meal, IV site clean"
+              placeholder={t("nurse.ui.eGAdministeredAfterLightMeal")}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
             />

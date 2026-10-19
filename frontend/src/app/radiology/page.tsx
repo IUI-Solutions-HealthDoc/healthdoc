@@ -64,10 +64,11 @@ function MachinePicker({ machines, value, onChange, placeholder }: {
   onChange: (value: string) => void;
   placeholder?: string;
 }) {
+  const { t } = useLocale();
   if (machines && machines.length > 0) {
     return (
       <select className="w-full rounded-md border border-border px-3 py-2" value={value} onChange={(e) => onChange(e.target.value)}>
-        <option value="">Choose machine…</option>
+        <option value="">{t("radiology.ui.chooseMachine")}</option>
         {machines.map((m) => (
           <option key={m.id} value={m.name} disabled={m.status !== "working"}>
             {m.name}{m.asset_tag ? ` (${m.asset_tag})` : ""}{m.status !== "working" ? ` — ${m.status}` : ""}
@@ -487,9 +488,9 @@ function RadiologyPageContent() {
                     {t("radiology.markScanComplete")}
                   </button>
                   <div className="space-y-3 border-t border-border pt-3">
-                    <p className="text-sm font-medium">Reschedule</p>
+                    <p className="text-sm font-medium">{t("receptionist.reschedule")}</p>
                     <label className="block space-y-1 text-sm">
-                      <span className="text-muted-foreground">New slot</span>
+                      <span className="text-muted-foreground">{t("radiology.ui.newSlot")}</span>
                       <input
                         type="datetime-local"
                         className="w-full rounded-md border border-border px-3 py-2"
@@ -498,11 +499,11 @@ function RadiologyPageContent() {
                       />
                     </label>
                     <label className="block space-y-1 text-sm">
-                      <span className="text-muted-foreground">Machine</span>
+                      <span className="text-muted-foreground">{t("radiology.machine")}</span>
                       <MachinePicker machines={machines} value={rescheduleMachine} onChange={setRescheduleMachine} />
                     </label>
                     <label className="block space-y-1 text-sm">
-                      <span className="text-muted-foreground">Reason</span>
+                      <span className="text-muted-foreground">{t("inventory.adjustment.reason")}</span>
                       <input
                         minLength={5}
                         maxLength={500}
@@ -574,15 +575,13 @@ function RadiologyPageContent() {
                 selected.status === "released") && (
                 <div className="space-y-3">
                   <p className="text-sm font-medium">
-                    {selected.status === "scanned" ? "Draft report" : "Report"}
+                    {selected.status === "scanned" ? t("radiology.ui.draftReport") : t("radiology.ui.report")}
                   </p>
                   {!canReport && selected.status !== "released" && (
-                    <p className="text-sm text-muted-foreground">
-                      Awaiting a doctor&apos;s report and sign-off. Technicians can view reports here.
-                    </p>
+                    <p className="text-sm text-muted-foreground">{t("radiology.ui.awaitingADoctorSReportAnd")}</p>
                   )}
                   <label className="block space-y-1 text-sm">
-                    <span className="text-muted-foreground">Findings</span>
+                    <span className="text-muted-foreground">{t("radiology.ui.findings")}</span>
                     <textarea
                       rows={5}
                       className="w-full rounded-md border border-border px-3 py-2"
@@ -592,7 +591,7 @@ function RadiologyPageContent() {
                     />
                   </label>
                   <label className="block space-y-1 text-sm">
-                    <span className="text-muted-foreground">Impression</span>
+                    <span className="text-muted-foreground">{t("radiology.ui.impression")}</span>
                     <textarea
                       rows={3}
                       className="w-full rounded-md border border-border px-3 py-2"
@@ -602,13 +601,13 @@ function RadiologyPageContent() {
                     />
                   </label>
                   <label className="block space-y-1 text-sm">
-                    <span className="text-muted-foreground">PACS study UID</span>
+                    <span className="text-muted-foreground">{t("radiology.ui.pacsStudyUid")}</span>
                     <input
                       className="w-full rounded-md border border-border px-3 py-2 font-mono text-xs"
                       value={pacsStudyUid}
                       onChange={(e) => setPacsStudyUid(e.target.value)}
                       disabled={!canReport || selected.status === "released"}
-                      placeholder="Optional DICOM study instance UID"
+                      placeholder={t("radiology.ui.optionalDicomStudyInstanceUid")}
                     />
                   </label>
 
@@ -654,7 +653,7 @@ function RadiologyPageContent() {
 
               {reports.length > 0 && (
                 <div className="border-t border-border pt-4">
-                  <p className="text-sm font-medium">Versions</p>
+                  <p className="text-sm font-medium">{t("radiology.ui.versions")}</p>
                   <ul className="mt-2 space-y-1">
                     {reports.map((report) => (
                       <li key={report.id} className="text-xs text-muted-foreground">
@@ -665,9 +664,7 @@ function RadiologyPageContent() {
                     ))}
                   </ul>
                   {currentReport && !currentReport.is_current && (
-                    <p className="mt-2 text-xs text-warning">
-                      You are viewing a superseded version.
-                    </p>
+                    <p className="mt-2 text-xs text-warning">{t("radiology.ui.youAreViewingASupersededVersion")}</p>
                   )}
                 </div>
               )}
@@ -736,23 +733,21 @@ function RadiologyPageContent() {
                         <div className="min-w-0 flex-1">
                           <p className="truncate font-medium text-foreground">{att.file_name}</p>
                           <div className="flex items-center gap-2 text-[11px] text-muted-foreground mt-0.5">
-                            <span>{(att.file_size_bytes / 1024).toFixed(1)} KB</span>
+                            <span>{t("radiology.ui.valueKb", { value: (att.file_size_bytes / 1024).toFixed(1) })}</span>
                             <span>•</span>
                             <span className="truncate max-w-[120px]">{att.mime_type}</span>
                             <span>•</span>
-                            <span className="font-mono text-[10px]" title={`SHA-256: ${att.checksum_sha256}`}>
-                              SHA: {att.checksum_sha256.slice(0, 8)}…
-                            </span>
+                            <span className="font-mono text-[10px]" title={`SHA-256: ${att.checksum_sha256}`}>{t("radiology.ui.shaValue", { value: att.checksum_sha256.slice(0, 8) })}</span>
                           </div>
                         </div>
                         <button
                           type="button"
                           onClick={() => void handleDownloadAttachment(att)}
                           className="flex items-center gap-1 rounded bg-secondary px-2 py-1 text-xs text-secondary-foreground hover:bg-secondary/80"
-                          title="Download attachment"
+                          title={t("radiology.ui.downloadAttachment")}
                         >
                           <Download className="h-3 w-3" />
-                          <span>Get</span>
+                          <span>{t("radiology.ui.get")}</span>
                         </button>
                       </div>
                     ))}
@@ -761,9 +756,7 @@ function RadiologyPageContent() {
               </div>
 
               {selected.pacs_study_uid && (
-                <p className="border-t border-border pt-4 font-mono text-xs text-muted-foreground">
-                  PACS study UID: {selected.pacs_study_uid}
-                </p>
+                <p className="border-t border-border pt-4 font-mono text-xs text-muted-foreground">{t("radiology.ui.pacsStudyUidPacsStudyUid", { pacs_study_uid: selected.pacs_study_uid })}</p>
               )}
             </>
           )}

@@ -228,7 +228,7 @@ export function ClinicalDispositionPanel({
             fullWidth
             size="small"
             label={t("ipd.admissionIndication")}
-            placeholder="e.g. Acute severe asthma exacerbation; requires oxygen therapy and nebulization"
+            placeholder={t("ipd.ui.eGAcuteSevereAsthmaExacerbation")}
             value={reason}
             onChange={(e) => setReason(e.target.value)}
           />
@@ -240,7 +240,7 @@ export function ClinicalDispositionPanel({
             rows={2}
             size="small"
             label={t("ipd.handoverNotesInpatient")}
-            placeholder="e.g. Strict intake/output monitoring, fall precautions, check vitals q2h"
+            placeholder={t("ipd.ui.eGStrictIntakeOutputMonitoring")}
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
           />
@@ -264,7 +264,7 @@ export function ClinicalDispositionPanel({
             fullWidth
             size="small"
             label={t("ipd.clinicalJustification")}
-            placeholder="e.g. Patient improved; continue oral medication and review in OPD after 7 days"
+            placeholder={t("ipd.ui.eGPatientImprovedContinueOral")}
             value={reason}
             onChange={(e) => setReason(e.target.value)}
           />
@@ -274,7 +274,7 @@ export function ClinicalDispositionPanel({
             rows={2}
             size="small"
             label={t("ipd.additionalDispositionNotes")}
-            placeholder="e.g. Red flag symptoms discussed with patient and attendant"
+            placeholder={t("ipd.ui.eGRedFlagSymptomsDiscussed")}
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
           />

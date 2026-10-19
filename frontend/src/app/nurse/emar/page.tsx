@@ -162,7 +162,7 @@ export default function Page() {
           >
             {admissions.map((admission) => (
               <option key={admission.id} value={admission.id}>
-                {formatDateTime(admission.admitted_at)} · {admission.reason ?? "Admission"}
+                {formatDateTime(admission.admitted_at)} · {admission.reason ?? t("nurse.emarLabelAdmission")}
               </option>
             ))}
           </select>
@@ -176,23 +176,19 @@ export default function Page() {
             <div>
               <span className="text-xs text-muted-foreground block">{t("nurse.emarLabelPatient")}</span>
               <span className="font-semibold text-foreground text-base">
-                {chart.patient.full_name || "Unnamed patient"}
+                {chart.patient.full_name || t("nurse.ward.unnamedPatient")}
               </span>
-              <div className="text-xs text-muted-foreground mt-0.5 font-mono">
-                UHID: {chart.patient.uhid}
-              </div>
+              <div className="text-xs text-muted-foreground mt-0.5 font-mono">{t("nurse.ui.uhidUhid", { uhid: chart.patient.uhid })}</div>
             </div>
 
             <div>
               <span className="text-xs text-muted-foreground block">{t("nurse.emarLabelDemographics")}</span>
               <span className="font-medium text-foreground">
                 {formatAge(chart.patient.age_years)} ·{" "}
-                {chart.patient.sex ? chart.patient.sex.toUpperCase() : "Unknown"}
+                {chart.patient.sex ? chart.patient.sex.toUpperCase() : t("mch.sex.unknown")}
               </span>
               {chart.patient.dob && (
-                <div className="text-xs text-muted-foreground mt-0.5">
-                  DOB: {chart.patient.dob}
-                </div>
+                <div className="text-xs text-muted-foreground mt-0.5">{t("nurse.ui.dobDob", { dob: chart.patient.dob })}</div>
               )}
             </div>
 
@@ -201,9 +197,7 @@ export default function Page() {
               <span className="font-medium text-foreground">
                 {localizeField(chart.admission.ward_name || t("common.unassigned"), chart.admission.ward_name_hi)}
               </span>
-              <div className="text-xs text-muted-foreground mt-0.5">
-                Bed: {chart.admission.bed_number || "—"}
-              </div>
+              <div className="text-xs text-muted-foreground mt-0.5">{t("nurse.ui.bedValue", { value: chart.admission.bed_number || "—" })}</div>
             </div>
 
             <div>
@@ -211,8 +205,7 @@ export default function Page() {
               <span className="font-medium text-foreground">
                 {chart.admission.admitted_at ? formatDateTime(chart.admission.admitted_at) : "—"}
               </span>
-              <div className="text-xs text-muted-foreground mt-0.5 truncate" title={chart.admission.reason ?? ""}>
-                Reason: {chart.admission.reason || "Not specified"}
+              <div className="text-xs text-muted-foreground mt-0.5 truncate" title={chart.admission.reason ?? ""}>{t("nurse.ui.reason")}{" "}{chart.admission.reason || t("nurse.ui.notSpecified")}
               </div>
             </div>
           </div>

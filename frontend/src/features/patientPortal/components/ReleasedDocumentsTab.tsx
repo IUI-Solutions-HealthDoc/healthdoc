@@ -162,7 +162,7 @@ export function ReleasedDocumentsTab() {
                 <h3 className="mt-3 text-base font-semibold text-foreground">{doc.title}</h3>
                 <p className="mt-1 text-xs text-muted-foreground">
                   {doc.doctor_name ? `Dr. ${doc.doctor_name}` : t("patientPortal.documents.attendingPhysician")} ·{" "}
-                  {doc.facility_name ?? "HealthDoc Medical Center"}
+                  {doc.facility_name ?? t("patientPortal.ui.healthdocMedicalCenter")}
                 </p>
                 <div className="mt-3 rounded-md bg-muted/40 p-2.5 text-xs text-muted-foreground">
                   <span className="font-medium text-foreground">{t("patientPortal.documents.summaryLabel")} </span>
@@ -198,7 +198,7 @@ export function ReleasedDocumentsTab() {
       {loadingDetail && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs">
           <div className="surface-card rounded-lg p-6 shadow-xl">
-            <p className="text-sm font-medium">Retrieving verified clinical record…</p>
+            <p className="text-sm font-medium">{t("patientPortal.documents.loadingDetail")}</p>
           </div>
         </div>
       )}
@@ -218,9 +218,7 @@ export function ReleasedDocumentsTab() {
             {/* Modal Header */}
             <div className="flex items-center justify-between border-b border-border p-4">
               <div>
-                <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  Verified Clinical Document
-                </span>
+                <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{t("patientPortal.documents.modal.verifiedDoc")}</span>
                 <h2 id="doc-preview-title" className="text-lg font-bold text-foreground">
                   {activeDoc.title}
                 </h2>
@@ -238,13 +236,11 @@ export function ReleasedDocumentsTab() {
                       strokeWidth={2}
                       d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"
                     />
-                  </svg>
-                  Print (A4)
-                </button>
+                  </svg>{t("patientPortal.documents.modal.printA4")}</button>
                 <button
                   type="button"
                   onClick={() => setActiveDoc(null)}
-                  aria-label="Close modal"
+                  aria-label={t("patientPortal.documents.modal.closeAria")}
                   className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
                 >
                   ✕
@@ -260,40 +256,37 @@ export function ReleasedDocumentsTab() {
                 <div className="print-header flex items-start justify-between border-b-2 border-primary pb-3">
                   <div>
                     <h1 className="print-header-logo text-xl font-extrabold text-primary">
-                      {activeDoc.facility_name ?? "HealthDoc Medical Center"}
+                      {activeDoc.facility_name ?? t("patientPortal.ui.healthdocMedicalCenter")}
                     </h1>
                     <p className="print-header-facility text-xs text-muted-foreground">
-                      {activeDoc.facility_address ?? "National Highway 44, Bengaluru, Karnataka 560100"} · NABH Accredited
-                    </p>
+                      {activeDoc.facility_address ?? t("patientPortal.ui.nationalHighway44BengaluruKarnataka560100")}{" "}{t("patientPortal.ui.nabhAccredited")}</p>
                   </div>
                   <div className="text-right">
                     <p className="print-header-doc-title text-sm font-bold uppercase text-primary">
                       {activeDoc.document_type.replace("_", " ")}
                     </p>
-                    <p className="text-xs text-muted-foreground">
-                      Date: {formatDateTime(activeDoc.date)}
-                    </p>
+                    <p className="text-xs text-muted-foreground">{t("patientPortal.ui.dateDate", { date: formatDateTime(activeDoc.date) })}</p>
                   </div>
                 </div>
 
                 {/* Patient Demographic Banner */}
                 <div className="print-patient-banner grid grid-cols-2 gap-3 rounded-lg border border-border bg-muted/30 p-3 text-xs md:grid-cols-4">
                   <div>
-                    <span className="block font-semibold uppercase text-muted-foreground">UHID</span>
+                    <span className="block font-semibold uppercase text-muted-foreground">{t("field.uhid")}</span>
                     <span className="font-bold text-foreground">{activeDoc.patient_uhid ?? "HD-PAT-ME"}</span>
                   </div>
                   <div>
-                    <span className="block font-semibold uppercase text-muted-foreground">Patient Name</span>
+                    <span className="block font-semibold uppercase text-muted-foreground">{t("common.ui.patientName")}</span>
                     <span className="font-bold text-foreground">{activeDoc.patient_name}</span>
                   </div>
                   <div>
-                    <span className="block font-semibold uppercase text-muted-foreground">Age / Gender</span>
-                    <span className="font-medium text-foreground">{activeDoc.patient_age_gender ?? "Adult"}</span>
+                    <span className="block font-semibold uppercase text-muted-foreground">{t("patientPortal.ui.ageGender")}</span>
+                    <span className="font-medium text-foreground">{activeDoc.patient_age_gender ?? t("patientPortal.ui.adult")}</span>
                   </div>
                   <div>
-                    <span className="block font-semibold uppercase text-muted-foreground">Doctor</span>
+                    <span className="block font-semibold uppercase text-muted-foreground">{t("common.doctor")}</span>
                     <span className="font-medium text-foreground">
-                      {activeDoc.doctor_name ? `Dr. ${activeDoc.doctor_name}` : "Attending Physician"}
+                      {activeDoc.doctor_name ? `Dr. ${activeDoc.doctor_name}` : t("patientPortal.documents.attendingPhysician")}
                     </span>
                   </div>
                 </div>
@@ -303,19 +296,17 @@ export function ReleasedDocumentsTab() {
                   {/* Prescriptions Table */}
                   {activeDoc.document_type === "prescription" && (
                     <div>
-                      <h4 className="border-b border-border pb-1 text-sm font-semibold uppercase text-primary">
-                        Prescribed Medications (Rx)
-                      </h4>
+                      <h4 className="border-b border-border pb-1 text-sm font-semibold uppercase text-primary">{t("patientPortal.ui.prescribedMedicationsRx")}</h4>
                       {Array.isArray((activeDoc.content as Record<string, unknown>).items) ? (
                         <table className="print-table mt-2 w-full text-left text-xs">
                           <thead>
                             <tr className="border-b border-border bg-muted/40">
                               <th className="p-2">#</th>
-                              <th className="p-2">Medicine / Generic</th>
-                              <th className="p-2">Dose / Route</th>
-                              <th className="p-2">Frequency</th>
-                              <th className="p-2">Duration</th>
-                              <th className="p-2">Instructions</th>
+                              <th className="p-2">{t("patientPortal.ui.medicineGeneric")}</th>
+                              <th className="p-2">{t("patientPortal.ui.doseRoute")}</th>
+                              <th className="p-2">{t("doctor.ui.frequency")}</th>
+                              <th className="p-2">{t("doctor.ui.duration")}</th>
+                              <th className="p-2">{t("doctor.ui.instructions")}</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -325,7 +316,7 @@ export function ReleasedDocumentsTab() {
                                 <td className="p-2 font-semibold">{String(item.medicine_name ?? "Medication")}</td>
                                 <td className="p-2">{String(item.dosage ?? "Standard")} ({String(item.route ?? "Oral")})</td>
                                 <td className="p-2">{String(item.frequency ?? "Daily")}</td>
-                                <td className="p-2">{String(item.duration_days ?? "5")} days</td>
+                                <td className="p-2">{t("patientPortal.ui.valueDays", { value: String(item.duration_days ?? "5") })}</td>
                                 <td className="p-2 text-muted-foreground">{String(item.instructions ?? "After food")}</td>
                               </tr>
                             ))}
@@ -336,7 +327,7 @@ export function ReleasedDocumentsTab() {
                       )}
                       {(activeDoc.content as Record<string, unknown>).notes ? (
                         <div className="mt-3 rounded border border-border bg-muted/20 p-2 text-xs">
-                          <span className="font-semibold">Doctor&apos;s Advice / Notes: </span>
+                          <span className="font-semibold">{t("patientPortal.ui.doctorSAdviceNotes")}{" "}</span>
                           {String((activeDoc.content as Record<string, unknown>).notes)}
                         </div>
                       ) : null}
@@ -346,29 +337,27 @@ export function ReleasedDocumentsTab() {
                   {/* Lab Reports */}
                   {activeDoc.document_type === "lab_report" && (
                     <div>
-                      <h4 className="border-b border-border pb-1 text-sm font-semibold uppercase text-primary">
-                        Investigation Findings
-                      </h4>
+                      <h4 className="border-b border-border pb-1 text-sm font-semibold uppercase text-primary">{t("patientPortal.ui.investigationFindings")}</h4>
                       <div className="mt-2 space-y-2 text-xs">
                         <div className="flex justify-between border-b border-border py-1.5">
-                          <span className="font-medium text-muted-foreground">Test / Panel</span>
+                          <span className="font-medium text-muted-foreground">{t("patientPortal.ui.testPanel")}</span>
                           <span className="font-bold text-foreground">
                             {String((activeDoc.content as Record<string, unknown>).test_name ?? activeDoc.title)}
                           </span>
                         </div>
                         <div className="flex justify-between border-b border-border py-1.5">
-                          <span className="font-medium text-muted-foreground">Observed Value</span>
+                          <span className="font-medium text-muted-foreground">{t("patientPortal.ui.observedValue")}</span>
                           <span className="font-bold text-primary">
                             {String((activeDoc.content as Record<string, unknown>).result_value ?? "Normal")}
                           </span>
                         </div>
                         <div className="flex justify-between border-b border-border py-1.5">
-                          <span className="font-medium text-muted-foreground">Reference Range</span>
+                          <span className="font-medium text-muted-foreground">{t("patientPortal.ui.referenceRange")}</span>
                           <span>{String((activeDoc.content as Record<string, unknown>).reference_range ?? "N/A")}</span>
                         </div>
                         {(activeDoc.content as Record<string, unknown>).notes ? (
                           <div className="py-2">
-                            <span className="block font-semibold">Pathologist Interpretation:</span>
+                            <span className="block font-semibold">{t("patientPortal.ui.pathologistInterpretation")}</span>
                             <p className="mt-1 text-muted-foreground">{String((activeDoc.content as Record<string, unknown>).notes)}</p>
                           </div>
                         ) : null}
@@ -380,22 +369,20 @@ export function ReleasedDocumentsTab() {
                   {activeDoc.document_type === "radiology" && (
                     <div className="space-y-3 text-xs">
                       <div>
-                        <h4 className="border-b border-border pb-1 text-sm font-semibold uppercase text-primary">
-                          Imaging Modality & Findings
-                        </h4>
+                        <h4 className="border-b border-border pb-1 text-sm font-semibold uppercase text-primary">{t("patientPortal.ui.imagingModalityFindings")}</h4>
                         <div className="mt-2 space-y-2">
                           <div>
-                            <span className="font-semibold text-muted-foreground">Modality / Study: </span>
+                            <span className="font-semibold text-muted-foreground">{t("patientPortal.ui.modalityStudy")}{" "}</span>
                             <span className="font-bold">{String((activeDoc.content as Record<string, unknown>).modality ?? "Radiograph")}</span>
                           </div>
                           <div className="rounded bg-muted/20 p-2">
-                            <span className="font-semibold block text-foreground">Findings:</span>
+                            <span className="font-semibold block text-foreground">{t("patientPortal.ui.findings")}</span>
                             <p className="mt-1 text-muted-foreground">
                               {String((activeDoc.content as Record<string, unknown>).findings ?? activeDoc.summary)}
                             </p>
                           </div>
                           <div className="rounded border border-primary/20 bg-primary/5 p-2">
-                            <span className="font-bold text-primary block">Impression:</span>
+                            <span className="font-bold text-primary block">{t("patientPortal.ui.impression")}</span>
                             <p className="mt-1 text-foreground font-medium">
                               {String((activeDoc.content as Record<string, unknown>).impression ?? "No acute abnormality detected.")}
                             </p>
@@ -408,29 +395,27 @@ export function ReleasedDocumentsTab() {
                   {/* Discharge Summaries */}
                   {activeDoc.document_type === "discharge_summary" && (
                     <div className="space-y-3 text-xs">
-                      <h4 className="border-b border-border pb-1 text-sm font-semibold uppercase text-primary">
-                        Inpatient Stay & Discharge Summary
-                      </h4>
+                      <h4 className="border-b border-border pb-1 text-sm font-semibold uppercase text-primary">{t("patientPortal.ui.inpatientStayDischargeSummary")}</h4>
                       <div className="grid grid-cols-2 gap-2 border-b border-border pb-2">
                         <div>
-                          <span className="text-muted-foreground">Admission Date: </span>
+                          <span className="text-muted-foreground">{t("patientPortal.ui.admissionDate")}{" "}</span>
                           <span className="font-semibold">{String((activeDoc.content as Record<string, unknown>).admission_date ?? "—")}</span>
                         </div>
                         <div>
-                          <span className="text-muted-foreground">Discharge Date: </span>
+                          <span className="text-muted-foreground">{t("patientPortal.ui.dischargeDate")}{" "}</span>
                           <span className="font-semibold">{String((activeDoc.content as Record<string, unknown>).discharge_date ?? "—")}</span>
                         </div>
                       </div>
                       <div className="space-y-1">
-                        <span className="font-semibold">Final Diagnoses:</span>
+                        <span className="font-semibold">{t("patientPortal.ui.finalDiagnoses")}</span>
                         <p className="text-muted-foreground">{String((activeDoc.content as Record<string, unknown>).final_diagnosis ?? activeDoc.summary)}</p>
                       </div>
                       <div className="space-y-1">
-                        <span className="font-semibold">Hospital Course & Treatment:</span>
+                        <span className="font-semibold">{t("patientPortal.ui.hospitalCourseTreatment")}</span>
                         <p className="text-muted-foreground">{String((activeDoc.content as Record<string, unknown>).course_summary ?? "Patient managed conservatively with satisfactory recovery.")}</p>
                       </div>
                       <div className="space-y-1 rounded bg-muted/20 p-2">
-                        <span className="font-semibold text-foreground">Discharge Advice & Follow-up:</span>
+                        <span className="font-semibold text-foreground">{t("patientPortal.ui.dischargeAdviceFollowUp")}</span>
                         <p className="text-muted-foreground">{String((activeDoc.content as Record<string, unknown>).discharge_advice ?? "Follow up in OPD after 7 days or SOS in Emergency.")}</p>
                       </div>
                     </div>
@@ -439,30 +424,26 @@ export function ReleasedDocumentsTab() {
                   {/* Vaccination Certificates */}
                   {activeDoc.document_type === "vaccine" && (
                     <div className="space-y-3 text-xs">
-                      <h4 className="border-b border-border pb-1 text-sm font-semibold uppercase text-primary">
-                        Immunization Certificate
-                      </h4>
+                      <h4 className="border-b border-border pb-1 text-sm font-semibold uppercase text-primary">{t("patientPortal.ui.immunizationCertificate")}</h4>
                       <div className="grid grid-cols-2 gap-2 rounded border border-border p-3">
                         <div>
-                          <span className="text-muted-foreground block">Vaccine Name</span>
+                          <span className="text-muted-foreground block">{t("immunization.col.vaccineName")}</span>
                           <span className="font-bold text-foreground text-sm">
                             {String((activeDoc.content as Record<string, unknown>).vaccine_name ?? activeDoc.title)}
                           </span>
                         </div>
                         <div>
-                          <span className="text-muted-foreground block">Dose Sequence</span>
-                          <span className="font-bold text-foreground text-sm">
-                            Dose #{String((activeDoc.content as Record<string, unknown>).dose_number ?? "1")}
-                          </span>
+                          <span className="text-muted-foreground block">{t("patientPortal.ui.doseSequence")}</span>
+                          <span className="font-bold text-foreground text-sm">{t("patientPortal.ui.doseValue", { value: String((activeDoc.content as Record<string, unknown>).dose_number ?? "1") })}</span>
                         </div>
                         <div>
-                          <span className="text-muted-foreground block">Batch / Lot Number</span>
+                          <span className="text-muted-foreground block">{t("patientPortal.ui.batchLotNumber")}</span>
                           <span className="font-mono font-medium">
                             {String((activeDoc.content as Record<string, unknown>).batch_number ?? "COV-78829")}
                           </span>
                         </div>
                         <div>
-                          <span className="text-muted-foreground block">Next Due Date</span>
+                          <span className="text-muted-foreground block">{t("patientPortal.ui.nextDueDate")}</span>
                           <span className="font-medium text-primary">
                             {String((activeDoc.content as Record<string, unknown>).next_due_date ?? "Complete")}
                           </span>
@@ -482,26 +463,22 @@ export function ReleasedDocumentsTab() {
                           d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
                           clipRule="evenodd"
                         />
-                      </svg>
-                      Verified Digital Health Record
-                    </div>
-                    <p className="text-muted-foreground text-[10px]">
-                      DPDP Act compliant electronic record signed at {formatDateTime(activeDoc.date)}
-                    </p>
+                      </svg>{t("patientPortal.ui.verifiedDigitalHealthRecord")}</div>
+                    <p className="text-muted-foreground text-[10px]">{t("patientPortal.ui.dpdpActCompliantElectronicRecordSigned", { date: formatDateTime(activeDoc.date) })}</p>
                   </div>
                   <div className="text-center">
                     <div className="print-signature-line mb-1 h-8 w-44 border-b border-foreground/60"></div>
                     <p className="font-bold text-foreground">
-                      {activeDoc.doctor_name ? `Dr. ${activeDoc.doctor_name}` : "Authorized Medical Officer"}
+                      {activeDoc.doctor_name ? `Dr. ${activeDoc.doctor_name}` : t("patientPortal.ui.authorizedMedicalOfficer")}
                     </p>
-                    <p className="text-[10px] text-muted-foreground">Reg. No: MCI-2018-84729</p>
+                    <p className="text-[10px] text-muted-foreground">{t("patientPortal.ui.regNoMci201884729")}</p>
                   </div>
                 </div>
 
                 {/* Print Footer */}
                 <div className="print-footer text-[9px] text-muted-foreground">
-                  <span>Generated via HealthDoc Patient Portal</span>
-                  <span>Confidential Medical Information</span>
+                  <span>{t("patientPortal.ui.generatedViaHealthdocPatientPortal")}</span>
+                  <span>{t("patientPortal.ui.confidentialMedicalInformation")}</span>
                 </div>
               </div>
             </div>
@@ -512,16 +489,12 @@ export function ReleasedDocumentsTab() {
                 type="button"
                 onClick={() => setActiveDoc(null)}
                 className="rounded-md border border-border px-4 py-2 text-xs font-semibold hover:bg-muted"
-              >
-                Close Preview
-              </button>
+              >{t("patientPortal.documents.modal.closePreview")}</button>
               <button
                 type="button"
                 onClick={handlePrint}
                 className="rounded-md bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
-              >
-                Print Document
-              </button>
+              >{t("patientPortal.documents.modal.printDocument")}</button>
             </div>
           </div>
         </div>

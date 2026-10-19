@@ -7,6 +7,7 @@ import Typography from "@mui/material/Typography";
 import { meridian } from "@/styles/theme";
 import type { SoapNote } from "./SoapNotePanel";
 import type { UpdateEncounterInput } from "../types";
+import { useLocale } from "@/lib/i18n";
 
 const FIELDS: { key: keyof SoapNote; label: string }[] = [
   { key: "subjective", label: "Subjective" },
@@ -27,6 +28,7 @@ export interface StaleWritePanelProps {
  * copy would destroy a colleague's clinical note.
  */
 export function StaleWritePanel({ yours, theirs }: StaleWritePanelProps) {
+  const { t } = useLocale();
   const changed = FIELDS.filter((f) => (yours[f.key] ?? "") !== (theirs[f.key] ?? ""));
 
   return (
@@ -48,18 +50,11 @@ export function StaleWritePanel({ yours, theirs }: StaleWritePanelProps) {
           color: meridian.danger,
           mb: 0.75,
         }}
-      >
-        Not saved — this encounter changed while you were editing
-      </Typography>
-      <Typography sx={{ fontSize: "0.8125rem", color: meridian.textPrimary, mb: 1.5 }}>
-        Your note was <strong>not</strong> stored, and nothing of theirs was overwritten. Compare the
-        two and re-enter what should stand.
-      </Typography>
+      >{t("doctor.ui.notSavedThisEncounterChangedWhile")}</Typography>
+      <Typography sx={{ fontSize: "0.8125rem", color: meridian.textPrimary, mb: 1.5 }}>{t("doctor.ui.yourNoteWas")}{" "}<strong>{t("doctor.ui.not")}</strong>{" "}{t("doctor.ui.storedAndNothingOfTheirsWas")}</Typography>
 
       {changed.length === 0 ? (
-        <Typography sx={{ fontSize: "0.8125rem", color: meridian.textSecondary }}>
-          The text is identical — only the version differs. Reload and save again.
-        </Typography>
+        <Typography sx={{ fontSize: "0.8125rem", color: meridian.textSecondary }}>{t("doctor.ui.theTextIsIdenticalOnlyThe")}</Typography>
       ) : (
         <Stack spacing={1.25}>
           {changed.map((f) => (
@@ -85,9 +80,7 @@ export function StaleWritePanel({ yours, theirs }: StaleWritePanelProps) {
                     border: `1px solid ${meridian.border}`,
                   }}
                 >
-                  <Typography sx={{ fontSize: "0.6875rem", color: meridian.textSecondary }}>
-                    Yours
-                  </Typography>
+                  <Typography sx={{ fontSize: "0.6875rem", color: meridian.textSecondary }}>{t("doctor.ui.yours")}</Typography>
                   <Typography sx={{ fontSize: "0.8125rem", whiteSpace: "pre-wrap" }}>
                     {yours[f.key] || "—"}
                   </Typography>
@@ -100,9 +93,7 @@ export function StaleWritePanel({ yours, theirs }: StaleWritePanelProps) {
                     border: `1px solid ${meridian.border}`,
                   }}
                 >
-                  <Typography sx={{ fontSize: "0.6875rem", color: meridian.textSecondary }}>
-                    On the server
-                  </Typography>
+                  <Typography sx={{ fontSize: "0.6875rem", color: meridian.textSecondary }}>{t("doctor.ui.onTheServer")}</Typography>
                   <Typography sx={{ fontSize: "0.8125rem", whiteSpace: "pre-wrap" }}>
                     {theirs[f.key] || "—"}
                   </Typography>

@@ -52,7 +52,7 @@ export function UserProfileForm({
   onSave,
   onToggleActive,
 }: Props) {
-  const { localizeField } = useLocale();
+  const { t, localizeField } = useLocale();
   const saveDisabled = busy || !isDirty;
 
   return (
@@ -79,15 +79,8 @@ export function UserProfileForm({
             fontWeight: 700,
             color: meridian.textPrimary,
           }}
-        >
-          Profile
-        </Typography>
-        <Typography sx={{ m: 0, mb: 2, fontSize: "0.8125rem", color: meridian.textSecondary }}>
-          Update the staff member&apos;s editable profile details and department assignment.
-          {" "}For ABDM consent requests, verify the clinician&apos;s real registration number,
-          identifier type and issuing registry URI. Leave both ABDM fields blank for other staff;
-          do not enter sample or invented credentials.
-        </Typography>
+        >{t("admin.ui.profile")}</Typography>
+        <Typography sx={{ m: 0, mb: 2, fontSize: "0.8125rem", color: meridian.textSecondary }}>{t("admin.ui.updateTheStaffMemberSEditable")}{" "}{t("admin.ui.forAbdmConsentRequestsVerifyThe")}</Typography>
 
         <Stack direction="row" useFlexGap spacing={1.5} sx={{ flexWrap: "wrap" }}>
           {FIELDS.map(({ key, label }) => (
@@ -105,15 +98,15 @@ export function UserProfileForm({
           ))}
           <TextField
             select
-            label="Department"
+            label={t("monitor.department")}
             size="small"
             sx={{ width: { xs: "100%", sm: "calc(50% - 6px)" } }}
             value={draft.department_id ?? ""}
             onChange={(event) => onChange("department_id", event.target.value)}
             disabled={busy}
-            helperText="Optional for facility-wide roles"
+            helperText={t("admin.ui.optionalForFacilityWideRoles")}
           >
-            <MenuItem value="">No department</MenuItem>
+            <MenuItem value="">{t("admin.ui.noDepartment")}</MenuItem>
             {departments.filter((department) => department.is_active).map((department) => (
               <MenuItem key={department.id} value={department.id}>
                 {localizeField(department.name, department.name_hi)} ({department.code})
@@ -133,7 +126,7 @@ export function UserProfileForm({
             color: isDirty ? meridian.warning : meridian.textSecondary,
           }}
         >
-          {isDirty ? "Unsaved changes" : "No changes"}
+          {isDirty ? t("doctor.statusUnsavedChanges") : t("admin.ui.noChanges")}
         </Typography>
         <Stack direction="row" useFlexGap sx={{ gap: 1.25, flexWrap: "wrap" }}>
           <Button
@@ -142,7 +135,7 @@ export function UserProfileForm({
             onClick={onToggleActive}
             sx={{ textTransform: "none", fontWeight: 600, borderRadius: "10px" }}
           >
-            {draft.is_active ? "Deactivate" : "Activate"}
+            {draft.is_active ? t("dpdp.consentManagerDeactivate") : t("admin.ui.activate")}
           </Button>
           <Button
             color="primary"
@@ -150,9 +143,7 @@ export function UserProfileForm({
             disabled={saveDisabled}
             onClick={onSave}
             sx={adminSaveButtonSx(isDirty, saveDisabled)}
-          >
-            Save profile
-          </Button>
+          >{t("admin.ui.saveProfile")}</Button>
         </Stack>
       </Box>
     </Box>

@@ -350,7 +350,7 @@ export function AdmissionChecklistPanel({
             multiline
             rows={3}
             label={t("ipd.checklist.skipReasonLabel")}
-            placeholder="e.g. Patient arriving in active seizure; baseline vitals deferred for immediate resuscitation"
+            placeholder={t("ipd.ui.eGPatientArrivingInActive")}
             value={skipReason}
             onChange={(e) => {
               setSkipReason(e.target.value);

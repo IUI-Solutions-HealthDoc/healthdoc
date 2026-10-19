@@ -67,7 +67,7 @@ export function PrescriptionQueue({ dispenseMode = false }: { dispenseMode?: boo
       </h1>
       <p>{loading ? `${t("pharmacy.loadingPrescriptions")}…` : `${total} prescription${total === 1 ? "" : "s"}`}</p>
       {dispenseMode ? (
-        <p>Dispensing mutations remain unavailable until a prescription-item detail contract is connected.</p>
+        <p>{t("pharmacy.ui.dispensingMutationsRemainUnavailableUntilA")}</p>
       ) : null}
       {loading ? <LoadingState label={t("pharmacy.loadingPrescriptions")} /> : null}
       {error ? <ErrorState message={error} /> : null}
@@ -77,7 +77,7 @@ export function PrescriptionQueue({ dispenseMode = false }: { dispenseMode?: boo
       {rows.length > 0 ? (
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <caption className="sr-only">Prescription queue</caption>
+            <caption className="sr-only">{t("pharmacy.ui.prescriptionQueue")}</caption>
             <thead>
               <tr>
                 {QUEUE_COLUMNS.map((labelKey) => (
@@ -91,7 +91,7 @@ export function PrescriptionQueue({ dispenseMode = false }: { dispenseMode?: boo
                   <td style={{ padding: "0.75rem", borderBottom: "1px solid #eef1f4" }}>{row.patient_full_name}</td>
                   <td style={{ padding: "0.75rem", borderBottom: "1px solid #eef1f4" }}>{row.uhid ?? row.thid ?? "—"}</td>
                   <td style={{ padding: "0.75rem", borderBottom: "1px solid #eef1f4" }}>{row.item_count}</td>
-                  <td style={{ padding: "0.75rem", borderBottom: "1px solid #eef1f4" }}>{row.dispense_status?.replaceAll("_", " ") ?? "Not dispensed"}</td>
+                  <td style={{ padding: "0.75rem", borderBottom: "1px solid #eef1f4" }}>{row.dispense_status?.replaceAll("_", " ") ?? t("pharmacy.ui.notDispensed")}</td>
                   <td style={{ padding: "0.75rem", borderBottom: "1px solid #eef1f4" }}>{formatDateTime(row.prescribed_at)}</td>
                   <td style={{ padding: "0.75rem", borderBottom: "1px solid #eef1f4" }}>
                     {!dispenseMode ? <Link href="/pharmacy/dispense">{t("pharmacy.openDispenseQueue")}</Link> : null}

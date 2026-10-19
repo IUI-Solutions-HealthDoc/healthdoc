@@ -125,9 +125,7 @@ export function ConsentRecordDetail({
           textAlign: "center",
           color: meridian.textSecondary,
         }}
-      >
-        Select a consent record to review the decision and expiry.
-      </Box>
+      >{t("consent.ui.selectAConsentRecordToReview")}</Box>
     );
   }
 
@@ -176,11 +174,11 @@ export function ConsentRecordDetail({
             value={consentChannelLabel(t, record.channel)}
           />
           <Meta
-            label="Expires"
+            label={t("receptionist.scanShare.expires")}
             value={record.expires_at ? formatDate(record.expires_at) : "open-ended"}
           />
-          <Meta label="Granted" value={formatDateTime(record.granted_at)} />
-          <Meta label="Granted by" value={String(record.granted_by_type)} />
+          <Meta label={t("consent.status.granted")} value={formatDateTime(record.granted_at)} />
+          <Meta label={t("consent.ui.grantedBy")} value={String(record.granted_by_type)} />
           <Meta
             label={t("consent.statusChanged")}
             value={formatDateTime(record.status_changed_at)}
@@ -229,9 +227,7 @@ export function ConsentRecordDetail({
       <Dialog open={withdrawOpen} onClose={() => setWithdrawOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle sx={{ fontWeight: 700 }}>{t("consent.withdraw")}</DialogTitle>
         <DialogContent>
-          <Typography sx={{ mb: 1.5, fontSize: "0.875rem", color: meridian.textSecondary }}>
-            This will revoke the consent record. The action is logged in the audit trail.
-          </Typography>
+          <Typography sx={{ mb: 1.5, fontSize: "0.875rem", color: meridian.textSecondary }}>{t("consent.ui.thisWillRevokeTheConsentRecord")}</Typography>
           <TextField
             autoFocus
             fullWidth

@@ -275,9 +275,7 @@ export function AdjustmentWorkspace() {
                 >
                   <option value="">{t("inventory.adjustment.selectBatch")}</option>
                   {item.batches.map((b) => (
-                    <option key={b.batch_id} value={b.batch_id}>
-                      {b.batch_number} · expires {b.expiry_date} · {b.quantity} on hand
-                    </option>
+                    <option key={b.batch_id} value={b.batch_id}>{t("inventory.ui.batchNumberExpiresExpiryDateQuantity", { batch_number: b.batch_number, expiry_date: b.expiry_date, quantity: b.quantity })}</option>
                   ))}
                 </select>
               )}
@@ -401,10 +399,7 @@ export function AdjustmentWorkspace() {
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                       <span className="font-medium">{row.item_name}</span>
-                      <span className="text-gray-600">
-                        {" "}
-                        · batch {row.batch_number} · expires {row.expiry_date}
-                      </span>
+                      <span className="text-gray-600">{" "}{t("inventory.ui.batchBatchNumberExpiresExpiryDate", { batch_number: row.batch_number, expiry_date: row.expiry_date })}</span>
                     </div>
                     <span
                       className={`rounded px-2 py-0.5 text-xs ${

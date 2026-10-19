@@ -162,11 +162,11 @@ function RequestRow({ item, onDone }: { item: AppointmentRequest; onDone: () => 
         </div>
       ) : (
         <div className="mt-2 flex flex-wrap items-center gap-2">
-          <input type="date" aria-label="Appointment date" value={day} onChange={(e) => setDay(e.target.value)} className="rounded-md border border-border px-2 py-1 text-xs" />
-          <input type="time" aria-label="Appointment time" value={time} onChange={(e) => setTime(e.target.value)} className="rounded-md border border-border px-2 py-1 text-xs" />
-          <select value={doctor} onChange={(e) => setDoctor(e.target.value)} aria-label="Doctor"
+          <input type="date" aria-label={t("receptionist.ui.appointmentDate")} value={day} onChange={(e) => setDay(e.target.value)} className="rounded-md border border-border px-2 py-1 text-xs" />
+          <input type="time" aria-label={t("receptionist.ui.appointmentTime")} value={time} onChange={(e) => setTime(e.target.value)} className="rounded-md border border-border px-2 py-1 text-xs" />
+          <select value={doctor} onChange={(e) => setDoctor(e.target.value)} aria-label={t("common.doctor")}
             className="rounded-md border border-border px-2 py-1 text-xs">
-            <option value="">{doctors === null ? t("common.loading") : doctors.length ? "Choose doctor…" : "No doctor rostered that day"}</option>
+            <option value="">{doctors === null ? t("common.loading") : doctors.length ? t("receptionist.ui.chooseDoctor") : t("receptionist.ui.noDoctorRosteredThatDay")}</option>
             {(doctors ?? []).map((d) => <option key={d.staff_user_id} value={d.staff_user_id}>{d.staff_name}</option>)}
           </select>
           <button type="button" disabled={busy || !/^\d{2}:\d{2}$/.test(time) || !doctor || (outsideSession && !agreed)}

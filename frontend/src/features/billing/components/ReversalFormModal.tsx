@@ -12,6 +12,7 @@ import { formatINR } from "../lib/formatters";
 import { extractValidationErrors } from "../lib/errors";
 import { fromMoney, round2, toMoney } from "../lib/money";
 import type { CreateRefundInput, PaymentWithRefunds } from "../types";
+import { useLocale } from "@/lib/i18n";
 
 type Props = {
   open: boolean;
@@ -22,6 +23,7 @@ type Props = {
 };
 
 export function ReversalFormModal({ open, payment, busy, onClose, onSubmit }: Props) {
+  const { t } = useLocale();
   const maxRefund = useMemo(() => {
     if (!payment) return 0;
     const already = payment.refunds.reduce((s, r) => s + fromMoney(r.amount), 0);
@@ -82,23 +84,19 @@ export function ReversalFormModal({ open, payment, busy, onClose, onSubmit }: Pr
     <Modal
       open={open}
       onClose={onClose}
-      title="Reverse payment"
+      title={t("billing.ui.reversePayment")}
       size="sm"
       loading={busy}
       actions={
         <>
-          <Button onClick={onClose} sx={{ textTransform: "none" }} disabled={busy}>
-            Cancel
-          </Button>
+          <Button onClick={onClose} sx={{ textTransform: "none" }} disabled={busy}>{t("common.cancel")}</Button>
           <Button
             variant="contained"
             color="error"
             onClick={() => void handleSave()}
             disabled={busy}
             sx={{ textTransform: "none", fontWeight: 600, borderRadius: "10px" }}
-          >
-            Confirm reversal
-          </Button>
+          >{t("billing.ui.confirmReversal")}</Button>
         </>
       }
     >
@@ -119,13 +117,10 @@ export function ReversalFormModal({ open, payment, busy, onClose, onSubmit }: Pr
             {errorMessage}
           </Typography>
         ) : null}
-        <Typography sx={{ fontSize: "0.875rem", color: meridian.textSecondary }}>
-          Original receipt <strong>{payment.receipt_number}</strong> stays immutable. A separate
-          refund row (RFD-…) will be created.
-        </Typography>
+        <Typography sx={{ fontSize: "0.875rem", color: meridian.textSecondary }}>{t("billing.ui.originalReceipt")}{" "}<strong>{payment.receipt_number}</strong>{" "}{t("billing.ui.staysImmutableASeparateRefundRow")}</Typography>
         <TextField
           type="number"
-          label="Refund amount (₹)"
+          label={t("billing.ui.refundAmount")}
           size="small"
           value={amount}
           error={Boolean(fieldErrors.amount)}
@@ -140,7 +135,7 @@ export function ReversalFormModal({ open, payment, busy, onClose, onSubmit }: Pr
           fullWidth
         />
         <TextField
-          label="Reason"
+          label={t("inventory.adjustment.reason")}
           size="small"
           value={reason}
           error={Boolean(fieldErrors.reason)}
@@ -154,7 +149,7 @@ export function ReversalFormModal({ open, payment, busy, onClose, onSubmit }: Pr
           fullWidth
           multiline
           minRows={2}
-          helperText={fieldErrors.reason || "Required — refunds.reason"}
+          helperText={fieldErrors.reason || t("billing.ui.requiredRefundsReason")}
         />
       </Stack>
     </Modal>

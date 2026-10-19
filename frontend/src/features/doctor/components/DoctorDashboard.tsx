@@ -64,9 +64,7 @@ export function DoctorDashboard() {
             textTransform: "uppercase",
             color: meridian.textSecondary,
           }}
-        >
-          OPD & Emergency · Doctor
-        </Typography>
+        >{t("doctor.ui.opdEmergencyDoctor")}</Typography>
         <Typography
           component="h1"
           sx={{
@@ -98,11 +96,9 @@ export function DoctorDashboard() {
         const old = emergencyArrivals.filter((a) => a.stale);
         return old.length > 0 ? (
           <Alert severity="warning" sx={{ borderRadius: "12px" }}>
-            {old.length} emergency visit{old.length === 1 ? "" : "s"} opened more than 24 hours ago{" "}
-            {old.length === 1 ? "is" : "are"} still open:{" "}
-            {old.map((a) => `${a.visit_number} (${formatDateTime(a.arrival_time)})`).join(", ")}. Close or discharge
-            them from the consultation once the record is complete.
-          </Alert>
+            {old.length}{" "}{t("doctor.ui.emergencyVisit")}{old.length === 1 ? "" : "s"}{" "}{t("doctor.ui.openedMoreThan24HoursAgo")}{" "}
+            {old.length === 1 ? "is" : "are"}{" "}{t("doctor.ui.stillOpen")}{" "}
+            {old.map((a) => `${a.visit_number} (${formatDateTime(a.arrival_time)})`).join(", ")}{t("doctor.ui.closeOrDischargeThemFromThe")}</Alert>
         ) : null;
       })()}
 
@@ -116,9 +112,7 @@ export function DoctorDashboard() {
             borderColor: "error.light",
           }}
         >
-          <Typography sx={{ fontWeight: 700, fontSize: "0.9375rem", color: "error.main", mb: 1 }}>
-            Emergency Arrivals Awaiting Care ({emergencyArrivals.filter((a) => !a.stale).length})
-          </Typography>
+          <Typography sx={{ fontWeight: 700, fontSize: "0.9375rem", color: "error.main", mb: 1 }}>{t("doctor.ui.emergencyArrivalsAwaitingCareCount", { count: emergencyArrivals.filter((a) => !a.stale).length })}</Typography>
           <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1.5 }}>
             {emergencyArrivals.filter((arr) => !arr.stale).map((arr) => (
               <Box
@@ -138,9 +132,7 @@ export function DoctorDashboard() {
                   <Typography sx={{ fontWeight: 600, fontSize: "0.8125rem" }}>
                     {arr.full_name} · {arr.thid ?? arr.uhid}
                   </Typography>
-                  <Typography sx={{ fontSize: "0.6875rem", color: "text.secondary" }}>
-                    {formatAgeSexShort(arr.age_years, arr.sex)} · Visit {arr.visit_number} · arrived {formatDateTime(arr.arrival_time)}
-                  </Typography>
+                  <Typography sx={{ fontSize: "0.6875rem", color: "text.secondary" }}>{t("doctor.ui.sexVisitVisitNumberArrivedArrival", { sex: formatAgeSexShort(arr.age_years, arr.sex), visit_number: arr.visit_number, arrival_time: formatDateTime(arr.arrival_time) })}</Typography>
                 </Box>
                 <Button
                   component={Link}
@@ -149,9 +141,7 @@ export function DoctorDashboard() {
                   color="error"
                   size="small"
                   sx={{ textTransform: "none", fontSize: "0.75rem", px: 1.5, py: 0.5 }}
-                >
-                  Consult
-                </Button>
+                >{t("doctor.ui.consult")}</Button>
               </Box>
             ))}
           </Box>

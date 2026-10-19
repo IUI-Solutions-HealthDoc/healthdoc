@@ -102,12 +102,8 @@ export function DataAccessLogPanel({
       }}
     >
       <Box sx={{ px: 2.5, pt: 2.25, pb: 1.75 }}>
-        <Typography sx={{ m: 0, fontSize: "1.0625rem", fontWeight: 700, color: meridian.textPrimary }}>
-          Data access log
-        </Typography>
-        <Typography sx={{ m: 0, mt: 0.4, fontSize: "0.8125rem", color: meridian.textSecondary }}>
-          Review who accessed patient data, why, and whether consent was verified.
-        </Typography>
+        <Typography sx={{ m: 0, fontSize: "1.0625rem", fontWeight: 700, color: meridian.textPrimary }}>{t("consent.dataAccessLog")}</Typography>
+        <Typography sx={{ m: 0, mt: 0.4, fontSize: "0.8125rem", color: meridian.textSecondary }}>{t("audit.dataAccess.subtitle")}</Typography>
       </Box>
 
       <Stack direction={{ xs: "column", sm: "row" }} spacing={1.25} sx={{ px: 2.5, pb: 2 }}>
@@ -121,14 +117,14 @@ export function DataAccessLogPanel({
         <TextField
           select
           size="small"
-          label="Channel"
+          label={t("audit.dataAccess.channel")}
           value={accessChannel}
           onChange={(e) =>
             onAccessChannelChange(e.target.value as AccessChannel | "all")
           }
           sx={{ minWidth: 160 }}
         >
-          <MenuItem value="all">All</MenuItem>
+          <MenuItem value="all">{t("common.all")}</MenuItem>
           {(Object.keys(ACCESS_CHANNEL_LABELS) as AccessChannel[]).map((c) => (
             <MenuItem key={c} value={c}>
               {ACCESS_CHANNEL_LABELS[c]}

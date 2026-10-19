@@ -3,9 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import type { PDFDocumentLoadingTask, RenderTask } from "pdfjs-dist";
 import { pdfBytes } from "./pdfAttachments";
+import { useLocale } from "@/lib/i18n";
 
 /** Canvas only: no PDF scripting manager, forms, annotation links or downloads. */
 export function EmbeddedPdfPreview({ data, title }: { data: string; title: string }) {
+  const { t } = useLocale();
   const canvas = useRef<HTMLCanvasElement>(null);
   const [page, setPage] = useState(1);
   const [pages, setPages] = useState(0);
@@ -52,12 +54,12 @@ export function EmbeddedPdfPreview({ data, title }: { data: string; title: strin
     return () => { disposed = true; window.clearTimeout(deadline); rendering?.cancel(); void task?.destroy(); worker?.terminate(); clear(); };
   }, [data, page]);
   return <section className="space-y-3" aria-label={title}>
-    <p className="text-sm">PDF preview only. Links, scripts, downloads and interactive forms are disabled.</p>
+    <p className="text-sm">{t("doctor.ui.pdfPreviewOnlyLinksScriptsDownloads")}</p>
     {error && <p role="alert" className="text-danger">{error}</p>}
     <div className="flex items-center gap-4">
-      <button type="button" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>Previous page</button>
-      <span>Page {page}{pages > 0 ? ` of ${pages}` : ""}</span>
-      <button type="button" disabled={!pages || page >= pages} onClick={() => setPage((p) => p + 1)}>Next page</button>
+      <button type="button" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>{t("doctor.ui.previousPage")}</button>
+      <span>{t("doctor.ui.pagePageValue", { page, value: pages > 0 ? ` of ${pages}` : "" })}</span>
+      <button type="button" disabled={!pages || page >= pages} onClick={() => setPage((p) => p + 1)}>{t("doctor.ui.nextPage")}</button>
     </div>
     <canvas ref={canvas} className="max-w-full border" aria-label={`${title}, page ${page}`} />
   </section>;

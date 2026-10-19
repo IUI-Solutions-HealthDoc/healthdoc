@@ -218,8 +218,7 @@ export function BloodCrossmatchModal({
                     {unit.bag_number || unit.unit_number || unit.id.slice(0, 8).toUpperCase()}
                   </span>
                   <span className="text-muted-foreground ml-2 capitalize">
-                    {(unit.component_type || t("bloodBank.notRecorded")).replace(/_/g, " ")} ({unit.volume_ml} mL)
-                  </span>
+                    {(unit.component_type || t("bloodBank.notRecorded")).replace(/_/g, " ")} ({unit.volume_ml}{" "}{t("bloodBank.ui.ml")}</span>
                 </div>
               </div>
               <span className="font-black px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-600 dark:text-rose-400">

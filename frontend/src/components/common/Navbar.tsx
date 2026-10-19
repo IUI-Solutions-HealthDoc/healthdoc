@@ -90,7 +90,7 @@ export default function Navbar({ open, setOpen }: NavbarProps) {
         <HealthDocBrand
           size={38}
           preload
-          subtitle="HIMS"
+          subtitle={t("common.ui.hims")}
           nameClassName="text-lg font-bold tracking-tight text-[#001F54] dark:text-blue-200"
           className="text-[#001F54]"
         />
@@ -133,9 +133,7 @@ export default function Navbar({ open, setOpen }: NavbarProps) {
                 : "text-muted-foreground hover:text-foreground"
             }`}
             aria-label={t("nav.switchToEnglish")}
-          >
-            English
-          </button>
+          >{t("common.ui.english")}</button>
           <button
             type="button"
             onClick={() => setLocale("hi")}

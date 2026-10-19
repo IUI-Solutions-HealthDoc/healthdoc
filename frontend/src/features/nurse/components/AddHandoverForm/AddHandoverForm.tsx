@@ -112,7 +112,7 @@ export default function AddHandoverForm({
             <div className="space-y-2">
               <TextField
                 label={t("nurse.handoverUuidLabel")}
-                placeholder="Receiving nurse users.id"
+                placeholder={t("nurse.ui.receivingNurseUsersId")}
                 registration={register("handed_over_to")}
                 error={errors.handed_over_to}
               />
@@ -122,7 +122,7 @@ export default function AddHandoverForm({
 
         <TextAreaField
           label={t("nurse.handoverSituation")}
-          placeholder="Current situation / reason for handover..."
+          placeholder={t("nurse.ui.currentSituationReasonForHandover")}
           rows={3}
           registration={register("situation")}
           error={errors.situation}
@@ -130,7 +130,7 @@ export default function AddHandoverForm({
 
         <TextAreaField
           label={t("nurse.handoverBackground")}
-          placeholder="Relevant patient background / history..."
+          placeholder={t("nurse.ui.relevantPatientBackgroundHistory")}
           rows={3}
           registration={register("background")}
           error={errors.background}
@@ -138,7 +138,7 @@ export default function AddHandoverForm({
 
         <TextAreaField
           label={t("nurse.handoverAssessment")}
-          placeholder="Current clinical assessment..."
+          placeholder={t("nurse.ui.currentClinicalAssessment")}
           rows={3}
           registration={register("assessment")}
           error={errors.assessment}
@@ -146,7 +146,7 @@ export default function AddHandoverForm({
 
         <TextAreaField
           label={t("nurse.handoverRecommendation")}
-          placeholder="Recommended next steps / things to watch..."
+          placeholder={t("nurse.ui.recommendedNextStepsThingsToWatch")}
           rows={3}
           registration={register("recommendation")}
           error={errors.recommendation}

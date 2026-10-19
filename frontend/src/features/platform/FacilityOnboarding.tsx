@@ -157,7 +157,7 @@ export function FacilityOnboarding({ facilities, onChanged }: {
           <div className="flex flex-wrap items-end gap-3">
             <label className="flex-1 space-y-1 text-sm">
               <span className="text-muted-foreground">{t("platform.hfrId")}</span>
-              <input aria-label={t("platform.setHfr")} className={input} value={hfr} placeholder="IN0910034387"
+              <input aria-label={t("platform.setHfr")} className={input} value={hfr} placeholder={t("platform.ui.in0910034387")}
                 onChange={(e) => setHfr(e.target.value.trim())} />
             </label>
             <button type="button" className={primary} disabled={busy || (hfr !== "" && !HFR_ID.test(hfr))}

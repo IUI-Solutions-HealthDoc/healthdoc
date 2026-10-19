@@ -213,7 +213,7 @@ export function BloodInventoryGrid({
                       <td className="p-3 capitalize text-muted-foreground">
                         {(u.component_type || t("bloodBank.notRecorded")).replace(/_/g, " ")}
                       </td>
-                      <td className="p-3 font-mono">{u.volume_ml} mL</td>
+                      <td className="p-3 font-mono">{t("bloodBank.ui.volumeMlMl", { volume_ml: u.volume_ml })}</td>
                       <td className="p-3 font-mono text-muted-foreground">
                         {u.collected_at ? u.collected_at.slice(0, 10) : u.collection_date || "—"}
                       </td>
@@ -348,7 +348,7 @@ export function BloodInventoryGrid({
                   >
                     <option value="A">A</option>
                     <option value="B">B</option>
-                    <option value="AB">AB</option>
+                    <option value="AB">{t("bloodBank.ui.ab3")}</option>
                     <option value="O">O</option>
                   </select>
                 </div>

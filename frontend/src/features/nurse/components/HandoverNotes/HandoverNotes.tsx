@@ -1,4 +1,5 @@
 import { HandoverNotesProps } from "./HandoverNotes.types";
+import { useLocale } from "@/lib/i18n";
 
 const SHIFT_LABELS: Record<string, string> = {
   morning: "Morning",
@@ -18,12 +19,11 @@ export default function HandoverNotes({
   admissionId,
   notes,
 }: HandoverNotesProps) {
+  const { t } = useLocale();
   if (!admissionId) {
     return (
       <div className="surface-card p-6">
-        <p className="text-sm text-muted-foreground">
-          Select a patient to view handover notes.
-        </p>
+        <p className="text-sm text-muted-foreground">{t("nurse.ui.selectAPatientToViewHandover")}</p>
       </div>
     );
   }
@@ -31,9 +31,7 @@ export default function HandoverNotes({
   if (notes.length === 0) {
     return (
       <div className="surface-card p-6">
-        <p className="text-sm text-muted-foreground">
-          Handover notes are not available for this ward yet.
-        </p>
+        <p className="text-sm text-muted-foreground">{t("nurse.ui.handoverNotesAreNotAvailableFor")}</p>
       </div>
     );
   }
@@ -41,19 +39,15 @@ export default function HandoverNotes({
   return (
     <section className="surface-card p-6">
       <div className="mb-6">
-        <h2 className="text-xl font-semibold">Handover Notes</h2>
-        <p className="text-sm text-muted-foreground">
-          Shift handover information for the selected patient.
-        </p>
+        <h2 className="text-xl font-semibold">{t("nurse.ui.handoverNotes")}</h2>
+        <p className="text-sm text-muted-foreground">{t("nurse.ui.shiftHandoverInformationForTheSelected")}</p>
       </div>
 
       <div className="space-y-5">
         {notes.map((note) => (
           <div key={note.id} className="rounded-xl border border-border p-5">
             <div className="flex items-center justify-between">
-              <h3 className="font-semibold">
-                {SHIFT_LABELS[note.shift] ?? note.shift} Shift
-              </h3>
+              <h3 className="font-semibold">{t("nurse.ui.shiftShift", { shift: SHIFT_LABELS[note.shift] ?? note.shift })}</h3>
 
               {note.created_at && (
                 <span className="text-xs text-muted-foreground" suppressHydrationWarning>
@@ -64,34 +58,34 @@ export default function HandoverNotes({
 
             <div className="mt-4 grid gap-4 md:grid-cols-2">
               <div>
-                <p className="text-xs text-muted-foreground">Handed Over By</p>
+                <p className="text-xs text-muted-foreground">{t("nurse.ui.handedOverBy")}</p>
                 <p className="text-sm">{actorLabel(note.created_by_name, note.created_by)}</p>
               </div>
 
               <div>
-                <p className="text-xs text-muted-foreground">Handed Over To</p>
+                <p className="text-xs text-muted-foreground">{t("nurse.ui.handedOverTo")}</p>
                 <p className="text-sm">{actorLabel(note.handed_over_to_name, note.handed_over_to)}</p>
               </div>
             </div>
 
             <div className="mt-5 space-y-3">
               <div className="rounded-lg bg-muted p-4">
-                <p className="text-xs text-muted-foreground">Situation</p>
+                <p className="text-xs text-muted-foreground">{t("nurse.handoverSituation")}</p>
                 <p className="mt-1 text-sm leading-6">{note.situation ?? "—"}</p>
               </div>
 
               <div className="rounded-lg bg-muted p-4">
-                <p className="text-xs text-muted-foreground">Background</p>
+                <p className="text-xs text-muted-foreground">{t("nurse.handoverBackground")}</p>
                 <p className="mt-1 text-sm leading-6">{note.background ?? "—"}</p>
               </div>
 
               <div className="rounded-lg bg-muted p-4">
-                <p className="text-xs text-muted-foreground">Assessment</p>
+                <p className="text-xs text-muted-foreground">{t("doctor.soapAssessment")}</p>
                 <p className="mt-1 text-sm leading-6">{note.assessment ?? "—"}</p>
               </div>
 
               <div className="rounded-lg bg-muted p-4">
-                <p className="text-xs text-muted-foreground">Recommendation</p>
+                <p className="text-xs text-muted-foreground">{t("nurse.handoverRecommendation")}</p>
                 <p className="mt-1 text-sm leading-6">{note.recommendation ?? "—"}</p>
               </div>
             </div>

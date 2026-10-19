@@ -135,8 +135,8 @@ export function BloodDonorRegistry({ donors, onRefresh }: BloodDonorRegistryProp
               <option value="A-">A-</option>
               <option value="B+">B+</option>
               <option value="B-">B-</option>
-              <option value="AB+">AB+</option>
-              <option value="AB-">AB-</option>
+              <option value="AB+">{t("bloodBank.ui.ab")}</option>
+              <option value="AB-">{t("bloodBank.ui.ab2")}</option>
               <option value="O+">O+</option>
               <option value="O-">O-</option>
             </select>
@@ -310,7 +310,7 @@ export function BloodDonorRegistry({ donors, onRefresh }: BloodDonorRegistryProp
                   >
                     <option value="A">A</option>
                     <option value="B">B</option>
-                    <option value="AB">AB</option>
+                    <option value="AB">{t("bloodBank.ui.ab3")}</option>
                     <option value="O">O</option>
                   </select>
                 </div>

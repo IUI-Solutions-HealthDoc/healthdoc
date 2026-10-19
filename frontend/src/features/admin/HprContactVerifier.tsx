@@ -11,6 +11,7 @@ import {
   verifyHprMobileOtp,
   type HprContact,
 } from "./api/hpr";
+import { useLocale } from "@/lib/i18n";
 
 const input = "w-full rounded-md border border-border px-3 py-2 text-sm";
 const button = "rounded-md border border-border px-3 py-2 text-sm disabled:opacity-50";
@@ -37,6 +38,7 @@ export function HprContactVerifier({ kind, contact, onChange }: {
   contact: HprContact | null;
   onChange: (contact: HprContact) => void;
 }) {
+  const { t } = useLocale();
   const [value, setValue] = useState("");
   const [otp, setOtp] = useState("");
   const [sent, setSent] = useState(false);
@@ -55,10 +57,8 @@ export function HprContactVerifier({ kind, contact, onChange }: {
   if (verified) {
     return (
       <p role="status" className="text-sm text-success">
-        {label} verified{mobile ? ` (ending ${contact?.mobile_hint ?? ""})` : `: ${contact?.email ?? ""}`}.{" "}
-        <button type="button" className="underline" onClick={() => onChange({ ...contact!, ...(mobile ? { mobile_verified: false } : { email_verified: false }) })}>
-          Change
-        </button>
+        {label}{" "}{t("admin.ui.verified")}{mobile ? ` (ending ${contact?.mobile_hint ?? ""})` : `: ${contact?.email ?? ""}`}.{" "}
+        <button type="button" className="underline" onClick={() => onChange({ ...contact!, ...(mobile ? { mobile_verified: false } : { email_verified: false }) })}>{t("common.change")}</button>
       </p>
     );
   }
@@ -66,7 +66,7 @@ export function HprContactVerifier({ kind, contact, onChange }: {
   return (
     <div className="space-y-2 text-sm" aria-label={`Verify ${label.toLowerCase()}`}>
       <label className="block space-y-1">
-        <span className="text-muted-foreground">{label} (required by HPR, verified by OTP)</span>
+        <span className="text-muted-foreground">{t("admin.ui.labelRequiredByHprVerifiedBy", { label })}</span>
         <input aria-label={label} className={input} value={value} inputMode={mobile ? "tel" : "email"} maxLength={mobile ? 10 : 120}
           onChange={(e) => { setValue(mobile ? e.target.value.replace(/\D/g, "") : e.target.value.trim()); setSent(false); }} />
       </label>
@@ -75,15 +75,15 @@ export function HprContactVerifier({ kind, contact, onChange }: {
           if (mobile) await sendHprMobileOtp(value); else await sendHprEmailOtp(value);
           setSent(true);
           setOtp("");
-        }, `HPR did not send the ${mobile ? "mobile" : "email"} OTP.`)}>{sent ? "Send again" : "Send OTP"}</button>
+        }, `HPR did not send the ${mobile ? "mobile" : "email"} OTP.`)}>{sent ? t("admin.ui.sendAgain") : t("receptionist.abha.sendOtp")}</button>
       {sent ? (
         <div className="flex gap-2">
-          <input aria-label={`${label} OTP`} className={input} value={otp} inputMode="numeric" maxLength={6} placeholder="6-digit OTP"
+          <input aria-label={`${label} OTP`} className={input} value={otp} inputMode="numeric" maxLength={6} placeholder={t("admin.ui.6DigitOtp")}
             onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))} />
           <button type="button" className={button} disabled={busy || otp.length !== 6}
             onClick={() => void run(async () => {
               onChange(mobile ? await verifyHprMobileOtp(otp) : await verifyHprEmailOtp(otp));
-            }, "HPR did not verify the OTP.")}>Verify</button>
+            }, "HPR did not verify the OTP.")}>{t("admin.ui.verify")}</button>
         </div>
       ) : null}
       {error ? <p role="alert" className="text-danger">{error}</p> : null}

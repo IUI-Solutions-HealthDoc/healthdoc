@@ -522,14 +522,14 @@ function PatientAbhaIdentity({ patient }: Props) {
   if (linked) {
     return (
       <section className="surface-card space-y-2 border border-success/30 bg-success-muted p-5" aria-live="polite">
-        <p className="font-medium">ABHA verified and linked</p>
+        <p className="font-medium">{t("receptionist.ui.abhaVerifiedAndLinked")}</p>
         <p className="font-mono text-lg">{linked.abha_number}</p>
         {linked.abha_address ? <p className="text-sm text-muted-foreground">{linked.abha_address}</p> : null}
-        <p className="text-sm text-muted-foreground">The hospital UHID card is printed from registration. The control below fetches the National Health Authority ABHA card.</p>
+        <p className="text-sm text-muted-foreground">{t("receptionist.ui.theHospitalUhidCardIsPrinted")}</p>
         {linked.has_nha_card ? (
-          <button type="button" disabled={busy} onClick={() => void downloadCard()} className="rounded-md border border-border px-3 py-2 text-sm">Download NHA ABHA card</button>
+          <button type="button" disabled={busy} onClick={() => void downloadCard()} className="rounded-md border border-border px-3 py-2 text-sm">{t("receptionist.ui.downloadNhaAbhaCard")}</button>
         ) : (
-          <p className="text-sm text-muted-foreground">NHA ABHA card is unavailable until a profile credential is stored.</p>
+          <p className="text-sm text-muted-foreground">{t("receptionist.ui.nhaAbhaCardIsUnavailableUntil")}</p>
         )}
         {error ? <p role="alert" className="text-sm text-danger">{error}</p> : null}
       </section>
@@ -544,7 +544,7 @@ function PatientAbhaIdentity({ patient }: Props) {
           {t("receptionist.abha.verifyLinkIntro", { name: patient.full_name })}
         </p>
       </div>
-      <div className="flex flex-wrap gap-2" role="group" aria-label="ABHA identity flow">
+      <div className="flex flex-wrap gap-2" role="group" aria-label={t("receptionist.ui.abhaIdentityFlow")}>
         <button type="button" onClick={() => changeFlow("existing")} aria-pressed={flow === "existing"} className={`rounded-md border px-3 py-2 text-sm ${flow === "existing" ? "border-primary bg-primary/10" : "border-border"}`}>{t("receptionist.abha.useExisting")}</button>
         <button type="button" onClick={() => changeFlow("new")} aria-pressed={flow === "new"} className={`rounded-md border px-3 py-2 text-sm ${flow === "new" ? "border-primary bg-primary/10" : "border-border"}`}>{t("receptionist.abha.create")}</button>
         <button type="button" onClick={() => changeFlow("demographic")} aria-pressed={flow === "demographic"} className={`rounded-md border px-3 py-2 text-sm ${flow === "demographic" ? "border-primary bg-primary/10" : "border-border"}`}>{t("receptionist.abha.createDemographic")}</button>
@@ -557,7 +557,7 @@ function PatientAbhaIdentity({ patient }: Props) {
       {flow === "licence" ? <DrivingLicenceAbhaEnrolment patient={patient} /> : null}
 
       {flow === "existing" && !sessionId ? (
-        <div className="flex flex-wrap gap-2" role="group" aria-label="Verification method">
+        <div className="flex flex-wrap gap-2" role="group" aria-label={t("receptionist.ui.verificationMethod")}>
           <button type="button" onClick={() => changeMethod("abha-number")} aria-pressed={method === "abha-number"} className={`rounded-md border px-3 py-1.5 text-xs ${method === "abha-number" ? "border-primary bg-primary/10" : "border-border"}`}>{t("receptionist.abha.methodAbhaMobile")}</button>
           <button type="button" onClick={() => changeMethod("aadhaar")} aria-pressed={method === "aadhaar"} className={`rounded-md border px-3 py-1.5 text-xs ${method === "aadhaar" ? "border-primary bg-primary/10" : "border-border"}`}>{t("receptionist.abha.methodAadhaar")}</button>
           <button type="button" onClick={() => changeMethod("abha-address")} aria-pressed={method === "abha-address"} className={`rounded-md border px-3 py-1.5 text-xs ${method === "abha-address" ? "border-primary bg-primary/10" : "border-border"}`}>{t("receptionist.abha.methodAddress")}</button>
@@ -567,7 +567,7 @@ function PatientAbhaIdentity({ patient }: Props) {
 
       {flow === "demographic" || flow === "licence" ? null : accounts.length > 0 ? (
         <fieldset className="space-y-3">
-          <legend className="text-sm text-muted-foreground">ABDM returned more than one account. Choose the one that belongs to this patient.</legend>
+          <legend className="text-sm text-muted-foreground">{t("receptionist.ui.abdmReturnedMoreThanOneAccount")}</legend>
           {accounts.map((account) => (
             <label key={account.abha_number} className="flex items-center gap-2 text-sm">
               <input type="radio" name="abha-account" value={account.abha_number} checked={selectedAccount === account.abha_number} onChange={() => setSelectedAccount(account.abha_number)} />
@@ -599,25 +599,25 @@ function PatientAbhaIdentity({ patient }: Props) {
             />
           </label>
           {usesAddress ? (
-            <div className="flex flex-wrap gap-2" role="group" aria-label="ABHA address OTP">
+            <div className="flex flex-wrap gap-2" role="group" aria-label={t("receptionist.ui.abhaAddressOtp")}>
               <button type="button" onClick={() => setAddressOtp("mobile")} aria-pressed={addressOtp === "mobile"} className={`rounded-md border px-3 py-1.5 text-xs ${addressOtp === "mobile" ? "border-primary bg-primary/10" : "border-border"}`}>{t("receptionist.abha.methodAbhaMobile")}</button>
               <button type="button" onClick={() => setAddressOtp("aadhaar")} aria-pressed={addressOtp === "aadhaar"} className={`rounded-md border px-3 py-1.5 text-xs ${addressOtp === "aadhaar" ? "border-primary bg-primary/10" : "border-border"}`}>{t("receptionist.abha.methodAadhaar")}</button>
             </div>
           ) : null}
           {usesMobile ? (
-            <div className="space-y-2 text-sm" aria-label="Image check">
+            <div className="space-y-2 text-sm" aria-label={t("receptionist.ui.imageCheck")}>
               {captchaError ? (
                 <p role="alert" className="text-danger">{captchaError}</p>
               ) : captcha ? (
                 // eslint-disable-next-line @next/next/no-img-element -- a one-use data URI, not an optimisable asset
-                <img src={captcha.image} alt="Type the characters shown in this image" width={170} height={56} className="rounded border border-border" />
+                <img src={captcha.image} alt={t("receptionist.ui.typeTheCharactersShownInThis")} width={170} height={56} className="rounded border border-border" />
               ) : (
-                <p role="status" className="text-muted-foreground">Loading the image check…</p>
+                <p role="status" className="text-muted-foreground">{t("receptionist.ui.loadingTheImageCheck")}</p>
               )}
               <div className="flex gap-2">
                 <input name="captcha_answer" value={captchaAnswer} onChange={(event) => setCaptchaAnswer(event.target.value.toUpperCase())}
-                  autoComplete="off" maxLength={8} placeholder="Characters in the image" className="w-full rounded-md border border-border px-3 py-2" />
-                <button type="button" onClick={newCaptcha} className="rounded-md border border-border px-3 py-2">New image</button>
+                  autoComplete="off" maxLength={8} placeholder={t("receptionist.ui.charactersInTheImage")} className="w-full rounded-md border border-border px-3 py-2" />
+                <button type="button" onClick={newCaptcha} className="rounded-md border border-border px-3 py-2">{t("receptionist.ui.newImage")}</button>
               </div>
             </div>
           ) : null}
@@ -641,7 +641,7 @@ function PatientAbhaIdentity({ patient }: Props) {
         </div>
       ) : enrolPhase === "mobile" ? (
         <div className="space-y-3">
-          <p className="text-sm text-muted-foreground">Verify the communication mobile in this same enrolment. This is separate from a mobile number typed on the Aadhaar OTP.</p>
+          <p className="text-sm text-muted-foreground">{t("receptionist.ui.verifyTheCommunicationMobileInThis")}</p>
           <label className="block space-y-1 text-sm">
             <span className="text-muted-foreground">{t("receptionist.abha.fieldMobile")}</span>
             <input value={mobile} onChange={(event) => setMobile(event.target.value)} inputMode="tel" autoComplete="tel" aria-invalid={!mobileValid} className={`w-full rounded-md border px-3 py-2 ${mobileValid ? "border-border" : "border-danger"}`} />
@@ -657,8 +657,8 @@ function PatientAbhaIdentity({ patient }: Props) {
         </div>
       ) : enrolPhase === "address" ? (
         <fieldset className="space-y-3">
-          <legend className="text-sm text-muted-foreground">Choose an ABHA address</legend>
-          {suggestions.length === 0 ? <p className="text-sm">ABDM returned no address suggestions. Start again if this continues.</p> : null}
+          <legend className="text-sm text-muted-foreground">{t("receptionist.ui.chooseAnAbhaAddress")}</legend>
+          {suggestions.length === 0 ? <p className="text-sm">{t("receptionist.ui.abdmReturnedNoAddressSuggestionsStart")}</p> : null}
           {suggestions.map((address) => (
             <label key={address} className="flex items-center gap-2 text-sm">
               <input type="radio" name="abha-address" value={address} checked={selectedAddress === address} onChange={() => setSelectedAddress(address)} />
@@ -669,7 +669,7 @@ function PatientAbhaIdentity({ patient }: Props) {
         </fieldset>
       ) : (
         <div className="space-y-3">
-          {maskedMobile ? <p className="text-sm text-muted-foreground">ABDM response: {maskedMobile}</p> : null}
+          {maskedMobile ? <p className="text-sm text-muted-foreground">{t("receptionist.ui.abdmResponseMaskedmobile", { maskedMobile })}</p> : null}
           <label className="block space-y-1 text-sm">
             <span className="text-muted-foreground">{t("receptionist.abha.fieldOtp")}</span>
             <input value={otp} onChange={(event) => setOtp(digitsOnly(event.target.value))} inputMode="numeric" autoComplete="one-time-code" maxLength={8} className="w-full rounded-md border border-border px-3 py-2" />
@@ -680,12 +680,12 @@ function PatientAbhaIdentity({ patient }: Props) {
                 {resendWaitSeconds > 0 ? `Resend OTP in ${resendWaitSeconds}s` : `Resend OTP (${resendsRemaining} left)`}
               </button>
             ) : (
-              <span>No more OTP resends for this attempt. Use “Start again” to begin a new verification.</span>
+              <span>{t("receptionist.ui.noMoreOtpResendsForThis")}</span>
             )}
           </p>
           {flow === "new" ? (
             <label className="block space-y-1 text-sm">
-              <span className="text-muted-foreground">Mobile number for this ABHA (required)</span>
+              <span className="text-muted-foreground">{t("receptionist.ui.mobileNumberForThisAbhaRequired")}</span>
               <input value={mobile} onChange={(event) => setMobile(event.target.value)} inputMode="tel" autoComplete="tel" aria-invalid={!mobileValid} className={`w-full rounded-md border px-3 py-2 ${mobileValid ? "border-border" : "border-danger"}`} />
             </label>
           ) : null}

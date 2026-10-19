@@ -6,6 +6,7 @@ import Typography from "@mui/material/Typography";
 
 import { meridian } from "@/styles/theme";
 import type { AllergyAlert, AllergyAlertKind } from "../types";
+import { useLocale } from "@/lib/i18n";
 
 const TONE: Record<AllergyAlertKind, { bg: string; fg: string; border: string; label: string }> = {
   block: { bg: "#fee2e2", fg: meridian.danger, border: "rgb(185 28 28 / 0.22)", label: "Do not prescribe" },
@@ -29,11 +30,10 @@ export interface SafetyBannerProps {
  * reads silence as "checked and clear".
  */
 export function SafetyBanner({ alerts, checking }: SafetyBannerProps) {
+  const { t } = useLocale();
   if (checking && alerts.length === 0) {
     return (
-      <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary }}>
-        Checking allergies…
-      </Typography>
+      <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary }}>{t("doctor.ui.checkingAllergies")}</Typography>
     );
   }
   if (alerts.length === 0) return null;

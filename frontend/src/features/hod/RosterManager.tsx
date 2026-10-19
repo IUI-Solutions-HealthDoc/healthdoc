@@ -163,10 +163,7 @@ export function RosterManager({ departmentId, today }: RosterManagerProps) {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2 id="roster-heading" className="text-xl font-semibold">{t("hod.roster.title")}</h2>
-          <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-            Add staff here before reception opens the day&apos;s OPD queues. Room assignment is
-            optional and only active staff from this department are shown.
-          </p>
+          <p className="mt-1 max-w-3xl text-sm text-muted-foreground">{t("hod.ui.addStaffHereBeforeReceptionOpens")}</p>
         </div>
         <label className="space-y-1 text-sm">
           <span className="text-muted-foreground">{t("hod.roster.viewDate")}</span>
@@ -203,7 +200,7 @@ export function RosterManager({ departmentId, today }: RosterManagerProps) {
             aria-invalid={Boolean(fieldError && !staffId)}
             className="w-full rounded-md border border-border bg-background px-3 py-2 disabled:opacity-60"
           >
-            {candidates.length === 0 ? <option value="">No active staff found</option> : null}
+            {candidates.length === 0 ? <option value="">{t("hod.ui.noActiveStaffFound")}</option> : null}
             {candidates.map((candidate) => (
               <option key={candidate.staff_user_id} value={candidate.staff_user_id}>
                 {candidate.staff_name}
@@ -214,7 +211,7 @@ export function RosterManager({ departmentId, today }: RosterManagerProps) {
         </label>
 
         <label className="space-y-1 text-sm">
-          <span className="text-muted-foreground">Shift</span>
+          <span className="text-muted-foreground">{t("monitor.shift")}</span>
           <select
             value={shift}
             onChange={(event) => setShift(event.target.value as RosterShift)}
@@ -227,13 +224,13 @@ export function RosterManager({ departmentId, today }: RosterManagerProps) {
         </label>
 
         <label className="space-y-1 text-sm">
-          <span className="text-muted-foreground">Room (optional)</span>
+          <span className="text-muted-foreground">{t("hod.ui.roomOptional")}</span>
           <select
             value={roomId}
             onChange={(event) => setRoomId(event.target.value)}
             className="w-full rounded-md border border-border bg-background px-3 py-2"
           >
-            <option value="">No room assigned</option>
+            <option value="">{t("hod.ui.noRoomAssigned")}</option>
             {rooms.map((room) => (
               <option key={room.id} value={room.id}>{room.room_number}</option>
             ))}
@@ -252,30 +249,24 @@ export function RosterManager({ departmentId, today }: RosterManagerProps) {
           <p role="alert" className="text-sm text-danger md:col-span-4">{fieldError}</p>
         ) : null}
         {!loading && candidates.length === 0 ? (
-          <p className="text-sm text-muted-foreground md:col-span-4">
-            An administrator must attach active staff to this department before they can be
-            rostered. No database seed is required.
-          </p>
+          <p className="text-sm text-muted-foreground md:col-span-4">{t("hod.ui.anAdministratorMustAttachActiveStaff")}</p>
         ) : null}
       </form>
 
       {loading ? <p className="text-sm text-muted-foreground">{t("hod.roster.loading")}</p> : null}
       {!loading && entries.length === 0 ? (
-        <p className="rounded border border-dashed border-border p-4 text-sm text-muted-foreground">
-          No roster entries for {rosterDate}. Add the first entry above so reception can open
-          the OPD queue.
-        </p>
+        <p className="rounded border border-dashed border-border p-4 text-sm text-muted-foreground">{t("hod.ui.noRosterEntriesForRosterdateAdd", { rosterDate })}</p>
       ) : null}
       {entries.length > 0 ? (
         <div className="surface-card overflow-hidden">
           <table className="min-w-full border-collapse text-sm">
             <thead className="bg-muted">
               <tr>
-                <th className="px-4 py-3 text-left">Staff</th>
-                <th className="px-4 py-3 text-left">Shift</th>
-                <th className="px-4 py-3 text-left">Room</th>
-                <th className="px-4 py-3 text-left">Status</th>
-                <th className="px-4 py-3 text-right">Action</th>
+                <th className="px-4 py-3 text-left">{t("hod.ui.staff")}</th>
+                <th className="px-4 py-3 text-left">{t("monitor.shift")}</th>
+                <th className="px-4 py-3 text-left">{t("hod.ui.room")}</th>
+                <th className="px-4 py-3 text-left">{t("common.status")}</th>
+                <th className="px-4 py-3 text-right">{t("receptionist.action")}</th>
               </tr>
             </thead>
             <tbody>
@@ -286,7 +277,7 @@ export function RosterManager({ departmentId, today }: RosterManagerProps) {
                   <tr key={entry.id} className="border-b border-border last:border-none">
                     <td className="px-4 py-3">
                       <span className="font-medium">
-                        {candidate?.staff_name ?? "Staff record unavailable"}
+                        {candidate?.staff_name ?? t("hod.ui.staffRecordUnavailable")}
                       </span>
                       {candidate?.designation ? (
                         <span className="block text-xs text-muted-foreground">
@@ -317,8 +308,8 @@ export function RosterManager({ departmentId, today }: RosterManagerProps) {
                         {updatingId === entry.id
                           ? "Updating…"
                           : entry.is_available
-                            ? "Mark unavailable"
-                            : "Mark available"}
+                            ? t("hod.ui.markUnavailable")
+                            : t("hod.ui.markAvailable")}
                       </button>
                     </td>
                   </tr>

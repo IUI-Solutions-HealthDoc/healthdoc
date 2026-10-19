@@ -1,6 +1,7 @@
 "use client";
 
 import type { AbhaDeclaration, ConsentLanguage } from "./types";
+import { useLocale } from "@/lib/i18n";
 
 /** Required statements ticked; the statement the method excludes left unticked. */
 export function declarationAccepted(declaration: AbhaDeclaration | null, ticks: Record<string, boolean>): boolean {
@@ -25,10 +26,11 @@ export function AbhaConsentDeclaration({ declaration, error, ticks, onTick, lang
   /** A new language reloads the text; the ticks start again from NHA's defaults. */
   onLanguage: (language: ConsentLanguage) => void;
 }) {
+  const { t } = useLocale();
   return (
     <fieldset className="space-y-2 rounded-md border border-border p-3 text-sm">
-      <legend className="px-1 font-medium">ABHA consent</legend>
-      <div className="flex gap-2" role="group" aria-label="Consent language">
+      <legend className="px-1 font-medium">{t("receptionist.ui.abhaConsent")}</legend>
+      <div className="flex gap-2" role="group" aria-label={t("receptionist.ui.consentLanguage")}>
         {([["en", "English"], ["hi", "हिन्दी"]] as const).map(([code, label]) => (
           <button key={code} type="button" aria-pressed={language === code} onClick={() => onLanguage(code)}
             className={`rounded-md border px-2 py-1 text-xs ${language === code ? "border-primary bg-primary/10" : "border-border"}`}>{label}</button>
@@ -38,7 +40,7 @@ export function AbhaConsentDeclaration({ declaration, error, ticks, onTick, lang
       {error ? (
         <p role="alert" className="text-danger">{error}</p>
       ) : !declaration ? (
-        <p role="status" className="text-muted-foreground">Loading the ABHA consent…</p>
+        <p role="status" className="text-muted-foreground">{t("receptionist.ui.loadingTheAbhaConsent")}</p>
       ) : (
         <>
           <p>{declaration.intro}</p>
@@ -54,12 +56,12 @@ export function AbhaConsentDeclaration({ declaration, error, ticks, onTick, lang
             </label>
           ))}
           {ticks.other_document && declaration.method !== "document" ? (
-            <p role="alert" className="text-warning">The patient chose a document other than Aadhaar. No Aadhaar request is sent while this is ticked.</p>
+            <p role="alert" className="text-warning">{t("receptionist.ui.thePatientChoseADocumentOther")}</p>
           ) : null}
           {ticks.aadhaar_sharing && declaration.method === "document" ? (
-            <p role="alert" className="text-warning">The patient chose Aadhaar. A driving-licence enrolment shares no Aadhaar; untick it or use an Aadhaar flow.</p>
+            <p role="alert" className="text-warning">{t("receptionist.ui.thePatientChoseAadhaarADriving")}</p>
           ) : null}
-          <p className="text-xs text-muted-foreground">NHA advises showing this consent to the patient on a screen facing them.</p>
+          <p className="text-xs text-muted-foreground">{t("receptionist.ui.nhaAdvisesShowingThisConsentTo")}</p>
         </>
       )}
     </fieldset>

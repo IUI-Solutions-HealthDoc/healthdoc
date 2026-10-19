@@ -293,9 +293,7 @@ export function StartVisit({ patient }: { patient: VisitPatient }) {
       {needsToken && queues !== null && queues.length === 0 && (
         <div className="space-y-2">
           <p className="text-sm text-muted-foreground">
-            {t("receptionist.noOpenQueues")} A queue has to be opened for a doctor before
-            tokens can be issued.
-          </p>
+            {t("receptionist.noOpenQueues")}{" "}{t("receptionist.ui.aQueueHasToBeOpened")}</p>
           <Link href="/receptionist/queue" className="inline-block text-sm font-medium underline">
             {t("receptionist.openTodaysQueue")}
           </Link>

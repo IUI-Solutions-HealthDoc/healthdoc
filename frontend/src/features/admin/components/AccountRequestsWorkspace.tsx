@@ -261,10 +261,7 @@ export function AccountRequestsWorkspace() {
                 </Typography>
                 <ApprovalStatusChip status={selected.status} />
               </Stack>
-              <Typography sx={{ fontSize: "0.875rem", color: meridian.textSecondary }}>
-                username {selected.requested_username} · roles{" "}
-                {selected.requested_roles.map((r) => REALM_ROLE_LABELS[r]).join(", ")}
-              </Typography>
+              <Typography sx={{ fontSize: "0.875rem", color: meridian.textSecondary }}>{t("admin.ui.usernameRequestedUsernameRolesValue", { requested_username: selected.requested_username, value: selected.requested_roles.map((r) => REALM_ROLE_LABELS[r]).join(", ") })}</Typography>
             </Box>
 
             <Box sx={{ px: 2.5, py: 2.5, flex: 1 }}>
@@ -272,14 +269,9 @@ export function AccountRequestsWorkspace() {
                 <Box component="span" sx={{ fontWeight: 700 }}>{t("admin.accountRequests.justification")} </Box>
                 {selected.justification}
               </Typography>
-              <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary, mb: 2 }}>
-                requested_by {selected.requested_by}
-                {selected.decided_by ? ` · decided_by ${selected.decided_by}` : ""}
-                {selected.created_user_id ? ` · created_user_id ${selected.created_user_id}` : ""}
-                {selected.rejection_reason
+              <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary, mb: 2 }}>{t("admin.ui.requestedByRequestedByValueValue2", { requested_by: selected.requested_by, value: selected.decided_by ? ` · decided_by ${selected.decided_by}` : "", value2: selected.created_user_id ? ` · created_user_id ${selected.created_user_id}` : "", value3: selected.rejection_reason
                   ? ` · rejection_reason ${selected.rejection_reason}`
-                  : ""}
-              </Typography>
+                  : "" })}</Typography>
 
               {selected.status === "pending" ? (
                 <>

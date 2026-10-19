@@ -118,7 +118,7 @@ export function AuditLogListPanel({
                 {a}
               </MenuItem>
             ))}
-            <MenuItem value="delete_attempt">delete_attempt</MenuItem>
+            <MenuItem value="delete_attempt">{t("audit.ui.deleteAttempt")}</MenuItem>
           </TextField>
           <TextField
             select

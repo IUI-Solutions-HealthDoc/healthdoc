@@ -201,9 +201,7 @@ export default function AdmissionForm({
                     {item.patient_uhid} · {formatAgeSexShort(item.patient_age ?? null, item.patient_sex ?? "unknown")}
                   </div>
                   {item.recommended_ward_name && (
-                    <div className="mt-1 text-xs font-medium text-blue-700">
-                      Rec: {item.recommended_ward_name}
-                    </div>
+                    <div className="mt-1 text-xs font-medium text-blue-700">{t("ipd.ui.recRecommendedWardName", { recommended_ward_name: item.recommended_ward_name })}</div>
                   )}
                   {item.reason && (
                     <div className="mt-1 text-[11px] text-slate-500 line-clamp-1">

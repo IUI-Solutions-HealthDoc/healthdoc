@@ -100,9 +100,7 @@ export function PatientAllergyBanner({ patientId }: { patientId: string }) {
         }}
       >
         <Typography sx={{ fontSize: "0.8125rem", color: meridian.textSecondary }}>
-          <strong>No allergies recorded</strong> for this patient. Confirm with the patient before
-          prescribing — an empty record is not the same as no allergy.
-        </Typography>
+          <strong>{t("doctor.ui.noAllergiesRecorded")}</strong>{" "}{t("doctor.ui.forThisPatientConfirmWithThe")}</Typography>
       </Box>
     );
   }
@@ -126,9 +124,7 @@ export function PatientAllergyBanner({ patientId }: { patientId: string }) {
           color: absolute ? meridian.danger : meridian.warning,
           mb: 0.75,
         }}
-      >
-        Allergies on record
-      </Typography>
+      >{t("doctor.ui.allergiesOnRecord")}</Typography>
 
       <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", gap: 0.75 }}>
         {allergies.map((a) => {
@@ -164,8 +160,8 @@ export function PatientAllergyBanner({ patientId }: { patientId: string }) {
 
       {uncoded > 0 && (
         <Typography sx={{ fontSize: "0.75rem", color: meridian.textPrimary, mt: 1 }}>
-          {uncoded} of these {uncoded === 1 ? "has" : "have"} no ingredient code —{" "}
-          <strong>they cannot be checked automatically when you prescribe.</strong>
+          {uncoded}{" "}{t("doctor.ui.ofThese")}{" "}{uncoded === 1 ? "has" : "have"}{" "}{t("doctor.ui.noIngredientCode")}{" "}
+          <strong>{t("doctor.ui.theyCannotBeCheckedAutomaticallyWhen")}</strong>
         </Typography>
       )}
     </Box>

@@ -74,9 +74,7 @@ export function PaymentsPanel({
           <Typography sx={{ m: 0, fontSize: "1.0625rem", fontWeight: 700, color: meridian.textPrimary }}>
             {t("billing.paymentsTitle")}
           </Typography>
-          <Typography sx={{ m: 0, mt: 0.4, fontSize: "0.8125rem", color: meridian.textSecondary }}>
-            Receipts cannot be edited. Incorrect payments must be reversed with a reason.
-          </Typography>
+          <Typography sx={{ m: 0, mt: 0.4, fontSize: "0.8125rem", color: meridian.textSecondary }}>{t("billing.ui.receiptsCannotBeEditedIncorrectPayments")}</Typography>
         </Box>
         <Stack direction="row" useFlexGap sx={{ gap: 1, flexWrap: "wrap" }}>
           <Button
@@ -96,20 +94,16 @@ export function PaymentsPanel({
         useFlexGap
         sx={{ gap: 2, mb: 2.5, flexWrap: "wrap" }}
       >
-        <Stat label="Net amount" value={formatINR(invoice.net_amount)} />
-        <Stat label="Paid" value={formatINR(paidTotal)} />
-        <Stat label="Refunded" value={formatINR(refundedTotal)} />
+        <Stat label={t("billing.ui.netAmount")} value={formatINR(invoice.net_amount)} />
+        <Stat label={t("billing.invoiceStatus.paid")} value={formatINR(paidTotal)} />
+        <Stat label={t("billing.ui.refunded")} value={formatINR(refundedTotal)} />
         <Stat label={t("billing.balanceDue")} value={formatINR(balanceDue)} emphasize />
       </Stack>
 
       {loading ? (
-        <Typography sx={{ color: meridian.textSecondary, fontSize: "0.875rem" }}>
-          Loading payments…
-        </Typography>
+        <Typography sx={{ color: meridian.textSecondary, fontSize: "0.875rem" }}>{t("billing.ui.loadingPayments")}</Typography>
       ) : payments.length === 0 ? (
-        <Typography sx={{ color: meridian.textSecondary, fontSize: "0.875rem" }}>
-          No payments yet. Collect to mint an RCP-… receipt.
-        </Typography>
+        <Typography sx={{ color: meridian.textSecondary, fontSize: "0.875rem" }}>{t("billing.ui.noPaymentsYetCollectToMint")}</Typography>
       ) : (
         <Stack spacing={1.25}>
           {payments.map((p) => {
@@ -157,9 +151,7 @@ export function PaymentsPanel({
                       variant="outlined"
                       onClick={() => setPrintTarget(p)}
                       sx={{ textTransform: "none", borderRadius: "10px" }}
-                    >
-                      Print
-                    </Button>
+                    >{t("common.ui.print")}</Button>
                     {canRefund && p.status === "success" ? (
                       <Button
                         size="small"
@@ -168,9 +160,7 @@ export function PaymentsPanel({
                         disabled={busy}
                         onClick={() => setReverseTarget(p)}
                         sx={{ textTransform: "none", borderRadius: "10px" }}
-                      >
-                        Reverse
-                      </Button>
+                      >{t("billing.ui.reverse")}</Button>
                     ) : null}
                   </Stack>
                 </Stack>

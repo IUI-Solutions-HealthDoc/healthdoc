@@ -194,7 +194,7 @@ export function InvoiceListPanel({
       </Box>
       <Stack direction="row" sx={{ flexShrink: 0, p: 1.5, gap: 1, alignItems: "center", justifyContent: "space-between", borderTop: `1px solid rgb(0 31 84 / 0.06)` }}>
         <Button disabled={loading || page <= 1} onClick={() => onPageChange(page - 1)}>{t("common.previous")}</Button>
-        <Typography variant="caption">Page {page} of {Math.max(1, Math.ceil(total / pageSize))} · {total} invoices</Typography>
+        <Typography variant="caption">{t("billing.ui.pagePageOfPagesizeTotalInvoices", { page, pageSize: Math.max(1, Math.ceil(total / pageSize)), total })}</Typography>
         <Button disabled={loading || page * pageSize >= total} onClick={() => onPageChange(page + 1)}>{t("common.next")}</Button>
       </Stack>
     </Box>
