@@ -1,0 +1,5 @@
+name: healthdoc
+
+include:
+  - path: infra/docker-compose.yml
+    env_file: .env
