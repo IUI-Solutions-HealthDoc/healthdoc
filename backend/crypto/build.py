@@ -6,13 +6,32 @@ import json
 import os
 import pathlib
 import subprocess
+import time
 import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parent
 RUNTIME = ROOT / ".runtime"
 VERSION = "1.86"
 SHA256 = "2af190b300cbb0b35e248ccf5f4a06b6072030aeb3da7a98ec73abe5b4cb371f"
-URL = f"https://repo.maven.apache.org/maven2/org/bouncycastle/bcprov-jdk18on/{VERSION}/bcprov-jdk18on-{VERSION}.jar"
+URLS = [
+    f"https://repo1.maven.org/maven2/org/bouncycastle/bcprov-jdk18on/{VERSION}/bcprov-jdk18on-{VERSION}.jar",
+    f"https://repo.maven.apache.org/maven2/org/bouncycastle/bcprov-jdk18on/{VERSION}/bcprov-jdk18on-{VERSION}.jar",
+]
+
+
+def download_bcprov(urls: list[str]) -> bytes:
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; HealthDocBuild/1.0)"}
+    last_err = None
+    for url in urls:
+        for attempt in range(3):
+            try:
+                req = urllib.request.Request(url, headers=headers)
+                with urllib.request.urlopen(req, timeout=60) as response:
+                    return response.read()
+            except Exception as exc:
+                last_err = exc
+                time.sleep(1)
+    raise RuntimeError(f"Failed to download Bouncy Castle jar from all sources: {last_err}")
 
 
 def main():
@@ -40,7 +59,7 @@ def main():
         return
     RUNTIME.mkdir(exist_ok=True)
     jar = RUNTIME / "bcprov.jar"
-    data = jar.read_bytes() if jar.exists() else urllib.request.urlopen(URL, timeout=60).read()
+    data = jar.read_bytes() if jar.exists() else download_bcprov(URLS)
     if hashlib.sha256(data).hexdigest() != SHA256:
         raise SystemExit("Bouncy Castle checksum mismatch; refusing to build")
     if not jar.exists():
