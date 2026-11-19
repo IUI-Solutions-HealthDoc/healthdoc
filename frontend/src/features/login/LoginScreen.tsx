@@ -2,6 +2,7 @@
 
 import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import { Lock, ShieldCheck, Scale, AlertTriangle, AlertCircle } from "lucide-react";
 // Capital B: the file is components/ui/Button.tsx. The lowercase import
 // resolved on a case-insensitive macOS filesystem and failed in Linux CI.
 import { Button } from "@/components/ui/Button";
@@ -65,7 +66,7 @@ export function LoginScreen() {
             className="flex items-start gap-3 rounded-xl border border-amber-300/80 bg-amber-50/90 p-3.5 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
             role="status"
           >
-            <span className="mt-0.5 text-amber-600 dark:text-amber-400">⚠️</span>
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
             <p className="leading-snug">
               <strong>{t("auth.ui.sessionExpired")}</strong>{" "}{t("auth.ui.pleaseSignInAgainToContinue")}</p>
           </div>
@@ -76,7 +77,7 @@ export function LoginScreen() {
             className="flex items-start gap-3 rounded-xl border border-red-300/80 bg-red-50/90 p-3.5 text-sm text-red-900 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200"
             role="alert"
           >
-            <span className="mt-0.5 text-red-600 dark:text-red-400">⛔</span>
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
             <p className="leading-snug">{error}</p>
           </div>
         )}
@@ -86,7 +87,7 @@ export function LoginScreen() {
             className="flex items-start gap-3 rounded-xl border border-red-300/80 bg-red-50/90 p-3.5 text-sm text-red-900 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200"
             role="alert"
           >
-            <span className="mt-0.5 text-red-600 dark:text-red-400">⚠️</span>
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
             <p className="leading-snug">{t("auth.ui.signInIsNotConfiguredFor")}</p>
           </div>
         )}
@@ -99,12 +100,21 @@ export function LoginScreen() {
 
         <div className="mt-6 border-t border-border/60 pt-5">
           <div className="flex flex-col items-center gap-2 text-xs text-muted-foreground">
-            <div className="flex items-center gap-4">
-              <span className="inline-flex items-center gap-1">{t("auth.ui.keycloakSignIn")}</span>
-              <span>•</span>
-              <span className="inline-flex items-center gap-1">{t("auth.ui.roleBasedAccess")}</span>
-              <span>•</span>
-              <span className="inline-flex items-center gap-1">{t("auth.ui.consentControls")}</span>
+            <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+              <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                <Lock className="h-3.5 w-3.5 shrink-0 text-primary/70" />
+                {t("auth.ui.keycloakSignIn")}
+              </span>
+              <span className="text-muted-foreground/40">•</span>
+              <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-primary/70" />
+                {t("auth.ui.roleBasedAccess")}
+              </span>
+              <span className="text-muted-foreground/40">•</span>
+              <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                <Scale className="h-3.5 w-3.5 shrink-0 text-primary/70" />
+                {t("auth.ui.consentControls")}
+              </span>
             </div>
             <p className="mt-1 text-center text-[11px] text-muted-foreground/80">{t("auth.ui.authorizedPersonnelOnlyUseTheWorkspace")}</p>
           </div>
