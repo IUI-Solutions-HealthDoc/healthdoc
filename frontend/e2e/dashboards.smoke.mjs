@@ -721,11 +721,17 @@ async function exerciseDashboard(context, role, dashboard) {
     }
 
     if (dashboard.expectedText) {
-      const hasExpectedText = await page.$eval(
-        "#main-content",
-        (node, expected) => node.textContent?.includes(expected),
-        dashboard.expectedText,
-      );
+      // Some screens (the monitor Control Room) render their headline tiles
+      // only after the first data fetch resolves, so a one-shot read right
+      // after navigation races the render. Wait for the text, bounded.
+      const hasExpectedText = await page
+        .waitForFunction(
+          (expected) =>
+            document.querySelector("#main-content")?.textContent?.includes(expected) ?? false,
+          { timeout: 15_000 },
+          dashboard.expectedText,
+        )
+        .then(() => true, () => false);
       if (!hasExpectedText) {
         failures.push(`${dashboard.path}: did not render ${JSON.stringify(dashboard.expectedText)}`);
       }
