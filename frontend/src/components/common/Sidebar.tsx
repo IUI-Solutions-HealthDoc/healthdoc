@@ -35,6 +35,7 @@ import { ROLES, type Role } from "@/config/roles";
 import { canRoleAccessPath } from "@/lib/auth/routes";
 import { useLocale, type MessageKey } from "@/lib/i18n";
 import { useAuth } from "@/providers/auth-provider";
+import { HealthDocBrand } from "./HealthDocBrand";
 
 type NavArea = "front_desk" | "clinical" | "diagnostics" | "finance" | "audit" | "admin" | "platform" | "patient";
 
@@ -194,6 +195,9 @@ export default function Sidebar({ open, setOpen }: SidebarProps) {
       >
         <div className="flex items-center justify-between border-b border-border/70 pb-3">
           <div className="min-w-0 pr-2">
+            <div className="lg:hidden mb-2">
+              <HealthDocBrand size={32} subtitle="HIMS" />
+            </div>
             <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
               {t("common.role")}
             </span>
