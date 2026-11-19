@@ -3,6 +3,7 @@
 import QRCode from "react-qr-code";
 import BarcodeDisplay from "@/components/shared/BarcodeDisplay";
 import { formatDateTime } from "./utils";
+import { useLocale } from "@/lib/i18n";
 
 interface PatientMetaProps {
   patient: {
@@ -40,17 +41,16 @@ export default function PatientMeta({
   qrValue,
   labAddress,
 }: PatientMetaProps) {
+  const { t } = useLocale();
   return (
     <section className="drlogy-patient-meta grid grid-cols-[1.15fr_1.2fr_0.95fr] gap-0 border-b border-slate-300 py-3 text-[12px]">
       <div className="flex gap-3 border-r border-slate-300 pr-3">
         <div className="min-w-0 flex-1 space-y-1">
           <p className="text-[15px] font-bold text-slate-900">{patient.name}</p>
-          <p className="text-slate-700">
-            Age : {patient.age} Years{" "}
-            <span className="mx-1 text-slate-300">|</span> Sex: {patient.gender}
+          <p className="text-slate-700">{t("common.ui.age")}{" "}{patient.age}{" "}{t("common.ui.years")}{" "}
+            <span className="mx-1 text-slate-300">|</span>{" "}{t("common.ui.sex")}{" "}{patient.gender}
           </p>
-          <p className="text-slate-700">
-            PID : <span className="font-semibold">{patient.patientId}</span>
+          <p className="text-slate-700">{t("common.ui.pid")}{" "}<span className="font-semibold">{patient.patientId}</span>
           </p>
         </div>
         <div className="h-[72px] w-[72px] shrink-0 rounded border border-slate-200 bg-white p-1">
@@ -60,13 +60,13 @@ export default function PatientMeta({
 
       <div className="space-y-2 border-r border-slate-300 px-3">
         <div>
-          <p className="font-bold text-slate-800">Sample Collected At:</p>
+          <p className="font-bold text-slate-800">{t("common.ui.sampleCollectedAt")}</p>
           <p className="mt-0.5 leading-4 text-slate-600">
             {sample.collectedAtLocation || labAddress}
           </p>
         </div>
         <p className="pt-1">
-          <span className="font-bold text-slate-800">Ref. By:</span>{" "}
+          <span className="font-bold text-slate-800">{t("common.ui.refBy")}</span>{" "}
           <span className="font-semibold text-slate-700">{doctor.name}</span>
         </p>
       </div>
@@ -81,9 +81,9 @@ export default function PatientMeta({
           />
         </div>
         <div className="w-full space-y-1 text-[11px] text-slate-700">
-          <MetaLine label="Registered on" value={formatDateTime(order.orderedAt)} />
-          <MetaLine label="Collected on" value={formatDateTime(sample.collectedAt)} />
-          <MetaLine label="Reported on" value={formatDateTime(reportInfo.reportedAt)} />
+          <MetaLine label={t("common.ui.registeredOn")} value={formatDateTime(order.orderedAt)} />
+          <MetaLine label={t("common.ui.collectedOn")} value={formatDateTime(sample.collectedAt)} />
+          <MetaLine label={t("common.ui.reportedOn")} value={formatDateTime(reportInfo.reportedAt)} />
         </div>
       </div>
     </section>

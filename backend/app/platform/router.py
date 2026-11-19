@@ -77,6 +77,9 @@ async def list_platform_facilities(
                 Facility.name.ilike(term),
                 Facility.code.ilike(term),
                 Facility.hfr_facility_id.ilike(term),
+                # "Nothing is getting searched" for a state or district (QA 17 Oct 2026).
+                Facility.state_code.ilike(term),
+                Facility.district.ilike(term),
             )
         )
 

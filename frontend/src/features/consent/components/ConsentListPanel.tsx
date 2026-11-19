@@ -58,9 +58,7 @@ export function ConsentListPanel({
         <Typography sx={{ m: 0, fontSize: "1.0625rem", fontWeight: 700, color: meridian.textPrimary }}>
           {t("consent.records")}
         </Typography>
-        <Typography sx={{ m: 0, mt: 0.4, fontSize: "0.8125rem", color: meridian.textSecondary }}>
-          Open a record to review its decision and expiry.
-        </Typography>
+        <Typography sx={{ m: 0, mt: 0.4, fontSize: "0.8125rem", color: meridian.textSecondary }}>{t("consent.ui.openARecordToReviewIts")}</Typography>
       </Box>
 
       <Stack spacing={1.25} sx={{ px: 2.5, pb: 2 }}>

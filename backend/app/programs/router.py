@@ -31,6 +31,48 @@ async def ping() -> dict:
 
 
 @router.get(
+    "/candidate-patients",
+    dependencies=[Depends(require_roles(*_PROGRAM_ROLES))],
+    summary="Find a patient to enrol, by UHID, THID or name",
+)
+async def find_candidate_patients(
+    current_db_user: CurrentDbUser,
+    q: str = Query(..., min_length=2, max_length=80),
+    db: AsyncSession = Depends(get_db),
+) -> list[dict]:
+    """Enrolment sent a fixed placeholder patient id because the dialog had no
+    patient field, so Confirm Enrolment always failed (QA 17 Oct 2026)."""
+    from sqlalchemy import or_, select
+
+    from app.patients.models import Patient
+
+    term = q.strip().replace("%", "").replace("_", "")
+    like = f"%{term}%"
+    rows = (
+        await db.execute(
+            select(Patient)
+            .where(
+                Patient.facility_id == current_db_user.facility_id,
+                Patient.status == "active",
+                or_(Patient.uhid.ilike(like), Patient.thid.ilike(like), Patient.full_name.ilike(like)),
+            )
+            .order_by(Patient.full_name)
+            .limit(20)
+        )
+    ).scalars()
+    return [
+        {
+            "patient_id": str(p.id),
+            "patient_name": p.full_name,
+            "patient_identifier": p.uhid or p.thid,
+            "patient_age": p.age_years,
+            "patient_sex": p.sex,
+        }
+        for p in rows
+    ]
+
+
+@router.get(
     "",
     response_model=list[CareProgramOut],
     dependencies=[Depends(require_roles(*_PROGRAM_ROLES))],

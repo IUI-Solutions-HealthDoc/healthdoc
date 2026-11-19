@@ -1,4 +1,5 @@
 import ResultRow from "./resultrow";
+import { useLocale } from "@/lib/i18n";
 
 interface Props {
   group: {
@@ -18,22 +19,15 @@ interface Props {
 }
 
 export default function TestGroup({ group, showHeader = false }: Props) {
+  const { t } = useLocale();
   return (
     <>
       {showHeader && (
         <tr>
-          <th className="border-y border-slate-800 pb-1.5 pt-2 text-left text-[12px] font-bold text-slate-900">
-            Investigation
-          </th>
-          <th className="border-y border-slate-800 pb-1.5 pt-2 text-center text-[12px] font-bold text-slate-900">
-            Result
-          </th>
-          <th className="border-y border-slate-800 pb-1.5 pt-2 text-center text-[12px] font-bold text-slate-900">
-            Reference Value
-          </th>
-          <th className="border-y border-slate-800 pb-1.5 pt-2 text-center text-[12px] font-bold text-slate-900">
-            Unit
-          </th>
+          <th className="border-y border-slate-800 pb-1.5 pt-2 text-left text-[12px] font-bold text-slate-900">{t("common.ui.investigation")}</th>
+          <th className="border-y border-slate-800 pb-1.5 pt-2 text-center text-[12px] font-bold text-slate-900">{t("common.ui.result")}</th>
+          <th className="border-y border-slate-800 pb-1.5 pt-2 text-center text-[12px] font-bold text-slate-900">{t("common.ui.referenceValue")}</th>
+          <th className="border-y border-slate-800 pb-1.5 pt-2 text-center text-[12px] font-bold text-slate-900">{t("common.ui.unit")}</th>
         </tr>
       )}
       <tr>

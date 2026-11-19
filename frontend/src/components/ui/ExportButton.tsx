@@ -6,6 +6,7 @@ import {
   useState,
   type MouseEvent,
 } from "react";
+import Tooltip from "@mui/material/Tooltip";
 import Button, { type ButtonProps } from "@mui/material/Button";
 import CircularProgress from "@mui/material/CircularProgress";
 import Menu from "@mui/material/Menu";
@@ -18,6 +19,7 @@ import TableChartOutlinedIcon from "@mui/icons-material/TableChartOutlined";
 import GridOnOutlinedIcon from "@mui/icons-material/GridOnOutlined";
 import PictureAsPdfOutlinedIcon from "@mui/icons-material/PictureAsPdfOutlined";
 import { meridian } from "@/styles/theme";
+import { translate } from "@/lib/i18n";
 
 export type ExportFormat = "csv" | "xlsx" | "pdf";
 
@@ -34,6 +36,9 @@ export type ExportButtonProps = Omit<
   formats?: ExportFormat[];
   label?: string;
   loading?: boolean;
+  /** Said on hover and to screen readers while disabled: a dead button with
+   *  no reason left the supervisor guessing (QA 12 Oct 2026). */
+  disabledReason?: string;
 };
 
 const FORMAT_META: Record<
@@ -46,13 +51,13 @@ const FORMAT_META: Record<
     icon: TableChartOutlinedIcon,
   },
   xlsx: {
-    label: "Excel",
-    hint: "Workbook (.xlsx)",
+    get label() { return translate("common.msg.excel"); },
+    get hint() { return translate("common.msg.workbookXlsx"); },
     icon: GridOnOutlinedIcon,
   },
   pdf: {
     label: "PDF",
-    hint: "Printable report",
+    get hint() { return translate("common.msg.printableReport"); },
     icon: PictureAsPdfOutlinedIcon,
   },
 };
@@ -64,11 +69,12 @@ export const ExportButton = forwardRef<HTMLButtonElement, ExportButtonProps>(
     {
       onExport,
       formats = DEFAULT_FORMATS,
-      label = "Export",
+      label = translate("consent.access.export"),
       loading: loadingProp = false,
       variant = "outlined",
       size = "medium",
       disabled = false,
+      disabledReason,
       sx,
       ...buttonProps
     },
@@ -101,6 +107,9 @@ export const ExportButton = forwardRef<HTMLButtonElement, ExportButtonProps>(
 
     return (
       <>
+        {disabled && disabledReason ? (
+          <Tooltip title={disabledReason}>
+            <span aria-label={disabledReason} style={{ display: "inline-flex" }}>
         <Button
           ref={ref}
           variant={variant}
@@ -147,6 +156,56 @@ export const ExportButton = forwardRef<HTMLButtonElement, ExportButtonProps>(
         >
           {label}
         </Button>
+            </span>
+          </Tooltip>
+        ) : (
+        <Button
+          ref={ref}
+          variant={variant}
+          size={size}
+          disabled={disabled || busy}
+          aria-haspopup="menu"
+          aria-expanded={open ? "true" : undefined}
+          aria-controls={open ? menuId : undefined}
+          onClick={handleOpen}
+          startIcon={
+            busy ? (
+              <CircularProgress color="inherit" size={15} thickness={5} />
+            ) : (
+              <DownloadIcon sx={{ fontSize: 18 }} />
+            )
+          }
+          endIcon={
+            <KeyboardArrowDownIcon
+              sx={{
+                fontSize: 20,
+                transition: "transform 0.2s ease",
+                transform: open ? "rotate(180deg)" : "none",
+              }}
+            />
+          }
+          sx={{
+            textTransform: "none",
+            fontWeight: 600,
+            letterSpacing: "0.01em",
+            borderRadius: "10px",
+            px: 1.75,
+            borderColor: "rgb(0 31 84 / 0.18)",
+            color: meridian.brandPrimary,
+            backgroundColor: meridian.surface,
+            boxShadow: "0 1px 2px rgb(0 31 84 / 0.04)",
+            "&:hover": {
+              borderColor: meridian.brandPrimary,
+              backgroundColor: meridian.muted,
+              boxShadow: "0 4px 12px rgb(0 31 84 / 0.08)",
+            },
+            ...((sx as object) ?? {}),
+          }}
+          {...buttonProps}
+        >
+          {label}
+        </Button>
+        )}
 
         <Menu
           id={menuId}

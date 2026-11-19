@@ -10,7 +10,7 @@
 import { apiErrorCode, userFacingApiError } from "./api-error-policy.mjs";
 import { sessionExpiredPath } from "./session-policy.mjs";
 import { clearAuthToken } from "./auth";
-export { userFacingApiError } from "./api-error-policy.mjs";
+export { apiErrorCode, userFacingApiError } from "./api-error-policy.mjs";
 
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api/v1";
 

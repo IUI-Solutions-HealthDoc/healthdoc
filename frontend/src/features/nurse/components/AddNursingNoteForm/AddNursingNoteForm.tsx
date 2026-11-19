@@ -18,12 +18,14 @@ import {
   addNursingNoteSchema,
   type AddNursingNoteSchema,
 } from "./validation";
+import { useLocale } from "@/lib/i18n";
 
 export default function AddNursingNoteForm({
   encounterId,
   patientId,
   isSubmitting = false,
 }: AddNursingNoteFormProps) {
+  const { t } = useLocale();
   const {
     register,
     reset,
@@ -54,16 +56,14 @@ export default function AddNursingNoteForm({
 
   return (
     <FormSection
-      title="Add Nursing Note"
-      description="Nursing notes are not available in this release."
+      title={t("nurse.ui.addNursingNote")}
+      description={t("nurse.ui.nursingNotesAreNotAvailableIn")}
     >
-      <p className="mb-4 rounded-md border border-border bg-muted p-3 text-sm text-muted-foreground">
-        Use the approved patient record workflow for clinical documentation.
-      </p>
+      <p className="mb-4 rounded-md border border-border bg-muted p-3 text-sm text-muted-foreground">{t("nurse.ui.useTheApprovedPatientRecordWorkflow")}</p>
       <form onSubmit={(e) => e.preventDefault()} className="pointer-events-none space-y-6 opacity-50">
         <div className="grid gap-5 md:grid-cols-2">
           <SelectField
-            label="Category"
+            label={t("billing.lineItems.col.category")}
             options={NOTE_CATEGORIES.map((category) => ({
               label: category,
               value: category,
@@ -73,7 +73,7 @@ export default function AddNursingNoteForm({
           />
 
           <SelectField
-            label="Priority"
+            label={t("receptionist.priority")}
             options={PRIORITIES.map((priority) => ({
               label: priority,
               value: priority,
@@ -84,8 +84,8 @@ export default function AddNursingNoteForm({
         </div>
 
         <TextAreaField
-          label="Nursing Note"
-          placeholder="Enter nursing observations, interventions, or patient condition..."
+          label={t("nurse.actionNursingNote")}
+          placeholder={t("nurse.ui.enterNursingObservationsInterventionsOrPatient")}
           rows={6}
           registration={register("note")}
           error={errors.note}
@@ -93,7 +93,7 @@ export default function AddNursingNoteForm({
 
         <FormActions
           isSubmitting={isSubmitting}
-          submitLabel="Save Note"
+          submitLabel={t("nurse.ui.saveNote")}
           resetLabel="Reset"
           onReset={handleReset}
         />

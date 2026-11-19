@@ -8,6 +8,7 @@ import Typography from "@mui/material/Typography";
 
 import { Modal } from "@/components/ui/Modal";
 import { meridian } from "@/styles/theme";
+import { translate } from "@/lib/i18n";
 
 export interface ReasonOption {
   label: string;
@@ -35,17 +36,17 @@ interface ReasonSelectionDialogProps {
 export default function ReasonSelectionDialog({
   open,
   title,
-  label = "Reason",
+  label = translate("inventory.adjustment.reason"),
   reasons,
   defaultValue = "",
   loading = false,
-  confirmText = "Save",
-  cancelText = "Cancel",
+  confirmText = translate("common.save"),
+  cancelText = translate("common.cancel"),
   confirmColor = "primary",
   helperText,
   showRemarks = false,
   defaultRemarks = "",
-  remarksLabel = "Remarks",
+  remarksLabel = translate("lab.ui.remarks"),
   onClose,
   onConfirm,
 }: ReasonSelectionDialogProps) {

@@ -143,7 +143,13 @@ export function useResults() {
           radiology_order_item_id: selected.order_type === "radiology" ? selected.id : undefined,
           notes,
         }));
-        const updated = await updateDoctorReview(existing.id, { status, notes });
+        // The server moves a review one step at a time (pending -> reviewed
+        // -> signed_off) and answers 409 to a skip. Signing off a result the
+        // doctor has open records the review step first.
+        const base = status === "signed_off" && existing.status === "pending"
+          ? await updateDoctorReview(existing.id, { status: "reviewed" })
+          : existing;
+        const updated = await updateDoctorReview(base.id, { status, notes });
         setReviews([updated]);
         setItems((prev) =>
           prev.map((i) => (i.id === selected.id ? { ...i, review_status: status } : i)),

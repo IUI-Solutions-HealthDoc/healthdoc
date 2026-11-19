@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { getInvoiceDetail } from "../api";
 import { DEFAULT_CURRENCY, moneyZero } from "../lib/money";
 import type { InvoiceBalance, PaymentWithRefunds } from "../types";
+import { translate } from "@/lib/i18n";
 
 const emptyBalance = (): InvoiceBalance => ({
   net_amount: moneyZero(),
@@ -43,7 +44,7 @@ export function useInvoicePayments(invoiceId: string | null, revision = 0) {
       } });
     } catch (reason) {
       if (generation.current === request) setSnapshot({ ...initial, loading: false,
-        error: reason instanceof Error ? reason.message : "Failed to load payment history" });
+        error: reason instanceof Error ? reason.message : translate("billing.msg.failedToLoadPaymentHistory") });
     }
   }, [invoiceId, scope]);
 

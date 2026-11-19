@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.actions import AuditAction
 from app.audit.service import audited_mutation
+from app.common.business_date import latest_date_anywhere
 from app.common.patient_scope import facility_today
 from app.common.security import (
     aadhaar_blind_index,
@@ -230,14 +231,25 @@ async def search_patients(
     uhid: str | None = None,
     aadhaar_number: str | None = None,
     abha_number: str | None = None,
+    age_years: int | None = None,
     page: int = 1,
     page_size: int = 20,
 ):
-    """Returns (page_of_(patient, score, matched_on, merged_from), total_count).
+    """Returns (page_of_(patient, score, matched_on, merged_from, matched_fields), total_count).
     Exact-match paths (aadhaar/abha/uhid/mobile) run first; fuzzy name+dob fills in.
     A patient found via multiple paths keeps its highest-scoring match.
     merged_from is the retired UHID/THID when the match came through a merge."""
     matches: dict = {}
+    fields: dict = {}
+
+    def _hit(patient, score, key, merged_from=None):
+        fields.setdefault(patient.id, [])
+        if key not in fields[patient.id]:
+            fields[patient.id].append(key)
+        existing = matches.get(patient.id)
+        if not existing or existing[1] < score:
+            matches[patient.id] = (patient, score, key, merged_from)
+
     # facility_id is required (PR review blocker 4) — cross-facility search
     # is a separate, consent-gated operation, never a default. Unconditional
     # so a future caller can't accidentally reopen the leak by omitting it.
@@ -262,22 +274,17 @@ async def search_patients(
             )
         )
         for patient in (await db.execute(stmt)).scalars().all():
-            matches[patient.id] = (patient, 1.0, "aadhaar", None)
+            _hit(patient, 1.0, "aadhaar")
 
     if abha_number:
         stmt = select(Patient).where(Patient.abha_number == abha_number, *base_filter)
         for patient in (await db.execute(stmt)).scalars().all():
-            existing = matches.get(patient.id)
-            if not existing or existing[1] < 1.0:
-                matches[patient.id] = (patient, 1.0, "abha", None)
+            _hit(patient, 1.0, "abha")
 
     if uhid:
         stmt = select(Patient).where(or_(Patient.uhid == uhid, Patient.thid == uhid), *base_filter)
         for patient in (await db.execute(stmt)).scalars().all():
-            existing = matches.get(patient.id)
-            matched_key = "uhid" if patient.uhid == uhid else "thid"
-            if not existing or existing[1] < 1.0:
-                matches[patient.id] = (patient, 1.0, matched_key, None)
+            _hit(patient, 1.0, "uhid" if patient.uhid == uhid else "thid")
 
         if not matches:
             merged_stmt = select(Patient).where(
@@ -297,42 +304,46 @@ async def search_patients(
                         and canonical.deleted_at is None
                         and canonical.status != "merged"
                     ):
-                        matches[canonical.id] = (
-                            canonical,
-                            1.0,
-                            "merged_identifier",
-                            merged_patient.uhid or merged_patient.thid,
-                        )
+                        _hit(canonical, 1.0, "merged_identifier",
+                             merged_patient.uhid or merged_patient.thid)
 
     if mobile:
         stmt = select(Patient).where(Patient.mobile == mobile, *base_filter)
         for patient in (await db.execute(stmt)).scalars().all():
-            existing = matches.get(patient.id)
-            if not existing or existing[1] < 1.0:
-                matches[patient.id] = (patient, 1.0, "mobile", None)
+            _hit(patient, 1.0, "mobile")
 
-    if full_name and dob:
+    if full_name and (dob is not None or age_years is not None):
         # Should-fix (PR review): use the native % (similarity) operator
         # instead of func.similarity() — faster in Postgres since it can use
-        # pg_trgm index acceleration. The % operator returns boolean (match or
-        # not), not a score, so we also fetch the actual similarity score for
-        # ranking. Set the threshold at Postgres level with SET LOCAL.
+        # pg_trgm index acceleration. % alone uses pg_trgm's default 0.3,
+        # which let "Test Patient Oct" match "Dev Patient" on the shared word
+        # (QA 12 Oct 2026); the score must also clear NAME_MATCH_MIN.
         similarity = func.similarity(Patient.full_name, full_name)
+        if dob is not None:
+            when = [Patient.dob == dob]
+            key = "name_dob"
+        else:
+            when = [or_(
+                Patient.age_years.between(age_years - 2, age_years + 2),
+                func.extract("year", Patient.dob).between(
+                    latest_date_anywhere().year - age_years - 2,
+                    latest_date_anywhere().year - age_years + 2,
+                ),
+            )]
+            key = "name_age"
         stmt = (
             select(Patient, similarity.label("score"))
             .where(
                 Patient.full_name.op("%")(full_name),
-                Patient.dob == dob,
+                similarity >= NAME_MATCH_MIN,
+                *when,
                 *base_filter,
             )
             .order_by(similarity.desc())
             .limit(50)
         )
         for patient, score in (await db.execute(stmt)).all():
-            boosted = min(1.0, float(score) + 0.3)
-            existing = matches.get(patient.id)
-            if not existing or existing[1] < boosted:
-                matches[patient.id] = (patient, boosted, "name_dob", None)
+            _hit(patient, min(1.0, float(score) + 0.3) if key == "name_dob" else float(score), key)
 
     # Pagination is intentionally in Python here (should-fix, PR review):
     # search_patients() runs up to 5 independent DB queries (aadhaar, abha,
@@ -344,10 +355,47 @@ async def search_patients(
     # so in-memory sorting and slicing is not a performance concern here.
     # A future single-path-only search (e.g. name-only, no dedup needed)
     # could use DB-side LIMIT/OFFSET directly.
-    ranked = sorted(matches.values(), key=lambda m: m[1], reverse=True)
+    ranked = sorted(
+        ((*m, sorted(fields[m[0].id], key=lambda f: f != m[2])) for m in matches.values()),
+        key=lambda m: m[1], reverse=True,
+    )
     total = len(ranked)
     start = (page - 1) * page_size
     return ranked[start:start + page_size], total
+
+NAME_MATCH_MIN = 0.5
+
+
+def _name_key(name: str) -> str:
+    return " ".join(name.casefold().split())
+
+
+async def find_probable_duplicates(
+    db: AsyncSession, *, facility_id: uuid.UUID, full_name: str, mobile: str,
+    dob=None, age_years: int | None = None,
+) -> list[Patient]:
+    """Patients at this facility with the same mobile, the same name (case and
+    spacing ignored) and the same DOB, or the same age when registered by age.
+    Exact on purpose: this blocks a registration until the desk confirms, so
+    it must not fire on a family sharing one phone."""
+    rows = (await db.execute(select(Patient).where(
+        Patient.facility_id == facility_id, Patient.mobile == mobile,
+        Patient.deleted_at.is_(None), Patient.status != "merged",
+    ))).scalars().all()
+    wanted = _name_key(full_name)
+    out = []
+    for patient in rows:
+        if _name_key(patient.full_name) != wanted:
+            continue
+        if dob is not None and patient.dob == dob:
+            out.append(patient)
+        elif dob is None and patient.dob is None and patient.age_years == age_years:
+            out.append(patient)
+        elif dob is None and patient.dob is not None and age_years is not None \
+                and abs((latest_date_anywhere().year - patient.dob.year) - age_years) <= 1:
+            out.append(patient)
+    return out
+
 
 async def find_duplicate_by_aadhaar(
     db: AsyncSession, *, aadhaar_number: str, facility_id: uuid.UUID,

@@ -6,7 +6,7 @@ import { fetchBloodDonors, fetchBloodUnits } from "./api";
 import { BloodCrossmatchModal } from "./components/BloodCrossmatchModal";
 import { BloodDonorRegistry } from "./components/BloodDonorRegistry";
 import { BloodInventoryGrid } from "./components/BloodInventoryGrid";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 import type { BloodDonor, BloodUnit } from "./types";
 
 export function BloodBankPage() {
@@ -35,7 +35,7 @@ export function BloodBankPage() {
       setLoaded(true);
     } catch (err: unknown) {
       if (request === loadSequence.current)
-        setLoadError(err instanceof Error && err.message ? err.message : "Blood bank data could not be loaded.");
+        setLoadError(err instanceof Error && err.message ? err.message : translate("bloodBank.errLoad"));
     } finally {
       if (request === loadSequence.current) setLoading(false);
     }
@@ -94,23 +94,19 @@ export function BloodBankPage() {
       ) : loadError && !loaded ? (
         <div role="alert" className="rounded-2xl border border-destructive/30 bg-destructive/10 p-8 text-center text-sm text-destructive space-y-3">
           <AlertCircle className="h-8 w-8 mx-auto" />
-          <p>Blood bank data could not be loaded: {loadError}</p>
-          <p className="text-xs text-muted-foreground">This is not an empty inventory. Units and donors are unknown until the load succeeds.</p>
+          <p>{t("bloodBank.ui.bloodBankDataCouldNotBe", { loadError })}</p>
+          <p className="text-xs text-muted-foreground">{t("bloodBank.errLoadNotEmpty")}</p>
           <button
             type="button"
             onClick={() => void loadData()}
             className="rounded-xl border border-destructive/40 px-4 py-2 text-xs font-semibold hover:bg-destructive/10 transition-colors"
-          >
-            Retry loading blood bank data
-          </button>
+          >{t("bloodBank.retryLoad")}</button>
         </div>
       ) : (
         <>
           {loadError && (
             <p role="alert" className="flex items-center gap-2 rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
-              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-              The latest refresh failed: {loadError}. Units and donors shown may be out of date.
-            </p>
+              <AlertCircle className="h-3.5 w-3.5 shrink-0" />{t("bloodBank.ui.theLatestRefreshFailed")}{" "}{loadError}{t("bloodBank.ui.unitsAndDonorsShownMayBe")}</p>
           )}
           {activeTab === "inventory" ? (
             <BloodInventoryGrid

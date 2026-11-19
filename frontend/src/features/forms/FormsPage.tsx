@@ -29,6 +29,7 @@ import { fetchFormDefinitions, fetchOrderSets, fetchPatientSubmissions } from ".
 import { ClinicalOrderSetsModal } from "./components/ClinicalOrderSetsModal";
 
 import { CsvAdministrationModal } from "./components/CsvAdministrationModal";
+import { useAuth } from "@/providers/auth-provider";
 
 import { DynamicFormRenderer } from "./components/DynamicFormRenderer";
 
@@ -123,6 +124,8 @@ export function FormsPage() {
   const [isOrderSetOpen, setIsOrderSetOpen] = useState(false);
 
   const [isCsvAdminOpen, setIsCsvAdminOpen] = useState(false);
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
 
 
 
@@ -300,6 +303,9 @@ export function FormsPage() {
 
         <div className="flex items-center gap-2">
 
+          {/* CSV import/export is admin-only on the server; for anyone else
+              the button opened a dialog whose Download did nothing (QA 12 Oct 2026). */}
+          {isAdmin ? (
           <button
 
             onClick={() => setIsCsvAdminOpen(true)}
@@ -313,6 +319,7 @@ export function FormsPage() {
             {t("forms.csvAdmin")}
 
           </button>
+          ) : null}
 
           <button
 
@@ -736,7 +743,7 @@ export function FormsPage() {
 
       <CsvAdministrationModal
 
-        isOpen={isCsvAdminOpen}
+        isOpen={isAdmin && isCsvAdminOpen}
 
         onClose={() => setIsCsvAdminOpen(false)}
 

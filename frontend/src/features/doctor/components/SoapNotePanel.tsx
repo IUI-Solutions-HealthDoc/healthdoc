@@ -30,6 +30,8 @@ export interface SoapNotePanelProps {
   value: SoapNote;
   noteStatus: NoteStatus;
   onChange: (patch: Partial<SoapNote>) => void;
+  /** After Complete consultation: typing was accepted and silently not saved. */
+  readOnly?: boolean;
 }
 
 /**
@@ -40,7 +42,7 @@ export interface SoapNotePanelProps {
  * reach its store, and a note that silently vanished is far worse than one the
  * clinician knows to re-enter.
  */
-export function SoapNotePanel({ value, noteStatus, onChange }: SoapNotePanelProps) {
+export function SoapNotePanel({ value, noteStatus, onChange, readOnly = false }: SoapNotePanelProps) {
   const { t } = useLocale();
 
   const statusLabel =
@@ -96,6 +98,7 @@ export function SoapNotePanel({ value, noteStatus, onChange }: SoapNotePanelProp
             multiline
             minRows={2}
             fullWidth
+            slotProps={{ input: { readOnly } }}
           />
         ))}
       </Stack>

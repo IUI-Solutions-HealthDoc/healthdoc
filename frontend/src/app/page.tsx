@@ -5,8 +5,10 @@ import { useRouter } from "next/navigation";
 
 import { getDefaultRouteForRole } from "@/lib/auth/routes";
 import { useAuth } from "@/providers/auth-provider";
+import { useLocale } from "@/lib/i18n";
 
 export default function HomePage() {
+  const { t } = useLocale();
   const router = useRouter();
   const { user, isAuthenticated, isLoading } = useAuth();
 
@@ -21,8 +23,6 @@ export default function HomePage() {
   }, [isAuthenticated, isLoading, router, user?.role]);
 
   return (
-    <div className="flex min-h-[40vh] items-center justify-center text-sm text-muted-foreground">
-      Loading your workspace…
-    </div>
+    <div className="flex min-h-[40vh] items-center justify-center text-sm text-muted-foreground">{t("common.ui.loadingYourWorkspace")}</div>
   );
 }

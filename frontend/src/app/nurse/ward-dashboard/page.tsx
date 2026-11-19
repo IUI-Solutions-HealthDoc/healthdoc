@@ -51,7 +51,7 @@ import {
   type NursingTask,
 } from "@/features/nurse/api/nursing";
 import { ApiError, formatDateTime } from "@/lib/api";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 type PatientAction = "vitals" | "fluid" | "transfer" | "incident" | "handover" | null;
 
@@ -69,6 +69,11 @@ function toOrder(task: NursingTask): Order {
     completed_at: task.completed_at,
     completed_by: task.completed_by,
     completion_note: task.completion_note,
+    order_number: task.order_number ?? undefined,
+    patient_name: task.patient_name,
+    patient_uhid: task.patient_uhid,
+    patient_age_years: task.patient_age_years,
+    patient_sex: task.patient_sex,
   };
 }
 
@@ -333,7 +338,7 @@ export default function Page() {
           data-status={taskQueueStatus}
           className={taskQueueStatus === "error" ? "text-sm text-danger" : "sr-only"}
         >
-          {taskQueueStatus === "error" ? t("nurse.taskQueueError") : `Nursing API ${taskQueueStatus}`}
+          {taskQueueStatus === "error" ? t("nurse.taskQueueError") : translate("nurse.msg.nursingApiTaskqueuestatus", undefined, { taskQueueStatus })}
         </p>
         <TaskQueue orders={orders} onAccept={acceptOrder} onCheckOff={checkOff} />
       </section>

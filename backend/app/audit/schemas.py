@@ -29,6 +29,9 @@ class AuditLogOut(BaseModel):
     new_value: dict[str, Any] | None
     created_at: datetime
     entry_hash: str | None
+    # Readable who/whom: the trail showed raw UUIDs (QA 12 Oct 2026).
+    user_display: str | None = None
+    patient_uhid: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

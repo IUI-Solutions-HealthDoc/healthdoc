@@ -279,3 +279,26 @@ async def test_export_endpoint_writes_an_audit_row_for_the_export_itself(
     assert row.user_id == user_id
     assert str(row.facility_id) == str(facility_id)
     assert "CSV export of audit_logs" in row.reason
+
+
+async def test_the_trail_names_the_user_instead_of_a_uuid(engine: AsyncEngine, session_factory, facility_id, user_id):
+    """QA 12 Oct 2026: the audit trail showed raw UUIDs for the acting user."""
+    await _insert_audit_row(engine, facility_id, user_id=user_id)
+    async with session_factory() as db:
+        name, login = (await db.execute(
+            text("SELECT full_name, username FROM users WHERE id = :u"), {"u": user_id}
+        )).one()
+        caller = DbUser(id=user_id, facility_id=facility_id, keycloak_sub="x", username=login, roles=["auditor"])
+        page = await router_module.list_audit_logs(user=caller, db=db)
+    assert {i["user_display"] for i in page["items"]} == {f"{name} ({login})"}
+
+
+async def test_list_filters_by_action_beyond_the_newest_page(engine: AsyncEngine, session_factory, facility_id):
+    # QA 17 Oct 2026: Login/Logout filtered only the newest page the viewer
+    # had loaded, so older logins never appeared.
+    await _insert_audit_row(engine, facility_id, action="login", resource_type="sessions")
+    for _ in range(3):
+        await _insert_audit_row(engine, facility_id, action="create")
+    async with session_factory() as db:
+        items, total = await service.list_audit_logs(db, facility_id=facility_id, action="login", page_size=2)
+    assert total == 1 and [row.action for row in items] == ["login"]

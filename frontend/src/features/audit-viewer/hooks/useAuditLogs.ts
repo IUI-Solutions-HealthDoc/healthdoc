@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { listAuditLogs } from "../api";
 import type { AuditLog, AuditLogFilters } from "../types";
+import { translate } from "@/lib/i18n";
 
 export function useAuditLogs(initial: AuditLogFilters = { action: "all", resource_type: "all" }) {
   const [filters, setFilters] = useState<AuditLogFilters>(initial);
@@ -14,7 +15,7 @@ export function useAuditLogs(initial: AuditLogFilters = { action: "all", resourc
   const refresh = useCallback(async () => {
     if (filters.from && filters.to && filters.from > filters.to) {
       setRows([]);
-      setError("The From date must be on or before the To date.");
+      setError(translate("reports.kpi.errCustomRange"));
       setLoading(false);
       return;
     }
@@ -24,7 +25,7 @@ export function useAuditLogs(initial: AuditLogFilters = { action: "all", resourc
       setRows((await listAuditLogs(filters)).items);
     } catch (e) {
       setRows([]);
-      setError(e instanceof Error ? e.message : "Failed to load audit logs");
+      setError(e instanceof Error ? e.message : translate("audit.msg.failedToLoadAuditLogs"));
     } finally {
       setLoading(false);
     }

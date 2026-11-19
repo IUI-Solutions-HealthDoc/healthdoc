@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.allergies.service import AllergyConflict
 from app.auth.deps import CurrentDbUser, require_roles
 from app.common.db import get_db
+from app.common.patient_brief import patient_briefs
 from app.common.idempotency import check_idempotency, hash_request_body, record_idempotent_response
 from app.orders import results_worklist, service
 from app.orders.external_referrals import ReferralState, list_external_referrals
@@ -319,9 +320,12 @@ async def get_prescription(prescription_id: UUID, current_db_user: CurrentDbUser
     if prescription is None:
         raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="prescription_not_found")
     items = await service.get_prescription_items(db, prescription_id)
+    brief = (await patient_briefs(db, [prescription.patient_id], current_db_user.facility_id)).get(
+        prescription.patient_id)
     return PrescriptionOut(
         id=prescription.id, encounter_id=prescription.encounter_id, facility_id=prescription.facility_id,
         patient_id=prescription.patient_id, notes=prescription.notes,
         created_at=prescription.created_at, updated_at=prescription.updated_at,
         items=[PrescriptionItemOut.model_validate(i) for i in items],
+        **(brief.model_dump(exclude={"patient_id"}) if brief else {}),
     )

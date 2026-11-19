@@ -306,7 +306,7 @@ function PatientWorkspace({ patientId }: { patientId: string }) {
               </fieldset>
             </form>
           </section>
-          <section className="surface-card space-y-4 p-5" aria-label="Consent and transfer status">
+          <section className="surface-card space-y-4 p-5" aria-label={t("doctor.ui.consentAndTransferStatus")}>
             <div className="flex justify-between gap-3">
               <h2 className="text-xl font-semibold">{t("doctor.abdm.consentAndDelivery")}</h2>
               <button

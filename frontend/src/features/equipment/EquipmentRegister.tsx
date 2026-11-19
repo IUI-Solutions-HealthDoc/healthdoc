@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { ApiError, formatDateTime, newIdempotencyKey } from "@/lib/api";
+import { humanizeCode } from "@/lib/format-age";
 import { useLocale } from "@/lib/i18n";
 import { useAuth } from "@/providers/auth-provider";
 
@@ -185,6 +186,9 @@ function EquipmentRow({ item, isAdmin, onChanged }: { item: EquipmentItem; isAdm
       setNext("");
       setReason("");
       setKey(newIdempotencyKey());
+      // An open history showed the new entry only after History was clicked
+      // again (QA 17 Oct 2026).
+      if (history) setHistory(await equipmentHistory(item.id));
       onChanged();
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.message : t("equipment.errSave"));
@@ -223,9 +227,22 @@ function EquipmentRow({ item, isAdmin, onChanged }: { item: EquipmentItem; isAdm
             {t("equipment.since")} {formatDateTime(item.status_since)}
           </p>
           {item.status_reason ? <p className="text-xs">{item.status_reason}</p> : null}
+          <p className="text-xs text-muted-foreground">
+            {item.last_service_at
+              ? t("equipment.lastService", { when: formatDateTime(item.last_service_at), kind: humanizeCode(item.last_service_type) })
+              : t("equipment.noServiceYet")}
+          </p>
         </div>
       </div>
-      {item.status !== "retired" ? (
+      {item.status === "retired" ? (
+        // Retiring hid the History link too, so who reported the faults and
+        // why it was retired could no longer be read (QA 16 Oct 2026).
+        <div className="mt-2">
+          <button type="button" onClick={() => void toggleHistory()} className="text-xs underline">
+            {history ? t("equipment.hideHistory") : t("equipment.showHistory")}
+          </button>
+        </div>
+      ) : (
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <select value={next} onChange={(e) => setNext(e.target.value as EquipmentStatus | "")} className="rounded-md border border-border px-2 py-1 text-xs">
             <option value="">{t("equipment.changeStatus")}</option>
@@ -258,7 +275,7 @@ function EquipmentRow({ item, isAdmin, onChanged }: { item: EquipmentItem; isAdm
             {history ? t("equipment.hideHistory") : t("equipment.showHistory")}
           </button>
         </div>
-      ) : null}
+      )}
       {error ? (
         <p className="mt-1 text-xs text-danger" role="alert">
           {error}

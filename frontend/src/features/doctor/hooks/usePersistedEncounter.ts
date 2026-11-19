@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { getEncounterForVisit } from "../api";
 import type { ActiveEncounter, EncounterContext } from "../types";
+import { translate } from "@/lib/i18n";
 
 /** Resolve the server-owned encounter used by standalone clinical screens. */
 export function usePersistedEncounter(context: EncounterContext): {
@@ -27,7 +28,7 @@ export function usePersistedEncounter(context: EncounterContext): {
       .catch((cause: unknown) => {
         if (cancelled) return;
         setEncounter(null);
-        setError(cause instanceof Error ? cause.message : "Could not load the encounter");
+        setError(cause instanceof Error ? cause.message : translate("doctor.msg.couldNotLoadTheEncounter"));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

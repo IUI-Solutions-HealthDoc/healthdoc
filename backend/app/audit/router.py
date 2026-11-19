@@ -31,9 +31,10 @@ that write uses the request's normal session while the CSV body itself
 does not.
 """
 import uuid
+from typing import Annotated
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -77,6 +78,7 @@ async def list_audit_logs(
     date_to: datetime | None = None,
     page: int = 1,
     page_size: int = 20,
+    action: Annotated[str | None, Query(max_length=50)] = None,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     items, total = await service.list_audit_logs(
@@ -89,9 +91,28 @@ async def list_audit_logs(
         date_to=date_to,
         page=page,
         page_size=page_size,
+        action=action,
     )
+    # Local imports: app.audit sits under every module, so it must not import
+    # their models at load time (see app/audit/deps.py).
+    import sqlalchemy as sa
+
+    from app.patients.models import Patient
+    from app.users.models import User
+
+    users = {u: f"{name} ({login})" for u, name, login in (await db.execute(
+        sa.select(User.id, User.full_name, User.username).where(User.id.in_({r.user_id for r in items if r.user_id}))
+    )).all()} if items else {}
+    patients = dict((await db.execute(
+        sa.select(Patient.id, sa.func.coalesce(Patient.uhid, Patient.thid)).where(
+            Patient.id.in_({r.patient_id for r in items if r.patient_id}), Patient.facility_id == user.facility_id)
+    )).all()) if items else {}
     return AuditLogListOut(
-        items=[AuditLogOut.model_validate(r) for r in items],
+        items=[
+            AuditLogOut.model_validate(r).model_copy(
+                update={"user_display": users.get(r.user_id), "patient_uhid": patients.get(r.patient_id)})
+            for r in items
+        ],
         page=page,
         page_size=page_size,
         total=total,

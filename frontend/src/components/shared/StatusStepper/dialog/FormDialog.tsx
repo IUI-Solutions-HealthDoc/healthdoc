@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import Button, { type ButtonProps } from "@mui/material/Button";
 
 import { Modal } from "@/components/ui/Modal";
+import { translate } from "@/lib/i18n";
 
 interface FormDialogProps {
   open: boolean;
@@ -25,8 +26,8 @@ export default function FormDialog({
   children,
   maxWidth = "sm",
   loading = false,
-  saveText = "Save",
-  cancelText = "Cancel",
+  saveText = translate("common.save"),
+  cancelText = translate("common.cancel"),
   saveColor = "primary",
   disableSave = false,
   onClose,

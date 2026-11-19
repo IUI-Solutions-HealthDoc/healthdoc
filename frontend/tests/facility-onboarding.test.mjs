@@ -32,12 +32,17 @@ async function settle(d) { for (let i = 0; i < 3; i += 1) { d.render(); await fl
 const type = (tree, label, value) => labelled(tree, label).props.onChange({ target: { value } });
 
 test("a facility is created only with a valid code, state and HFR id", async () => {
+  // The button always answers (QA 17 Oct 2026): an incomplete form is refused
+  // in the panel, with the fields named, and nothing is sent.
   const d = panel();
   let tree = d.render();
-  assert.equal(button(tree, "Create facility").props.disabled, true);
+  await button(tree, "Create facility").props.onClick(); tree = await settle(d);
+  assert.equal(d.calls.length, 0);
+  assert.match(content(tree), /Fill in the marked fields/);
   type(tree, "Code", "DEV002"); type(tree, "Name", "Second Hospital"); type(tree, "State code", "br");
   type(tree, "HFR facility id", "2710009999"); tree = await settle(d);
-  assert.equal(button(tree, "Create facility").props.disabled, true, "an HFR id must look like IN0910034387");
+  await button(tree, "Create facility").props.onClick(); tree = await settle(d);
+  assert.equal(d.calls.length, 0, "an HFR id must look like IN0910034387");
   type(tree, "HFR facility id", "IN2710009999"); tree = await settle(d);
   await button(tree, "Create facility").props.onClick(); tree = await settle(d);
   assert.deepEqual(d.calls[0], ["create", { code: "DEV002", name: "Second Hospital", state_code: "BR",
@@ -72,8 +77,10 @@ test("an email-style username is refused before the server, with the reason show
   type(tree, "Facility to set up", "f-2"); tree = await settle(d);
   type(tree, "Admin username", "dev2@example.org"); type(tree, "Admin full name", "Second Admin");
   type(tree, "Temporary password", "Synthetic#Pass1"); tree = await settle(d);
-  assert.equal(button(tree, "Create first admin").props.disabled, true);
   assert.match(content(tree), /not an email/);
+  await button(tree, "Create first admin").props.onClick(); tree = await settle(d);
+  assert.equal(d.calls.filter((c) => c[0] === "admin").length, 0, "nothing is sent while the username is an email");
   type(tree, "Admin username", "dev2.admin"); tree = await settle(d);
-  assert.equal(button(tree, "Create first admin").props.disabled, false);
+  await button(tree, "Create first admin").props.onClick(); tree = await settle(d);
+  assert.equal(d.calls.filter((c) => c[0] === "admin").length, 1);
 });

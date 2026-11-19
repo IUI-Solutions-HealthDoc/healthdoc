@@ -60,6 +60,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.context import AuditActor
+from app.users.models import User
 from app.audit.deps import get_current_actor_dependency
 from app.auth.deps import AuthUser, CurrentDbUser, require_roles
 from app.billing import service
@@ -396,7 +397,7 @@ async def get_invoice(
 
     row = (
         await db.execute(
-            select(Invoice, Patient.full_name, Patient.uhid, Patient.thid, Visit.visit_type)
+            select(Invoice, Patient.full_name, Patient.uhid, Patient.thid, Visit.visit_type, Visit.visit_number)
             .join(Patient, Patient.id == Invoice.patient_id)
             .outerjoin(Visit, Visit.id == Invoice.visit_id)
             .where(Invoice.id == invoice_id)
@@ -406,7 +407,7 @@ async def get_invoice(
         # _assert_invoice_in_facility already passed, so this is a patient row
         # that vanished — not a scoping failure.
         raise HTTPException(status_code=404, detail={"code": "invoice_not_found"})
-    invoice, patient_full_name, uhid, thid, visit_type = row
+    invoice, patient_full_name, uhid, thid, visit_type, visit_number = row
 
     lines = (
         (
@@ -449,6 +450,10 @@ async def get_invoice(
                 RefundOnPaymentOut.model_validate(r)
             )
 
+    collectors = dict((await db.execute(
+        select(User.id, User.full_name).where(User.id.in_({p.collected_by for p in payments}))
+    )).all()) if payments else {}
+
     # The same helper record_payment uses to decide partially_paid vs paid.
     # Deliberately not reimplemented here: two versions of this arithmetic
     # would eventually disagree, and the one on screen is the one a patient is
@@ -478,6 +483,7 @@ async def get_invoice(
                 id=p.id, receipt_number=p.receipt_number, invoice_id=p.invoice_id,
                 amount=p.amount, currency=p.currency, mode=p.mode, status=p.status,
                 collected_at=p.collected_at.isoformat(),
+                collected_by=p.collected_by, collected_by_name=collectors.get(p.collected_by),
                 refunds=refunds_by_payment.get(p.id, []),
             )
             for p in payments
@@ -486,6 +492,7 @@ async def get_invoice(
         total_refunded=total_refunded,
         balance_due=balance_due,
         care_setting=visit_type,
+        visit_number=visit_number,
     )
 
 

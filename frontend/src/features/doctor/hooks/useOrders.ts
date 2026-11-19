@@ -6,6 +6,7 @@ import { toast } from "@/components/ui/toast";
 import { getUserFacingError } from "@/lib/api";
 import { listOrders, placeOrder } from "../api";
 import type { ActiveEncounter, DraftOrder, PlacedOrder } from "../types";
+import { translate } from "@/lib/i18n";
 
 export function useOrders(encounter: ActiveEncounter) {
   const [placed, setPlaced] = useState<PlacedOrder[]>([]);
@@ -33,7 +34,7 @@ export function useOrders(encounter: ActiveEncounter) {
       })
       .catch((error: unknown) => {
         if (!cancelled) {
-          setError(getUserFacingError(error, "Orders could not be loaded. Please retry."));
+          setError(getUserFacingError(error, translate("doctor.msg.ordersCouldNotBeLoadedPlease")));
         }
       })
       .finally(() => {
@@ -63,10 +64,10 @@ export function useOrders(encounter: ActiveEncounter) {
         setPlaced((prev) => [...prev.filter((row) => row.id !== result.id), result]);
         if (result.detail_status === "failed") {
           toast.error(
-            `${result.order_number} was created, but its department item failed. Do not reorder; contact support.`,
+            translate("doctor.msg.orderNumberWasCreatedButIts", undefined, { order_number: result.order_number }),
           );
         } else if (result.fulfilment_mode === "external_referral") {
-          toast.success(`${result.order_number} is referred externally; no local department item was created.`);
+          toast.success(translate("doctor.msg.orderNumberIsReferredExternallyNo", undefined, { order_number: result.order_number }));
         } else {
           toast.success(
             `${result.item_label} ordered${
@@ -76,7 +77,7 @@ export function useOrders(encounter: ActiveEncounter) {
         }
         return true;
       } catch (e) {
-        if (live.current) toast.error(getUserFacingError(e, "Order submission was not confirmed. Retry the same action; do not create another order."));
+        if (live.current) toast.error(getUserFacingError(e, translate("doctor.msg.orderSubmissionWasNotConfirmedRetry")));
         return false;
       } finally {
         writing.current = false;

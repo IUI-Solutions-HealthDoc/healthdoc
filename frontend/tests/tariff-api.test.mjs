@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import ts from "typescript";
+import { i18nStub } from "./helpers/i18n-stub.mjs";
 import { z } from "zod";
 
 function load(file, dependencies) {
@@ -9,7 +10,7 @@ function load(file, dependencies) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
   }).outputText;
   const exports = {};
-  new Function("require", "exports", code)((name) => {
+  new Function("require", "exports", code)((name) => { if (name === "@/lib/i18n") return i18nStub;
     assert.ok(name in dependencies, `Unexpected dependency ${name}`);
     return dependencies[name];
   }, exports);

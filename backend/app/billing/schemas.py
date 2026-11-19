@@ -73,6 +73,8 @@ class InvoicePreviewResponse(BaseModel):
     unpriced_count: int
     projected_new_charges_total: Money
     projected_gross_amount: Money
+    #: Things the desk must know before issuing (an admission still open).
+    warnings: list[str] = []
 
 
 class InvoiceBuildRequest(BaseModel):
@@ -88,6 +90,9 @@ class InvoiceBuildResponse(BaseModel):
     lines_skipped_unpriced: int
     gross_amount: Money
     net_amount: Money
+    #: Charge codes with no tariff, so the desk knows what to configure.
+    unpriced_codes: list[str] = []
+    warnings: list[str] = []
 
 
 # PM-JAY eligibility — STUB, not a real ABDM check yet.
@@ -123,6 +128,10 @@ class PaymentOut(BaseModel):
     mode: PaymentMode
     status: PaymentStatus
     collected_at: str
+    # Who took the money, by name: the printed receipt's "Collected by" was
+    # blank because the response never carried it (QA 12 Oct 2026).
+    collected_by: uuid.UUID | None = None
+    collected_by_name: str | None = None
 
 
 class RefundOnPaymentOut(BaseModel):
@@ -210,6 +219,7 @@ class InvoiceDetailOut(BaseModel):
     total_refunded: Money
     balance_due: Money
     care_setting: str | None = None
+    visit_number: str | None = None
 
 
 

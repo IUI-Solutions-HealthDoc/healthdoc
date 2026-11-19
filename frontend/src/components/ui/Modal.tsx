@@ -6,6 +6,7 @@ import DialogActions from "@mui/material/DialogActions";
 import IconButton from "@mui/material/IconButton";
 import Stack from "@mui/material/Stack";
 import CircularProgress from "@mui/material/CircularProgress";
+import { useLocale } from "@/lib/i18n";
 
 // Inline icon so this component has zero extra dependencies
 // (repo doesn't currently install @mui/icons-material).
@@ -53,6 +54,7 @@ export function Modal({
   disableClose = false,
   loading = false,
 }: ModalProps) {
+  const { t } = useLocale();
   const handleClose = () => {
     if (disableClose || loading) return;
     onClose();
@@ -72,7 +74,7 @@ export function Modal({
       >
         {title}
         <IconButton
-          aria-label="Close dialog"
+          aria-label={t("lab.critical.closeDialog")}
           onClick={onClose}
           disabled={disableClose || loading}
           size="small"

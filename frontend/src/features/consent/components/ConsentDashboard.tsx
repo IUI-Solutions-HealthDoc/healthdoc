@@ -7,6 +7,7 @@ import Typography from "@mui/material/Typography";
 import { PatientSearch } from "@/features/receptionist/PatientSearch";
 import { useLocale } from "@/lib/i18n";
 import { meridian } from "@/styles/theme";
+import { takeConsentHandoff } from "../handoff";
 import { useConsentDetail } from "../hooks/useConsentDetail";
 import { useConsentRecords } from "../hooks/useConsentRecords";
 import { ConsentListPanel } from "./ConsentListPanel";
@@ -24,7 +25,9 @@ export function ConsentDashboard() {
    * that was deferred. So the screen asks who first, reusing the receptionist's
    * PatientSearch rather than growing a second patient picker.
    */
-  const [patient, setPatient] = useState<{ id: string; full_name: string } | null>(null);
+  // Opened from "Record consent" at the desk: that patient, not an empty search
+  // the receptionist has to fill in again (QA 12 Oct 2026).
+  const [patient, setPatient] = useState<{ id: string; full_name: string } | null>(() => takeConsentHandoff());
   const patientRef = useRef(patient);
   patientRef.current = patient;
   const [selectedId, setSelectedId] = useState<string | null>(null);

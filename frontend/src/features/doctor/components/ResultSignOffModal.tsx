@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { meridian } from "@/styles/theme";
 import { doctorButtonSx } from "../panelSx";
+import { useLocale } from "@/lib/i18n";
 
 export interface ResultSignOffModalProps {
   open: boolean;
@@ -30,6 +31,7 @@ export function ResultSignOffModal({
   onClose,
   onConfirm,
 }: ResultSignOffModalProps) {
+  const { t } = useLocale();
   const [note, setNote] = React.useState("");
 
   React.useEffect(() => {
@@ -40,41 +42,33 @@ export function ResultSignOffModal({
     <Modal
       open={open}
       onClose={onClose}
-      title="Sign off result"
+      title={t("doctor.ui.signOffResult")}
       size="sm"
       disableClose={busy}
       actions={
         <>
-          <Button variant="outlined" sx={doctorButtonSx} onClick={onClose}>
-            Cancel
-          </Button>
+          <Button variant="outlined" sx={doctorButtonSx} onClick={onClose}>{t("common.cancel")}</Button>
           <Button
             variant="contained"
             sx={doctorButtonSx}
             loading={busy}
             onClick={() => onConfirm(note.trim() || undefined)}
-          >
-            Confirm sign-off
-          </Button>
+          >{t("doctor.ui.confirmSignOff")}</Button>
         </>
       }
     >
       <Stack spacing={2}>
-        <Typography sx={{ fontSize: "0.875rem" }}>
-          You are recording that you have reviewed <strong>{subject}</strong>.
+        <Typography sx={{ fontSize: "0.875rem" }}>{t("doctor.ui.youAreRecordingThatYouHave")}{" "}<strong>{subject}</strong>.
         </Typography>
-        <Typography sx={{ fontSize: "0.8125rem", color: meridian.textSecondary }}>
-          Sign-off is recorded against the current version only. If the lab issues a correction, the
-          new version will need signing again.
-        </Typography>
+        <Typography sx={{ fontSize: "0.8125rem", color: meridian.textSecondary }}>{t("doctor.ui.signOffIsRecordedAgainstThe")}</Typography>
         <TextField
-          label="Review note (optional)"
+          label={t("doctor.ui.reviewNoteOptional")}
           value={note}
           onChange={(e) => setNote(e.target.value)}
           multiline
           minRows={3}
           fullWidth
-          placeholder="e.g. Potassium critical — patient recalled, ECG ordered."
+          placeholder={t("doctor.ui.eGPotassiumCriticalPatientRecalled")}
         />
       </Stack>
     </Modal>

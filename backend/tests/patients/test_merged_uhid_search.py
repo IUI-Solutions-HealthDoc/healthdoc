@@ -47,9 +47,10 @@ async def test_a_merged_uhid_finds_the_surviving_chart_with_the_standard_result_
     results, total = await search_patients(db, facility_id=here.id, uhid=retired.uhid)
 
     assert total == 1
-    patient, score, matched_on, merged_from = results[0]
+    patient, score, matched_on, merged_from, matched_fields = results[0]
     assert patient.id == survivor.id
     assert (score, matched_on, merged_from) == (1.0, "merged_identifier", retired.uhid)
+    assert matched_fields == ["merged_identifier"]
 
 
 async def test_a_merge_pointing_at_another_facility_does_not_leak_that_chart(db):
@@ -68,7 +69,7 @@ async def test_a_merge_pointing_at_another_facility_does_not_leak_that_chart(db)
     assert (results, total) == ([], 0)
 
 
-async def test_every_exact_match_path_returns_four_fields(db):
+async def test_every_exact_match_path_returns_five_fields(db):
     here = await _facility(db, f"H{uuid.uuid4().hex[:5].upper()}")
     staff = await _staff(db, here.id)
     patient = _patient(here.id, staff.id, mobile="+919876543210")
@@ -77,5 +78,5 @@ async def test_every_exact_match_path_returns_four_fields(db):
 
     for criteria in ({"uhid": patient.uhid}, {"mobile": "+919876543210"}):
         results, _ = await search_patients(db, facility_id=here.id, **criteria)
-        assert [len(item) for item in results] == [4]
+        assert [len(item) for item in results] == [5]
         assert results[0][3] is None

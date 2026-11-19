@@ -7,6 +7,7 @@ import CircularProgress from "@mui/material/CircularProgress";
 import { usePersistedEncounter } from "../hooks/usePersistedEncounter";
 import type { EncounterContext } from "../types";
 import { OrdersPanel } from "./OrdersPanel";
+import { useLocale } from "@/lib/i18n";
 
 export interface OrdersWorkspaceProps {
   context: EncounterContext;
@@ -18,15 +19,14 @@ export function OrdersWorkspace(props: OrdersWorkspaceProps) {
 }
 
 function EncounterWorkspace({ context }: OrdersWorkspaceProps) {
+  const { t } = useLocale();
   const { encounter, loading, error } = usePersistedEncounter(context);
 
   if (loading) return <CircularProgress size={28} />;
   if (error) return <Alert severity="error">{error}</Alert>;
   if (!encounter) {
     return (
-      <Alert severity="info">
-        Save this patient&apos;s consultation before placing an order.
-      </Alert>
+      <Alert severity="info">{t("doctor.ui.saveThisPatientSConsultationBefore")}</Alert>
     );
   }
 

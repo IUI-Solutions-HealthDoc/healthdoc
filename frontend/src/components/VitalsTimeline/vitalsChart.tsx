@@ -13,6 +13,7 @@ import {
 
 import { meridian } from "@/styles/theme";
 import type { VitalRecord } from "./VitalsTimeline.types";
+import { useLocale } from "@/lib/i18n";
 
 export type VitalsChartProps = {
   records: VitalRecord[];
@@ -53,6 +54,7 @@ function num(value: string | number | null): number | null {
  * Shared vitals trend chart — consumes the same VitalRecord shape as VitalsTimeline.
  */
 export default function VitalsChart({ records }: VitalsChartProps) {
+  const { t } = useLocale();
   if (records.length === 0) {
     return (
       <div
@@ -63,9 +65,7 @@ export default function VitalsChart({ records }: VitalsChartProps) {
           background: meridian.surface,
         }}
       >
-        <p style={{ margin: 0, fontSize: 14, color: meridian.textSecondary }}>
-          No vital records available.
-        </p>
+        <p style={{ margin: 0, fontSize: 14, color: meridian.textSecondary }}>{t("common.ui.noVitalRecordsAvailable")}</p>
       </div>
     );
   }
@@ -104,18 +104,14 @@ export default function VitalsChart({ records }: VitalsChartProps) {
           fontWeight: 700,
           color: meridian.textPrimary,
         }}
-      >
-        Vitals Chart
-      </h2>
+      >{t("common.ui.vitalsChart")}</h2>
       <p
         style={{
           margin: "4px 0 0",
           fontSize: 14,
           color: meridian.textSecondary,
         }}
-      >
-        Time-series trend of patient vitals.
-      </p>
+      >{t("common.ui.timeSeriesTrendOfPatientVitals")}</p>
 
       <div style={{ marginTop: 24, height: 320, width: "100%" }}>
         <ResponsiveContainer width="100%" height="100%">

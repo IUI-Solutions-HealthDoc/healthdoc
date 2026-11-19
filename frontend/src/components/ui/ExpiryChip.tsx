@@ -2,6 +2,7 @@
 
 import Chip from "@mui/material/Chip";
 import { meridian } from "@/styles/theme";
+import { translate } from "@/lib/i18n";
 
 export interface ExpiryChipProps {
   daysLeft: number;
@@ -14,7 +15,7 @@ export default function ExpiryChip({ daysLeft }: ExpiryChipProps) {
   let border: string;
 
   if (daysLeft <= 0) {
-    label = "Expired";
+    label = translate("receptionist.scanShare.statusExpired");
     bg = "#fee2e2";
     fg = meridian.danger;
     border = "rgb(185 28 28 / 0.18)";

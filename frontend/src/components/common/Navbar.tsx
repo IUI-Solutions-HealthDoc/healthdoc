@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Menu, LogOut, User, Languages, AlertTriangle } from "lucide-react";
+import { Menu, LogOut, User, Languages, AlertTriangle, FlaskConical } from "lucide-react";
 import { useAuth } from "@/providers/auth-provider";
 import { useLocale, type MessageKey } from "@/lib/i18n";
 import { useDeskCounter } from "@/features/receptionist/useDeskCounter";
@@ -70,43 +70,55 @@ export default function Navbar({ open, setOpen }: NavbarProps) {
 
   return (
     <header
-      className="fixed top-0 left-0 right-0 z-50 flex h-16 items-center justify-between border-b border-border/80 bg-card/95 px-5 backdrop-blur-md transition-all sm:px-6"
+      className="fixed top-0 left-0 right-0 z-50 flex h-16 items-center justify-between border-b border-border/80 bg-card/95 pl-0 pr-4 sm:pr-6 backdrop-blur-md transition-all"
       style={{
         boxShadow: "0 1px 3px rgba(0, 31, 84, 0.05), 0 1px 2px rgba(0, 0, 0, 0.03)",
       }}
     >
-      <div className="flex items-center gap-3 sm:gap-4">
-        <button
-          type="button"
-          onClick={() => setOpen((prev) => !prev)}
-          className="rounded-lg p-2 text-foreground/80 transition-colors hover:bg-muted hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
-          aria-label={t("nav.toggleMenu")}
-          aria-controls="workspace-sidebar"
-          aria-expanded={open}
+      <div className="flex h-full items-center min-w-0">
+        <div
+          className={`flex h-full items-center gap-2 sm:gap-4 px-4 sm:px-6 shrink-0 transition-[width] duration-300 ${
+            open
+              ? "lg:w-[260px] lg:border-r lg:border-border/80"
+              : "lg:w-auto lg:border-r-0"
+          }`}
         >
-          <Menu size={20} />
-        </button>
+          <button
+            type="button"
+            onClick={() => setOpen((prev) => !prev)}
+            className="shrink-0 rounded-lg p-2 text-foreground/80 transition-colors hover:bg-muted hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
+            aria-label={t("nav.toggleMenu")}
+            aria-controls="workspace-sidebar"
+            aria-expanded={open}
+          >
+            <Menu size={20} />
+          </button>
 
-        <HealthDocBrand
-          size={38}
-          preload
-          subtitle="HIMS"
-          nameClassName="text-lg font-bold tracking-tight text-[#001F54] dark:text-blue-200"
-          className="text-[#001F54]"
-        />
+          <HealthDocBrand
+            size={38}
+            preload
+            subtitle={t("common.ui.hims")}
+            nameClassName="text-base sm:text-lg font-bold tracking-tight text-[#001F54] dark:text-blue-200"
+            className="text-[#001F54] shrink-0"
+          />
 
-        <div className="hidden items-center gap-2 border-l border-border/70 pl-4 md:flex">
+          <div className="flex items-center gap-1.5 lg:hidden" title={t("common.online")}>
+            <div className="flex h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+          </div>
+        </div>
+
+        <div className="hidden items-center gap-2 pl-4 sm:pl-6 lg:flex shrink-0">
           <div className="flex h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span className="text-xs font-semibold text-foreground/75 uppercase tracking-wider">
+          <span className="text-xs font-semibold text-foreground/75 uppercase tracking-wider whitespace-nowrap">
             {t("common.online")}
           </span>
         </div>
       </div>
 
-      <div className="flex items-center gap-3 sm:gap-4">
+      <div className="flex items-center gap-2 sm:gap-3 shrink-0">
         {user?.role === "receptionist" && (
-          <div className="hidden sm:flex items-center gap-2 rounded-full border border-border/80 bg-muted/40 px-3 py-1 text-xs">
-            <span className="font-medium text-muted-foreground">{t("counter.label")}:</span>
+          <div className="hidden sm:flex items-center gap-2 rounded-full border border-border/80 bg-muted/40 px-3 py-1 text-xs shrink-0">
+            <span className="font-medium text-muted-foreground hidden lg:inline">{t("counter.label")}:</span>
             <select
               value={counter}
               onChange={(e) => setDeskCounter(e.target.value)}
@@ -122,7 +134,7 @@ export default function Navbar({ open, setOpen }: NavbarProps) {
           </div>
         )}
 
-        <div className="flex items-center gap-1 rounded-full border border-border/80 bg-muted/40 p-1 text-xs">
+        <div className="flex items-center gap-1 rounded-full border border-border/80 bg-muted/40 p-1 text-xs shrink-0">
           <Languages size={14} className="ml-1 text-muted-foreground hidden xs:block" />
           <button
             type="button"
@@ -133,9 +145,7 @@ export default function Navbar({ open, setOpen }: NavbarProps) {
                 : "text-muted-foreground hover:text-foreground"
             }`}
             aria-label={t("nav.switchToEnglish")}
-          >
-            English
-          </button>
+          >{t("common.ui.english")}</button>
           <button
             type="button"
             onClick={() => setLocale("hi")}
@@ -150,17 +160,17 @@ export default function Navbar({ open, setOpen }: NavbarProps) {
           </button>
         </div>
 
-        <div className="flex items-center gap-3 rounded-full border border-border/80 bg-muted/40 py-1 pl-1.5 pr-3 transition-colors hover:bg-muted/70">
+        <div className="flex items-center gap-2 sm:gap-2.5 rounded-full border border-border/80 bg-muted/40 py-1 pl-1.5 pr-2 sm:pr-3 transition-colors hover:bg-muted/70 shrink-0">
           <div
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-[#001F54] text-white shadow-sm"
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-[#001F54] text-white shadow-sm shrink-0"
           >
             <User size={15} />
           </div>
-          <div className="text-left">
-            <p className="text-xs font-semibold leading-tight text-foreground">
+          <div className="text-left hidden md:block max-w-[130px]">
+            <p className="text-xs font-semibold leading-tight text-foreground truncate">
               {user?.name || roleLabel}
             </p>
-            <p className="text-[10px] font-medium leading-tight text-foreground/70">
+            <p className="text-[10px] font-medium leading-tight text-foreground/70 truncate">
               {roleLabel}
             </p>
           </div>
@@ -170,7 +180,7 @@ export default function Navbar({ open, setOpen }: NavbarProps) {
           <button
             type="button"
             onClick={() => setAlertModalOpen(true)}
-            className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition-all ${
+            className={`flex items-center gap-1.5 rounded-full px-2.5 sm:px-3 py-1 text-xs font-semibold transition-all shrink-0 ${
               unackAlertCount > 0
                 ? "border border-red-300 bg-red-500/10 text-red-600 hover:bg-red-500/20 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300 animate-pulse"
                 : "border border-border/80 bg-muted/40 text-muted-foreground hover:text-foreground"
@@ -178,8 +188,14 @@ export default function Navbar({ open, setOpen }: NavbarProps) {
             title={t("nav.criticalAlertsTitle")}
             aria-label={t("nav.criticalAlertsTitle")}
           >
-            <AlertTriangle size={14} className={unackAlertCount > 0 ? "text-red-600 dark:text-red-400" : "text-muted-foreground"} />
-            <span>
+            {/* A warning triangle with nothing to warn about taught people to
+                ignore it (QA 17 Oct 2026); it appears only with open alerts. */}
+            {unackAlertCount > 0 ? (
+              <AlertTriangle size={14} className="text-red-600 dark:text-red-400" />
+            ) : (
+              <FlaskConical size={14} className="text-muted-foreground" aria-hidden="true" />
+            )}
+            <span className="hidden sm:inline">
               {unackAlertCount > 0
                 ? t(unackAlertCount > 1 ? "nav.panicAlerts_plural" : "nav.panicAlerts", {
                     count: unackAlertCount,
@@ -192,7 +208,7 @@ export default function Navbar({ open, setOpen }: NavbarProps) {
         <button
           type="button"
           onClick={() => void logout()}
-          className="flex h-9 w-9 items-center justify-center rounded-full border border-border/80 text-muted-foreground transition-all hover:border-red-200 hover:bg-red-50 hover:text-red-600 focus:outline-none focus:ring-2 focus:ring-red-200 dark:hover:bg-red-950/30"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border/80 text-muted-foreground transition-all hover:border-red-200 hover:bg-red-50 hover:text-red-600 focus:outline-none focus:ring-2 focus:ring-red-200 dark:hover:bg-red-950/30"
           aria-label={t("nav.logout")}
           title={t("nav.logout")}
         >

@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import { formatDateTime } from "./utils";
+import { useLocale } from "@/lib/i18n";
 
 interface Verification {
   verifiedBy: string;
@@ -18,25 +19,24 @@ interface VerificationProps {
 }
 
 export default function Verification({ verification }: VerificationProps) {
+  const { t } = useLocale();
   return (
     <section className="report-panel overflow-hidden rounded-xl border border-slate-200/90 bg-white shadow-[0_1px_0_rgba(15,23,42,0.03)]">
       <div className="border-b border-white/10 bg-gradient-to-r from-[#001f54] to-[#0a2f6b] px-3.5 py-2">
-        <h3 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white">
-          Authorized Signatory
-        </h3>
+        <h3 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white">{t("common.ui.authorizedSignatory")}</h3>
       </div>
 
       <div className="flex items-end justify-between gap-6 px-4 py-5">
         <div className="grid flex-1 grid-cols-2 gap-x-6 gap-y-3 text-[12px]">
-          <Field label="Verified By" value={verification.verifiedBy} />
-          <Field label="Designation" value={verification.designation} />
-          <Field label="Qualification" value={verification.qualification} />
+          <Field label={t("common.ui.verifiedBy")} value={verification.verifiedBy} />
+          <Field label={t("common.ui.designation")} value={verification.designation} />
+          <Field label={t("common.ui.qualification")} value={verification.qualification} />
           <Field
-            label="Registration No."
+            label={t("common.ui.registrationNo")}
             value={verification.registrationNumber}
           />
           <Field
-            label="Verified At"
+            label={t("common.ui.verifiedAt")}
             value={formatDateTime(verification.verifiedAt)}
           />
         </div>
@@ -61,9 +61,7 @@ export default function Verification({ verification }: VerificationProps) {
             </p>
           </div>
           {verification.digitallySigned && (
-            <span className="mt-2 rounded-full bg-emerald-100 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-800">
-              Digitally Verified
-            </span>
+            <span className="mt-2 rounded-full bg-emerald-100 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-800">{t("common.ui.digitallyVerified")}</span>
           )}
         </div>
       </div>

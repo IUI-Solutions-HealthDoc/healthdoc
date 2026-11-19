@@ -7,12 +7,14 @@ import { useAuth } from "@/providers/auth-provider";
 import Sidebar from "./Sidebar";
 import Navbar from "./Navbar";
 import { HealthDocBrand } from "./HealthDocBrand";
+import { useLocale } from "@/lib/i18n";
 
 export default function MainLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const { t } = useLocale();
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
@@ -21,7 +23,7 @@ export default function MainLayout({
   const allowed = pathname === "/" || canRoleAccessPath(user?.role ?? null, pathname);
 
   useEffect(() => {
-    const desktop = window.matchMedia("(min-width: 768px)");
+    const desktop = window.matchMedia("(min-width: 1024px)");
     const sync = () => setOpen(desktop.matches);
     sync();
     desktop.addEventListener("change", sync);
@@ -54,7 +56,7 @@ export default function MainLayout({
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-4 text-sm text-muted-foreground">
         <HealthDocBrand size={64} showName={false} preload />
-        <span>Loading your workspace…</span>
+        <span>{t("common.ui.loadingYourWorkspace")}</span>
       </div>
     );
   }
@@ -63,15 +65,10 @@ export default function MainLayout({
     return (
       <div className="flex min-h-screen items-center justify-center px-4">
         <div className="surface-card max-w-lg p-8 text-center">
-          <HealthDocBrand size={64} className="mb-5 justify-center" subtitle="HIMS" />
-          <h1 className="text-xl font-semibold">No HealthDoc role assigned</h1>
-          <p className="mt-3 text-sm text-muted-foreground">
-            Your sign-in is valid, but no HealthDoc workspace has been assigned.
-            Ask a facility administrator to assign your role.
-          </p>
-          <button className="mt-6 underline" type="button" onClick={() => void logout()}>
-            Sign out
-          </button>
+          <HealthDocBrand size={64} className="mb-5 justify-center" subtitle={t("common.ui.hims")} />
+          <h1 className="text-xl font-semibold">{t("common.ui.noHealthdocRoleAssigned")}</h1>
+          <p className="mt-3 text-sm text-muted-foreground">{t("common.ui.yourSignInIsValidBut")}</p>
+          <button className="mt-6 underline" type="button" onClick={() => void logout()}>{t("nav.logout")}</button>
         </div>
       </div>
     );
@@ -79,9 +76,7 @@ export default function MainLayout({
 
   return (
     <div className="min-h-screen bg-background">
-      <a className="skip-link" href="#main-content">
-        Skip to main content
-      </a>
+      <a className="skip-link" href="#main-content">{t("common.ui.skipToMainContent")}</a>
       <Navbar open={open} setOpen={setOpen} />
 
       <Sidebar open={open} setOpen={setOpen} />
@@ -89,7 +84,7 @@ export default function MainLayout({
       <main
         id="main-content"
         tabIndex={-1}
-        className={`p-6 pt-20 transition-[margin] duration-300 ${open ? "md:ml-[260px]" : "md:ml-0"}`}
+        className={`min-h-[calc(100vh-64px)] px-4 sm:px-8 pt-24 pb-12 transition-[margin] duration-300 ${open ? "lg:ml-[260px]" : "lg:ml-0"}`}
       >
         {children}
       </main>

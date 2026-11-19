@@ -1,5 +1,6 @@
 "use client";
 
+import { formatAgeSexShort } from "@/lib/format-age";
 import { useEffect, useState } from "react";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
@@ -8,6 +9,7 @@ import Typography from "@mui/material/Typography";
 import Link from "next/link";
 
 import { listEmergencyWorklist, type EmergencyWorklistItem } from "@/features/emergency/api";
+import { formatDateTime } from "@/lib/api";
 import { meridian } from "@/styles/theme";
 import { useLocale } from "@/lib/i18n";
 import { doctorPageHeaderSx } from "../panelSx";
@@ -62,9 +64,7 @@ export function DoctorDashboard() {
             textTransform: "uppercase",
             color: meridian.textSecondary,
           }}
-        >
-          OPD & Emergency · Doctor
-        </Typography>
+        >{t("doctor.ui.opdEmergencyDoctor")}</Typography>
         <Typography
           component="h1"
           sx={{
@@ -92,7 +92,17 @@ export function DoctorDashboard() {
         </Typography>
       </Box>
 
-      {emergencyArrivals.length > 0 && (
+      {(() => {
+        const old = emergencyArrivals.filter((a) => a.stale);
+        return old.length > 0 ? (
+          <Alert severity="warning" sx={{ borderRadius: "12px" }}>
+            {old.length}{" "}{t("doctor.ui.emergencyVisit")}{old.length === 1 ? "" : "s"}{" "}{t("doctor.ui.openedMoreThan24HoursAgo")}{" "}
+            {old.length === 1 ? "is" : "are"}{" "}{t("doctor.ui.stillOpen")}{" "}
+            {old.map((a) => `${a.visit_number} (${formatDateTime(a.arrival_time)})`).join(", ")}{t("doctor.ui.closeOrDischargeThemFromThe")}</Alert>
+        ) : null;
+      })()}
+
+      {emergencyArrivals.some((a) => !a.stale) && (
         <Box
           sx={{
             p: 2,
@@ -102,11 +112,9 @@ export function DoctorDashboard() {
             borderColor: "error.light",
           }}
         >
-          <Typography sx={{ fontWeight: 700, fontSize: "0.9375rem", color: "error.main", mb: 1 }}>
-            Emergency Arrivals Awaiting Care ({emergencyArrivals.length})
-          </Typography>
+          <Typography sx={{ fontWeight: 700, fontSize: "0.9375rem", color: "error.main", mb: 1 }}>{t("doctor.ui.emergencyArrivalsAwaitingCareCount", { count: emergencyArrivals.filter((a) => !a.stale).length })}</Typography>
           <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1.5 }}>
-            {emergencyArrivals.map((arr) => (
+            {emergencyArrivals.filter((arr) => !arr.stale).map((arr) => (
               <Box
                 key={arr.visit_id}
                 sx={{
@@ -124,9 +132,7 @@ export function DoctorDashboard() {
                   <Typography sx={{ fontWeight: 600, fontSize: "0.8125rem" }}>
                     {arr.full_name} · {arr.thid ?? arr.uhid}
                   </Typography>
-                  <Typography sx={{ fontSize: "0.6875rem", color: "text.secondary" }}>
-                    {arr.age_years ?? "?"}y/{arr.sex[0]?.toUpperCase()} · Visit {arr.visit_number}
-                  </Typography>
+                  <Typography sx={{ fontSize: "0.6875rem", color: "text.secondary" }}>{t("doctor.ui.sexVisitVisitNumberArrivedArrival", { sex: formatAgeSexShort(arr.age_years, arr.sex), visit_number: arr.visit_number, arrival_time: formatDateTime(arr.arrival_time) })}</Typography>
                 </Box>
                 <Button
                   component={Link}
@@ -135,9 +141,7 @@ export function DoctorDashboard() {
                   color="error"
                   size="small"
                   sx={{ textTransform: "none", fontSize: "0.75rem", px: 1.5, py: 0.5 }}
-                >
-                  Consult
-                </Button>
+                >{t("doctor.ui.consult")}</Button>
               </Box>
             ))}
           </Box>

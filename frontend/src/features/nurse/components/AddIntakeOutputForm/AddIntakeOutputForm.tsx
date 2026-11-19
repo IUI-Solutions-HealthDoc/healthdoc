@@ -20,12 +20,14 @@ import {
   addIntakeOutputSchema,
   type AddIntakeOutputSchema,
 } from "./validation";
+import { useLocale } from "@/lib/i18n";
 
 export default function AddIntakeOutputForm({
   admissionId,
   isSubmitting = false,
   onSubmit,
 }: AddIntakeOutputFormProps) {
+  const { t } = useLocale();
   const {
     register,
     handleSubmit,
@@ -64,15 +66,15 @@ export default function AddIntakeOutputForm({
 
   return (
     <FormSection
-      title="Intake / Output Record"
-      description="Record a single fluid intake or output entry. Log intake and output as separate entries."
+      title={t("nurse.ui.intakeOutputRecord")}
+      description={t("nurse.ui.recordASingleFluidIntakeOr")}
     >
       {/* noValidate for the same reason as AddVitalsForm: zod owns validation,
           and a native bubble the app cannot see is not a usable error. */}
       <form onSubmit={handleSubmit(submitHandler)} className="space-y-6" noValidate>
         <div className="grid gap-5 md:grid-cols-2">
           <SelectField
-            label="Entry Type"
+            label={t("nurse.ui.entryType")}
             options={ENTRY_TYPES.map((type) => ({
               label: type.label,
               value: type.value,
@@ -82,7 +84,7 @@ export default function AddIntakeOutputForm({
           />
 
           <NumberField
-            label="Volume (mL)"
+            label={t("nurse.ui.volumeMl")}
             placeholder="500"
             // Same NaN trap as AddVitalsForm: a blank number input reads as
             // NaN, which turns "Volume must be greater than 0" into a bare
@@ -96,15 +98,15 @@ export default function AddIntakeOutputForm({
           />
 
           <DateTimeField
-            label="Recorded At"
+            label={t("nurse.ui.recordedAt")}
             registration={register("recorded_at")}
             error={errors.recorded_at}
           />
         </div>
 
         <TextAreaField
-          label="Notes (optional)"
-          placeholder="Enter additional observations..."
+          label={t("nurse.ui.notesOptional2")}
+          placeholder={t("nurse.ui.enterAdditionalObservations")}
           rows={3}
           registration={register("notes")}
           error={errors.notes}
@@ -112,7 +114,7 @@ export default function AddIntakeOutputForm({
 
         <FormActions
           isSubmitting={isSubmitting}
-          submitLabel="Save Record"
+          submitLabel={t("immunization.record.saveRecord")}
           resetLabel="Reset"
           onReset={handleReset}
         />

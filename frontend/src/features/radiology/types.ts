@@ -23,6 +23,11 @@ export interface RadiologyOrderItem {
   scan_completed_at: string | null;
   status: RadiologyStatus | string;
   created_at: string;
+  patient_id?: string | null;
+  patient_name?: string | null;
+  patient_uhid?: string | null;
+  patient_age_years?: number | null;
+  patient_sex?: string | null;
 }
 
 export interface RadiologyOrderItemList {

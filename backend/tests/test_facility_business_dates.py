@@ -33,7 +33,8 @@ def utc_evening(monkeypatch):
 
 
 def test_an_indian_today_is_not_a_future_date_of_birth(utc_evening):
-    patient = PatientCreate(full_name="Newborn Test", sex="female", dob=date(2026, 10, 1))
+    patient = PatientCreate(full_name="Newborn Test", sex="female", dob=date(2026, 10, 1),
+                            guardian_name="Sita Devi", guardian_relationship="mother")
     assert patient.dob == date(2026, 10, 1)
 
 

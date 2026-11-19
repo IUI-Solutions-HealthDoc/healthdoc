@@ -1,4 +1,5 @@
 import type { RealmRole, User } from "./types";
+import { translate } from "@/lib/i18n";
 
 export type FieldErrors = Record<string, string>;
 
@@ -22,33 +23,33 @@ const MOBILE_PATTERN = /^\+91\d{10}$/;
 
 function optionalEmail(value: string): string | undefined {
   const next = value.trim();
-  if (next && !EMAIL_PATTERN.test(next)) return "Enter a valid email address.";
+  if (next && !EMAIL_PATTERN.test(next)) return translate("admin.msg.enterAValidEmailAddress");
   return undefined;
 }
 
 function optionalMobile(value: string): string | undefined {
   const next = value.trim();
   if (next && !MOBILE_PATTERN.test(next)) {
-    return "Use Indian E.164 format: +91 followed by 10 digits.";
+    return translate("admin.msg.useIndianE164Format91");
   }
   return undefined;
 }
 
 function usernameError(value: string): string | undefined {
   const next = value.trim();
-  if (!next) return "Username is required.";
-  if (next.length < 3) return "Username must be at least 3 characters.";
-  if (next.length > 100) return "Username must be at most 100 characters.";
+  if (!next) return translate("admin.msg.usernameIsRequired");
+  if (next.length < 3) return translate("admin.msg.usernameMustBeAtLeast3");
+  if (next.length > 100) return translate("admin.msg.usernameMustBeAtMost100");
   if (!USERNAME_PATTERN.test(next)) {
-    return "Use letters, numbers, dots, hyphens or underscores only; spaces are not allowed.";
+    return translate("admin.msg.useLettersNumbersDotsHyphensOr");
   }
   return undefined;
 }
 
 function roleError(roles: RealmRole[]): string | undefined {
-  if (roles.length === 0) return "Select at least one staff role.";
+  if (roles.length === 0) return translate("admin.msg.selectAtLeastOneStaffRole");
   if (roles.some((role) => !FACILITY_STAFF_ROLES.includes(role))) {
-    return "Patient and platform-superadmin roles cannot be created in a facility staffing flow.";
+    return translate("admin.msg.patientAndPlatformSuperadminRolesCannot");
   }
   return undefined;
 }
@@ -67,13 +68,13 @@ export function validateCreateUser(values: {
 }): FieldErrors {
   return compact({
     username: usernameError(values.username) ?? "",
-    fullName: values.fullName.trim() ? "" : "Full name is required.",
+    fullName: values.fullName.trim() ? "" : translate("admin.msg.fullNameIsRequired"),
     email: optionalEmail(values.email) ?? "",
     mobile: optionalMobile(values.mobile) ?? "",
     temporaryPassword:
       values.temporaryPassword.length >= 8
         ? ""
-        : "Temporary password must be at least 8 characters.",
+        : translate("admin.msg.temporaryPasswordMustBeAtLeast"),
     roles: roleError(values.roles) ?? "",
   });
 }
@@ -87,14 +88,14 @@ export function validateAccountRequest(values: {
   roles: RealmRole[];
 }): FieldErrors {
   return compact({
-    fullName: values.fullName.trim() ? "" : "Full name is required.",
+    fullName: values.fullName.trim() ? "" : translate("admin.msg.fullNameIsRequired"),
     username: usernameError(values.username) ?? "",
     email: optionalEmail(values.email) ?? "",
     mobile: optionalMobile(values.mobile) ?? "",
     justification:
       values.justification.trim().length >= 10
         ? ""
-        : "Explain why this account is needed in at least 10 characters.",
+        : translate("admin.msg.explainWhyThisAccountIsNeeded"),
     roles: roleError(values.roles) ?? "",
   });
 }
@@ -104,18 +105,18 @@ export function validateUserProfile(user: User): FieldErrors {
   const kind = user.registration_identifier_type?.trim() ?? "";
   const system = user.registration_identifier_system?.trim() ?? "";
   if (kind || system) {
-    if (!kind || kind.length > 50) registrationErrors.registration_identifier_type = "Enter the verified identifier type (up to 50 characters).";
-    if (!user.registration_number?.trim() || user.registration_number.trim().length > 50) registrationErrors.registration_number = "Enter the clinician’s real registration number (up to 50 characters).";
+    if (!kind || kind.length > 50) registrationErrors.registration_identifier_type = translate("admin.msg.enterTheVerifiedIdentifierTypeUp");
+    if (!user.registration_number?.trim() || user.registration_number.trim().length > 50) registrationErrors.registration_number = translate("admin.msg.enterTheClinicianSRealRegistration");
     try {
       const uri = new URL(system);
       if (!/^https?:$/.test(uri.protocol) || !uri.hostname || uri.username || uri.password || uri.search || uri.hash || /\s/.test(system) || system.length > 255) throw new Error("invalid");
     } catch {
-      registrationErrors.registration_identifier_system = "Enter the issuing registry’s HTTP(S) URI, without credentials, query or fragment.";
+      registrationErrors.registration_identifier_system = translate("admin.msg.enterTheIssuingRegistrySHttp");
     }
   }
   return compact({
     ...registrationErrors,
-    full_name: user.full_name.trim() ? "" : "Full name is required.",
+    full_name: user.full_name.trim() ? "" : translate("admin.msg.fullNameIsRequired"),
     email: optionalEmail(user.email ?? "") ?? "",
     mobile: optionalMobile(user.mobile ?? "") ?? "",
   });

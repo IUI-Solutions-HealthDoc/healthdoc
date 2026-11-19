@@ -1,10 +1,7 @@
 import { FREQUENCY_OPTIONS, ROUTE_OPTIONS } from "../constants";
 
-/** "34 yrs · Male" style demographics line. */
-export function formatAgeSex(age_years: number, sex: string): string {
-  const s = sex ? sex[0].toUpperCase() + sex.slice(1) : "";
-  return `${age_years} yrs · ${s}`;
-}
+/** "34 yrs · Male" style demographics line; "Age unknown" when there is none. */
+export { formatAgeSex } from "@/lib/format-age";
 
 export function formatTime(iso: string): string {
   return new Date(iso).toLocaleString(undefined, {

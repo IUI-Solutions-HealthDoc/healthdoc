@@ -190,13 +190,18 @@ class TestIPDCoreJourney:
         assert transfer_resp.json()["data"]["bed_id"] == str(BED_B_ID)
 
         # Step 4: discharge.
+        discharge_body = {
+            "discharged_at": "2026-08-13T11:00:00Z",
+            "discharge_type": "discharged",
+            "discharge_summary": "Journey test discharge - no complications.",
+        }
+        # Mandatory checklist items are still open, so the ward must confirm.
+        refused = client.post(f"/api/v1/admissions/{admission_id}/discharge", json=discharge_body)
+        assert refused.status_code == 422
+        assert refused.json()["error"]["message"]["code"] == "checklist_incomplete"
         discharge_resp = client.post(
             f"/api/v1/admissions/{admission_id}/discharge",
-            json={
-                "discharged_at": "2026-08-13T11:00:00Z",
-                "discharge_type": "discharged",
-                "discharge_summary": "Journey test discharge - no complications.",
-            },
+            json={**discharge_body, "acknowledge_incomplete_checklist": True},
         )
         assert discharge_resp.status_code in (200, 201), discharge_resp.text
 

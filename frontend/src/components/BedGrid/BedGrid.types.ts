@@ -1,3 +1,4 @@
+import { translate } from "@/lib/i18n";
 /**
  * Mirrors `BedGridOut` from `GET /wards/{ward_id}/beds`.
  *
@@ -13,10 +14,10 @@
 export type BedStatus = "vacant" | "occupied" | "reserved" | "maintenance";
 
 export const BED_STATUS_LABELS: Record<BedStatus, string> = {
-  vacant: "Vacant",
-  occupied: "Occupied",
-  reserved: "Reserved",
-  maintenance: "Out of service",
+  get vacant() { return translate("common.msg.vacant"); },
+  get occupied() { return translate("monitor.occupied"); },
+  get reserved() { return translate("bloodBank.status.reserved"); },
+  get maintenance() { return translate("admin.ui.outOfService"); },
 };
 
 export interface BedOccupant {

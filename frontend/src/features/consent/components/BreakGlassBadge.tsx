@@ -3,12 +3,14 @@
 import Chip from "@mui/material/Chip";
 
 import { meridian } from "@/styles/theme";
+import { useLocale } from "@/lib/i18n";
 
 export function BreakGlassBadge() {
+  const { t } = useLocale();
   return (
     <Chip
       size="small"
-      label="Break-glass"
+      label={t("consent.ui.breakGlass")}
       sx={{
         height: 24,
         borderRadius: "999px",

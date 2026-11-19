@@ -1,4 +1,5 @@
 import type { ModuleCode, RealmRole } from "./types";
+import { translate } from "@/lib/i18n";
 
 // Retired (P1.1):
 //
@@ -23,10 +24,10 @@ export const MODULE_CODES: ModuleCode[] = [
 
 export const MODULE_CODE_LABELS: Record<ModuleCode, string> = {
   lab: "Lab",
-  radiology: "Radiology",
-  pharmacy: "Pharmacy",
+  get radiology() { return translate("sidebar.radiology"); },
+  get pharmacy() { return translate("doctor.orderType.pharmacy"); },
   ot: "OT",
-  blood_bank: "Blood bank",
+  get blood_bank() { return translate("admin.msg.bloodBank"); },
 };
 
 /** Core modules that can never be disabled (schema text — display legend only). */
@@ -68,21 +69,21 @@ export const REALM_ROLES: RealmRole[] = [
 ];
 
 export const REALM_ROLE_LABELS: Record<RealmRole, string> = {
-  receptionist: "Receptionist",
-  doctor: "Doctor",
-  nurse: "Nurse",
-  lab_tech: "Lab tech",
-  radiology_tech: "Radiology tech",
-  pharmacist: "Pharmacist",
-  emergency: "Emergency",
-  supervisor: "Supervisor",
-  billing: "Billing desk",
-  admin: "Admin",
+  get receptionist() { return translate("role.receptionist"); },
+  get doctor() { return translate("common.doctor"); },
+  get nurse() { return translate("role.nurse"); },
+  get lab_tech() { return translate("admin.msg.labTech"); },
+  get radiology_tech() { return translate("admin.msg.radiologyTech"); },
+  get pharmacist() { return translate("role.pharmacist"); },
+  get emergency() { return translate("role.emergency"); },
+  get supervisor() { return translate("role.supervisor"); },
+  get billing() { return translate("admin.msg.billingDesk"); },
+  get admin() { return translate("role.admin"); },
   hod: "HOD",
-  auditor: "Auditor",
-  patient: "Patient",
-  superadmin: "Superadmin",
-  monitor: "Control room",
+  get auditor() { return translate("role.auditor"); },
+  get patient() { return translate("common.patient"); },
+  get superadmin() { return translate("role.superadmin"); },
+  get monitor() { return translate("role.monitor"); },
 };
 
 /**
@@ -125,23 +126,23 @@ export const MATRIX_CAPABILITIES: MatrixCapability[] = [
 ];
 
 export const MATRIX_CAPABILITY_LABELS: Record<MatrixCapability, string> = {
-  facilities: "Facilities",
-  patients: "Patients",
-  registration: "Registration",
+  get facilities() { return translate("sidebar.facilities"); },
+  get patients() { return translate("admin.msg.patients"); },
+  get registration() { return translate("sidebar.registration"); },
   opd: "OPD",
-  queue: "Queue",
-  billing: "Billing",
+  get queue() { return translate("nav.queue"); },
+  get billing() { return translate("nav.billing"); },
   lab: "Lab",
-  radiology: "Radiology",
-  pharmacy: "Pharmacy",
-  inventory: "Inventory",
+  get radiology() { return translate("sidebar.radiology"); },
+  get pharmacy() { return translate("doctor.orderType.pharmacy"); },
+  get inventory() { return translate("sidebar.inventory"); },
   ipd: "IPD",
   ot: "OT",
-  blood_bank: "Blood",
-  emergency: "Emergency",
-  consent: "Consent",
-  audit: "Audit",
-  users: "Users",
+  get blood_bank() { return translate("doctor.orderType.blood"); },
+  get emergency() { return translate("role.emergency"); },
+  get consent() { return translate("nav.consent"); },
+  get audit() { return translate("area.audit"); },
+  get users() { return translate("sidebar.users"); },
 };
 
 /** Which ModuleCode / core areas each realm role typically touches (reference only). */
@@ -169,7 +170,7 @@ export const ROLE_CAPABILITY_MAP: Record<RealmRole, MatrixCapability[]> = {
 };
 
 export const APPROVAL_STATUS_LABELS: Record<"pending" | "approved" | "rejected", string> = {
-  pending: "Pending",
-  approved: "Approved",
-  rejected: "Rejected",
+  get pending() { return translate("doctor.soapStatusPending"); },
+  get approved() { return translate("admin.accountRequests.status.approved"); },
+  get rejected() { return translate("admin.accountRequests.status.rejected"); },
 };

@@ -523,3 +523,27 @@ async def test_walkin_direct_service_visit_journey(db):
     retrieved = v_res.scalar_one_or_none()
     assert retrieved is not None
     assert retrieved.visit_type == "direct_service"
+
+
+async def test_blood_group_from_the_form_is_stored_as_the_database_code():
+    # QA 17 Oct 2026: the donor and stock forms sent "O+", the CHECK wants
+    # "o_pos", and every save failed as a conflict.
+    from app.blood_bank.schemas import BloodDonorCreate, normalise_blood_group
+
+    assert normalise_blood_group("O+") == "o_pos"
+    assert normalise_blood_group("ab-") == "ab_neg"
+    assert normalise_blood_group("B pos") == "b_pos"
+    assert normalise_blood_group("a_neg") == "a_neg"
+    import pytest as _pytest
+    from pydantic import ValidationError
+
+    with _pytest.raises(ValidationError):
+        BloodDonorCreate(full_name="Donor One", blood_group="C+")
+    with _pytest.raises(ValidationError):
+        BloodDonorCreate(full_name="Donor One", blood_group="O+", mobile="98abc12345")
+    from datetime import date, timedelta
+
+    with _pytest.raises(ValidationError):
+        BloodDonorCreate(full_name="Donor One", blood_group="O+", last_donation_date=date.today() + timedelta(days=3))
+    ok = BloodDonorCreate(full_name="Donor One", blood_group="O+", mobile="98765 43210")
+    assert (ok.blood_group, ok.mobile) == ("o_pos", "9876543210")

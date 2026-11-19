@@ -52,7 +52,7 @@ export function PatientCardModal({ open, onClose, patient }: PatientCardModalPro
     <Modal
       open={open}
       onClose={onClose}
-      title="Patient Identity Card"
+      title={t("receptionist.ui.patientIdentityCard")}
       size="md"
       actions={
         <div className="flex items-center justify-end gap-3 no-print">
@@ -60,9 +60,7 @@ export function PatientCardModal({ open, onClose, patient }: PatientCardModalPro
             type="button"
             onClick={onClose}
             className="rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-muted"
-          >
-            Close
-          </button>
+          >{t("common.close")}</button>
           <button
             // The dialog's focus trap keeps focus that is already inside it,
             // so this lands on Print without a timer racing the open animation.
@@ -71,9 +69,7 @@ export function PatientCardModal({ open, onClose, patient }: PatientCardModalPro
             onClick={handlePrint}
             className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-white shadow hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary/20"
           >
-            <Printer size={16} />
-            Print Card
-          </button>
+            <Printer size={16} />{t("card.print")}</button>
         </div>
       }
     >
@@ -91,24 +87,19 @@ export function PatientCardModal({ open, onClose, patient }: PatientCardModalPro
               <p className="text-xs font-bold uppercase tracking-wider text-primary">
                 {facilityName}
               </p>
-              <p className="text-[10px] text-muted-foreground">Patient Identification Card</p>
+              <p className="text-[10px] text-muted-foreground">{t("receptionist.ui.patientIdentificationCard")}</p>
             </div>
             {isEmergencyThid ? (
               <span className="inline-flex items-center gap-1 rounded bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-900">
-                <AlertTriangle size={12} />
-                PROVISIONAL THID
-              </span>
+                <AlertTriangle size={12} />{t("receptionist.ui.provisionalThid")}</span>
             ) : (
-              <span className="rounded bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
-                OFFICIAL ID
-              </span>
+              <span className="rounded bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">{t("receptionist.ui.officialId")}</span>
             )}
           </div>
 
           {isEmergencyThid && (
             <div className="mt-2 rounded bg-amber-50 p-2 text-left text-[11px] text-amber-800 border border-amber-200">
-              <strong>Emergency Record:</strong> Temporary identifier. Must be merged into canonical UHID after patient stabilization and verification.
-            </div>
+              <strong>{t("receptionist.ui.emergencyRecord")}</strong>{" "}{t("receptionist.ui.temporaryIdentifierMustBeMergedInto")}</div>
           )}
 
           {/* Main Card Body */}
@@ -155,14 +146,12 @@ export function PatientCardModal({ open, onClose, patient }: PatientCardModalPro
 
           {/* Card footer */}
           <div className="mt-3 flex items-center justify-between text-[9px] text-muted-foreground border-t pt-2">
-            <span>Non-transferable medical identity card</span>
-            <span>Issued: {new Date().toLocaleDateString("en-IN")}</span>
+            <span>{t("receptionist.ui.nonTransferableMedicalIdentityCard")}</span>
+            <span>{t("receptionist.ui.issued")}{" "}{new Date().toLocaleDateString("en-IN")}</span>
           </div>
         </div>
 
-        <p className="text-xs text-muted-foreground text-center no-print">
-          Card encodes strictly the approved local identifier ({identifier}). No Aadhaar, ABHA, phone, or clinical details are encoded.
-        </p>
+        <p className="text-xs text-muted-foreground text-center no-print">{t("receptionist.ui.cardEncodesStrictlyTheApprovedLocal", { identifier })}</p>
       </div>
     </Modal>
   );

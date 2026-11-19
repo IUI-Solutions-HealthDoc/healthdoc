@@ -26,6 +26,7 @@ function setup() {
       "next/link": { __esModule: true, default: "a" },
       "@/lib/api": { ApiError, newIdempotencyKey: () => `key-${++keyCounter}` },
       "@/lib/api-error-policy.mjs": { apiErrorCode },
+      "@/features/consent/handoff": { handPatientToConsent() {} },
       "@/lib/auth/routes": { canRoleAccessPath: () => false },
       "@/providers/auth-provider": { useAuth: () => ({ user: { role: "receptionist" } }) },
       "./api": {

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { listQueue } from "../api";
 import type { EncounterContext, QueueToken } from "../types";
+import { translate } from "@/lib/i18n";
 
 /**
  * The patient the doctor is currently consulting, from their own queue.
@@ -50,7 +51,7 @@ export function useEncounterContext(): {
       .catch((e: unknown) => {
         if (cancelled) return;
         setContext(null);
-        setError(e instanceof Error ? e.message : "Could not load your queue");
+        setError(e instanceof Error ? e.message : translate("doctor.msg.couldNotLoadYourQueue"));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

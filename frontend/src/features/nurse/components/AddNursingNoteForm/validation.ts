@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { translate } from "@/lib/i18n";
 
 export const addNursingNoteSchema = z.object({
   encounter_id: z.string().min(1),
@@ -10,7 +11,7 @@ export const addNursingNoteSchema = z.object({
 
   note: z
     .string()
-    .min(10, "Note must contain at least 10 characters")
+    .min(10, { error: () => translate("nurse.msg.noteMustContainAtLeast10") })
     .max(1000),
 });
 

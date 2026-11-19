@@ -30,6 +30,7 @@ test("rendered sign-in keeps the real identity flow without unsupported complian
     {
       ...runtime,
       "next/navigation": { useSearchParams: () => new URLSearchParams() },
+      "lucide-react": { Lock: "icon", ShieldCheck: "icon", Scale: "icon", AlertTriangle: "icon", AlertCircle: "icon" },
       "@/components/ui/Button": { Button: "button" },
       "@/components/common/HealthDocBrand": { HealthDocBrand: "brand" },
       "@/lib/auth/keycloak": {

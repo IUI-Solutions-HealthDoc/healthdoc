@@ -15,10 +15,12 @@ import { useFacilityModules } from "../hooks/useFacilityModules";
 import { AdminPageHeader } from "./AdminPageHeader";
 import { FacilityModulesPanel } from "./FacilityModulesPanel";
 import { RealmRolesMatrixPanel } from "./RealmRolesMatrixPanel";
+import { useLocale } from "@/lib/i18n";
 
 type PermTab = "modules" | "roles";
 
 export function PermissionsWorkspace() {
+  const { t } = useLocale();
   const [tab, setTab] = useState<PermTab>("modules");
   const { modules, capabilities, loading, error, busyCode, toggle } = useFacilityModules();
   const { user: currentUser } = useCurrentUser();
@@ -46,8 +48,8 @@ export function PermissionsWorkspace() {
       <AdminPageHeader
         backHref="/admin"
         eyebrow="Admin"
-        title="Permissions"
-        subtitle="Manage facility modules and review the access assigned to each role."
+        title={t("sidebar.permissions")}
+        subtitle={t("admin.ui.manageFacilityModulesAndReviewThe")}
       />
 
       <Box
@@ -75,9 +77,7 @@ export function PermissionsWorkspace() {
               textTransform: "uppercase",
               color: meridian.textSecondary,
             }}
-          >
-            Facility
-          </Typography>
+          >{t("monitor.colFacility")}</Typography>
           {[
             // The real facility, from GET /users/me — this used to render a
             // hardcoded mock UUID, which is a poor label anyway: an admin
@@ -107,9 +107,7 @@ export function PermissionsWorkspace() {
             />
           ))}
         </Stack>
-        <Typography sx={{ m: 0, fontSize: "0.75rem", color: meridian.textSecondary }}>
-          Changes apply to this facility. Role access is enforced at sign-in and on every request.
-        </Typography>
+        <Typography sx={{ m: 0, fontSize: "0.75rem", color: meridian.textSecondary }}>{t("admin.ui.changesApplyToThisFacilityRole")}</Typography>
       </Box>
 
       {error ? (
@@ -154,8 +152,8 @@ export function PermissionsWorkspace() {
           "& .MuiTabs-indicator": { bgcolor: meridian.brandPrimary, height: 3, borderRadius: 2 },
         }}
       >
-        <Tab value="modules" label="Modules" />
-        <Tab value="roles" label="Realm roles" />
+        <Tab value="modules" label={t("admin.ui.modules")} />
+        <Tab value="roles" label={t("admin.ui.realmRoles")} />
       </Tabs>
 
       {tab === "modules" ? (

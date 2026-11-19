@@ -116,13 +116,10 @@ export function AddInvoiceItemModal({ open, onClose, onSave, scheme_code }: Prop
     >
       <Stack spacing={2} sx={{ pt: 1 }}>
         {error ? <Typography role="alert" color="error">{error}</Typography> : null}
-        <Typography sx={{ fontSize: "0.8125rem", color: "text.secondary" }}>
-          Prices come from charge_master (0033). Missing tariff → BE returns 409
-          no_tariff on accrual.
-        </Typography>
+        <Typography sx={{ fontSize: "0.8125rem", color: "text.secondary" }}>{t("billing.ui.pricesComeFromChargeMaster0033")}</Typography>
         <TextField
           select
-          label="Tariff"
+          label={t("billing.ui.tariff")}
           value={chargeMasterId}
           onChange={(e) => setChargeMasterId(e.target.value)}
           fullWidth
@@ -137,13 +134,11 @@ export function AddInvoiceItemModal({ open, onClose, onSave, scheme_code }: Prop
           ))}
         </TextField>
         {selected ? (
-          <Typography sx={{ fontSize: "0.8125rem" }}>
-            Category: {selected.charge_category} · Unit: {formatMoney(selected.unit_price)}
-          </Typography>
+          <Typography sx={{ fontSize: "0.8125rem" }}>{t("billing.ui.categoryChargeCategoryUnitUnitPrice", { charge_category: selected.charge_category, unit_price: formatMoney(selected.unit_price) })}</Typography>
         ) : null}
         <TextField
           type="number"
-          label="Quantity"
+          label={t("pharmacy.expiry.col.quantity")}
           value={quantity}
           onChange={(e) => setQuantity(Number(e.target.value) || 0)}
           slotProps={{ htmlInput: { min: 0.01, step: 1 } }}

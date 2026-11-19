@@ -52,9 +52,7 @@ export function EncounterHeaderPanel({
       <Stack direction="row" spacing={2} sx={{ alignItems: "flex-start", justifyContent: "space-between" }}>
         <Box>
           <Typography sx={{ fontSize: "1.0625rem", fontWeight: 700 }}>{context.patient_name}</Typography>
-          <Typography sx={{ fontSize: "0.8125rem", color: meridian.textSecondary, mt: 0.25 }}>
-            {formatAgeSex(context.age_years, context.sex)} · UHID {context.uhid} · Token {context.token_display}
-          </Typography>
+          <Typography sx={{ fontSize: "0.8125rem", color: meridian.textSecondary, mt: 0.25 }}>{t("doctor.ui.sexUhidUhidTokenTokenDisplay", { sex: formatAgeSex(context.age_years, context.sex), uhid: context.uhid, token_display: context.token_display })}</Typography>
         </Box>
         <TextField
           select
@@ -78,7 +76,7 @@ export function EncounterHeaderPanel({
           label={t("receptionist.department")}
           value={localizeField(context.department, context.department_hi)}
         />
-        <Meta label={t("doctor.visitId")} value={context.visit_id} />
+        <Meta label={t("doctor.visitId")} value={context.visit_number ?? "—"} />
         <Meta label={t("doctor.startedAt")} value={formatTime(startedAt)} />
       </Stack>
     </Box>
