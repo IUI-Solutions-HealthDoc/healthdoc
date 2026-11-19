@@ -144,7 +144,12 @@ jobs:
           sudo sed -i 's|deb |deb [signed-by=/usr/share/keyrings/pgdg.gpg] |' /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends postgresql-client-16
-          pg_dump --version
+          # The runner image also ships a newer client, and the pg_wrapper
+          # symlinks on PATH pick the newest installed major. Its pg_dump emits
+          # settings (e.g. transaction_timeout, PG17+) the 16 server rejects on
+          # restore. Put the 16 binaries first so the pinned client is used.
+          echo "/usr/lib/postgresql/16/bin" >> "$GITHUB_PATH"
+          /usr/lib/postgresql/16/bin/pg_dump --version
 
       # requirements-dev.txt already -r's requirements.txt and pins the test
       # toolchain. The old form hand-listed `ruff pytest pytest-asyncio`

@@ -255,7 +255,16 @@ async def test_a_retried_health_information_request_replays_instead_of_500ing(
     integrity error, comes back 500, and the gateway reads that as 'try again'
     — a retry loop against a request already accepted."""
     await _facility_with_hfr(hip_db)
-    await _artefact(hip_db)
+    # The route checks expiry against the wall clock, not the fixed NOW the
+    # service-level tests inject, so a NOW-relative artefact silently expires
+    # once the calendar passes NOW + 60 days. Anchor this one to the real clock.
+    real_now = datetime.now(UTC)
+    await _artefact(
+        hip_db,
+        frm=real_now - timedelta(days=30),
+        to=real_now + timedelta(days=30),
+        expires=real_now + timedelta(days=60),
+    )
 
     first = hip_client.post(
         "/api/v1/abdm/hip/callbacks/health-information/request", json=_hi_request_body()
