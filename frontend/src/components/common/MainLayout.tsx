@@ -21,7 +21,7 @@ export default function MainLayout({
   const allowed = pathname === "/" || canRoleAccessPath(user?.role ?? null, pathname);
 
   useEffect(() => {
-    const desktop = window.matchMedia("(min-width: 768px)");
+    const desktop = window.matchMedia("(min-width: 1024px)");
     const sync = () => setOpen(desktop.matches);
     sync();
     desktop.addEventListener("change", sync);
@@ -89,7 +89,7 @@ export default function MainLayout({
       <main
         id="main-content"
         tabIndex={-1}
-        className={`p-6 pt-20 transition-[margin] duration-300 ${open ? "md:ml-[260px]" : "md:ml-0"}`}
+        className={`min-h-[calc(100vh-64px)] px-4 sm:px-8 pt-24 pb-12 transition-[margin] duration-300 ${open ? "lg:ml-[260px]" : "lg:ml-0"}`}
       >
         {children}
       </main>

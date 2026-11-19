@@ -35,7 +35,6 @@ import { ROLES, type Role } from "@/config/roles";
 import { canRoleAccessPath } from "@/lib/auth/routes";
 import { useLocale, type MessageKey } from "@/lib/i18n";
 import { useAuth } from "@/providers/auth-provider";
-import { HealthDocBrand } from "./HealthDocBrand";
 
 type NavArea = "front_desk" | "clinical" | "diagnostics" | "finance" | "audit" | "admin" | "platform" | "patient";
 
@@ -150,7 +149,7 @@ export default function Sidebar({ open, setOpen }: SidebarProps) {
   }, [setOpen]);
 
   const closeOnMobile = () => {
-    if (!window.matchMedia("(min-width: 768px)").matches) setOpen(false);
+    if (!window.matchMedia("(min-width: 1024px)").matches) setOpen(false);
   };
 
   const filtered = useMemo(() => {
@@ -180,7 +179,7 @@ export default function Sidebar({ open, setOpen }: SidebarProps) {
           type="button"
           aria-label={t("sidebar.closeNav")}
           onClick={() => setOpen(false)}
-          className="fixed inset-x-0 bottom-0 top-16 z-30 bg-black/40 md:hidden"
+          className="fixed inset-x-0 bottom-0 top-16 z-30 bg-black/40 lg:hidden"
         />
       )}
 
@@ -193,21 +192,19 @@ export default function Sidebar({ open, setOpen }: SidebarProps) {
           open ? "translate-x-0" : "-translate-x-full"
         }`}
       >
-        <div className="flex items-center justify-between border-b border-border/70 pb-3.5">
-          <div>
-            <HealthDocBrand
-              size={36}
-              subtitle="HIMS"
-              nameClassName="text-base font-bold text-foreground"
-            />
-            <p className="text-[11px] font-medium text-foreground/80 mt-0.5">
-              {t("common.role")}: <span className="text-foreground font-semibold">{roleLabel}</span>
+        <div className="flex items-center justify-between border-b border-border/70 pb-3">
+          <div className="min-w-0 pr-2">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+              {t("common.role")}
+            </span>
+            <p className="truncate text-sm font-semibold text-foreground">
+              {roleLabel}
             </p>
           </div>
 
           <button
             onClick={() => setOpen(false)}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-foreground/70 hover:bg-muted hover:text-foreground transition"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition"
             type="button"
             aria-label={t("sidebar.closeSidebar")}
           >
