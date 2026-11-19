@@ -12,9 +12,10 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
 from uuid import UUID
 
-from sqlalchemy import and_, case, select
+from sqlalchemy import and_, case, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -96,8 +97,128 @@ class ChecklistTaskNotFound(Exception):
         self.task_id = task_id
 
 
+class ChecklistTaskBlocked(Exception):
+    def __init__(self, code: str, message: str):
+        self.code = code
+        self.message = message
+
+
+class DischargeRefused(Exception):
+    def __init__(self, code: str, message: str):
+        self.code = code
+        self.message = message
+
+
 class ChecklistSkipReasonRequired(Exception):
     pass
+
+
+class AdmissionRefused(Exception):
+    """An admission the ward rules refuse; `message` reaches the screen."""
+
+    def __init__(self, code: str, message: str):
+        self.code = code
+        self.message = message
+
+
+CLOSED_VISIT_STATUSES = ("completed", "cancelled", "closed", "lwbs")
+
+
+async def find_admittable_visits(
+    db: AsyncSession, *, facility_id: UUID, q: str, limit: int = 20, include_admitted: bool = False,
+) -> list[dict]:
+    """Open visits a ward can admit, found by UHID, THID, visit number or name.
+
+    The Admit form offered only "paste Visit UUID", so an emergency patient
+    was admitted with an id copied out of a network response (QA 16 Oct 2026).
+    """
+    term = q.strip()
+    if len(term) < 2:
+        return []
+    like = f"%{term.replace('%', '').replace('_', '')}%"
+    admitted = select(Admission.patient_id).where(Admission.status == "admitted")
+    conditions = [Visit.facility_id == facility_id, Visit.status.notin_(CLOSED_VISIT_STATUSES)]
+    if not include_admitted:
+        conditions.append(Visit.patient_id.notin_(admitted))
+    rows = await db.execute(
+        select(Visit, Patient)
+        .join(Patient, Patient.id == Visit.patient_id)
+        .where(
+            *conditions,
+            or_(
+                Patient.uhid.ilike(like),
+                Patient.thid.ilike(like),
+                Visit.visit_number.ilike(like),
+                Patient.full_name.ilike(like),
+            ),
+        )
+        .order_by(Visit.created_at.desc())
+        .limit(limit)
+    )
+    today = datetime.now(UTC).date()
+    out = []
+    pairs = rows.all()
+    admissions_by_visit: dict = {}
+    if include_admitted and pairs:
+        admissions_by_visit = {
+            a.visit_id: a.id
+            for a in (
+                await db.execute(
+                    select(Admission).where(
+                        Admission.visit_id.in_([v.id for v, _ in pairs]), Admission.status == "admitted",
+                    )
+                )
+            ).scalars()
+        }
+    for visit, patient in pairs:
+        age = patient.age_years
+        if age is None and patient.dob:
+            age = today.year - patient.dob.year - ((today.month, today.day) < (patient.dob.month, patient.dob.day))
+        out.append({
+            "visit_id": visit.id,
+            "visit_number": visit.visit_number,
+            "visit_type": visit.visit_type,
+            "visit_date": visit.visit_date,
+            "patient_id": patient.id,
+            "patient_name": patient.full_name,
+            "patient_identifier": patient.uhid or patient.thid,
+            "patient_age": age,
+            "patient_sex": patient.sex,
+            "admission_id": admissions_by_visit.get(visit.id),
+        })
+    return out
+
+
+async def describe_admissions(db: AsyncSession, admissions: list[Admission]) -> list[dict]:
+    """Admission rows with the names a person reads instead of UUIDs.
+
+    Discharge listed admissions as "02419357-… — Bed 1", which invites
+    discharging the wrong patient (QA 16 Oct 2026).
+    """
+    if not admissions:
+        return []
+    patient_ids = {a.patient_id for a in admissions}
+    visit_ids = {a.visit_id for a in admissions}
+    bed_ids = {a.bed_id for a in admissions}
+    ward_ids = {a.ward_id for a in admissions}
+    patients = {p.id: p for p in (await db.execute(select(Patient).where(Patient.id.in_(patient_ids)))).scalars()}
+    visits = {v.id: v for v in (await db.execute(select(Visit).where(Visit.id.in_(visit_ids)))).scalars()}
+    beds = {b.id: b for b in (await db.execute(select(Bed).where(Bed.id.in_(bed_ids)))).scalars()}
+    wards = {w.id: w for w in (await db.execute(select(Ward).where(Ward.id.in_(ward_ids)))).scalars()}
+    out = []
+    for a in admissions:
+        patient, visit, bed, ward = patients.get(a.patient_id), visits.get(a.visit_id), beds.get(a.bed_id), wards.get(a.ward_id)
+        out.append({
+            "id": a.id, "visit_id": a.visit_id, "patient_id": a.patient_id, "ward_id": a.ward_id,
+            "bed_id": a.bed_id, "admitted_at": a.admitted_at, "reason": a.reason, "status": a.status,
+            "patient_name": patient.full_name if patient else None,
+            "patient_identifier": (patient.uhid or patient.thid) if patient else None,
+            "visit_number": visit.visit_number if visit else None,
+            "ward_name": ward.name if ward else None,
+            "ward_name_hi": ward.name_hi if ward else None,
+            "bed_number": bed.bed_number if bed else None,
+        })
+    return out
 
 
 _DISCHARGE_NOTIFICATION_TARGETS = ("pharmacy", "billing", "nursing", "lab", "radiology", "patient")
@@ -116,6 +237,19 @@ async def admit_patient(
     visit = await db.get(Visit, visit_id)
     if visit is None or (facility_id is not None and visit.facility_id != facility_id):
         raise VisitNotFound(visit_id)
+    if visit.status in CLOSED_VISIT_STATUSES:
+        raise AdmissionRefused("visit_closed", "This visit is closed. Start a new visit to admit the patient.")
+    already = (
+        await db.execute(
+            select(Admission.id).where(
+                Admission.patient_id == visit.patient_id, Admission.status == "admitted",
+            )
+        )
+    ).first()
+    if already is not None:
+        raise AdmissionRefused(
+            "already_admitted", "This patient is already admitted. Use Ward transfer to move them.",
+        )
 
     ward = await db.get(Ward, ward_id)
     if ward is None or (facility_id is not None and ward.facility_id != facility_id):
@@ -314,9 +448,15 @@ async def discharge_patient(
     destination_facility_id: UUID | None = None,
     destination_facility_name: str | None = None,
     discharged_at: datetime | None = None,
+    acknowledge_incomplete_checklist: bool = False,
 ) -> Discharge:
     if admission.status != "admitted":
         raise AdmissionNotActive(admission.id, admission.status)
+    # The ward's calendar day, not UTC's.
+    when = (discharged_at or datetime.now(UTC)).astimezone(ZoneInfo("Asia/Kolkata"))
+    if follow_up_date is not None and follow_up_date < when.date():
+        raise DischargeRefused("follow_up_in_past", "The follow-up date must be on or after the discharge date.")
+
     if discharge_type == "transferred" and not (destination_facility_id or destination_facility_name):
         raise TransferDestinationRequired()
     admitted_at = admission.admitted_at
@@ -324,6 +464,25 @@ async def discharge_patient(
         admitted_at = admitted_at.replace(tzinfo=UTC)
     if discharged_at is not None and admitted_at is not None and discharged_at < admitted_at:
         raise DischargeBeforeAdmission()
+    # Discharge went through with the checklist at 1 of 6 and no warning
+    # (QA 16 Oct 2026). Leaving with mandatory items open needs saying so.
+    if discharge_type == "discharged" and not acknowledge_incomplete_checklist:
+        open_items = (
+            await db.execute(
+                select(AdmissionChecklistTask.title).where(
+                    AdmissionChecklistTask.admission_id == admission.id,
+                    AdmissionChecklistTask.is_mandatory.is_(True),
+                    AdmissionChecklistTask.status == "pending",
+                )
+            )
+        ).scalars().all()
+        if open_items:
+            raise DischargeRefused(
+                "checklist_incomplete",
+                f"{len(open_items)} mandatory admission checklist item(s) are still open: "
+                + "; ".join(open_items[:3])
+                + ". Complete them, or confirm the discharge anyway.",
+            )
 
     discharge = Discharge(
         id=uuid.uuid4(), admission_id=admission.id, discharged_at=discharged_at or datetime.now(UTC),
@@ -540,6 +699,7 @@ async def list_pending_admissions(
             Patient.id.label("patient_id"),
             Patient.full_name.label("patient_name"),
             Patient.uhid.label("patient_uhid"),
+            Patient.thid.label("patient_thid"),
             Patient.sex.label("patient_sex"),
             Patient.dob.label("patient_dob"),
             Patient.age_years.label("patient_age_years"),
@@ -589,8 +749,11 @@ async def list_pending_admissions(
         item["patient_age"] = age
         item.pop("patient_dob", None)
         item.pop("patient_age_years", None)
+        # An emergency arrival has a THID until identity is confirmed; showing
+        # "Pending UHID" hid the only identifier the ward could match on.
+        thid = item.pop("patient_thid", None)
         if not item.get("patient_uhid"):
-            item["patient_uhid"] = "Pending UHID"
+            item["patient_uhid"] = thid or "Pending UHID"
         results.append(item)
     return results
 
@@ -664,6 +827,14 @@ async def update_clinical_disposition(
 
 # ---------------- HD-16: ADMISSION CHECKLIST ----------------
 
+_CHECKLIST_ORDER = {
+    code: index
+    for index, code in enumerate(
+        ("id_wristband", "baseline_vitals", "allergy_diet", "med_reconciliation", "fall_safety_risk", "ward_orientation")
+    )
+}
+
+
 async def get_admission_checklist(
     db: AsyncSession, admission_id: UUID, facility_id: UUID
 ) -> list[dict]:
@@ -687,7 +858,14 @@ async def get_admission_checklist(
     )
     rows = await db.execute(query)
     items = []
-    for task, completed_by_name in rows.all():
+    # All six tasks share one created_at, so that order was arbitrary and a
+    # completed item jumped to the bottom (QA 16 Oct 2026). The seeded order
+    # is the clinical order.
+    ordered = sorted(
+        rows.all(),
+        key=lambda row: (_CHECKLIST_ORDER.get(row[0].task_code, len(_CHECKLIST_ORDER)), row[0].created_at),
+    )
+    for task, completed_by_name in ordered:
         data = {
             "id": task.id,
             "admission_id": task.admission_id,
@@ -725,9 +903,26 @@ async def update_checklist_task(
     if task is None or task.admission_id != admission_id or task.facility_id != facility_id:
         raise ChecklistTaskNotFound(task_id)
 
-    if status == "skipped" and (not skipped_reason or not skipped_reason.strip()):
-        raise ChecklistSkipReasonRequired("Mandatory skipped_reason is required when skipping a checklist task")
+    if status == "skipped" and len((skipped_reason or "").strip()) < 10:
+        # "x" was accepted as the reason to skip identity verification and the
+        # wristband (QA 16 Oct 2026).
+        raise ChecklistSkipReasonRequired("Give a reason of at least 10 characters for skipping this item")
+    if status == "completed" and task.task_code == "baseline_vitals":
+        # The vitals item was ticked Completed while the chart showed
+        # Vitals (0): the checklist must not claim a measurement that is not
+        # on the record.
+        from app.nursing.models import Vitals
 
+        has_vitals = (
+            await db.execute(select(Vitals.id).where(Vitals.admission_id == admission_id).limit(1))
+        ).first()
+        if has_vitals is None:
+            raise ChecklistTaskBlocked(
+                "vitals_not_recorded", "Record the baseline vital signs on the chart before completing this item.",
+            )
+
+    if status not in ("pending", "completed", "skipped"):
+        raise ChecklistTaskBlocked("invalid_status", "Choose completed, skipped or pending.")
     task.status = status
     if status in ("completed", "skipped"):
         task.completed_at = datetime.now(UTC)

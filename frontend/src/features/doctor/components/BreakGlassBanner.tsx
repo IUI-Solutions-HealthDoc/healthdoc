@@ -10,6 +10,7 @@ import { meridian } from "@/styles/theme";
 import { formatCountdown, formatDateTime } from "../lib/formatters";
 import { doctorButtonSx } from "../panelSx";
 import type { BreakGlassGrant } from "../types";
+import { useLocale } from "@/lib/i18n";
 
 export interface BreakGlassBannerProps {
   grant: BreakGlassGrant;
@@ -24,6 +25,7 @@ export interface BreakGlassBannerProps {
  * to the grant's own expires_at (see useBreakGlass).
  */
 export function BreakGlassBanner({ grant, msRemaining, busy, onRevoke }: BreakGlassBannerProps) {
+  const { t } = useLocale();
   return (
     <Box
       sx={{
@@ -49,18 +51,12 @@ export function BreakGlassBanner({ grant, msRemaining, busy, onRevoke }: BreakGl
               color: meridian.danger,
               fontVariantNumeric: "tabular-nums",
             }}
-          >
-            {formatCountdown(msRemaining)} left
-          </Typography>
+          >{t("doctor.ui.msremainingLeft", { msRemaining: formatCountdown(msRemaining) })}</Typography>
         </Stack>
-        <Typography sx={{ fontSize: "0.75rem", color: meridian.textPrimary }}>
-          Emergency access is open and being recorded · expires {formatDateTime(grant.expires_at)}
-        </Typography>
+        <Typography sx={{ fontSize: "0.75rem", color: meridian.textPrimary }}>{t("doctor.ui.emergencyAccessIsOpenAndBeing", { expires_at: formatDateTime(grant.expires_at) })}</Typography>
       </Stack>
 
-      <Button variant="outlined" color="error" sx={doctorButtonSx} loading={busy} onClick={onRevoke}>
-        End access now
-      </Button>
+      <Button variant="outlined" color="error" sx={doctorButtonSx} loading={busy} onClick={onRevoke}>{t("doctor.ui.endAccessNow")}</Button>
     </Box>
   );
 }

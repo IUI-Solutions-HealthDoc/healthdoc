@@ -39,6 +39,12 @@ class RadiologyOrderItemOut(BaseModel):
     scan_completed_at: datetime | None = None
     status: str
     created_at: datetime
+    # Joined for the worklist (app.common.patient_brief); absent on writes.
+    patient_id: uuid.UUID | None = None
+    patient_name: str | None = None
+    patient_uhid: str | None = None
+    patient_age_years: int | None = None
+    patient_sex: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

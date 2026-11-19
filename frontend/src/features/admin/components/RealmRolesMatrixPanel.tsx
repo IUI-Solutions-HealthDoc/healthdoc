@@ -25,10 +25,12 @@ import {
 } from "../constants";
 import { adminPanelSx } from "../panelSx";
 import type { RealmRole } from "../types";
+import { useLocale } from "@/lib/i18n";
 
 const STICKY_BG = "#fbfcfe";
 
 export function RealmRolesMatrixPanel() {
+  const { t } = useLocale();
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<RealmRole | null>("doctor");
 
@@ -47,12 +49,8 @@ export function RealmRolesMatrixPanel() {
     <Box sx={adminPanelSx}>
       <Typography
         sx={{ m: 0, fontSize: "1.0625rem", fontWeight: 700, color: meridian.textPrimary }}
-      >
-        Role permissions
-      </Typography>
-      <Typography sx={{ m: 0, mt: 0.5, mb: 2, fontSize: "0.8125rem", color: meridian.textSecondary }}>
-        Review what each application role is allowed to access. Assignments are managed from staff accounts.
-      </Typography>
+      >{t("admin.ui.rolePermissions")}</Typography>
+      <Typography sx={{ m: 0, mt: 0.5, mb: 2, fontSize: "0.8125rem", color: meridian.textSecondary }}>{t("admin.ui.reviewWhatEachApplicationRoleIs")}</Typography>
 
       <Stack
         direction={{ xs: "column", sm: "row" }}
@@ -61,7 +59,7 @@ export function RealmRolesMatrixPanel() {
       >
         <TextField
           size="small"
-          placeholder="Filter roles…"
+          placeholder={t("admin.ui.filterRoles")}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           sx={{ width: { xs: "100%", sm: 260 } }}
@@ -76,9 +74,7 @@ export function RealmRolesMatrixPanel() {
             maxWidth: 420,
           }}
         >
-          <Typography sx={{ m: 0, fontSize: "0.75rem", color: meridian.warning, fontWeight: 600 }}>
-            Platform administrators manage facilities only and cannot access clinical records.
-          </Typography>
+          <Typography sx={{ m: 0, fontSize: "0.75rem", color: meridian.warning, fontWeight: 600 }}>{t("admin.ui.platformAdministratorsManageFacilitiesOnlyAnd")}</Typography>
         </Box>
       </Stack>
 
@@ -113,9 +109,7 @@ export function RealmRolesMatrixPanel() {
                     color: meridian.textSecondary,
                     borderBottom: `1px solid ${meridian.border}`,
                   }}
-                >
-                  Role
-                </TableCell>
+                >{t("common.role")}</TableCell>
                 {MATRIX_CAPABILITIES.map((cap) => (
                   <TableCell
                     key={cap}
@@ -141,9 +135,7 @@ export function RealmRolesMatrixPanel() {
               {filteredRoles.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={MATRIX_CAPABILITIES.length + 1}>
-                    <Typography sx={{ py: 2, color: meridian.textSecondary, fontSize: "0.875rem" }}>
-                      No roles match this filter.
-                    </Typography>
+                    <Typography sx={{ py: 2, color: meridian.textSecondary, fontSize: "0.875rem" }}>{t("admin.ui.noRolesMatchThisFilter")}</Typography>
                   </TableCell>
                 </TableRow>
               ) : (
@@ -252,9 +244,7 @@ export function RealmRolesMatrixPanel() {
                   textTransform: "uppercase",
                   color: meridian.textSecondary,
                 }}
-              >
-                Role detail
-              </Typography>
+              >{t("admin.ui.roleDetail")}</Typography>
               <Typography
                 sx={{
                   m: 0,
@@ -289,9 +279,7 @@ export function RealmRolesMatrixPanel() {
                     color: meridian.warning,
                     fontWeight: 600,
                   }}
-                >
-                  Governance role — not for clinical workflows.
-                </Typography>
+                >{t("admin.ui.governanceRoleNotForClinicalWorkflows")}</Typography>
               ) : null}
 
               <Typography
@@ -304,9 +292,7 @@ export function RealmRolesMatrixPanel() {
                   textTransform: "uppercase",
                   color: meridian.textSecondary,
                 }}
-              >
-                Capabilities ({selectedCaps.length})
-              </Typography>
+              >{t("admin.ui.capabilitiesCount", { count: selectedCaps.length })}</Typography>
               <Stack direction="row" useFlexGap sx={{ flexWrap: "wrap", gap: 0.75, mb: 2 }}>
                 {selectedCaps.map((cap) => (
                   <Chip
@@ -323,14 +309,10 @@ export function RealmRolesMatrixPanel() {
                   />
                 ))}
               </Stack>
-              <Typography sx={{ m: 0, fontSize: "0.75rem", color: meridian.textSecondary, lineHeight: 1.45 }}>
-                This is a read-only permission reference. Assign roles from the staff account workflow.
-              </Typography>
+              <Typography sx={{ m: 0, fontSize: "0.75rem", color: meridian.textSecondary, lineHeight: 1.45 }}>{t("admin.ui.thisIsAReadOnlyPermission")}</Typography>
             </>
           ) : (
-            <Typography sx={{ color: meridian.textSecondary, fontSize: "0.875rem" }}>
-              Select a role row to see its capability list.
-            </Typography>
+            <Typography sx={{ color: meridian.textSecondary, fontSize: "0.875rem" }}>{t("admin.ui.selectARoleRowToSee")}</Typography>
           )}
         </Box>
       </Box>

@@ -1,3 +1,4 @@
+import { translate } from "@/lib/i18n";
 /**
  * A driving-licence photo as the ABDM enrolment expects it: plain base64.
  *
@@ -19,7 +20,7 @@ export function decodedBytes(encoded: string): number {
 
 export async function prepareLicencePhoto(file: File): Promise<string> {
   if (!/^image\/(jpeg|png)$/.test(file.type)) {
-    throw new Error("Choose a JPEG or PNG photo of the licence.");
+    throw new Error(translate("receptionist.msg.chooseAJpegOrPngPhoto"));
   }
   const bitmap = await createImageBitmap(file);
   try {
@@ -38,5 +39,5 @@ export async function prepareLicencePhoto(file: File): Promise<string> {
   } finally {
     bitmap.close();
   }
-  throw new Error("This photo cannot be made smaller than ABDM's 150 KB limit. Retake it closer to the licence, with less background.");
+  throw new Error(translate("receptionist.msg.thisPhotoCannotBeMadeSmaller"));
 }

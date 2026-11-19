@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ApiError, newIdempotencyKey } from "@/lib/api";
 import { apiErrorCode } from "@/lib/api-error-policy.mjs";
+import { translate } from "@/lib/i18n";
 
 /** One mounted editor/action. Never persist clinical drafts in browser storage. */
 export function useClinicalWrite() {
@@ -16,10 +17,10 @@ export function useClinicalWrite() {
   }, []);
 
   async function run<Payload, Result>(payload: Payload, send: (body: Payload, key: string) => Promise<Result>): Promise<Result> {
-    if (!mounted.current || busy.current) throw new Error("A save is already in progress or this editor is closed.");
+    if (!mounted.current || busy.current) throw new Error(translate("common.msg.aSaveIsAlreadyInProgress"));
     const body = JSON.stringify(payload);
     if (attempt.current && attempt.current.body !== body)
-      throw new Error("Retry the unchanged save before editing. Its outcome has not been confirmed.");
+      throw new Error(translate("common.msg.retryTheUnchangedSaveBeforeEditing"));
     attempt.current ??= { key: newIdempotencyKey(), body };
     const current = attempt.current;
     busy.current = true;
@@ -38,7 +39,7 @@ export function useClinicalWrite() {
       if (refused) attempt.current = null;
       if (mounted.current) setRetryPending(!refused);
       if (!refused)
-        throw new Error("Save outcome is not confirmed. Keep this editor open and retry the unchanged save. If you leave or reload, check the saved records before entering it again.");
+        throw new Error(translate("common.msg.saveOutcomeIsNotConfirmedKeep"));
       throw error;
     } finally {
       busy.current = false;

@@ -25,13 +25,18 @@ import { useLocale } from "@/lib/i18n";
 import { createIndent, decideIndent, issueIndent, listIndents } from "./api";
 import type { IndentListRow } from "./types";
 
-interface DraftLine {
+export interface DraftLine {
   item_id: string;
   item_name: string;
   quantity_requested: string;
 }
 
-export function IndentWorkspace() {
+/**
+ * `prefill`: lines handed over from the reorder alerts ("Raise indent for low
+ * stock"). The tester looked for a way to raise an indent from the low-stock
+ * list and found none (QA 10 Oct 2026); the form below was a separate tab.
+ */
+export function IndentWorkspace({ prefill }: { prefill?: DraftLine[] } = {}) {
   const { t, localizeField } = useLocale();
   const { user } = useCurrentUser();
   const roles = user?.roles ?? [];
@@ -44,7 +49,10 @@ export function IndentWorkspace() {
   const [busy, setBusy] = useState(false);
 
   const [departmentId, setDepartmentId] = useState("");
-  const [lines, setLines] = useState<DraftLine[]>([]);
+  const [lines, setLines] = useState<DraftLine[]>(() => prefill ?? []);
+  useEffect(() => {
+    if (prefill && prefill.length) setLines(prefill);
+  }, [prefill]);
   const [term, setTerm] = useState("");
   const [matches, setMatches] = useState<MedicineSearchResult[]>([]);
 
@@ -63,23 +71,35 @@ export function IndentWorkspace() {
     void reload();
   }, [reload]);
 
+  // Focusing the box lists the catalogue; typing narrows it. A failed search
+  // said nothing and looked like an empty catalogue (QA 17 Oct 2026).
+  const [browsing, setBrowsing] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
   useEffect(() => {
     const q = term.trim();
-    if (q.length < 2) {
+    if (q.length === 1 || (q.length === 0 && !browsing)) {
       setMatches([]);
       return;
     }
     let cancelled = false;
     const timer = setTimeout(() => {
       searchMedicines(q)
-        .then((r) => !cancelled && setMatches(r.items))
-        .catch(() => !cancelled && setMatches([]));
+        .then((r) => {
+          if (cancelled) return;
+          setMatches(r.items);
+          setSearchError(r.items.length ? null : t("inventory.noItemsMatch"));
+        })
+        .catch((reason) => {
+          if (cancelled) return;
+          setMatches([]);
+          setSearchError(reason instanceof ApiError ? reason.message : t("inventory.errItemSearch"));
+        });
     }, 250);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [term]);
+  }, [term, browsing, t]);
 
   const submit = async () => {
     const ready = lines.filter((l) => l.item_id && Number(l.quantity_requested) > 0);
@@ -170,8 +190,10 @@ export function IndentWorkspace() {
             className="w-full rounded border border-gray-300 p-2 text-sm sm:max-w-sm"
             placeholder={t("inventory.indent.searchMedicinesPlaceholder")}
             value={term}
+            onFocus={() => setBrowsing(true)}
             onChange={(event) => setTerm(event.target.value)}
           />
+          {searchError ? <p className="mt-1 text-xs text-danger">{searchError}</p> : null}
           {matches.length > 0 ? (
             <ul className="mt-1 max-h-40 max-w-sm overflow-auto rounded border border-gray-200 text-sm">
               {matches.map((match) => (

@@ -19,6 +19,16 @@ import type {
 } from "./types";
 
 /** The department worklist. Facility-scoped; status narrows it server-side. */
+/** How many scans are in each stage: one count-only read per stage. */
+export async function radiologyStageCounts(statuses: string[]): Promise<Record<string, number>> {
+  const totals = await Promise.all(statuses.map(async (status) => {
+    const params = new URLSearchParams({ page: "1", page_size: "1", status });
+    const page = await api<RadiologyOrderItemList>(`/radiology/order-items?${params.toString()}`);
+    return [status, page.total] as const;
+  }));
+  return Object.fromEntries(totals);
+}
+
 export function listRadiologyWork(status?: string): Promise<RadiologyOrderItemList> {
   const params = new URLSearchParams({ page: "1", page_size: "100" });
   if (status && status !== "all") params.set("status", status);

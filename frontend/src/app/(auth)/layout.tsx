@@ -1,11 +1,15 @@
+"use client";
+
 import { ShieldCheck, Activity, Award, Lock } from "lucide-react";
 import { AuthBrandHeader } from "@/components/common/AuthBrandHeader";
+import { useLocale } from "@/lib/i18n";
 
 export default function AuthLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const { t } = useLocale();
   return (
     <div className="flex min-h-screen lg:h-screen lg:overflow-hidden flex-col lg:flex-row bg-background">
       {/* Brand & Security Showcase Banner (Visible on lg screens) */}
@@ -25,16 +29,14 @@ export default function AuthLayout({
 
         <div className="relative z-10 my-auto max-w-xl space-y-4 xl:space-y-6">
           <div className="inline-flex items-center gap-2 rounded-full border border-blue-400/30 bg-blue-500/10 px-3.5 py-1 text-xs font-medium tracking-wide text-blue-200 backdrop-blur-sm">
-            <span className="flex h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-            Enterprise Clinical Operations Platform
-          </div>
+            <span className="flex h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />{t("auth.ui.enterpriseClinicalOperationsPlatform")}</div>
 
           <h2 className="text-2xl xl:text-4xl font-bold tracking-tight text-white leading-tight">
-            Integrated Clinical, Diagnostic & Administrative Excellence
+            {t("auth.ui.integratedClinicalDiagnosticAdministrativeExcellence")}
           </h2>
 
           <p className="text-xs xl:text-base leading-relaxed text-blue-100/80">
-            Manage outpatient consultations, inpatient care, diagnostic reporting, and consent-based digital record workflows.
+            {t("auth.ui.manageOutpatientConsultationsInpatientCareDiagnostic")}
           </p>
 
           <div className="grid grid-cols-2 gap-3 xl:gap-4 pt-2 xl:pt-4">
@@ -44,8 +46,8 @@ export default function AuthLayout({
                   <ShieldCheck className="h-5 w-5" />
                 </div>
                 <div>
-                  <h3 className="text-xs xl:text-sm font-semibold text-white">ABDM integration</h3>
-                  <p className="text-[11px] xl:text-xs text-blue-200/70">M1/M2/M3 sandbox verification in progress</p>
+                  <h3 className="text-xs xl:text-sm font-semibold text-white">{t("auth.ui.abdmIntegration")}</h3>
+                  <p className="text-[11px] xl:text-xs text-blue-200/70">{t("auth.ui.m1M2M3SandboxVerificationIn")}</p>
                 </div>
               </div>
             </div>
@@ -56,8 +58,8 @@ export default function AuthLayout({
                   <Lock className="h-5 w-5" />
                 </div>
                 <div>
-                  <h3 className="text-xs xl:text-sm font-semibold text-white">Consent & audit</h3>
-                  <p className="text-[11px] xl:text-xs text-blue-200/70">Access controls and activity records</p>
+                  <h3 className="text-xs xl:text-sm font-semibold text-white">{t("auth.ui.consentAudit")}</h3>
+                  <p className="text-[11px] xl:text-xs text-blue-200/70">{t("auth.ui.accessControlsAndActivityRecords")}</p>
                 </div>
               </div>
             </div>
@@ -68,8 +70,8 @@ export default function AuthLayout({
                   <Activity className="h-5 w-5" />
                 </div>
                 <div>
-                  <h3 className="text-xs xl:text-sm font-semibold text-white">Ward workflows</h3>
-                  <p className="text-[11px] xl:text-xs text-blue-200/70">Vitals, medication and discharge records</p>
+                  <h3 className="text-xs xl:text-sm font-semibold text-white">{t("auth.ui.wardWorkflows")}</h3>
+                  <p className="text-[11px] xl:text-xs text-blue-200/70">{t("auth.ui.vitalsMedicationAndDischargeRecords")}</p>
                 </div>
               </div>
             </div>
@@ -80,8 +82,8 @@ export default function AuthLayout({
                   <Award className="h-5 w-5" />
                 </div>
                 <div>
-                  <h3 className="text-xs xl:text-sm font-semibold text-white">Radiology</h3>
-                  <p className="text-[11px] xl:text-xs text-blue-200/70">Imaging integration requires facility setup</p>
+                  <h3 className="text-xs xl:text-sm font-semibold text-white">{t("sidebar.radiology")}</h3>
+                  <p className="text-[11px] xl:text-xs text-blue-200/70">{t("auth.ui.imagingIntegrationRequiresFacilitySetup")}</p>
                 </div>
               </div>
             </div>
@@ -89,8 +91,8 @@ export default function AuthLayout({
         </div>
 
         <div className="relative z-10 flex items-center justify-between border-t border-white/10 pt-4 xl:pt-6 text-xs text-blue-200/60">
-          <span>HealthDoc Clinical Suite</span>
-          <span>Role-based clinical workspaces</span>
+          <span>{t("auth.ui.healthdocClinicalSuite")}</span>
+          <span>{t("auth.ui.roleBasedClinicalWorkspaces")}</span>
         </div>
       </div>
 

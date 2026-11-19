@@ -12,6 +12,7 @@ import Box from "@mui/material/Box";
 import Skeleton from "@mui/material/Skeleton";
 import Typography from "@mui/material/Typography";
 import { meridian } from "@/styles/theme";
+import { useLocale, translate } from "@/lib/i18n";
 
 export interface DataTableColumn<T> {
   /** Unique key. If it matches a key on T, sorting works automatically. */
@@ -61,7 +62,7 @@ export function DataTable<T>({
   rows,
   getRowId,
   loading = false,
-  emptyMessage = "No records found.",
+  emptyMessage = translate("common.msg.noRecordsFound"),
   onRowClick,
   selectedRowId = null,
   page,
@@ -71,6 +72,7 @@ export function DataTable<T>({
   onRowsPerPageChange,
   rowsPerPageOptions = [10, 25, 50],
 }: DataTableProps<T>) {
+  const { t } = useLocale();
   const [sortKey, setSortKey] = React.useState<string | null>(null);
   const [sortDir, setSortDir] = React.useState<"asc" | "desc">("asc");
 
@@ -121,7 +123,7 @@ export function DataTable<T>({
       }}
     >
       <TableContainer sx={{ maxHeight: 640 }}>
-        <Table stickyHeader size="small" aria-label="data table">
+        <Table stickyHeader size="small" aria-label={t("common.ui.dataTable")}>
           <TableHead>
             <TableRow>
               {columns.map((col) => (

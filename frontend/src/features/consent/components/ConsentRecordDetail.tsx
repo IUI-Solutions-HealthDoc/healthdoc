@@ -14,7 +14,7 @@ import Typography from "@mui/material/Typography";
 import { StatusChip } from "@/components/ui/StatusChip";
 import { toast } from "@/components/ui/toast";
 import { newIdempotencyKey } from "@/lib/api";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 import { meridian } from "@/styles/theme";
 import { transitionConsentStatus, withdrawConsent } from "../api/consent";
 import { consentChannelLabel, consentPurposeLabel, consentStatusLabel } from "../i18nLabels";
@@ -80,7 +80,7 @@ export function ConsentRecordDetail({
       });
     } catch (e) {
       if (!mounted.current) return;
-      toast.error(e instanceof Error ? e.message : "Withdrawal failed");
+      toast.error(e instanceof Error ? e.message : translate("consent.msg.withdrawalFailed"));
     } finally {
       busyRef.current = false;
       if (mounted.current) setBusy(false);
@@ -97,11 +97,11 @@ export function ConsentRecordDetail({
         const next = await transitionConsentStatus(record.id, { status }, keyFor(scope));
         retryKeys.current.delete(scope);
         if (!mounted.current) return;
-        toast.success(`Consent ${status}`);
+        toast.success(translate("consent.msg.consentStatus", undefined, { status }));
         onRecordUpdated?.(next);
       } catch (e) {
         if (!mounted.current) return;
-        toast.error(e instanceof Error ? e.message : "Transition failed");
+        toast.error(e instanceof Error ? e.message : translate("consent.msg.transitionFailed"));
       } finally {
         busyRef.current = false;
         if (mounted.current) setBusy(false);
@@ -125,9 +125,7 @@ export function ConsentRecordDetail({
           textAlign: "center",
           color: meridian.textSecondary,
         }}
-      >
-        Select a consent record to review the decision and expiry.
-      </Box>
+      >{t("consent.ui.selectAConsentRecordToReview")}</Box>
     );
   }
 
@@ -145,10 +143,16 @@ export function ConsentRecordDetail({
         <Stack direction="row" sx={{ justifyContent: "space-between", gap: 2, mb: 2 }}>
           <Box>
             <Typography sx={{ m: 0, fontSize: "1.0625rem", fontWeight: 700, color: meridian.textPrimary }}>
-              {record.patient?.name ?? record.patient_id}
+              {record.patient?.name ?? t("consent.unnamedPatient")}
             </Typography>
+            {/* A record id here read as the record's title (QA 16 Oct 2026):
+                purpose and date identify a consent to a person. */}
             <Typography sx={{ m: 0, mt: 0.4, fontSize: "0.8125rem", color: meridian.textSecondary }}>
-              {record.patient?.uhid} · {record.id}
+              {[
+                record.patient?.uhid,
+                record.purpose_label ?? (record.purpose_code ? record.purpose_code.replaceAll("_", " ") : null),
+                formatDateTime(record.granted_at ?? record.created_at),
+              ].filter(Boolean).join(" · ")}
             </Typography>
           </Box>
           <StatusChip status={record.status} label={consentStatusLabel(t, record.status)} />
@@ -170,11 +174,11 @@ export function ConsentRecordDetail({
             value={consentChannelLabel(t, record.channel)}
           />
           <Meta
-            label="Expires"
+            label={t("receptionist.scanShare.expires")}
             value={record.expires_at ? formatDate(record.expires_at) : "open-ended"}
           />
-          <Meta label="Granted" value={formatDateTime(record.granted_at)} />
-          <Meta label="Granted by" value={String(record.granted_by_type)} />
+          <Meta label={t("consent.status.granted")} value={formatDateTime(record.granted_at)} />
+          <Meta label={t("consent.ui.grantedBy")} value={String(record.granted_by_type)} />
           <Meta
             label={t("consent.statusChanged")}
             value={formatDateTime(record.status_changed_at)}
@@ -223,9 +227,7 @@ export function ConsentRecordDetail({
       <Dialog open={withdrawOpen} onClose={() => setWithdrawOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle sx={{ fontWeight: 700 }}>{t("consent.withdraw")}</DialogTitle>
         <DialogContent>
-          <Typography sx={{ mb: 1.5, fontSize: "0.875rem", color: meridian.textSecondary }}>
-            This will revoke the consent record. The action is logged in the audit trail.
-          </Typography>
+          <Typography sx={{ mb: 1.5, fontSize: "0.875rem", color: meridian.textSecondary }}>{t("consent.ui.thisWillRevokeTheConsentRecord")}</Typography>
           <TextField
             autoFocus
             fullWidth

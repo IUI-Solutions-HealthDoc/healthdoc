@@ -36,21 +36,17 @@ export function ReceiptPrintView({ open, payment, invoice, onClose, onPrint }: P
     <Modal
       open={open}
       onClose={onClose}
-      title="Print receipt"
+      title={t("billing.ui.printReceipt")}
       size="md"
       actions={
         <>
-          <Button onClick={onClose} className="no-print" sx={{ textTransform: "none" }}>
-            Close
-          </Button>
+          <Button onClick={onClose} className="no-print" sx={{ textTransform: "none" }}>{t("common.close")}</Button>
           <Button
             variant="contained"
             onClick={onPrint}
             className="no-print"
             sx={{ textTransform: "none", fontWeight: 600, borderRadius: "10px" }}
-          >
-            Print
-          </Button>
+          >{t("common.ui.print")}</Button>
         </>
       }
     >
@@ -59,15 +55,13 @@ export function ReceiptPrintView({ open, payment, invoice, onClose, onPrint }: P
           <Typography sx={{ fontWeight: 700, fontSize: "1.125rem" }}>
             {localizeField(currentUser?.facility.name ?? "", currentUser?.facility.name_hi)}
           </Typography>
-          <Typography sx={{ fontSize: "0.875rem" }}>Payment receipt</Typography>
+          <Typography sx={{ fontSize: "0.875rem" }}>{t("billing.ui.paymentReceipt")}</Typography>
           <Typography sx={{ fontSize: "0.75rem" }}>
             {paymentModeLabel(t, payment.mode)} · {formatINR(payment.amount)}
           </Typography>
         </Stack>
         <ImmutableReceipt payment={payment} invoice={invoice} />
-        <Typography sx={{ mt: 2, fontSize: "0.75rem", textAlign: "center" }}>
-          This is a computer-generated receipt.
-        </Typography>
+        <Typography sx={{ mt: 2, fontSize: "0.75rem", textAlign: "center" }}>{t("billing.ui.thisIsAComputerGeneratedReceipt")}</Typography>
       </Box>
     </Modal>
   );

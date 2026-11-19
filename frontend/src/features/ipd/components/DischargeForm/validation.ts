@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { translate } from "@/lib/i18n";
 
 export const DISCHARGE_TYPES = [
   "discharged",
@@ -10,26 +11,32 @@ export const DISCHARGE_TYPES = [
 
 export const addDischargeSchema = z
   .object({
-    admission_id: z.string().uuid("Admission ID must be a UUID"),
-    discharged_at: z.string().min(1),
+    admission_id: z.guid({ error: () => translate("ipd.msg.admissionIdMustBeAUuid") }),
+    discharged_at: z.string().min(1, { error: () => translate("ipd.msg.enterTheDischargeDateAndTime") }),
     discharge_type: z.enum(DISCHARGE_TYPES),
-    discharge_summary: z.string().min(1, "Discharge summary is required"),
+    discharge_summary: z.string().min(1, { error: () => translate("ipd.msg.dischargeSummaryIsRequired") }),
     // Normalised on the way out, in dischargePatient — see the note there.
     follow_up_date: z.string().optional(),
     // Backend: DischargeRequest.destination_facility_id / destination_facility_name.
     // Required (either one) only when discharge_type === "transferred" —
     // mirrors ck_discharges_transfer_destination.
-    destination_facility_id: z.string().uuid().optional(),
+    destination_facility_id: z.guid().optional(),
     destination_facility_name: z.string().trim().optional(),
+    // Set after the server reports open mandatory checklist items and the
+    // ward confirms discharging anyway.
+    acknowledge_incomplete_checklist: z.boolean().optional(),
   })
+  .refine(
+    (data) => !data.follow_up_date || !data.discharged_at || data.follow_up_date.slice(0, 10) >= data.discharged_at.slice(0, 10),
+    { error: () => translate("ipd.msg.theFollowUpDateMustBe"), path: ["follow_up_date"] },
+  )
   .refine(
     (data) =>
       data.discharge_type !== "transferred" ||
       !!data.destination_facility_id ||
       !!data.destination_facility_name?.length,
     {
-      message:
-        "Destination facility (ID or name) is required for a transferred discharge",
+      error: () => translate("ipd.msg.destinationFacilityIdOrNameIs"),
       path: ["destination_facility_name"],
     },
   );

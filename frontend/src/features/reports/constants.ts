@@ -2,6 +2,7 @@
 // server-side from the token — the browser never sends one. Removed (P1.1).
 import type { ModuleCode } from "@/features/admin/types";
 import type { CoreKpiCode, KpiPeriod } from "./types";
+import { translate } from "@/lib/i18n";
 
 
 /** Same facility as admin / billing mock seed. */
@@ -25,10 +26,10 @@ export const PERIOD_OPTIONS: readonly {
   value: KpiPeriod;
   label: string;
 }[] = [
-  { value: "today", label: "Today" },
+  { value: "today", get label() { return translate("common.today"); } },
   { value: "7d", label: "7 days" },
   { value: "30d", label: "30 days" },
-  { value: "custom", label: "Custom" },
+  { value: "custom", get label() { return translate("reports.kpi.period.custom"); } },
 ] as const;
 
 /** Chart series colors (Meridian-aligned, not schema). */

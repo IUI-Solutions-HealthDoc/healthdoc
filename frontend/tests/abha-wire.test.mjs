@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import ts from "typescript";
+import { i18nStub } from "./helpers/i18n-stub.mjs";
 
 function loadApi() {
   const calls = [];
@@ -9,7 +10,7 @@ function loadApi() {
     const source = readFileSync(new URL(file, import.meta.url), "utf8");
     const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
     const exports = {};
-    new Function("require", "exports", compiled)((name) => {
+    new Function("require", "exports", compiled)((name) => { if (name === "@/lib/i18n") return i18nStub;
       assert.ok(name in dependencies, `Unexpected dependency ${name}`);
       return dependencies[name];
     }, exports);

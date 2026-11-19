@@ -1,4 +1,5 @@
 import { PatientMovementProps } from "./PatientMovement.types";
+import { useLocale } from "@/lib/i18n";
 
 function resolveWardName(
   wardId: string | null,
@@ -22,12 +23,11 @@ export default function PatientMovement({
   wards,
   beds,
 }: PatientMovementProps) {
+  const { t } = useLocale();
   if (!admissionId) {
     return (
       <div className="surface-card p-6">
-        <p className="text-sm text-muted-foreground">
-          Select a patient to view movement history.
-        </p>
+        <p className="text-sm text-muted-foreground">{t("nurse.ui.selectAPatientToViewMovement")}</p>
       </div>
     );
   }
@@ -35,9 +35,7 @@ export default function PatientMovement({
   if (records.length === 0) {
     return (
       <div className="surface-card p-6">
-        <p className="text-sm text-muted-foreground">
-          No movement records available.
-        </p>
+        <p className="text-sm text-muted-foreground">{t("nurse.ui.noMovementRecordsAvailable")}</p>
       </div>
     );
   }
@@ -45,21 +43,19 @@ export default function PatientMovement({
   return (
     <section className="surface-card overflow-hidden">
       <div className="border-b border-border p-6">
-        <h2 className="text-xl font-semibold">Patient Movement</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Ward/bed transfer history for the selected patient.
-        </p>
+        <h2 className="text-xl font-semibold">{t("nurse.ui.patientMovement")}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">{t("nurse.ui.wardBedTransferHistoryForThe")}</p>
       </div>
 
       <div className="overflow-x-auto">
         <table className="min-w-full">
           <thead className="bg-muted">
             <tr>
-              <th className="px-4 py-3 text-left text-sm font-semibold">Time</th>
-              <th className="px-4 py-3 text-left text-sm font-semibold">From</th>
-              <th className="px-4 py-3 text-left text-sm font-semibold">To</th>
-              <th className="px-4 py-3 text-left text-sm font-semibold">Reason</th>
-              <th className="px-4 py-3 text-left text-sm font-semibold">Moved By</th>
+              <th className="px-4 py-3 text-left text-sm font-semibold">{t("common.ui.time")}</th>
+              <th className="px-4 py-3 text-left text-sm font-semibold">{t("lab.mis.from")}</th>
+              <th className="px-4 py-3 text-left text-sm font-semibold">{t("lab.mis.to")}</th>
+              <th className="px-4 py-3 text-left text-sm font-semibold">{t("inventory.adjustment.reason")}</th>
+              <th className="px-4 py-3 text-left text-sm font-semibold">{t("nurse.ui.movedBy")}</th>
             </tr>
           </thead>
 

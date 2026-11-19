@@ -10,6 +10,7 @@ import {
   X,
 } from "lucide-react";
 import type { ClinicalOrderSet } from "../types";
+import { useLocale } from "@/lib/i18n";
 
 interface ClinicalOrderSetsModalProps {
   isOpen: boolean;
@@ -22,6 +23,7 @@ export function ClinicalOrderSetsModal({
   onClose,
   orderSets,
 }: ClinicalOrderSetsModalProps) {
+  const { t } = useLocale();
   const [selectedSet, setSelectedSet] = useState<ClinicalOrderSet | null>(
     orderSets[0] || null
   );
@@ -33,8 +35,8 @@ export function ClinicalOrderSetsModal({
           <div className="flex items-center gap-2">
             <Layers className="h-5 w-5 text-primary" />
             <div>
-              <h3 className="text-lg font-bold text-card-foreground">Clinical Order Sets</h3>
-              <p className="text-xs text-muted-foreground">Standardized multi-speciality clinical pathways & bundles</p>
+              <h3 className="text-lg font-bold text-card-foreground">{t("forms.ui.clinicalOrderSets")}</h3>
+              <p className="text-xs text-muted-foreground">{t("forms.ui.standardizedMultiSpecialityClinicalPathwaysBundles")}</p>
             </div>
           </div>
           <button
@@ -45,13 +47,11 @@ export function ClinicalOrderSetsModal({
           </button>
         </div>
 
-        <p role="status" className="mt-4 text-sm">Preview only. No orders are placed here. Use the individual clinical order workflow until catalogue mappings are approved.</p>
+        <p role="status" className="mt-4 text-sm">{t("forms.ui.previewOnlyNoOrdersArePlaced")}</p>
           <div className="mt-4 grid grid-cols-1 md:grid-cols-5 gap-4">
             {/* List of sets */}
             <div className="md:col-span-2 space-y-2 border-r border-border pr-2">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground block mb-1">
-                Select Protocol
-              </span>
+              <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground block mb-1">{t("forms.ui.selectProtocol")}</span>
               {orderSets.map((os) => (
                 <button
                   key={os.id}
@@ -64,9 +64,7 @@ export function ClinicalOrderSetsModal({
                 >
                   <div>
                     <div className="font-bold text-foreground">{os.title}</div>
-                    <div className="text-[10px] text-muted-foreground uppercase font-mono mt-0.5">
-                      {os.category} • {os.orders.length} items
-                    </div>
+                    <div className="text-[10px] text-muted-foreground uppercase font-mono mt-0.5">{t("forms.ui.categoryCountItems", { category: os.category, count: os.orders.length })}</div>
                   </div>
                   <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
                 </button>
@@ -78,11 +76,8 @@ export function ClinicalOrderSetsModal({
               {selectedSet ? (
                 <>
                   <div>
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground block">
-                      Bundle Preview: {selectedSet.title}
-                    </span>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      Code: <span className="font-mono text-primary font-bold">{selectedSet.code}</span>
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground block">{t("forms.ui.bundlePreviewTitle", { title: selectedSet.title })}</span>
+                    <p className="text-xs text-muted-foreground mt-0.5">{t("forms.ui.code")}{" "}<span className="font-mono text-primary font-bold">{selectedSet.code}</span>
                     </p>
                   </div>
 
@@ -120,16 +115,12 @@ export function ClinicalOrderSetsModal({
                       type="button"
                       onClick={onClose}
                       className="rounded-xl border border-border px-3.5 py-2 text-xs font-semibold text-muted-foreground hover:bg-muted transition-colors"
-                    >
-                      Cancel
-                    </button>
+                    >{t("common.cancel")}</button>
 
                   </div>
                 </>
               ) : (
-                <div className="text-center py-12 text-muted-foreground text-xs">
-                  Select an order set on the left to preview bundled items.
-                </div>
+                <div className="text-center py-12 text-muted-foreground text-xs">{t("forms.ui.selectAnOrderSetOnThe")}</div>
               )}
             </div>
           </div>

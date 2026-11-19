@@ -9,7 +9,7 @@ import Typography from "@mui/material/Typography";
 
 import { Modal } from "@/components/ui/Modal";
 import { meridian } from "@/styles/theme";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 import { PAYMENT_MODES, paymentModeLabel } from "../lib/labels";
 import { extractValidationErrors } from "../lib/errors";
 import { toMoney } from "../lib/money";
@@ -50,13 +50,13 @@ export function CollectPaymentModal({
     setErrorMessage(null);
 
     if (amount <= 0) {
-      setFieldErrors({ amount: "Amount must be greater than ₹0.00" });
-      setErrorMessage("Please enter an amount greater than ₹0.00");
+      setFieldErrors({ amount: translate("billing.collect.errAmountPositive") });
+      setErrorMessage(translate("billing.collect.errEnterAmount"));
       return;
     }
     if (amount > balanceDue + 0.001) {
-      setFieldErrors({ amount: `Amount cannot exceed balance due of ₹${balanceDue.toFixed(2)}` });
-      setErrorMessage(`Amount cannot exceed the remaining balance of ₹${balanceDue.toFixed(2)}`);
+      setFieldErrors({ amount: translate("billing.msg.amountCannotExceedBalanceDueOf", undefined, { value: balanceDue.toFixed(2) }) });
+      setErrorMessage(translate("billing.msg.amountCannotExceedTheRemainingBalance", undefined, { value: balanceDue.toFixed(2) }));
       return;
     }
 
@@ -70,7 +70,7 @@ export function CollectPaymentModal({
     } catch (err) {
       const extracted = extractValidationErrors(err);
       setFieldErrors(extracted.fieldErrors);
-      setErrorMessage(extracted.summary || (err instanceof Error ? err.message : "Payment failed"));
+      setErrorMessage(extracted.summary || (err instanceof Error ? err.message : translate("billing.collect.paymentFailed")));
     }
   };
 
@@ -120,7 +120,7 @@ export function CollectPaymentModal({
           size="small"
           value={amount}
           error={Boolean(fieldErrors.amount)}
-          helperText={fieldErrors.amount || `Balance due: ₹${balanceDue.toFixed(2)}`}
+          helperText={fieldErrors.amount || translate("billing.msg.balanceDueValue", undefined, { value: balanceDue.toFixed(2) })}
           onChange={(e) => {
             setAmount(Number(e.target.value) || 0);
             if (fieldErrors.amount) {

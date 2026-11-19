@@ -19,6 +19,7 @@ import {
 import { setAccessToken } from "@/lib/api";
 import { idleTimeoutMs, sessionExpiredPath } from "@/lib/session-policy.mjs";
 import { toast } from "@/components/ui/toast";
+import { translate } from "@/lib/i18n";
 
 type AuthContextValue = {
   user: AuthUser | null;
@@ -133,7 +134,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       window.clearTimeout(warningTimer);
       window.clearTimeout(expiryTimer);
       warningTimer = window.setTimeout(() => {
-        toast.warning("Session expiring", "Save your work or continue activity to stay signed in.");
+        toast.warning(translate("common.msg.sessionExpiring"), translate("common.msg.saveYourWorkOrContinueActivity"));
       }, timeout - warningLead);
       expiryTimer = window.setTimeout(expire, timeout);
     };

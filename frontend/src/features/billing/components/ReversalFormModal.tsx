@@ -12,6 +12,7 @@ import { formatINR } from "../lib/formatters";
 import { extractValidationErrors } from "../lib/errors";
 import { fromMoney, round2, toMoney } from "../lib/money";
 import type { CreateRefundInput, PaymentWithRefunds } from "../types";
+import { useLocale, translate } from "@/lib/i18n";
 
 type Props = {
   open: boolean;
@@ -22,6 +23,7 @@ type Props = {
 };
 
 export function ReversalFormModal({ open, payment, busy, onClose, onSubmit }: Props) {
+  const { t } = useLocale();
   const maxRefund = useMemo(() => {
     if (!payment) return 0;
     const already = payment.refunds.reduce((s, r) => s + fromMoney(r.amount), 0);
@@ -50,18 +52,18 @@ export function ReversalFormModal({ open, payment, busy, onClose, onSubmit }: Pr
 
     const trimmedReason = reason.trim();
     if (!trimmedReason) {
-      setFieldErrors((prev) => ({ ...prev, reason: "A reversal reason is required." }));
-      setErrorMessage("Please enter a reason for the reversal.");
+      setFieldErrors((prev) => ({ ...prev, reason: translate("billing.msg.reversalReasonRequired") }));
+      setErrorMessage(translate("billing.msg.pleaseEnterAReasonForThe"));
       return;
     }
     if (amount <= 0) {
-      setFieldErrors((prev) => ({ ...prev, amount: "Refund amount must be greater than ₹0.00" }));
-      setErrorMessage("Please enter an amount greater than ₹0.00");
+      setFieldErrors((prev) => ({ ...prev, amount: translate("billing.msg.refundAmountMustBeGreaterThan") }));
+      setErrorMessage(translate("billing.collect.errEnterAmount"));
       return;
     }
     if (amount > maxRefund + 0.001) {
-      setFieldErrors((prev) => ({ ...prev, amount: `Refund cannot exceed ${formatINR(maxRefund)}` }));
-      setErrorMessage(`Refund amount cannot exceed the maximum reversible amount of ${formatINR(maxRefund)}`);
+      setFieldErrors((prev) => ({ ...prev, amount: translate("billing.msg.refundCannotExceedMaxrefund", undefined, { maxRefund: formatINR(maxRefund) }) }));
+      setErrorMessage(translate("billing.msg.refundAmountCannotExceedTheMaximum", undefined, { maxRefund: formatINR(maxRefund) }));
       return;
     }
 
@@ -74,7 +76,7 @@ export function ReversalFormModal({ open, payment, busy, onClose, onSubmit }: Pr
     } catch (err) {
       const extracted = extractValidationErrors(err);
       setFieldErrors(extracted.fieldErrors);
-      setErrorMessage(extracted.summary || (err instanceof Error ? err.message : "Reversal failed"));
+      setErrorMessage(extracted.summary || (err instanceof Error ? err.message : translate("billing.msg.reversalFailed")));
     }
   };
 
@@ -82,23 +84,19 @@ export function ReversalFormModal({ open, payment, busy, onClose, onSubmit }: Pr
     <Modal
       open={open}
       onClose={onClose}
-      title="Reverse payment"
+      title={t("billing.ui.reversePayment")}
       size="sm"
       loading={busy}
       actions={
         <>
-          <Button onClick={onClose} sx={{ textTransform: "none" }} disabled={busy}>
-            Cancel
-          </Button>
+          <Button onClick={onClose} sx={{ textTransform: "none" }} disabled={busy}>{t("common.cancel")}</Button>
           <Button
             variant="contained"
             color="error"
             onClick={() => void handleSave()}
             disabled={busy}
             sx={{ textTransform: "none", fontWeight: 600, borderRadius: "10px" }}
-          >
-            Confirm reversal
-          </Button>
+          >{t("billing.ui.confirmReversal")}</Button>
         </>
       }
     >
@@ -119,17 +117,14 @@ export function ReversalFormModal({ open, payment, busy, onClose, onSubmit }: Pr
             {errorMessage}
           </Typography>
         ) : null}
-        <Typography sx={{ fontSize: "0.875rem", color: meridian.textSecondary }}>
-          Original receipt <strong>{payment.receipt_number}</strong> stays immutable. A separate
-          refund row (RFD-…) will be created.
-        </Typography>
+        <Typography sx={{ fontSize: "0.875rem", color: meridian.textSecondary }}>{t("billing.ui.originalReceipt")}{" "}<strong>{payment.receipt_number}</strong>{" "}{t("billing.ui.staysImmutableASeparateRefundRow")}</Typography>
         <TextField
           type="number"
-          label="Refund amount (₹)"
+          label={t("billing.ui.refundAmount")}
           size="small"
           value={amount}
           error={Boolean(fieldErrors.amount)}
-          helperText={fieldErrors.amount || `Max reversible: ${formatINR(maxRefund)}`}
+          helperText={fieldErrors.amount || translate("billing.msg.maxReversibleMaxrefund", undefined, { maxRefund: formatINR(maxRefund) })}
           onChange={(e) => {
             setAmount(Number(e.target.value) || 0);
             if (fieldErrors.amount) {
@@ -140,7 +135,7 @@ export function ReversalFormModal({ open, payment, busy, onClose, onSubmit }: Pr
           fullWidth
         />
         <TextField
-          label="Reason"
+          label={t("inventory.adjustment.reason")}
           size="small"
           value={reason}
           error={Boolean(fieldErrors.reason)}
@@ -154,7 +149,7 @@ export function ReversalFormModal({ open, payment, busy, onClose, onSubmit }: Pr
           fullWidth
           multiline
           minRows={2}
-          helperText={fieldErrors.reason || "Required — refunds.reason"}
+          helperText={fieldErrors.reason || t("billing.ui.requiredRefundsReason")}
         />
       </Stack>
     </Modal>

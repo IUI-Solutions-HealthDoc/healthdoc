@@ -13,8 +13,8 @@ export const addProcedureAssistanceSchema = z.object({
 
   ot_schedule_id: z.string().optional(),
 
-  performed_by: z.string().uuid(),
-  assisted_by: z.string().uuid().optional(),
+  performed_by: z.guid(),
+  assisted_by: z.guid().optional(),
 
   started_at: z.string().min(1),
   ended_at: z.string().optional(),

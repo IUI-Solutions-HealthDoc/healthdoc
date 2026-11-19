@@ -30,6 +30,25 @@ async def ping() -> dict:
     return {"module": "ot", "status": "ok"}
 
 
+@router.get(
+    "/candidate-visits",
+    dependencies=[Depends(require_roles(*_OT_ROLES))],
+    summary="Open visits a theatre case can be booked against",
+)
+async def list_ot_candidate_visits(
+    current_db_user: CurrentDbUser,
+    q: str = Query(..., min_length=2, max_length=80),
+    db: AsyncSession = Depends(get_db),
+) -> list[dict]:
+    """The Schedule form had no patient field and sent fixed placeholder ids,
+    so every booking failed with "record not found" (QA 17 Oct 2026)."""
+    from app.admissions.schemas import AdmittableVisitOut
+    from app.admissions.service import find_admittable_visits
+
+    rows = await find_admittable_visits(db, facility_id=current_db_user.facility_id, q=q, include_admitted=True)
+    return [AdmittableVisitOut(**row).model_dump(mode="json") for row in rows]
+
+
 @router.post(
     "/schedules",
     response_model=OtScheduleOut,

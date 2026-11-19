@@ -18,6 +18,7 @@ import {
   addProcedureAssistanceSchema,
   AddProcedureAssistanceSchema,
 } from "./validation";
+import { useLocale } from "@/lib/i18n";
 
 export default function AddProcedureAssistanceForm({
   encounterId,
@@ -25,6 +26,7 @@ export default function AddProcedureAssistanceForm({
   assistedBy,
   isSubmitting = false,
 }: AddProcedureAssistanceFormProps) {
+  const { t } = useLocale();
   const {
     register,
     reset,
@@ -61,83 +63,81 @@ export default function AddProcedureAssistanceForm({
 
   return (
     <FormSection
-      title="Procedure Assistance"
-      description="Procedure-assistance entry is not available in this release."
+      title={t("nurse.ui.procedureAssistance")}
+      description={t("nurse.ui.procedureAssistanceEntryIsNotAvailable")}
     >
-      <p className="mb-4 rounded-md border border-border bg-muted p-3 text-sm text-muted-foreground">
-        Use the doctor&apos;s procedure order for bedside documentation.
-      </p>
+      <p className="mb-4 rounded-md border border-border bg-muted p-3 text-sm text-muted-foreground">{t("nurse.ui.useTheDoctorSProcedureOrder")}</p>
       <form onSubmit={(e) => e.preventDefault()} className="pointer-events-none space-y-6 opacity-50">
         <div className="grid gap-5 md:grid-cols-2">
           <TextField
-            label="Procedure Name"
-            placeholder="Wound dressing, catheterization, etc."
+            label={t("nurse.ui.procedureName")}
+            placeholder={t("nurse.ui.woundDressingCatheterizationEtc")}
             registration={register("procedure_name")}
             error={errors.procedure_name}
           />
 
           <SelectField
-            label="Setting"
+            label={t("nurse.ui.setting")}
             options={SETTINGS.map((s) => ({ label: s.label, value: s.value }))}
             registration={register("setting")}
             error={errors.setting}
           />
 
           <TextField
-            label="Performed By (Doctor ID)"
-            placeholder="Doctor's user UUID"
+            label={t("nurse.ui.performedByDoctorId")}
+            placeholder={t("nurse.ui.doctorSUserUuid")}
             registration={register("performed_by")}
             error={errors.performed_by}
           />
 
           {setting === "ot" && (
             <TextField
-              label="OT Schedule ID"
-              placeholder="Only applicable for Operation Theatre setting"
+              label={t("nurse.ui.otScheduleId")}
+              placeholder={t("nurse.ui.onlyApplicableForOperationTheatreSetting")}
               registration={register("ot_schedule_id")}
               error={errors.ot_schedule_id}
             />
           )}
 
           <DateTimeField
-            label="Started At"
+            label={t("nurse.ui.startedAt")}
             registration={register("started_at")}
             error={errors.started_at}
           />
 
           <DateTimeField
-            label="Ended At (optional)"
+            label={t("nurse.ui.endedAtOptional")}
             registration={register("ended_at")}
             error={errors.ended_at}
           />
 
           <TextField
-            label="Procedure Code (optional)"
-            placeholder="ICD-11 / SNOMED code"
+            label={t("nurse.ui.procedureCodeOptional")}
+            placeholder={t("nurse.ui.icd11SnomedCode")}
             registration={register("procedure_code")}
             error={errors.procedure_code}
           />
 
       
           <TextField
-            label="Code System (optional)"
-            placeholder="ICD-11, SNOMED-CT, etc."
+            label={t("nurse.ui.codeSystemOptional")}
+            placeholder={t("nurse.ui.icd11SnomedCtEtc")}
             registration={register("code_system")}
             error={errors.code_system}
           />
         </div>
 
         <TextAreaField
-          label="Outcome (optional)"
-          placeholder="Procedure outcome..."
+          label={t("nurse.ui.outcomeOptional")}
+          placeholder={t("nurse.ui.procedureOutcome")}
           rows={2}
           registration={register("outcome")}
           error={errors.outcome}
         />
 
         <TextAreaField
-          label="Complications (optional)"
-          placeholder="Any complications during the procedure..."
+          label={t("nurse.ui.complicationsOptional")}
+          placeholder={t("nurse.ui.anyComplicationsDuringTheProcedure")}
           rows={2}
           registration={register("complications")}
           error={errors.complications}
@@ -145,7 +145,7 @@ export default function AddProcedureAssistanceForm({
 
         <FormActions
           isSubmitting={isSubmitting}
-          submitLabel="Save Procedure Record"
+          submitLabel={t("nurse.ui.saveProcedureRecord")}
           resetLabel="Reset"
           onReset={handleReset}
         />

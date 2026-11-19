@@ -110,4 +110,6 @@ class DoctorReviewOut(BaseModel):
     signed_off_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    #: The reviewer's name: "Signed off by 29ef040e-…" (QA 16 Oct 2026).
+    reviewed_by_name: str | None = None
     model_config = {"from_attributes": True}

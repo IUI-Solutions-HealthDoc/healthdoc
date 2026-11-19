@@ -11,7 +11,7 @@ test("structured validation payloads never become user-facing JSON", () => {
   };
   const message = userFacingApiError(422, payload);
 
-  assert.equal(message, "Please check the highlighted fields and try again.");
+  assert.equal(message, "Email: check this value.");
   assert.doesNotMatch(message, /private|loc|input|\{|\[/);
 });
 
@@ -108,5 +108,75 @@ test("ABHA enrolment refusals name their cause instead of 'highlighted fields' o
   assert.equal(
     userFacingApiError(503, { code: "abdm_unavailable" }),
     "The service is temporarily unavailable. Try again shortly.",
+  );
+});
+
+test("HealthDoc's own refusal reaches the screen instead of generic copy", () => {
+  // QA 12 Oct 2026: both of these showed "check the highlighted fields" /
+  // "reload and try again" while the server had said exactly what was wrong.
+  assert.equal(
+    userFacingApiError(422, { detail: { code: "date_out_of_range", message: "Choose a date from today to 60 days ahead" } }),
+    "Choose a date from today to 60 days ahead",
+  );
+  assert.equal(
+    userFacingApiError(409, { detail: { code: "too_many_open_requests", message: "You already have 3 requests waiting for the hospital" } }),
+    "You already have 3 requests waiting for the hospital",
+  );
+});
+
+test("text relayed from ABDM or shaped like data is still never shown", () => {
+  assert.equal(
+    userFacingApiError(409, { detail: { code: "abdm_link_failed", message: "upstream private text" } }),
+    "This request conflicts with the record's current state. Reload and try again.",
+  );
+  assert.doesNotMatch(
+    userFacingApiError(409, { detail: { code: "some_conflict", message: "row {'id': 'x'} locked" } }),
+    /row|id|locked|\{/,
+  );
+  assert.doesNotMatch(userFacingApiError(500, { detail: { code: "x", message: "Plain words" } }), /Plain words/);
+});
+
+test("a model-level validation error names the rule, never the submitted value", () => {
+  const message = userFacingApiError(422, { detail: [{
+    type: "value_error", loc: ["body"], input: { full_name: "PRIVATE NAME" },
+    msg: "Value error, guardian_name and guardian_relationship are required for a patient under 18",
+  }] });
+  assert.equal(message, "Guardian name and guardian relationship are required for a patient under 18.");
+  assert.doesNotMatch(message, /PRIVATE/);
+});
+
+test("the bare 422 list api() passes is summarised, not replaced by generic copy", () => {
+  // QA 17 Oct 2026: every pydantic refusal (ANC weight, birth weight, vitals)
+  // read "check the highlighted fields" because api() passes error.message,
+  // which is the list itself, and only {detail: [...]} was read.
+  const message = userFacingApiError(422, [
+    { type: "greater_than_equal", loc: ["body", "weight_kg"], msg: "Input should be greater than or equal to 20", input: 15 },
+  ]);
+  assert.equal(message, "Weight kg: Input should be greater than or equal to 20.");
+});
+
+test("a code-only refusal is explained with its quantities, never its ids", () => {
+  const message = userFacingApiError(422, {
+    code: "insufficient_stock", prescription_item_id: "0b0e9c1e-7f7c-4a43-9d47-6c5bb1c0a111", requested: "9", short_by: "9",
+  });
+  assert.match(message, /Not enough stock: short by 9/);
+  assert.doesNotMatch(message, /0b0e9c1e|highlighted/);
+  assert.equal(userFacingApiError(422, { code: "invalid_performed_range" }), "Invalid performed range.");
+});
+
+test("HealthDoc's plain-string refusals are shown; ids and infrastructure text are not", () => {
+  assert.equal(
+    userFacingApiError(422, "Verifier must be different from the person who entered the result"),
+    "Verifier must be different from the person who entered the result.",
+  );
+  assert.equal(userFacingApiError(404, "maintenance_log_not_found"), "Maintenance log not found.");
+  assert.equal(
+    userFacingApiError(404, "Patient 0b0e9c1e-7f7c-4a43-9d47-6c5bb1c0a111 not found."),
+    "The requested record was not found.",
+  );
+  assert.equal(userFacingApiError(403, "Requires doctor role"), "You do not have permission to perform this action.");
+  assert.equal(
+    userFacingApiError(400, "Could not insert: DETAIL: Key (x)=(y) already exists"),
+    "Please check the highlighted fields and try again.",
   );
 });

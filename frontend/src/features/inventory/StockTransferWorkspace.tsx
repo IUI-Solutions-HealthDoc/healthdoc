@@ -81,23 +81,35 @@ export function StockTransferWorkspace() {
     void reload();
   }, [reload]);
 
+  // Focusing the box lists the catalogue; typing narrows it. A failed search
+  // said nothing and looked like an empty catalogue (QA 17 Oct 2026).
+  const [browsing, setBrowsing] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
   useEffect(() => {
     const q = term.trim();
-    if (q.length < 2) {
+    if (q.length === 1 || (q.length === 0 && !browsing)) {
       setMatches([]);
       return;
     }
     let cancelled = false;
     const timer = setTimeout(() => {
       searchMedicines(q)
-        .then((r) => !cancelled && setMatches(r.items))
-        .catch(() => !cancelled && setMatches([]));
+        .then((r) => {
+          if (cancelled) return;
+          setMatches(r.items);
+          setSearchError(r.items.length ? null : t("inventory.noItemsMatch"));
+        })
+        .catch((reason) => {
+          if (cancelled) return;
+          setMatches([]);
+          setSearchError(reason instanceof ApiError ? reason.message : t("inventory.errItemSearch"));
+        });
     }, 250);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [term]);
+  }, [term, browsing, t]);
 
   const addBatch = (item: MedicineSearchResult, batch: BatchAvailability) => {
     setLines((cur) =>
@@ -223,8 +235,10 @@ export function StockTransferWorkspace() {
             className="w-full rounded border border-gray-300 p-2 text-sm sm:max-w-sm"
             placeholder={t("inventory.transfer.searchPlaceholder")}
             value={term}
+            onFocus={() => setBrowsing(true)}
             onChange={(e) => setTerm(e.target.value)}
           />
+          {searchError ? <p className="mt-1 text-xs text-danger">{searchError}</p> : null}
           {matches.length > 0 && !picking ? (
             <ul className="mt-1 max-h-40 max-w-sm overflow-auto rounded border border-gray-200 text-sm">
               {matches.map((m) => (
@@ -263,9 +277,7 @@ export function StockTransferWorkspace() {
                         type="button"
                         className="w-full px-1 py-1 text-left hover:bg-gray-100"
                         onClick={() => addBatch(picking, b)}
-                      >
-                        {b.batch_number} · expires {b.expiry_date} · {b.quantity} on hand
-                      </button>
+                      >{t("inventory.ui.batchNumberExpiresExpiryDateQuantity", { batch_number: b.batch_number, expiry_date: b.expiry_date, quantity: b.quantity })}</button>
                     </li>
                   ))}
                 </ul>
@@ -290,7 +302,7 @@ export function StockTransferWorkspace() {
                   <div className="flex flex-wrap items-center gap-3">
                     <span className="flex-1">
                       {line.item_name}{" "}
-                      <span className="text-gray-600">· batch {line.batch_number}</span>
+                      <span className="text-gray-600">{t("inventory.ui.batchBatchNumber", { batch_number: line.batch_number })}</span>
                     </span>
                     <input
                       type="number" min="0" step="0.01" placeholder={t("inventory.po.qtyPlaceholder")}
@@ -363,9 +375,7 @@ export function StockTransferWorkspace() {
 
                 <ul className="mt-1 text-gray-600">
                   {transfer.items.map((item) => (
-                    <li key={item.id}>
-                      {item.item_name} · batch {item.batch_number} · {item.quantity}
-                    </li>
+                    <li key={item.id}>{t("inventory.ui.itemNameBatchBatchNumberQuantity", { item_name: item.item_name, batch_number: item.batch_number, quantity: item.quantity })}</li>
                   ))}
                 </ul>
 

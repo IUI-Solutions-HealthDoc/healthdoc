@@ -10,6 +10,7 @@ import {
   updateFacilityModule,
 } from "../api";
 import type { FacilityCapabilities, FacilityModule } from "../types";
+import { translate } from "@/lib/i18n";
 
 export function useFacilityModules() {
   const [modules, setModules] = useState<FacilityModule[]>([]);
@@ -33,7 +34,7 @@ export function useFacilityModules() {
     } catch (reason) {
       setModules([]);
       setCapabilities(null);
-      setError(getUserFacingError(reason, "Could not load facility modules."));
+      setError(getUserFacingError(reason, translate("admin.msg.couldNotLoadFacilityModules")));
     } finally {
       setLoading(false);
     }
@@ -56,9 +57,9 @@ export function useFacilityModules() {
           disabled_reason: is_enabled ? null : disabled_reason,
         });
         await refresh();
-        toast.success(is_enabled ? "Module enabled" : "Module disabled");
+        toast.success(is_enabled ? translate("admin.msg.moduleEnabled") : translate("admin.msg.moduleDisabled"));
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : "Update failed");
+        toast.error(e instanceof Error ? e.message : translate("admin.msg.updateFailed"));
       } finally {
         setBusyCode(null);
       }

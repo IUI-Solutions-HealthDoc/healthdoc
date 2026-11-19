@@ -428,21 +428,30 @@ async def list_audit_logs(
     date_to: datetime | None = None,
     page: int = 1,
     page_size: int = 20,
+    action: str | None = None,
 ) -> tuple[list[AuditLog], int]:
     """Paginated, most-recent-first (matches the BRIN/partition ordering
     on created_at). Returns (items, total) — same shape as
-    app/departments/service.py's list_departments()/list_rooms()."""
+    app/departments/service.py's list_departments()/list_rooms().
+
+    `action` narrows on the server. The viewer used to filter only the newest
+    page it had loaded, so Login/Logout showed nothing once those events were
+    older than the latest hundred rows (QA 17 Oct 2026).
+    """
     page = max(page, 1)
     page_size = _clamp_page_size(page_size)
     conditions = _audit_log_filters(
         facility_id=facility_id, user_id=user_id, patient_id=patient_id,
         resource_type=resource_type, date_from=date_from, date_to=date_to,
     )
-
-    total = await count_audit_logs(
-        db, facility_id=facility_id, user_id=user_id, patient_id=patient_id,
-        resource_type=resource_type, date_from=date_from, date_to=date_to,
-    )
+    if action:
+        conditions = [*conditions, AuditLog.action == action]
+        total = (await db.execute(select(func.count()).select_from(AuditLog).where(*conditions))).scalar_one()
+    else:
+        total = await count_audit_logs(
+            db, facility_id=facility_id, user_id=user_id, patient_id=patient_id,
+            resource_type=resource_type, date_from=date_from, date_to=date_to,
+        )
 
     q = (
         select(AuditLog)

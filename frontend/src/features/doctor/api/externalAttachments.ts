@@ -1,4 +1,5 @@
 import { api } from "@/lib/api";
+import { translate } from "@/lib/i18n";
 
 export interface ResultFile {
   id: string;
@@ -9,16 +10,16 @@ export interface ResultFile {
 
 function assertPatientFile(file: ResultFile, patientId: string, expectedId?: string) {
   if (!file?.id || file.patient_id !== patientId || file.erased_at || (expectedId && file.id !== expectedId)) {
-    throw new Error("Attachment does not match the current patient or is unavailable");
+    throw new Error(translate("doctor.msg.attachmentDoesNotMatchTheCurrent"));
   }
 }
 
 export function validateResultFile(file: File): string | null {
-  if (file.size === 0) return "Choose a non-empty report file.";
-  if (file.size > 25 * 1024 * 1024) return "The report must be 25 MB or smaller.";
+  if (file.size === 0) return translate("doctor.msg.chooseANonEmptyReportFile");
+  if (file.size > 25 * 1024 * 1024) return translate("doctor.msg.theReportMustBe25Mb");
   // Only these formats are offered here. Backend magic-byte validation remains
   // authoritative; an extension is not evidence that a file is safe to read.
-  if (!/\.(pdf|png|jpe?g)$/i.test(file.name)) return "Choose a PDF, PNG or JPEG report.";
+  if (!/\.(pdf|png|jpe?g)$/i.test(file.name)) return translate("doctor.msg.chooseAPdfPngOrJpeg");
   return null;
 }
 
@@ -45,7 +46,7 @@ export async function prepareResultDownload(fileId: string, patientId: string) {
   const localHttp = url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
   if ((url.protocol !== "https:" && !localHttp) || url.username || url.password ||
       !Number.isFinite(link.expires_in_seconds) || link.expires_in_seconds <= 0) {
-    throw new Error("The attachment download address is not safely configured");
+    throw new Error(translate("doctor.msg.theAttachmentDownloadAddressIsNot"));
   }
-  return { url: url.href, name: file.original_name || "Outside report", expiresAt: Date.now() + link.expires_in_seconds * 1000 };
+  return { url: url.href, name: file.original_name || translate("doctor.ui.outsideReport"), expiresAt: Date.now() + link.expires_in_seconds * 1000 };
 }

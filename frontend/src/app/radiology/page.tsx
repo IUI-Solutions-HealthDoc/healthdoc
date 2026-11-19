@@ -1,5 +1,6 @@
 "use client";
 
+import { PatientIdentityCell } from "@/components/common/PatientIdentityCell";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { ModuleCapabilityGate } from "@/components/common/ModuleCapabilityGate";
@@ -15,35 +16,75 @@ import {
   rescheduleScan,
   scheduleScan,
   signOffRadiologyReport,
-  uploadOrderAttachment,
-} from "@/features/radiology/api";
+  uploadOrderAttachment, radiologyStageCounts } from "@/features/radiology/api";
 import type {
   RadiologyAttachment,
   RadiologyOrderItem,
   RadiologyReport,
 } from "@/features/radiology/types";
-import { ApiError, downloadBlob, formatDateTime } from "@/lib/api";
-import { useLocale, type MessageKey } from "@/lib/i18n";
+import { ApiError, api, downloadBlob, formatDateTime } from "@/lib/api";
+import { useLocale, type MessageKey, translate } from "@/lib/i18n";
 import { useAuth } from "@/providers/auth-provider";
 import { Download, FileUp, Image as ImageIcon } from "lucide-react";
 
 const WORKFLOW: { status: string; labelKey: MessageKey; hint: string }[] = [
-  { status: "placed", labelKey: "radiology.filter.toSchedule", hint: "Ordered, not yet booked onto a machine" },
-  { status: "scheduled", labelKey: "radiology.filter.booked", hint: "Slot assigned; patient not yet imaged" },
-  { status: "scanned", labelKey: "radiology.filter.toReport", hint: "Imaged, awaiting a radiologist" },
-  { status: "reporting", labelKey: "radiology.filter.preliminary", hint: "Drafted, not signed off" },
-  { status: "released", labelKey: "radiology.filter.released", hint: "Signed and available to the ordering doctor" },
-  { status: "cancelled", labelKey: "radiology.filter.cancelled", hint: "Cancelled before imaging" },
+  { status: "placed", labelKey: "radiology.filter.toSchedule", get hint() { return translate("radiology.msg.orderedNotYetBookedOntoA"); } },
+  { status: "scheduled", labelKey: "radiology.filter.booked", get hint() { return translate("radiology.msg.slotAssignedPatientNotYetImaged"); } },
+  { status: "scanned", labelKey: "radiology.filter.toReport", get hint() { return translate("radiology.msg.imagedAwaitingARadiologist"); } },
+  { status: "reporting", labelKey: "radiology.filter.preliminary", get hint() { return translate("radiology.msg.draftedNotSignedOff"); } },
+  { status: "released", labelKey: "radiology.filter.released", get hint() { return translate("radiology.msg.signedAndAvailableToTheOrdering"); } },
+  { status: "cancelled", labelKey: "radiology.filter.cancelled", get hint() { return translate("radiology.msg.cancelledBeforeImaging"); } },
 ];
 
 const RADIOLOGY_COLUMNS: MessageKey[] = [
   "radiology.col.accession",
+  "field.patient",
   "radiology.col.scan",
   "radiology.col.slot",
   "radiology.col.status",
 ];
 
+interface ImagingMachine {
+  id: string;
+  name: string;
+  category: string;
+  status: string;
+  asset_tag: string | null;
+}
+
+/**
+ * The machine, picked from the equipment register when the facility keeps
+ * one, so "xr-01" and "XR-01" cannot become two machines (QA 12 Oct 2026).
+ * A machine that is down or in maintenance is shown but cannot be chosen.
+ * Without registered imaging equipment the field stays free text.
+ */
+function MachinePicker({ machines, value, onChange, placeholder }: {
+  machines: ImagingMachine[] | null;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+}) {
+  const { t } = useLocale();
+  if (machines && machines.length > 0) {
+    return (
+      <select className="w-full rounded-md border border-border px-3 py-2" value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">{t("radiology.ui.chooseMachine")}</option>
+        {machines.map((m) => (
+          <option key={m.id} value={m.name} disabled={m.status !== "working"}>
+            {m.name}{m.asset_tag ? ` (${m.asset_tag})` : ""}{m.status !== "working" ? ` — ${m.status}` : ""}
+          </option>
+        ))}
+      </select>
+    );
+  }
+  return (
+    <input maxLength={50} className="w-full rounded-md border border-border px-3 py-2" value={value}
+      onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />
+  );
+}
+
 function StatusChip({ status }: { status: string }) {
+  const { t } = useLocale();
   const tone =
     status === "released"
       ? "bg-success-muted text-success"
@@ -52,7 +93,14 @@ function StatusChip({ status }: { status: string }) {
         : status === "cancelled"
           ? "bg-danger-muted text-danger"
           : "bg-muted text-muted-foreground";
-  return <span className={`rounded-full px-2 py-1 text-xs font-medium ${tone}`}>{status}</span>;
+  // The same words as the stage tabs above: the chip said "reporting" while
+  // the tab said "Preliminary" for the same scan (QA 12 Oct 2026).
+  const stage = WORKFLOW.find((s) => s.status === status);
+  return (
+    <span className={`rounded-full px-2 py-1 text-xs font-medium ${tone}`}>
+      {stage ? t(stage.labelKey) : status.replaceAll("_", " ")}
+    </span>
+  );
 }
 
 function RadiologyPageContent() {
@@ -73,6 +121,12 @@ function RadiologyPageContent() {
 
   const [slot, setSlot] = useState("");
   const [machine, setMachine] = useState("");
+  const [machines, setMachines] = useState<ImagingMachine[] | null>(null);
+  useEffect(() => {
+    api<ImagingMachine[]>("/equipment")
+      .then((rows) => setMachines(rows.filter((m) => m.category === "imaging" && m.status !== "retired")))
+      .catch(() => setMachines([]));
+  }, []);
   const [findings, setFindings] = useState("");
   const [impression, setImpression] = useState("");
   const [pacsStudyUid, setPacsStudyUid] = useState("");
@@ -255,11 +309,18 @@ function RadiologyPageContent() {
     }
   }, [loadFhir, selected]);
 
-  const counts = useMemo(() => {
-    const byStatus: Record<string, number> = {};
-    for (const item of items) byStatus[item.status] = (byStatus[item.status] ?? 0) + 1;
-    return byStatus;
+  // Counted per stage, not from the rows on screen: those are already
+  // filtered, so every other tab's count vanished (QA 12 Oct 2026).
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  useEffect(() => {
+    radiologyStageCounts(WORKFLOW.map((stage) => stage.status))
+      .then(setCounts)
+      .catch(() => setCounts({}));
   }, [items]);
+  // A scan from another stage must not stay open under "Nothing in this stage".
+  useEffect(() => {
+    if (selected && !items.some((item) => item.id === selected.id)) setSelected(null);
+  }, [items, selected]);
 
   const currentReport = reports.find((r) => r.is_current) ?? null;
 
@@ -326,6 +387,7 @@ function RadiologyPageContent() {
                     }`}
                   >
                     <td className="px-4 py-3 font-mono text-xs">{item.accession_number}</td>
+                    <td className="px-4 py-3 text-sm"><PatientIdentityCell row={item} /></td>
                     <td className="px-4 py-3">
                       <div className="text-sm font-medium">{item.scan_type}</div>
                       <div className="text-xs uppercase text-muted-foreground">
@@ -358,6 +420,7 @@ function RadiologyPageContent() {
                 <p className="text-xs text-muted-foreground">
                   {selected.accession_number} · <StatusChip status={selected.status} />
                 </p>
+                <p className="mt-1 text-sm"><PatientIdentityCell row={selected} /></p>
               </div>
 
               {!canOperate && (selected.status === "placed" || selected.status === "scheduled") && (
@@ -380,12 +443,8 @@ function RadiologyPageContent() {
                   </label>
                   <label className="block space-y-1 text-sm">
                     <span className="text-muted-foreground">{t("radiology.machine")}</span>
-                    <input
-                      className="w-full rounded-md border border-border px-3 py-2"
-                      value={machine}
-                      onChange={(e) => setMachine(e.target.value)}
-                      placeholder={t("radiology.machinePlaceholder")}
-                    />
+                    <MachinePicker machines={machines} value={machine} onChange={setMachine}
+                      placeholder={t("radiology.machinePlaceholder")} />
                   </label>
                   <button
                     type="button"
@@ -429,9 +488,9 @@ function RadiologyPageContent() {
                     {t("radiology.markScanComplete")}
                   </button>
                   <div className="space-y-3 border-t border-border pt-3">
-                    <p className="text-sm font-medium">Reschedule</p>
+                    <p className="text-sm font-medium">{t("receptionist.reschedule")}</p>
                     <label className="block space-y-1 text-sm">
-                      <span className="text-muted-foreground">New slot</span>
+                      <span className="text-muted-foreground">{t("radiology.ui.newSlot")}</span>
                       <input
                         type="datetime-local"
                         className="w-full rounded-md border border-border px-3 py-2"
@@ -440,16 +499,11 @@ function RadiologyPageContent() {
                       />
                     </label>
                     <label className="block space-y-1 text-sm">
-                      <span className="text-muted-foreground">Machine</span>
-                      <input
-                        maxLength={50}
-                        className="w-full rounded-md border border-border px-3 py-2"
-                        value={rescheduleMachine}
-                        onChange={(event) => setRescheduleMachine(event.target.value)}
-                      />
+                      <span className="text-muted-foreground">{t("radiology.machine")}</span>
+                      <MachinePicker machines={machines} value={rescheduleMachine} onChange={setRescheduleMachine} />
                     </label>
                     <label className="block space-y-1 text-sm">
-                      <span className="text-muted-foreground">Reason</span>
+                      <span className="text-muted-foreground">{t("inventory.adjustment.reason")}</span>
                       <input
                         minLength={5}
                         maxLength={500}
@@ -521,15 +575,13 @@ function RadiologyPageContent() {
                 selected.status === "released") && (
                 <div className="space-y-3">
                   <p className="text-sm font-medium">
-                    {selected.status === "scanned" ? "Draft report" : "Report"}
+                    {selected.status === "scanned" ? t("radiology.ui.draftReport") : t("radiology.ui.report")}
                   </p>
                   {!canReport && selected.status !== "released" && (
-                    <p className="text-sm text-muted-foreground">
-                      Awaiting a doctor&apos;s report and sign-off. Technicians can view reports here.
-                    </p>
+                    <p className="text-sm text-muted-foreground">{t("radiology.ui.awaitingADoctorSReportAnd")}</p>
                   )}
                   <label className="block space-y-1 text-sm">
-                    <span className="text-muted-foreground">Findings</span>
+                    <span className="text-muted-foreground">{t("radiology.ui.findings")}</span>
                     <textarea
                       rows={5}
                       className="w-full rounded-md border border-border px-3 py-2"
@@ -539,7 +591,7 @@ function RadiologyPageContent() {
                     />
                   </label>
                   <label className="block space-y-1 text-sm">
-                    <span className="text-muted-foreground">Impression</span>
+                    <span className="text-muted-foreground">{t("radiology.ui.impression")}</span>
                     <textarea
                       rows={3}
                       className="w-full rounded-md border border-border px-3 py-2"
@@ -549,13 +601,13 @@ function RadiologyPageContent() {
                     />
                   </label>
                   <label className="block space-y-1 text-sm">
-                    <span className="text-muted-foreground">PACS study UID</span>
+                    <span className="text-muted-foreground">{t("radiology.ui.pacsStudyUid")}</span>
                     <input
                       className="w-full rounded-md border border-border px-3 py-2 font-mono text-xs"
                       value={pacsStudyUid}
                       onChange={(e) => setPacsStudyUid(e.target.value)}
                       disabled={!canReport || selected.status === "released"}
-                      placeholder="Optional DICOM study instance UID"
+                      placeholder={t("radiology.ui.optionalDicomStudyInstanceUid")}
                     />
                   </label>
 
@@ -601,7 +653,7 @@ function RadiologyPageContent() {
 
               {reports.length > 0 && (
                 <div className="border-t border-border pt-4">
-                  <p className="text-sm font-medium">Versions</p>
+                  <p className="text-sm font-medium">{t("radiology.ui.versions")}</p>
                   <ul className="mt-2 space-y-1">
                     {reports.map((report) => (
                       <li key={report.id} className="text-xs text-muted-foreground">
@@ -612,9 +664,7 @@ function RadiologyPageContent() {
                     ))}
                   </ul>
                   {currentReport && !currentReport.is_current && (
-                    <p className="mt-2 text-xs text-warning">
-                      You are viewing a superseded version.
-                    </p>
+                    <p className="mt-2 text-xs text-warning">{t("radiology.ui.youAreViewingASupersededVersion")}</p>
                   )}
                 </div>
               )}
@@ -683,23 +733,21 @@ function RadiologyPageContent() {
                         <div className="min-w-0 flex-1">
                           <p className="truncate font-medium text-foreground">{att.file_name}</p>
                           <div className="flex items-center gap-2 text-[11px] text-muted-foreground mt-0.5">
-                            <span>{(att.file_size_bytes / 1024).toFixed(1)} KB</span>
+                            <span>{t("radiology.ui.valueKb", { value: (att.file_size_bytes / 1024).toFixed(1) })}</span>
                             <span>•</span>
                             <span className="truncate max-w-[120px]">{att.mime_type}</span>
                             <span>•</span>
-                            <span className="font-mono text-[10px]" title={`SHA-256: ${att.checksum_sha256}`}>
-                              SHA: {att.checksum_sha256.slice(0, 8)}…
-                            </span>
+                            <span className="font-mono text-[10px]" title={`SHA-256: ${att.checksum_sha256}`}>{t("radiology.ui.shaValue", { value: att.checksum_sha256.slice(0, 8) })}</span>
                           </div>
                         </div>
                         <button
                           type="button"
                           onClick={() => void handleDownloadAttachment(att)}
                           className="flex items-center gap-1 rounded bg-secondary px-2 py-1 text-xs text-secondary-foreground hover:bg-secondary/80"
-                          title="Download attachment"
+                          title={t("radiology.ui.downloadAttachment")}
                         >
                           <Download className="h-3 w-3" />
-                          <span>Get</span>
+                          <span>{t("radiology.ui.get")}</span>
                         </button>
                       </div>
                     ))}
@@ -708,9 +756,7 @@ function RadiologyPageContent() {
               </div>
 
               {selected.pacs_study_uid && (
-                <p className="border-t border-border pt-4 font-mono text-xs text-muted-foreground">
-                  PACS study UID: {selected.pacs_study_uid}
-                </p>
+                <p className="border-t border-border pt-4 font-mono text-xs text-muted-foreground">{t("radiology.ui.pacsStudyUidPacsStudyUid", { pacs_study_uid: selected.pacs_study_uid })}</p>
               )}
             </>
           )}

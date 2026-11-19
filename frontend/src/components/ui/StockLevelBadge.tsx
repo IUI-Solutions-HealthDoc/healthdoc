@@ -2,6 +2,7 @@
 
 import Chip from "@mui/material/Chip";
 import { meridian } from "@/styles/theme";
+import { translate } from "@/lib/i18n";
 
 export interface StockLevelBadgeProps {
   quantity: number;
@@ -21,12 +22,12 @@ export default function StockLevelBadge({
   let border: string = "rgb(22 101 52 / 0.18)";
 
   if (quantity === 0) {
-    label = "Out of Stock";
+    label = translate("common.msg.outOfStock");
     bg = "#fee2e2";
     fg = meridian.danger;
     border = "rgb(185 28 28 / 0.18)";
   } else if (quantity <= minimumQuantity) {
-    label = "Low Stock";
+    label = translate("common.msg.lowStock");
     bg = "#fef3c7";
     fg = meridian.warning;
     border = "rgb(180 83 9 / 0.2)";

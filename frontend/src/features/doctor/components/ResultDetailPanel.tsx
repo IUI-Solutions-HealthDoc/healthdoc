@@ -23,6 +23,7 @@ import { CriticalBadge } from "./CriticalBadge";
 import { LabResultViewer } from "./LabResultViewer";
 import { RadiologyReportViewer } from "./RadiologyReportViewer";
 import { ResultSignOffModal } from "./ResultSignOffModal";
+import { useLocale } from "@/lib/i18n";
 
 export interface ResultDetailPanelProps {
   item: ResultWorklistItem | null;
@@ -53,6 +54,7 @@ export function ResultDetailPanel({
   onSign,
   onMarkReviewed,
 }: ResultDetailPanelProps) {
+  const { t } = useLocale();
   const [signOpen, setSignOpen] = React.useState(false);
   const alreadySigned = review?.status === "signed_off";
 
@@ -61,9 +63,7 @@ export function ResultDetailPanel({
       <Box sx={doctorPanelSx}>
         <Typography
           sx={{ color: meridian.textSecondary, fontSize: "0.875rem", textAlign: "center", py: 3 }}
-        >
-          Select a result from the list to review it.
-        </Typography>
+        >{t("doctor.ui.selectAResultFromTheList")}</Typography>
       </Box>
     );
   }
@@ -79,22 +79,18 @@ export function ResultDetailPanel({
           <Stack direction="row" spacing={1} sx={{ alignItems: "center", flexWrap: "wrap", gap: 1 }}>
             <Typography sx={{ fontSize: "1.0625rem", fontWeight: 700 }}>{item.test_name}</Typography>
             <Badge variant="outline">
-              {item.order_type === "lab" ? "Lab" : (item.modality?.toUpperCase() ?? "Radiology")}
+              {item.order_type === "lab" ? t("doctor.orderType.lab") : (item.modality?.toUpperCase() ?? t("sidebar.radiology"))}
             </Badge>
             {status && <StatusChip status={status} />}
             {false && <CriticalBadge />}
           </Stack>
-          <Typography sx={{ fontSize: "0.8125rem", color: meridian.textSecondary, mt: 0.5 }}>
-            {item.patient_name} · UHID {item.uhid} · {item.accession_number}
-          </Typography>
+          <Typography sx={{ fontSize: "0.8125rem", color: meridian.textSecondary, mt: 0.5 }}>{t("doctor.ui.patientNameUhidUhidAccessionNumber", { patient_name: item.patient_name, uhid: item.uhid, accession_number: item.accession_number })}</Typography>
         </Box>
       </Stack>
 
       {versions.length > 1 && (
         <Stack direction="row" spacing={1} sx={{ alignItems: "center", flexWrap: "wrap", gap: 1 }}>
-          <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary, mr: 0.5 }}>
-            Versions
-          </Typography>
+          <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary, mr: 0.5 }}>{t("radiology.ui.versions")}</Typography>
           {versions.map((v) => (
             <Button
               key={v.version}
@@ -120,10 +116,7 @@ export function ResultDetailPanel({
             border: `1px solid ${meridian.border}`,
           }}
         >
-          <Typography sx={{ fontSize: "0.8125rem", color: meridian.textSecondary }}>
-            Viewing a superseded version. Corrections create a new version — the previous one is
-            never edited.
-          </Typography>
+          <Typography sx={{ fontSize: "0.8125rem", color: meridian.textSecondary }}>{t("doctor.ui.viewingASupersededVersionCorrectionsCreate")}</Typography>
         </Box>
       )}
 
@@ -134,8 +127,7 @@ export function ResultDetailPanel({
           <CircularProgress size={22} />
         </Stack>
       ) : !item.result_status ? (
-        <Typography sx={{ fontSize: "0.875rem", color: meridian.textSecondary, py: 2 }}>
-          No result has been reported yet. Current order status:{" "}
+        <Typography sx={{ fontSize: "0.875rem", color: meridian.textSecondary, py: 2 }}>{t("doctor.ui.noResultHasBeenReportedYet")}{" "}
           <strong>{item.status.replace(/_/g, " ")}</strong>.
         </Typography>
       ) : labResult ? (
@@ -145,10 +137,7 @@ export function ResultDetailPanel({
       ) : null}
 
       {(reported || reporter) && (
-        <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary }}>
-          Reported {reported ? formatDateTime(reported) : "—"}
-          {reporter ? ` · ${reporter}` : ""}
-        </Typography>
+        <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary }}>{t("doctor.ui.reportedValueValue2", { value: reported ? formatDateTime(reported) : "—", value2: reporter ? ` · ${reporter}` : "" })}</Typography>
       )}
 
       {item.result_status && (
@@ -163,10 +152,7 @@ export function ResultDetailPanel({
               <Stack spacing={0.5}>
                 {[review].filter((x): x is DoctorReview => x !== null).map((a) => (
                   <Box key={a.id}>
-                    <Typography sx={{ fontSize: "0.8125rem", color: meridian.success, fontWeight: 600 }}>
-                      Signed off by {a.reviewed_by_name ?? a.reviewed_by} ·{" "}
-                      {formatDateTime((a.signed_off_at ?? a.updated_at))}
-                    </Typography>
+                    <Typography sx={{ fontSize: "0.8125rem", color: meridian.success, fontWeight: 600 }}>{t("doctor.ui.signedOffByReviewedByUpdated", { reviewed_by: a.reviewed_by_name ?? a.reviewed_by, updated_at: formatDateTime((a.signed_off_at ?? a.updated_at)) })}</Typography>
                     {a.notes && (
                       <Typography sx={{ fontSize: "0.8125rem", color: meridian.textPrimary }}>
                         {a.notes}
@@ -176,9 +162,7 @@ export function ResultDetailPanel({
                 ))}
               </Stack>
             ) : (
-              <Typography sx={{ fontSize: "0.8125rem", color: meridian.warning, fontWeight: 600 }}>
-                Awaiting your sign-off
-              </Typography>
+              <Typography sx={{ fontSize: "0.8125rem", color: meridian.warning, fontWeight: 600 }}>{t("doctor.ui.awaitingYourSignOff")}</Typography>
             )}
 
             {!alreadySigned && (
@@ -189,18 +173,14 @@ export function ResultDetailPanel({
                     sx={doctorButtonSx}
                     disabled={signing || !viewingIsCurrent}
                     onClick={onMarkReviewed}
-                  >
-                    Mark as reviewed
-                  </Button>
+                  >{t("doctor.ui.markAsReviewed")}</Button>
                 )}
                 <Button
                   variant="contained"
                   sx={doctorButtonSx}
                   disabled={signing || !viewingIsCurrent}
                   onClick={() => setSignOpen(true)}
-                >
-                  Sign off result
-                </Button>
+                >{t("doctor.ui.signOffResult")}</Button>
               </Stack>
             )}
           </Stack>

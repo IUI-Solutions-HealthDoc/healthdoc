@@ -14,7 +14,7 @@ import {
   type Room,
 } from "@/features/admin/api/departments";
 import { ApiError } from "@/lib/api";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 export default function Page() {
   const { localizeField, t } = useLocale();
@@ -57,11 +57,11 @@ export default function Page() {
     const nextName = name.trim();
     const nextCode = code.trim().toUpperCase();
     if (nextName.length < 2) {
-      setDepartmentFormError("Department name must be at least 2 characters.");
+      setDepartmentFormError(translate("admin.msg.departmentNameMustBeAtLeast"));
       return;
     }
     if (!/^[A-Z0-9_-]{2,12}$/.test(nextCode)) {
-      setDepartmentFormError("Code must be 2–12 letters, numbers, hyphens or underscores.");
+      setDepartmentFormError(translate("admin.msg.codeMustBe212Letters"));
       return;
     }
     setBusy(true);
@@ -74,10 +74,10 @@ export default function Page() {
       setNameHi("");
       setCode("");
       setRoomDepartment((current) => current || created.id);
-      setMessage("Department created in your facility.");
+      setMessage(translate("admin.msg.departmentCreatedInYourFacility"));
       setShowDepartmentForm(false);
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Department could not be created");
+      setError(reason instanceof ApiError ? reason.message : translate("admin.msg.departmentCouldNotBeCreated"));
     } finally {
       setBusy(false);
     }
@@ -86,11 +86,11 @@ export default function Page() {
   async function addRoom(event: React.FormEvent) {
     event.preventDefault();
     if (!roomDepartment) {
-      setRoomFormError("Select a department.");
+      setRoomFormError(translate("admin.msg.selectADepartment"));
       return;
     }
     if (roomNumber.trim().length < 1) {
-      setRoomFormError("Room number or name is required.");
+      setRoomFormError(translate("admin.msg.roomNumberOrNameIsRequired"));
       return;
     }
     setBusy(true);
@@ -100,10 +100,10 @@ export default function Page() {
       const created = await createRoom(roomDepartment, roomNumber.trim());
       setRooms((current) => [...current, created]);
       setRoomNumber("");
-      setMessage("Room created.");
+      setMessage(translate("admin.msg.roomCreated"));
       setShowRoomForm(false);
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Room could not be created");
+      setError(reason instanceof ApiError ? reason.message : translate("admin.msg.roomCouldNotBeCreated"));
     } finally {
       setBusy(false);
     }
@@ -116,7 +116,7 @@ export default function Page() {
         current?.map((item) => (item.id === updated.id ? updated : item)) ?? [],
       );
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Department update failed");
+      setError(reason instanceof ApiError ? reason.message : translate("admin.msg.departmentUpdateFailed"));
     }
   }
 
@@ -125,20 +125,16 @@ export default function Page() {
       const updated = await updateRoom(room.id, { is_active: !room.is_active });
       setRooms((current) => current.map((item) => (item.id === updated.id ? updated : item)));
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "Room update failed");
+      setError(reason instanceof ApiError ? reason.message : translate("admin.msg.roomUpdateFailed"));
     }
   }
 
   return (
     <div className="space-y-8 p-6">
       <div>
-        <Link href="/admin" className="mb-3 inline-block text-sm font-medium text-primary underline">
-          ← Back to administration
-        </Link>
+        <Link href="/admin" className="mb-3 inline-block text-sm font-medium text-primary underline">{t("admin.ui.backToAdministration")}</Link>
         <h1 className="text-3xl font-semibold">{t("admin.departmentsTitle")}</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          All records and mutations are restricted to the signed-in administrator’s facility.
-        </p>
+        <p className="mt-2 text-sm text-muted-foreground">{t("admin.ui.allRecordsAndMutationsAreRestricted")}</p>
       </div>
 
       {error ? (
@@ -203,7 +199,7 @@ export default function Page() {
             />
           </label>
           <label className="block space-y-1 text-sm">
-            <span className="text-muted-foreground">Code</span>
+            <span className="text-muted-foreground">{t("immunization.col.code")}</span>
             <input
               required
               className="w-full rounded-md border border-border px-3 py-2 uppercase"
@@ -234,7 +230,7 @@ export default function Page() {
           <form onSubmit={addRoom} className="surface-card space-y-4 p-5">
           <h2 className="text-lg font-medium">{t("admin.departments.createRoom")}</h2>
           <label className="block space-y-1 text-sm">
-            <span className="text-muted-foreground">Department</span>
+            <span className="text-muted-foreground">{t("monitor.department")}</span>
             <select
               required
               className="w-full rounded-md border border-border px-3 py-2"
@@ -244,7 +240,7 @@ export default function Page() {
                 setRoomFormError(null);
               }}
             >
-              <option value="">Select</option>
+              <option value="">{t("common.select")}</option>
               {departments?.filter((department) => department.is_active).map((department) => (
                 <option key={department.id} value={department.id}>
                   {localizeField(department.name, department.name_hi)}
@@ -253,7 +249,7 @@ export default function Page() {
             </select>
           </label>
           <label className="block space-y-1 text-sm">
-            <span className="text-muted-foreground">Room number/name</span>
+            <span className="text-muted-foreground">{t("admin.ui.roomNumberName")}</span>
             <input
               required
               className="w-full rounded-md border border-border px-3 py-2"
@@ -282,10 +278,8 @@ export default function Page() {
       {departments === null ? <p className="text-sm text-muted-foreground">{t("admin.departments.loading")}</p> : null}
       <div className="surface-card overflow-hidden">
         <div className="border-b border-border px-5 py-4">
-          <h2 className="text-lg font-medium">Configured departments</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {departments?.length ?? 0} department{departments?.length === 1 ? "" : "s"}
-          </p>
+          <h2 className="text-lg font-medium">{t("admin.ui.configuredDepartments")}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">{t("admin.ui.valueDepartmentValue2", { value: departments?.length ?? 0, value2: departments?.length === 1 ? "" : "s" })}</p>
         </div>
         <div className="divide-y divide-border">
         {departments?.map((department) => {
@@ -295,10 +289,7 @@ export default function Page() {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h2 className="font-medium">{localizeField(department.name, department.name_hi)}</h2>
-                  <p className="text-sm text-muted-foreground">
-                    {department.code} · {departmentRooms.length} room
-                    {departmentRooms.length === 1 ? "" : "s"}
-                  </p>
+                  <p className="text-sm text-muted-foreground">{t("admin.ui.codeCountRoomValue", { code: department.code, count: departmentRooms.length, value: departmentRooms.length === 1 ? "" : "s" })}</p>
                 </div>
                 <button
                   type="button"
@@ -309,7 +300,7 @@ export default function Page() {
                       : "bg-muted text-muted-foreground"
                   }`}
                 >
-                  {department.is_active ? "Active" : "Inactive"}
+                  {department.is_active ? t("monitor.activeToday") : t("admin.users.inactive")}
                 </button>
               </div>
               {departmentRooms.length > 0 ? (
@@ -325,7 +316,7 @@ export default function Page() {
                         className="text-xs underline"
                         onClick={() => void toggleRoom(room)}
                       >
-                        {room.is_active ? "Deactivate" : "Activate"}
+                        {room.is_active ? t("dpdp.consentManagerDeactivate") : t("admin.ui.activate")}
                       </button>
                     </li>
                   ))}

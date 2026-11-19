@@ -229,9 +229,27 @@ async def test_emar_doctor_acknowledgement(db):
 # HD-18: ED Triage, Tracking Board, Re-Triage Audit & Metrics
 # ===========================================================================
 
+async def _emergency_visit(db, facility, patient, created_by):
+    from app.opd.models import Visit
+
+    visit = Visit(
+        id=uuid.uuid4(),
+        visit_number=f"VST-ED-{uuid.uuid4().hex[:8]}",
+        patient_id=patient.id,
+        facility_id=facility.id,
+        visit_type="emergency",
+        status="registered",
+        visit_date=datetime.now(timezone.utc),
+        created_by=created_by,
+    )
+    db.add(visit)
+    await db.flush()
+    return visit
+
+
 async def test_ed_triage_flow_and_retriage_audit(db):
     facility, patient, doctor, nurse, _, _ = await _setup_patient_and_admission(db)
-    visit_id = uuid.uuid4()
+    visit_id = (await _emergency_visit(db, facility, patient, nurse.id)).id
 
     # 1. Initial Triage
     triage_payload = EmergencyTriageCreate(
@@ -260,7 +278,7 @@ async def test_ed_triage_flow_and_retriage_audit(db):
         reason="Patient became unresponsive, acute hypotensive collapse.",
     )
     updated_triage = await re_triage(
-        db, triage.id, retriage_payload, changed_by=doctor.id
+        db, triage.id, retriage_payload, facility_id=facility.id, changed_by=doctor.id
     )
     assert updated_triage.acuity_level == "resuscitation"
 
@@ -276,9 +294,13 @@ async def test_ed_triage_flow_and_retriage_audit(db):
 
     # 3. Update status to in_treatment -> records clinician_seen_at
     update_payload = EmergencyTriageUpdate(status="in_treatment", clinician_seen=True)
-    in_tx = await update_triage(db, triage.id, update_payload, updated_by=doctor.id)
+    in_tx = await update_triage(
+        db, triage.id, update_payload, facility_id=facility.id, updated_by=doctor.id,
+        updated_by_is_doctor=True,
+    )
     assert in_tx.status == "in_treatment"
     assert in_tx.clinician_seen_at is not None
+    assert in_tx.assigned_doctor_id == doctor.id
 
     # 4. ED Metrics Calculation
     metrics = await get_emergency_metrics(db, facility.id)
@@ -386,3 +408,161 @@ async def test_prescription_items_urgency_ordering(db):
     assert priorities[0] == "stat"
     assert priorities[1] == "urgent"
     assert priorities[2] == "routine"
+
+
+# QA 16-17 Oct 2026: second triage, re-triage to the same level, LWBS after
+# seen, admit before seen, silent P1 discharge, another facility's triage.
+
+async def _triaged(db, acuity="resuscitation"):
+    facility, patient, doctor, nurse, _, _ = await _setup_patient_and_admission(db)
+    visit = await _emergency_visit(db, facility, patient, nurse.id)
+    triage = await create_triage(
+        db,
+        EmergencyTriageCreate(
+            patient_id=patient.id, visit_id=visit.id, acuity_level=acuity, chief_complaint="Chest pain",
+        ),
+        facility_id=facility.id, triaged_by=nurse.id,
+    )
+    return facility, patient, doctor, nurse, visit, triage
+
+
+async def test_a_second_initial_triage_of_one_visit_is_refused(db):
+    from app.emergency.service import TriageRefused
+
+    facility, patient, _, nurse, visit, _ = await _triaged(db)
+    with pytest.raises(TriageRefused) as exc:
+        await create_triage(
+            db,
+            EmergencyTriageCreate(
+                patient_id=patient.id, visit_id=visit.id, acuity_level="non_urgent", chief_complaint="Again",
+            ),
+            facility_id=facility.id, triaged_by=nurse.id,
+        )
+    assert exc.value.code == "already_triaged"
+    assert len(await list_active_triages(db, facility.id)) == 1
+
+
+async def test_a_blank_chief_complaint_is_refused():
+    with pytest.raises(ValidationError):
+        EmergencyTriageCreate(
+            patient_id=uuid.uuid4(), visit_id=uuid.uuid4(), acuity_level="urgent", chief_complaint="   ",
+        )
+    with pytest.raises(ValidationError):
+        EmergencyReTriageRequest(new_acuity="urgent", reason="          x")
+
+
+async def test_triage_of_another_facilitys_visit_is_not_found(db):
+    from app.emergency.service import TriageRefused
+
+    facility, patient, _, nurse, visit, triage = await _triaged(db)
+    other = Facility(id=uuid.uuid4(), name="Other", code=f"OF{uuid.uuid4().hex[:4]}", state_code="RJ")
+    db.add(other)
+    await db.flush()
+    with pytest.raises(TriageRefused) as exc:
+        await re_triage(
+            db, triage.id, EmergencyReTriageRequest(new_acuity="urgent", reason="Improving after fluids"),
+            facility_id=other.id, changed_by=nurse.id,
+        )
+    assert exc.value.status == 404
+
+
+async def test_re_triage_to_the_same_level_names_the_reason(db):
+    from app.emergency.service import TriageRefused
+
+    facility, _, doctor, _, _, triage = await _triaged(db)
+    with pytest.raises(TriageRefused) as exc:
+        await re_triage(
+            db, triage.id, EmergencyReTriageRequest(new_acuity="resuscitation", reason="No change at all here"),
+            facility_id=facility.id, changed_by=doctor.id,
+        )
+    assert exc.value.code == "acuity_unchanged"
+    assert "different acuity" in exc.value.message
+
+
+async def test_disposition_rules(db):
+    from app.admissions.service import list_pending_admissions
+    from app.emergency.service import TriageRefused
+
+    facility, _, doctor, _, visit, triage = await _triaged(db)
+
+    with pytest.raises(TriageRefused) as exc:
+        await update_triage(
+            db, triage.id, EmergencyTriageUpdate(disposition="admit"),
+            facility_id=facility.id, updated_by=doctor.id,
+        )
+    assert exc.value.code == "admit_before_seen"
+
+    await update_triage(
+        db, triage.id, EmergencyTriageUpdate(clinician_seen=True),
+        facility_id=facility.id, updated_by=doctor.id, updated_by_is_doctor=True,
+    )
+    with pytest.raises(TriageRefused) as exc:
+        await update_triage(
+            db, triage.id, EmergencyTriageUpdate(disposition="lwbs"),
+            facility_id=facility.id, updated_by=doctor.id,
+        )
+    assert exc.value.code == "lwbs_after_seen"
+
+    with pytest.raises(TriageRefused) as exc:
+        await update_triage(
+            db, triage.id, EmergencyTriageUpdate(disposition="discharge"),
+            facility_id=facility.id, updated_by=doctor.id,
+        )
+    assert exc.value.code == "high_acuity_discharge_unconfirmed"
+
+    admitted = await update_triage(
+        db, triage.id, EmergencyTriageUpdate(disposition="admit", disposition_notes="Admit to ICU"),
+        facility_id=facility.id, updated_by=doctor.id,
+    )
+    assert admitted.status == "admitted"
+    queue = await list_pending_admissions(db, facility_id=facility.id)
+    assert [row["visit_id"] for row in queue] == [visit.id]
+    assert queue[0]["priority"] == "emergency"
+
+    with pytest.raises(TriageRefused) as exc:
+        await update_triage(
+            db, triage.id, EmergencyTriageUpdate(disposition="discharge", confirm_high_acuity_discharge=True),
+            facility_id=facility.id, updated_by=doctor.id,
+        )
+    assert exc.value.code == "triage_closed"
+
+
+async def test_confirmed_discharge_closes_the_visit_and_leaves_the_worklist(db):
+    from app.emergency.service import get_emergency_worklist
+
+    facility, _, doctor, _, visit, triage = await _triaged(db, acuity="non_urgent")
+    assert [i["visit_id"] for i in await get_emergency_worklist(db, facility.id)] == [visit.id]
+    await update_triage(
+        db, triage.id, EmergencyTriageUpdate(disposition="discharge"),
+        facility_id=facility.id, updated_by=doctor.id,
+    )
+    assert visit.status == "completed"
+    assert await get_emergency_worklist(db, facility.id) == []
+
+
+async def test_census_counts_an_arrival_before_triage_and_door_time_runs_from_arrival(db):
+    facility, patient, doctor, nurse, _, _ = await _setup_patient_and_admission(db)
+    visit = await _emergency_visit(db, facility, patient, nurse.id)
+    metrics = await get_emergency_metrics(db, facility.id)
+    assert metrics["active_census"] == 1
+    assert metrics["awaiting_triage_count"] == 1
+
+    visit.created_at = datetime.now(timezone.utc) - timedelta(minutes=20)
+    triage = await create_triage(
+        db,
+        EmergencyTriageCreate(
+            patient_id=patient.id, visit_id=visit.id, acuity_level="urgent", chief_complaint="Fall",
+            triaged_at=datetime.now(timezone.utc) - timedelta(minutes=9),
+        ),
+        facility_id=facility.id, triaged_by=nurse.id,
+    )
+    await update_triage(
+        db, triage.id, EmergencyTriageUpdate(clinician_seen=True),
+        facility_id=facility.id, updated_by=doctor.id, updated_by_is_doctor=True,
+    )
+    board = await list_active_triages(db, facility.id)
+    assert board[0]["door_to_clinician_minutes"] >= 19
+    metrics = await get_emergency_metrics(db, facility.id)
+    assert metrics["active_census"] == 1
+    assert metrics["awaiting_triage_count"] == 0
+    assert metrics["avg_door_to_clinician_minutes"] >= 19

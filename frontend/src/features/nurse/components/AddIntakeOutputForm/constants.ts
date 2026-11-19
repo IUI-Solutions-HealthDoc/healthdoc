@@ -1,9 +1,10 @@
+import { translate } from "@/lib/i18n";
 export const ENTRY_TYPES = [
-  { label: "Oral Intake", value: "intake_oral" },
-  { label: "IV Intake (includes blood/fluids given via IV)", value: "intake_iv" },
-  { label: "Urine Output", value: "output_urine" },
-  { label: "Drain Output (includes tube/vomit-type drainage)", value: "output_drain" },
-  { label: "Other Output (e.g. stool)", value: "output_other" },
+  { get label() { return translate("nurse.msg.oralIntake"); }, value: "intake_oral" },
+  { get label() { return translate("nurse.msg.ivIntakeIncludesBloodFluidsGiven"); }, value: "intake_iv" },
+  { get label() { return translate("nurse.msg.urineOutput"); }, value: "output_urine" },
+  { get label() { return translate("nurse.msg.drainOutputIncludesTubeVomitType"); }, value: "output_drain" },
+  { get label() { return translate("nurse.msg.otherOutputEGStool"); }, value: "output_other" },
 ] as const;
 
 export const DEFAULT_VALUES = {

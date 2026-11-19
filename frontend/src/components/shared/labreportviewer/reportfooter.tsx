@@ -4,6 +4,7 @@ import Image from "next/image";
 import { MessageCircle } from "lucide-react";
 import StripeBar from "./StripeBar";
 import { formatDateTime } from "./utils";
+import { useLocale } from "@/lib/i18n";
 
 interface Signatory {
   name: string;
@@ -24,6 +25,7 @@ export default function ReportFooter({
   footer,
   signatories,
 }: ReportFooterProps) {
+  const { t } = useLocale();
   return (
     <footer className="drlogy-footer mt-4">
       <div className="grid grid-cols-3 gap-4 border-t border-slate-300 px-1 pb-4 pt-5">
@@ -47,7 +49,7 @@ export default function ReportFooter({
 
       <div className="mb-2 flex items-center justify-between px-1 text-[11px] text-slate-600">
         <span>
-          <span className="font-semibold text-slate-800">Generated on:</span>{" "}
+          <span className="font-semibold text-slate-800">{t("common.ui.generatedOn")}</span>{" "}
           {formatDateTime(footer.generatedAt)}
         </span>
       </div>
@@ -55,9 +57,7 @@ export default function ReportFooter({
       <div className="relative overflow-hidden">
         <StripeBar />
         <div className="pointer-events-none absolute inset-y-0 left-3 flex items-center">
-          <span className="rounded bg-white/95 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#0b2f6b]">
-            Sample Collection
-          </span>
+          <span className="rounded bg-white/95 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#0b2f6b]">{t("common.ui.sampleCollection")}</span>
         </div>
         {footer.whatsapp && (
           <div className="absolute inset-y-0 right-3 flex items-center gap-1.5 text-white">

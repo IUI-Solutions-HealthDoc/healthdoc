@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { listFileAccessLogs } from "../api";
 import type { FileAccessAction, FileAccessFilters, FileAccessLog } from "../types";
+import { translate } from "@/lib/i18n";
 
 export function useFileAccessLogs(initial: FileAccessFilters = { action: "all" }) {
   const [filters, setFilters] = useState<FileAccessFilters>(initial);
@@ -18,7 +19,7 @@ export function useFileAccessLogs(initial: FileAccessFilters = { action: "all" }
       setRows(await listFileAccessLogs(filters));
     } catch (reason) {
       setRows([]);
-      setError(reason instanceof Error ? reason.message : "Failed to load file access logs");
+      setError(reason instanceof Error ? reason.message : translate("audit.msg.failedToLoadFileAccessLogs"));
     } finally {
       setLoading(false);
     }

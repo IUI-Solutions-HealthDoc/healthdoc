@@ -25,6 +25,7 @@ import {
   type HfrUpload,
 } from "./api/hfr";
 import { readHfrUpload } from "./hfrUpload";
+import { useLocale, translate } from "@/lib/i18n";
 
 type Step = "basic" | "additional" | "detailed" | "submit" | "done";
 interface Option { code: string; label: string }
@@ -45,9 +46,9 @@ const RULES = {
 };
 // HFR's own refusal names the only ownership subtypes it takes (C, P, NP).
 const OWNER_SUBTYPES: Record<string, Option[]> = {
-  G: [{ code: "", label: "State / UT government" }, { code: "C", label: "Central government" }],
-  P: [{ code: "P", label: "For profit" }, { code: "NP", label: "Not for profit" }],
-  PP: [{ code: "P", label: "For profit" }, { code: "NP", label: "Not for profit" }],
+  G: [{ code: "", get label() { return translate("admin.msg.stateUtGovernment"); } }, { code: "C", get label() { return translate("admin.msg.centralGovernment"); } }],
+  P: [{ code: "P", get label() { return translate("admin.msg.forProfit"); } }, { code: "NP", get label() { return translate("admin.msg.notForProfit"); } }],
+  PP: [{ code: "P", get label() { return translate("admin.msg.forProfit"); } }, { code: "NP", get label() { return translate("admin.msg.notForProfit"); } }],
 };
 const GENERAL = [
   ["dialysis", "Dialysis centre"], ["pharmacy", "Pharmacy"], ["blood_bank", "Blood bank"],
@@ -86,7 +87,7 @@ function loadList(key: string): Promise<HfrOption[]> {
     case "types": return hfrFacilityTypes(a, b);
     case "subtypes": return hfrFacilitySubtypes(a);
     case "specialities": return hfrSpecialities(a);
-    default: return Promise.reject(new Error(`Unknown HFR list ${kind}`));
+    default: return Promise.reject(new Error(translate("admin.msg.unknownHfrListKind", undefined, { kind })));
   }
 }
 
@@ -104,21 +105,22 @@ function useList(key: string | null): { rows: Option[] | null; error: string | n
         const options = rows.map((row) => ({ code: String(row.code).trim(), label: String(row.value ?? row.name ?? row.code).trim() }));
         setState({ key, rows: options, error: null });
       },
-      (reason: unknown) => { if (live) setState({ key, rows: null, error: failure(reason, "HFR did not return this list.")[0] }); },
+      (reason: unknown) => { if (live) setState({ key, rows: null, error: failure(reason, translate("admin.msg.hfrDidNotReturnThisList"))[0] }); },
     );
     return () => { live = false; };
   }, [key]);
   return state.key === key ? state : { rows: null, error: null };
 }
 
-function Select({ name, label, value, list, onChange, placeholder = "Choose" }: {
+function Select({ name, label, value, list, onChange, placeholder = translate("platform.choose") }: {
   name: string; label: string; value: string; list: { rows: Option[] | null; error: string | null };
   onChange: (value: string) => void; placeholder?: string;
 }) {
+  const { t } = useLocale();
   return (
     <label className="block space-y-1 text-sm"><span className="text-muted-foreground">{label}</span>
       <select name={name} value={value} onChange={(e) => onChange(e.target.value)} disabled={!list.rows} className={input}>
-        <option value="">{list.rows ? placeholder : list.error ? "Unavailable" : "Loading…"}</option>
+        <option value="">{list.rows ? placeholder : list.error ? t("doctor.summaryUnavailable") : "Loading…"}</option>
         {(list.rows ?? []).map((row) => <option key={row.code} value={row.code}>{row.label}</option>)}
       </select>
       {list.error ? <span role="alert" className="text-danger">{list.error}</span> : null}
@@ -130,10 +132,11 @@ function Text({ name, label, value, onChange, valid = true, ...rest }: {
   name: string; label: string; value: string; onChange: (value: string) => void; valid?: boolean;
   inputMode?: "numeric" | "decimal" | "tel" | "email" | "url"; maxLength?: number;
 }) {
+  const { t } = useLocale();
   return (
     <label className="block space-y-1 text-sm"><span className="text-muted-foreground">{label}</span>
       <input name={name} value={value} onChange={(e) => onChange(e.target.value)} aria-invalid={value !== "" && !valid} className={input} {...rest} />
-      {value !== "" && !valid ? <span role="alert" className="text-danger">{label} is not valid</span> : null}
+      {value !== "" && !valid ? <span role="alert" className="text-danger">{t("admin.ui.labelIsNotValid", { label })}</span> : null}
     </label>
   );
 }
@@ -142,10 +145,11 @@ function Checks({ name, legend, list, chosen, onChange }: {
   name: string; legend: string; list: { rows: Option[] | null; error: string | null };
   chosen: string[]; onChange: (codes: string[]) => void;
 }) {
+  const { t } = useLocale();
   return (
     <fieldset className="space-y-1 text-sm"><legend className="text-muted-foreground">{legend}</legend>
       {list.error ? <p role="alert" className="text-danger">{list.error}</p> : null}
-      {!list.rows && !list.error ? <p className="text-muted-foreground">Loading…</p> : null}
+      {!list.rows && !list.error ? <p className="text-muted-foreground">{t("common.loading")}</p> : null}
       <div className="flex flex-wrap gap-3">
         {(list.rows ?? []).map((row) => (
           <label key={row.code} className="flex items-center gap-1">
@@ -206,6 +210,7 @@ function savedDetailed(saved?: HfrSavedRegistration) {
  * its tracking id, then resubmitted.
  */
 export function HfrRegistration({ signedIn }: { signedIn: boolean }) {
+  const { t } = useLocale();
   const [open, setOpen] = useState<false | "new" | HfrSavedRegistration>(false);
   const [registered, setRegistered] = useState<HfrRegistrationSummary[] | null>(null);
   const [listError, setListError] = useState<string | null>(null);
@@ -216,7 +221,7 @@ export function HfrRegistration({ signedIn }: { signedIn: boolean }) {
     // HealthDoc's own record of what it registered; this asks HFR nothing.
     listHfrRegistrations().then(
       (rows) => { if (live) setRegistered(rows); },
-      (reason: unknown) => { if (live) setListError(failure(reason, "The registered facilities could not be loaded.")[0]); },
+      (reason: unknown) => { if (live) setListError(failure(reason, translate("admin.msg.theRegisteredFacilitiesCouldNotBe"))[0]); },
     );
     return () => { live = false; };
   }, []);
@@ -234,33 +239,33 @@ export function HfrRegistration({ signedIn }: { signedIn: boolean }) {
           submitted_at: null, updated_at: "", basic: null, additional: null, detailed: null });
         return;
       }
-      setListError(failure(reason, "This registration could not be opened.")[0]);
+      setListError(failure(reason, translate("admin.msg.thisRegistrationCouldNotBeOpened"))[0]);
     } finally {
       setOpening(null);
     }
   }
   return (
-    <section className="surface-card space-y-3 p-5" aria-label="Register a facility in HFR">
-      <h2 className="font-medium">Register a facility in HFR</h2>
+    <section className="surface-card space-y-3 p-5" aria-label={t("admin.ui.registerAFacilityInHfr")}>
+      <h2 className="font-medium">{t("admin.ui.registerAFacilityInHfr")}</h2>
       {!open ? (
         <>
-          <p className="text-sm text-muted-foreground">Registration is done under the facility manager&apos;s HPR login. HFR verifies the facility after it is submitted.</p>
-          <button type="button" className={primary} disabled={!signedIn} onClick={() => setOpen("new")}>Start registration</button>
-          {!signedIn ? <p className="text-sm text-muted-foreground">Sign in to HPR above first.</p> : null}
+          <p className="text-sm text-muted-foreground">{t("admin.ui.registrationIsDoneUnderTheFacility")}</p>
+          <button type="button" className={primary} disabled={!signedIn} onClick={() => setOpen("new")}>{t("admin.ui.startRegistration")}</button>
+          {!signedIn ? <p className="text-sm text-muted-foreground">{t("admin.ui.signInToHprAboveFirst")}</p> : null}
           {registered?.length ? (
             <div className="space-y-2">
-              <h3 className="text-sm font-medium">Registered from HealthDoc</h3>
+              <h3 className="text-sm font-medium">{t("admin.ui.registeredFromHealthdoc")}</h3>
               <ul className="divide-y divide-border text-sm">
                 {registered.map((row) => (
                   <li key={row.tracking_id} className="flex flex-wrap items-center justify-between gap-2 py-2">
                     <span>
-                      <strong>{row.facility_name ?? "Unnamed facility"}</strong>
+                      <strong>{row.facility_name ?? t("admin.ui.unnamedFacility")}</strong>
                       {row.facility_id ? <span className="ml-2 font-mono">{row.facility_id}</span> : null}
-                      <span className="ml-2 text-muted-foreground">Tracking ID {row.tracking_id}{row.status ? ` · ${row.status}` : ""}</span>
+                      <span className="ml-2 text-muted-foreground">{t("admin.ui.trackingIdTrackingIdValue", { tracking_id: row.tracking_id, value: row.status ? ` · ${row.status}` : "" })}</span>
                     </span>
                     <button type="button" className="rounded-md border border-border px-3 py-1 text-sm disabled:opacity-50"
                       disabled={!signedIn || opening !== null} onClick={() => void startEdit(row.tracking_id)}>
-                      {opening === row.tracking_id ? "Opening…" : "Edit"}
+                      {opening === row.tracking_id ? "Opening…" : t("common.edit")}
                     </button>
                   </li>
                 ))}
@@ -268,12 +273,10 @@ export function HfrRegistration({ signedIn }: { signedIn: boolean }) {
             </div>
           ) : null}
           <div className="flex flex-wrap items-end gap-2">
-            <Text name="edit_tracking_id" label="Edit another facility by its HFR tracking ID" value={otherTracking}
+            <Text name="edit_tracking_id" label={t("admin.ui.editAnotherFacilityByItsHfr")} value={otherTracking}
               valid={/^\d{1,20}$/.test(otherTracking)} onChange={(v) => setOtherTracking(v.replace(/\D/g, ""))} inputMode="numeric" maxLength={20} />
             <button type="button" className="rounded-md border border-border px-3 py-2 text-sm disabled:opacity-50"
-              disabled={!signedIn || opening !== null || !/^\d{1,20}$/.test(otherTracking)} onClick={() => void startEdit(otherTracking)}>
-              Edit by tracking ID
-            </button>
+              disabled={!signedIn || opening !== null || !/^\d{1,20}$/.test(otherTracking)} onClick={() => void startEdit(otherTracking)}>{t("admin.ui.editByTrackingId")}</button>
           </div>
           {listError ? <p role="alert" className="text-sm text-danger">{listError}</p> : null}
         </>
@@ -283,6 +286,7 @@ export function HfrRegistration({ signedIn }: { signedIn: boolean }) {
 }
 
 function RegistrationSteps({ signedIn, initial }: { signedIn: boolean; initial?: HfrSavedRegistration }) {
+  const { t } = useLocale();
   const editing = initial !== undefined;
   const [step, setStep] = useState<Step>("basic");
   const [basic, setBasic] = useState<HfrBasicInformation>(() => savedBasic(initial));
@@ -340,7 +344,7 @@ function RegistrationSteps({ signedIn, initial }: { signedIn: boolean; initial?:
     try {
       apply(await readHfrUpload(file));
     } catch (reason) {
-      setErrors(failure(reason, "The image could not be read."));
+      setErrors(failure(reason, translate("admin.msg.theImageCouldNotBeRead")));
     }
   }
   function locate() {
@@ -371,7 +375,7 @@ function RegistrationSteps({ signedIn, initial }: { signedIn: boolean; initial?:
       await call(key);
       keys.current[stage] = null;
     } catch (reason) {
-      setErrors(failure(reason, "HFR did not accept this step."));
+      setErrors(failure(reason, translate("admin.msg.hfrDidNotAcceptThisStep")));
     } finally {
       setBusy(false);
     }
@@ -382,7 +386,7 @@ function RegistrationSteps({ signedIn, initial }: { signedIn: boolean; initial?:
     // NHA's HFR document: a facility that is not Functional skips the
     // additional and detailed information and is submitted directly.
     const functional = basic.operational_status === "F";
-    setNotice(`Saved in HFR. Tracking ID ${saved.tracking_id}.${functional ? "" : " Not functional, so it goes straight to submission."}`);
+    setNotice(translate("admin.msg.savedInHfrTrackingIdTracking", undefined, { tracking_id: saved.tracking_id, value: functional ? "" : " Not functional, so it goes straight to submission." }));
     setStep(functional ? "additional" : "submit");
   });
   const saveAdditional = () => run("additional", async (key) => {
@@ -393,7 +397,7 @@ function RegistrationSteps({ signedIn, initial }: { signedIn: boolean; initial?:
       general: additional.general as Record<(typeof GENERAL)[number][0], string>,
       imaging_services: additional.general.imaging === "N" ? [] : imaging,
     }, key);
-    setNotice("Additional information saved in HFR.");
+    setNotice(translate("admin.msg.additionalInformationSavedInHfr"));
     setStep("detailed");
   });
   const saveDetailed = () => run("detailed", async (key) => {
@@ -409,7 +413,7 @@ function RegistrationSteps({ signedIn, initial }: { signedIn: boolean; initial?:
         .map(([service, count]) => ({ service, count: Number(count) })),
       diagnostic_services: detailed.diagnostics,
     }, key);
-    setNotice("Detailed information saved in HFR.");
+    setNotice(translate("admin.msg.detailedInformationSavedInHfr"));
     setStep("submit");
   });
   const submit = () => run("submit", async (key) => {
@@ -429,10 +433,10 @@ function RegistrationSteps({ signedIn, initial }: { signedIn: boolean; initial?:
   if (step === "done" && facilityId) {
     return (
       <div role="status" className="space-y-1 text-sm">
-        {editing ? <p className="font-medium">Changes resubmitted to HFR.</p> : null}
-        <p className="font-medium">HFR facility ID: <span className="font-mono">{facilityId}</span></p>
+        {editing ? <p className="font-medium">{t("admin.ui.changesResubmittedToHfr")}</p> : null}
+        <p className="font-medium">{t("admin.ui.hfrFacilityId")}{" "}<span className="font-mono">{facilityId}</span></p>
         <p>{notice}</p>
-        <p className="text-muted-foreground">HFR now verifies the facility; its status reads &ldquo;Submitted&rdquo; until then. Search for it above to follow it.</p>
+        <p className="text-muted-foreground">{t("admin.ui.hfrNowVerifiesTheFacilityIts")}</p>
       </div>
     );
   }
@@ -440,11 +444,11 @@ function RegistrationSteps({ signedIn, initial }: { signedIn: boolean; initial?:
   return (
     <div className="space-y-4">
       {editing ? (
-        <p className="text-sm">Editing <strong>{initial.facility_name ?? "this facility"}</strong>{initial.facility_id ? <> (<span className="font-mono">{initial.facility_id}</span>)</> : null}. Save the steps you change, then resubmit.</p>
+        <p className="text-sm">{t("admin.ui.editing")}{" "}<strong>{initial.facility_name ?? "this facility"}</strong>{initial.facility_id ? <> (<span className="font-mono">{initial.facility_id}</span>)</> : null}{t("admin.ui.saveTheStepsYouChangeThen")}</p>
       ) : null}
-      <ol className="flex flex-wrap gap-3 text-xs text-muted-foreground" aria-label="Registration steps">
+      <ol className="flex flex-wrap gap-3 text-xs text-muted-foreground" aria-label={t("admin.ui.registrationSteps")}>
         {(["basic", "additional", "detailed", "submit"] as const).map((name, index) => {
-          const label = `${index + 1}. ${{ basic: "Basic information", additional: "Additional information", detailed: "Detailed information", submit: "Submit" }[name]}`;
+          const label = `${index + 1}. ${{ basic: translate("admin.msg.basicInformation"), additional: translate("admin.msg.additionalInformation"), detailed: translate("admin.msg.detailedInformation"), submit: translate("common.submit") }[name]}`;
           return (
             <li key={name} aria-current={step === name ? "step" : undefined} className={step === name ? "font-semibold text-foreground" : ""}>
               {/* An edit already has its tracking id, so any step can be changed on its own. */}
@@ -453,69 +457,69 @@ function RegistrationSteps({ signedIn, initial }: { signedIn: boolean; initial?:
           );
         })}
       </ol>
-      {basic.tracking_id ? <p className="text-xs text-muted-foreground">Tracking ID {basic.tracking_id}</p> : null}
+      {basic.tracking_id ? <p className="text-xs text-muted-foreground">{t("admin.ui.trackingIdTrackingId", { tracking_id: basic.tracking_id })}</p> : null}
       {notice ? <p role="status" className="text-sm">{notice}</p> : null}
-      {!signedIn ? <p role="alert" className="text-sm text-danger">The HPR login has ended. Sign in again above to continue.</p> : null}
+      {!signedIn ? <p role="alert" className="text-sm text-danger">{t("admin.ui.theHprLoginHasEndedSign")}</p> : null}
 
       {step === "basic" ? (
         <div className="grid gap-3 md:grid-cols-2">
-          <div className="md:col-span-2"><Text name="facility_name" label="Facility name" value={basic.name} valid={RULES.name.test(basic.name)} onChange={(v) => setB("name", v)} maxLength={200} /></div>
-          <label className="block space-y-1 text-sm"><span className="text-muted-foreground">Country</span><input value="India" disabled className={input} readOnly /></label>
-          <Select name="state" label="State / UT" value={a.state_code} list={lists.states} onChange={(v) => setAddress("state_code", v)} />
-          <Select name="district" label="District" value={a.district_code} list={a.state_code ? lists.districts : { rows: null, error: null }} onChange={(v) => setAddress("district_code", v)} placeholder="Choose" />
-          <Select name="subdistrict" label="Sub-district" value={a.sub_district_code} list={a.district_code ? lists.subdistricts : { rows: null, error: null }} onChange={(v) => setAddress("sub_district_code", v)} />
-          <Select name="region" label="Region" value={a.region} list={lists.region} onChange={(v) => setAddress("region", v)} />
-          <Text name="address_line1" label="Address line 1" value={a.address_line1} valid={RULES.address.test(a.address_line1)} onChange={(v) => setAddress("address_line1", v)} maxLength={200} />
-          <Text name="address_line2" label="Address line 2" value={a.address_line2} valid={RULES.address.test(a.address_line2)} onChange={(v) => setAddress("address_line2", v)} maxLength={200} />
-          <Text name="pincode" label="PIN code" value={a.pincode} valid={RULES.pincode.test(a.pincode)} onChange={(v) => setAddress("pincode", v.replace(/\D/g, ""))} inputMode="numeric" maxLength={6} />
-          <Text name="latitude" label="Latitude" value={a.latitude} valid={RULES.latitude.test(a.latitude)} onChange={(v) => setAddress("latitude", v)} inputMode="decimal" />
-          <Text name="longitude" label="Longitude" value={a.longitude} valid={RULES.longitude.test(a.longitude)} onChange={(v) => setAddress("longitude", v)} inputMode="decimal" />
-          <div className="flex items-end"><button type="button" onClick={locate} className="rounded-md border border-border px-3 py-2 text-sm">Use this device&apos;s location</button></div>
-          <Text name="email" label="Email (for public display)" value={basic.contact.email} valid={RULES.email.test(basic.contact.email)} onChange={(v) => setContact("email", v.trim())} inputMode="email" />
-          <Text name="mobile" label="Mobile (for public display)" value={basic.contact.mobile} valid={RULES.mobile.test(basic.contact.mobile)} onChange={(v) => setContact("mobile", v.replace(/\D/g, ""))} inputMode="tel" maxLength={10} />
-          <Text name="website" label="Website (optional)" value={basic.contact.website} onChange={(v) => setContact("website", v.trim())} inputMode="url" />
-          <Text name="std_code" label="STD code (optional)" value={basic.contact.std_code} valid={/^0\d{1,4}$/.test(basic.contact.std_code)} onChange={(v) => setContact("std_code", v.replace(/\D/g, ""))} inputMode="numeric" maxLength={5} />
-          <Text name="landline" label="Landline (optional)" value={basic.contact.landline} valid={/^\d{6,8}$/.test(basic.contact.landline)} onChange={(v) => setContact("landline", v.replace(/\D/g, ""))} inputMode="numeric" maxLength={8} />
-          <Select name="ownership" label="Ownership" value={basic.ownership_code} list={lists.owner} onChange={(v) => setB("ownership_code", v)} />
+          <div className="md:col-span-2"><Text name="facility_name" label={t("platform.facilityName")} value={basic.name} valid={RULES.name.test(basic.name)} onChange={(v) => setB("name", v)} maxLength={200} /></div>
+          <label className="block space-y-1 text-sm"><span className="text-muted-foreground">{t("admin.ui.country")}</span><input value="India" disabled className={input} readOnly /></label>
+          <Select name="state" label={t("admin.ui.stateUt")} value={a.state_code} list={lists.states} onChange={(v) => setAddress("state_code", v)} />
+          <Select name="district" label={t("field.district")} value={a.district_code} list={a.state_code ? lists.districts : { rows: null, error: null }} onChange={(v) => setAddress("district_code", v)} placeholder={t("platform.choose")} />
+          <Select name="subdistrict" label={t("admin.ui.subDistrict")} value={a.sub_district_code} list={a.district_code ? lists.subdistricts : { rows: null, error: null }} onChange={(v) => setAddress("sub_district_code", v)} />
+          <Select name="region" label={t("admin.ui.region")} value={a.region} list={lists.region} onChange={(v) => setAddress("region", v)} />
+          <Text name="address_line1" label={t("admin.ui.addressLine1")} value={a.address_line1} valid={RULES.address.test(a.address_line1)} onChange={(v) => setAddress("address_line1", v)} maxLength={200} />
+          <Text name="address_line2" label={t("admin.ui.addressLine2")} value={a.address_line2} valid={RULES.address.test(a.address_line2)} onChange={(v) => setAddress("address_line2", v)} maxLength={200} />
+          <Text name="pincode" label={t("admin.ui.pinCode")} value={a.pincode} valid={RULES.pincode.test(a.pincode)} onChange={(v) => setAddress("pincode", v.replace(/\D/g, ""))} inputMode="numeric" maxLength={6} />
+          <Text name="latitude" label={t("admin.ui.latitude")} value={a.latitude} valid={RULES.latitude.test(a.latitude)} onChange={(v) => setAddress("latitude", v)} inputMode="decimal" />
+          <Text name="longitude" label={t("admin.ui.longitude")} value={a.longitude} valid={RULES.longitude.test(a.longitude)} onChange={(v) => setAddress("longitude", v)} inputMode="decimal" />
+          <div className="flex items-end"><button type="button" onClick={locate} className="rounded-md border border-border px-3 py-2 text-sm">{t("admin.ui.useThisDeviceSLocation")}</button></div>
+          <Text name="email" label={t("admin.ui.emailForPublicDisplay")} value={basic.contact.email} valid={RULES.email.test(basic.contact.email)} onChange={(v) => setContact("email", v.trim())} inputMode="email" />
+          <Text name="mobile" label={t("admin.ui.mobileForPublicDisplay")} value={basic.contact.mobile} valid={RULES.mobile.test(basic.contact.mobile)} onChange={(v) => setContact("mobile", v.replace(/\D/g, ""))} inputMode="tel" maxLength={10} />
+          <Text name="website" label={t("admin.ui.websiteOptional")} value={basic.contact.website} onChange={(v) => setContact("website", v.trim())} inputMode="url" />
+          <Text name="std_code" label={t("admin.ui.stdCodeOptional")} value={basic.contact.std_code} valid={/^0\d{1,4}$/.test(basic.contact.std_code)} onChange={(v) => setContact("std_code", v.replace(/\D/g, ""))} inputMode="numeric" maxLength={5} />
+          <Text name="landline" label={t("admin.ui.landlineOptional")} value={basic.contact.landline} valid={/^\d{6,8}$/.test(basic.contact.landline)} onChange={(v) => setContact("landline", v.replace(/\D/g, ""))} inputMode="numeric" maxLength={8} />
+          <Select name="ownership" label={t("platform.ownership")} value={basic.ownership_code} list={lists.owner} onChange={(v) => setB("ownership_code", v)} />
           {basic.ownership_code ? (
-            <label className="block space-y-1 text-sm"><span className="text-muted-foreground">Ownership subtype</span>
+            <label className="block space-y-1 text-sm"><span className="text-muted-foreground">{t("admin.ui.ownershipSubtype")}</span>
               <select name="ownership_subtype" value={basic.ownership_subtype_code} onChange={(e) => setB("ownership_subtype_code", e.target.value)} className={input}>
                 {subtypeOptions.map((option) => <option key={option.code} value={option.code}>{option.label}</option>)}
               </select></label>
           ) : null}
-          {basic.ownership_subtype_code ? <Select name="ownership_subtype2" label="Ownership subtype 2" value={basic.ownership_subtype_code2} list={lists.owner2} onChange={(v) => setB("ownership_subtype_code2", v)} /> : null}
-          <div className="md:col-span-2"><Checks name="medicine" legend="System of medicine" list={lists.medicine} chosen={basic.systems_of_medicine} onChange={(v) => setB("systems_of_medicine", v)} /></div>
-          <Select name="facility_type" label="Facility type" value={basic.facility_type_code} list={basic.systems_of_medicine[0] && basic.ownership_code ? lists.types : { rows: null, error: null }} onChange={(v) => setB("facility_type_code", v)} />
-          <Select name="facility_subtype" label="Facility subtype" value={basic.facility_subtype_code} list={basic.facility_type_code ? lists.subtypes : { rows: null, error: null }} onChange={(v) => setB("facility_subtype_code", v)} />
-          <div className="md:col-span-2"><Checks name="service" legend="Type of service (not needed for a pharmacy, lab, imaging centre, blood bank, cath lab or dialysis centre)" list={lists.service} chosen={basic.types_of_service} onChange={(v) => setB("types_of_service", v)} /></div>
-          <Select name="speciality_type" label="Speciality type" value={basic.speciality_type} list={lists.speciality} onChange={(v) => setB("speciality_type", v)} />
-          <Select name="operational_status" label="Operational status" value={basic.operational_status} list={lists.status} onChange={(v) => setB("operational_status", v)} />
+          {basic.ownership_subtype_code ? <Select name="ownership_subtype2" label={t("admin.ui.ownershipSubtype2")} value={basic.ownership_subtype_code2} list={lists.owner2} onChange={(v) => setB("ownership_subtype_code2", v)} /> : null}
+          <div className="md:col-span-2"><Checks name="medicine" legend={t("admin.ui.systemOfMedicine")} list={lists.medicine} chosen={basic.systems_of_medicine} onChange={(v) => setB("systems_of_medicine", v)} /></div>
+          <Select name="facility_type" label={t("admin.ui.facilityType")} value={basic.facility_type_code} list={basic.systems_of_medicine[0] && basic.ownership_code ? lists.types : { rows: null, error: null }} onChange={(v) => setB("facility_type_code", v)} />
+          <Select name="facility_subtype" label={t("admin.ui.facilitySubtype")} value={basic.facility_subtype_code} list={basic.facility_type_code ? lists.subtypes : { rows: null, error: null }} onChange={(v) => setB("facility_subtype_code", v)} />
+          <div className="md:col-span-2"><Checks name="service" legend={t("admin.ui.typeOfServiceNotNeededFor")} list={lists.service} chosen={basic.types_of_service} onChange={(v) => setB("types_of_service", v)} /></div>
+          <Select name="speciality_type" label={t("admin.ui.specialityType")} value={basic.speciality_type} list={lists.speciality} onChange={(v) => setB("speciality_type", v)} />
+          <Select name="operational_status" label={t("admin.ui.operationalStatus")} value={basic.operational_status} list={lists.status} onChange={(v) => setB("operational_status", v)} />
           {basic.timings.map((timing, index) => (
             <div key={index} className="space-y-2 rounded-md border border-border p-3 md:col-span-2">
-              <Checks name={`days${index}`} legend="Working days" list={lists.days} chosen={timing.days}
+              <Checks name={`days${index}`} legend={t("admin.ui.workingDays")} list={lists.days} chosen={timing.days}
                 onChange={(days) => setB("timings", basic.timings.map((row, i) => (i === index ? { ...row, days } : row)))} />
-              <Text name={`hours${index}`} label="Opening hours (e.g. 9:00 AM - 6:00 PM, or 24*7)" value={timing.hours} valid={RULES.hours.test(timing.hours)}
+              <Text name={`hours${index}`} label={t("admin.ui.openingHoursEG900")} value={timing.hours} valid={RULES.hours.test(timing.hours)}
                 onChange={(hours) => setB("timings", basic.timings.map((row, i) => (i === index ? { ...row, hours } : row)))} />
-              {basic.timings.length > 1 ? <button type="button" className="text-sm underline" onClick={() => setB("timings", basic.timings.filter((_, i) => i !== index))}>Remove these hours</button> : null}
+              {basic.timings.length > 1 ? <button type="button" className="text-sm underline" onClick={() => setB("timings", basic.timings.filter((_, i) => i !== index))}>{t("admin.ui.removeTheseHours")}</button> : null}
             </div>
           ))}
-          <div className="md:col-span-2"><button type="button" className="text-sm underline" onClick={() => setB("timings", [...basic.timings, { days: [], hours: "" }])}>Add different hours for other days</button></div>
-          {editing ? <p className="text-sm text-muted-foreground md:col-span-2">HFR needs the board and building photographs with every save of these details. HealthDoc does not keep them, so attach them again.</p> : null}
+          <div className="md:col-span-2"><button type="button" className="text-sm underline" onClick={() => setB("timings", [...basic.timings, { days: [], hours: "" }])}>{t("admin.ui.addDifferentHoursForOtherDays")}</button></div>
+          {editing ? <p className="text-sm text-muted-foreground md:col-span-2">{t("admin.ui.hfrNeedsTheBoardAndBuilding")}</p> : null}
           {(["board_photo", "building_photo"] as const).map((field) => (
-            <label key={field} className="block space-y-1 text-sm"><span className="text-muted-foreground">{field === "board_photo" ? "Facility board photograph" : "Facility building photograph"} (PNG or JPEG, up to 5 MB)</span>
+            <label key={field} className="block space-y-1 text-sm"><span className="text-muted-foreground">{field === "board_photo" ? t("admin.ui.facilityBoardPhotograph") : t("admin.ui.facilityBuildingPhotograph")}{" "}{t("admin.ui.pngOrJpegUpTo5")}</span>
               <input type="file" name={field} accept="image/png,image/jpeg" onChange={(e) => void choose(e.target.files?.[0], (upload) => setB(field, upload))} className={input} />
               {basic[field] ? <span className="text-xs text-muted-foreground">{basic[field]?.name}</span> : null}
             </label>
           ))}
           <div className="space-y-2 md:col-span-2">
-            <p className="text-sm text-muted-foreground">Address proofs (optional)</p>
+            <p className="text-sm text-muted-foreground">{t("admin.ui.addressProofsOptional")}</p>
             {basic.address_proofs.map((proof, index) => (
               <p key={index} className="text-sm">{lists.proof.rows?.find((row) => row.code === proof.type)?.label ?? proof.type}: {proof.attachment.name}
-                <button type="button" className="ml-2 underline" onClick={() => setB("address_proofs", basic.address_proofs.filter((_, i) => i !== index))}>Remove</button></p>
+                <button type="button" className="ml-2 underline" onClick={() => setB("address_proofs", basic.address_proofs.filter((_, i) => i !== index))}>{t("common.remove")}</button></p>
             ))}
             <AddressProofPicker list={lists.proof} onAdd={(proof) => setB("address_proofs", [...basic.address_proofs, proof])} choose={choose} />
           </div>
-          <div className="md:col-span-2"><button type="button" className={primary} disabled={busy || !signedIn || !basicValid} onClick={() => void saveBasic()}>{busy ? "Saving in HFR…" : "Save basic information"}</button></div>
+          <div className="md:col-span-2"><button type="button" className={primary} disabled={busy || !signedIn || !basicValid} onClick={() => void saveBasic()}>{busy ? t("admin.ui.savingInHfr") : t("admin.ui.saveBasicInformation")}</button></div>
         </div>
       ) : null}
 
@@ -530,10 +534,10 @@ function RegistrationSteps({ signedIn, initial }: { signedIn: boolean; initial?:
               onChange={(v) => edit("additional", () => setAdditional((current) => ({ ...current, general: { ...current.general, [field]: v || "N" } })))} />
           ))}
           {additional.general.imaging !== "N" ? (lists.imaging.rows ?? []).map((row) => (
-            <Text key={row.code} name={`imaging:${row.code}`} label={`${row.label}: number of machines`} value={additional.imaging[row.code] ?? ""} valid={twoDigits(additional.imaging[row.code] ?? "")}
+            <Text key={row.code} name={`imaging:${row.code}`} label={translate("admin.msg.labelNumberOfMachines", undefined, { label: row.label })} value={additional.imaging[row.code] ?? ""} valid={twoDigits(additional.imaging[row.code] ?? "")}
               onChange={(v) => edit("additional", () => setAdditional((current) => ({ ...current, imaging: { ...current.imaging, [row.code]: v.replace(/\D/g, "") } })))} inputMode="numeric" maxLength={2} />
           )) : null}
-          <div className="md:col-span-2"><button type="button" className={primary} disabled={busy || !signedIn} onClick={() => void saveAdditional()}>{busy ? "Saving in HFR…" : "Save additional information"}</button></div>
+          <div className="md:col-span-2"><button type="button" className={primary} disabled={busy || !signedIn} onClick={() => void saveAdditional()}>{busy ? t("admin.ui.savingInHfr") : t("admin.ui.saveAdditionalInformation")}</button></div>
         </div>
       ) : null}
 
@@ -549,30 +553,30 @@ function RegistrationSteps({ signedIn, initial }: { signedIn: boolean; initial?:
             <Text key={field} name={field} label={label} value={detailed.beds[field]} valid={twoDigits(detailed.beds[field])}
               onChange={(v) => edit("detailed", () => setDetailed((current) => ({ ...current, beds: { ...current.beds, [field]: v.replace(/\D/g, "") } })))} inputMode="numeric" maxLength={2} />
           ))}
-          <p className="text-sm md:col-span-2" aria-live="polite">Total beds (IPD and HDU): <strong>{totalBeds}</strong>. Total ventilators: <strong>{totalVentilators}</strong>.</p>
+          <p className="text-sm md:col-span-2" aria-live="polite">{t("admin.ui.totalBedsIpdAndHdu")}{" "}<strong>{totalBeds}</strong>{t("admin.ui.totalVentilators")}{" "}<strong>{totalVentilators}</strong>.</p>
           <div className="space-y-2 md:col-span-2">
-            <p className="text-sm text-muted-foreground">Only for an imaging centre or diagnostic laboratory; HFR refuses these for other facility types.</p>
+            <p className="text-sm text-muted-foreground">{t("admin.ui.onlyForAnImagingCentreOr")}</p>
             <div className="grid gap-3 md:grid-cols-3">
               {(lists.imaging.rows ?? []).map((row) => (
                 <Text key={row.code} name={`detailed-imaging:${row.code}`} label={`${row.label}: number`} value={detailed.imaging[row.code] ?? ""} valid={twoDigits(detailed.imaging[row.code] ?? "")}
                   onChange={(v) => edit("detailed", () => setDetailed((current) => ({ ...current, imaging: { ...current.imaging, [row.code]: v.replace(/\D/g, "") } })))} inputMode="numeric" maxLength={2} />
               ))}
             </div>
-            <Checks name="diagnostic" legend="Diagnostic services" list={lists.diagnostic} chosen={detailed.diagnostics}
+            <Checks name="diagnostic" legend={t("admin.ui.diagnosticServices")} list={lists.diagnostic} chosen={detailed.diagnostics}
               onChange={(codes) => edit("detailed", () => setDetailed((current) => ({ ...current, diagnostics: codes })))} />
           </div>
-          <div className="md:col-span-2"><button type="button" className={primary} disabled={busy || !signedIn || !BEDS.every(([field]) => twoDigits(detailed.beds[field]))} onClick={() => void saveDetailed()}>{busy ? "Saving in HFR…" : "Save detailed information"}</button></div>
+          <div className="md:col-span-2"><button type="button" className={primary} disabled={busy || !signedIn || !BEDS.every(([field]) => twoDigits(detailed.beds[field]))} onClick={() => void saveDetailed()}>{busy ? t("admin.ui.savingInHfr") : t("admin.ui.saveDetailedInformation")}</button></div>
         </div>
       ) : null}
 
       {step === "submit" ? (
         <div className="space-y-2 text-sm">
           {editing ? (
-            <p>Resubmit <strong>{basic.name}</strong> (tracking ID {basic.tracking_id}) to HFR with the saved changes. HFR verifies the changes afterwards.</p>
+            <p>{t("admin.ui.resubmit")}{" "}<strong>{basic.name}</strong>{" "}{t("admin.ui.trackingId")}{" "}{basic.tracking_id}{t("admin.ui.toHfrWithTheSavedChanges")}</p>
           ) : (
-            <p>Submit <strong>{basic.name}</strong> (tracking ID {basic.tracking_id}) to HFR. HFR returns the facility ID and verifies the facility afterwards.</p>
+            <p>{t("common.submit")}{" "}<strong>{basic.name}</strong>{" "}{t("admin.ui.trackingId")}{" "}{basic.tracking_id}{t("admin.ui.toHfrHfrReturnsTheFacility")}</p>
           )}
-          <button type="button" className={primary} disabled={busy || !signedIn} onClick={() => void submit()}>{busy ? "Submitting…" : editing ? "Resubmit to HFR" : "Submit to HFR"}</button>
+          <button type="button" className={primary} disabled={busy || !signedIn} onClick={() => void submit()}>{busy ? "Submitting…" : editing ? t("admin.ui.resubmitToHfr") : t("admin.ui.submitToHfr")}</button>
         </div>
       ) : null}
 
@@ -590,11 +594,12 @@ function AddressProofPicker({ list, onAdd, choose }: {
   onAdd: (proof: { type: string; attachment: HfrUpload }) => void;
   choose: (file: File | undefined, apply: (upload: HfrUpload | null) => void) => Promise<void>;
 }) {
+  const { t } = useLocale();
   const [type, setType] = useState("");
   return (
     <div className="grid gap-2 md:grid-cols-2">
-      <Select name="address_proof_type" label="Address proof type" value={type} list={list} onChange={setType} />
-      <label className="block space-y-1 text-sm"><span className="text-muted-foreground">Address proof (PNG or JPEG, up to 5 MB)</span>
+      <Select name="address_proof_type" label={t("admin.ui.addressProofType")} value={type} list={list} onChange={setType} />
+      <label className="block space-y-1 text-sm"><span className="text-muted-foreground">{t("admin.ui.addressProofPngOrJpegUp")}</span>
         <input type="file" name="address_proof" accept="image/png,image/jpeg" disabled={!type} className={input}
           onChange={(e) => void choose(e.target.files?.[0], (upload) => { if (upload) { onAdd({ type, attachment: upload }); setType(""); } })} /></label>
     </div>
@@ -605,17 +610,16 @@ function SpecialityPicker({ system, label, value, onChange }: {
   system: string; label: string; value: { available: "Y" | "N"; codes: string[] };
   onChange: (value: { available: "Y" | "N"; codes: string[] }) => void;
 }) {
+  const { t } = useLocale();
   const list = useList(value.available === "Y" ? `specialities:${system}` : null);
   return (
     <fieldset className="space-y-2 rounded-md border border-border p-3 text-sm md:col-span-2">
-      <legend className="px-1 font-medium">{label}: specialities</legend>
+      <legend className="px-1 font-medium">{t("admin.ui.labelSpecialities", { label })}</legend>
       <label className="flex items-center gap-2">
         <input type="checkbox" name={`specialisation:${system}`} checked={value.available === "Y"}
-          onChange={(e) => onChange({ available: e.target.checked ? "Y" : "N", codes: [] })} />
-        Specialisation is available
-      </label>
+          onChange={(e) => onChange({ available: e.target.checked ? "Y" : "N", codes: [] })} />{t("admin.ui.specialisationIsAvailable")}</label>
       {value.available === "Y" ? (
-        <Checks name={`speciality:${system}`} legend="Specialities" list={list} chosen={value.codes} onChange={(codes) => onChange({ ...value, codes })} />
+        <Checks name={`speciality:${system}`} legend={t("admin.ui.specialities")} list={list} chosen={value.codes} onChange={(codes) => onChange({ ...value, codes })} />
       ) : null}
     </fieldset>
   );

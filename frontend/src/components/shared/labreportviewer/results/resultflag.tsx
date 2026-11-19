@@ -1,3 +1,4 @@
+import { translate } from "@/lib/i18n";
 interface ResultFlagProps {
   flag: string;
 }
@@ -11,11 +12,11 @@ const styles: Record<string, string> = {
 };
 
 const labels: Record<string, string> = {
-  HIGH: "High",
+  get HIGH() { return translate("common.msg.high"); },
   LOW: "Low",
-  BORDERLINE: "Borderline",
-  CRITICAL: "Critical",
-  PANIC: "Panic",
+  get BORDERLINE() { return translate("common.msg.borderline"); },
+  get CRITICAL() { return translate("equipment.critical"); },
+  get PANIC() { return translate("common.msg.panic"); },
 };
 
 export default function ResultFlagLabel({ flag }: ResultFlagProps) {

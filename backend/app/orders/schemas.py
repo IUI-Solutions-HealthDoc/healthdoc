@@ -158,6 +158,11 @@ class PrescriptionOut(BaseModel):
     #: on this prescription -- unlike an allergy conflict, this never
     #: prevents the save; it's surfaced so the clinician can review.
     interaction_warnings: list[str] = []
+    # Who it is for, so the pharmacist checks the person, not an id.
+    patient_name: str | None = None
+    patient_uhid: str | None = None
+    patient_age_years: int | None = None
+    patient_sex: str | None = None
     model_config = {"from_attributes": True}
 
 

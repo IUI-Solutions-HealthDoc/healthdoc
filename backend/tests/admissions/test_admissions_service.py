@@ -6,6 +6,7 @@ this one, alongside discharge_patient() itself.
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -168,7 +169,7 @@ class TestDischargePatient:
         )
         discharge = await service.discharge_patient(
             db, admission=admission, discharge_type="discharged", created_by=doctor.id,
-            discharge_summary="Recovered well.",
+            discharge_summary="Recovered well.", acknowledge_incomplete_checklist=True,
         )
         assert discharge.discharge_type == "discharged"
 
@@ -223,11 +224,106 @@ class TestDischargePatient:
         )
         await service.discharge_patient(
             db, admission=admission, discharge_type="discharged", created_by=doctor.id,
+            acknowledge_incomplete_checklist=True,
         )
         with pytest.raises(service.AdmissionNotActive):
             await service.discharge_patient(
                 db, admission=admission, discharge_type="discharged", created_by=doctor.id,
             )
+
+
+class TestWardRules:
+    """QA 16 Oct 2026: discharge with the checklist 1 of 6 and a past
+    follow-up date, the vitals item ticked with no vitals, a skip reason of
+    "x", and a second admission for a patient already in a bed."""
+
+    async def test_open_mandatory_items_stop_a_discharge_until_confirmed(self, db, seed, visit, ward, bed):
+        _dept, _room, doctor = seed
+        admission = await service.admit_patient(
+            db, visit_id=visit.id, ward_id=ward.id, bed_id=bed.id, created_by=doctor.id,
+        )
+        with pytest.raises(service.DischargeRefused) as exc:
+            await service.discharge_patient(
+                db, admission=admission, discharge_type="discharged", created_by=doctor.id,
+            )
+        assert exc.value.code == "checklist_incomplete"
+        assert "5 mandatory" in exc.value.message
+        await service.discharge_patient(
+            db, admission=admission, discharge_type="discharged", created_by=doctor.id,
+            acknowledge_incomplete_checklist=True,
+        )
+        assert admission.status == "discharged"
+
+    async def test_a_follow_up_before_the_discharge_is_refused(self, db, seed, visit, ward, bed):
+        _dept, _room, doctor = seed
+        admission = await service.admit_patient(
+            db, visit_id=visit.id, ward_id=ward.id, bed_id=bed.id, created_by=doctor.id,
+        )
+        with pytest.raises(service.DischargeRefused) as exc:
+            await service.discharge_patient(
+                db, admission=admission, discharge_type="discharged", created_by=doctor.id,
+                follow_up_date=(datetime.now(UTC) - timedelta(days=16)).date(),
+                acknowledge_incomplete_checklist=True,
+            )
+        assert exc.value.code == "follow_up_in_past"
+
+    async def test_vitals_item_needs_vitals_and_a_skip_needs_a_real_reason(self, db, seed, visit, ward, bed):
+        from app.admissions.models import AdmissionChecklistTask
+
+        _dept, _room, doctor = seed
+        admission = await service.admit_patient(
+            db, visit_id=visit.id, ward_id=ward.id, bed_id=bed.id, created_by=doctor.id,
+        )
+        tasks = {
+            t.task_code: t
+            for t in (
+                await db.execute(select(AdmissionChecklistTask).where(AdmissionChecklistTask.admission_id == admission.id))
+            ).scalars()
+        }
+        with pytest.raises(service.ChecklistTaskBlocked) as exc:
+            await service.update_checklist_task(
+                db, admission_id=admission.id, task_id=tasks["baseline_vitals"].id, status="completed",
+                updated_by=doctor.id, facility_id=visit.facility_id,
+            )
+        assert exc.value.code == "vitals_not_recorded"
+        with pytest.raises(service.ChecklistSkipReasonRequired):
+            await service.update_checklist_task(
+                db, admission_id=admission.id, task_id=tasks["id_wristband"].id, status="skipped",
+                skipped_reason="x", updated_by=doctor.id, facility_id=visit.facility_id,
+            )
+        skipped = await service.update_checklist_task(
+            db, admission_id=admission.id, task_id=tasks["id_wristband"].id, status="skipped",
+            skipped_reason="Patient unconscious; identity confirmed by attendant", updated_by=doctor.id,
+            facility_id=visit.facility_id,
+        )
+        assert skipped["completed_by"] == doctor.id and skipped["completed_at"] is not None
+
+    async def test_a_patient_already_in_a_bed_is_not_admitted_twice(self, db, seed, visit, ward, bed):
+        from app.admissions.models import Bed
+
+        _dept, _room, doctor = seed
+        await service.admit_patient(db, visit_id=visit.id, ward_id=ward.id, bed_id=bed.id, created_by=doctor.id)
+        other_bed = Bed(id=uuid.uuid4(), ward_id=ward.id, bed_number="B-2", status="vacant")
+        db.add(other_bed)
+        await db.flush()
+        with pytest.raises(service.AdmissionRefused) as exc:
+            await service.admit_patient(
+                db, visit_id=visit.id, ward_id=ward.id, bed_id=other_bed.id, created_by=doctor.id,
+            )
+        assert exc.value.code == "already_admitted"
+
+    async def test_admittable_visits_are_found_by_name_and_hide_admitted_patients(self, db, seed, visit, ward, bed):
+        from app.patients.models import Patient
+
+        _dept, _room, doctor = seed
+        patient = await db.get(Patient, visit.patient_id)
+        found = await service.find_admittable_visits(db, facility_id=visit.facility_id, q=patient.full_name[:4])
+        assert [row["visit_id"] for row in found] == [visit.id]
+        await service.admit_patient(db, visit_id=visit.id, ward_id=ward.id, bed_id=bed.id, created_by=doctor.id)
+        assert await service.find_admittable_visits(db, facility_id=visit.facility_id, q=patient.full_name[:4]) == []
+        described = await service.describe_admissions(db, await service.list_admissions(db, facility_id=visit.facility_id))
+        assert described[0]["patient_name"] == patient.full_name
+        assert described[0]["bed_number"] == bed.bed_number
 
 
 class TestClinicalTimes:

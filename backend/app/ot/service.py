@@ -4,6 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime, time, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, or_, select
@@ -21,6 +22,12 @@ from app.ot.schemas import (
 from app.patients.models import Patient
 from app.admissions.models import Admission
 from app.common.patient_scope import require_patient_scope, require_visit_scope
+
+
+def _ist(value: datetime) -> str:
+    """A clash message the theatre desk can read; it carried a schedule UUID."""
+    aware = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    return aware.astimezone(ZoneInfo("Asia/Kolkata")).strftime("%d %b %H:%M")
 
 
 async def create_ot_schedule(
@@ -60,11 +67,13 @@ async def create_ot_schedule(
     if conflict is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                f"Theatre '{body.theatre_number}' has a conflicting schedule "
-                f"from {conflict.scheduled_start.isoformat()} to {conflict.scheduled_end.isoformat()} "
-                f"(schedule ID: {conflict.id})."
-            ),
+            detail={
+                "code": "theatre_booked",
+                "message": (
+                    f"{body.theatre_number} is already booked from "
+                    f"{_ist(conflict.scheduled_start)} to {_ist(conflict.scheduled_end)}. Choose another time or theatre."
+                ),
+            },
         )
 
     schedule = OtSchedule(

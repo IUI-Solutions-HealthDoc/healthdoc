@@ -1,5 +1,6 @@
 import { BED_STATUS_STYLES } from "./constants";
 import { Bed, BED_STATUS_LABELS, type BedStatus } from "./BedGrid.types";
+import { useLocale } from "@/lib/i18n";
 
 type BedGridProps = {
   beds: Bed[];
@@ -13,12 +14,11 @@ export default function BedGrid({
   selectedBedId = null,
   onBedClick,
 }: BedGridProps) {
+  const { t } = useLocale();
   if (beds.length === 0) {
     return (
       <div className="surface-card p-6">
-        <p className="text-sm text-muted-foreground">
-          No beds available.
-        </p>
+        <p className="text-sm text-muted-foreground">{t("common.ui.noBedsAvailable")}</p>
       </div>
     );
   }
@@ -75,10 +75,10 @@ export default function BedGrid({
             </div>
 
             <div className="mt-3">
-              <p className="text-sm text-muted-foreground">Patient</p>
+              <p className="text-sm text-muted-foreground">{t("common.patient")}</p>
 
               <p className="mt-1 text-sm font-medium">
-                {bed.occupant?.patient_name ?? "Not assigned"}
+                {bed.occupant?.patient_name ?? t("common.ui.notAssigned")}
               </p>
 
               {/* UHID, not the name alone: two patients on a ward share a name

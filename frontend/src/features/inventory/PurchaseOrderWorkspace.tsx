@@ -24,6 +24,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { searchMedicines } from "@/features/pharmacy/api";
 import type { MedicineSearchResult } from "@/features/pharmacy/types";
 import { ApiError } from "@/lib/api";
+import { api } from "@/lib/api";
 import { useLocale } from "@/lib/i18n";
 
 import {
@@ -64,6 +65,7 @@ export function PurchaseOrderWorkspace() {
   const [busy, setBusy] = useState(false);
 
   const [supplierId, setSupplierId] = useState("");
+  const [newSupplier, setNewSupplier] = useState("");
   const [expectedDate, setExpectedDate] = useState("");
   const [lines, setLines] = useState<DraftLine[]>([]);
   const [term, setTerm] = useState("");
@@ -87,23 +89,35 @@ export function PurchaseOrderWorkspace() {
     void reload();
   }, [reload]);
 
+  // Focusing the box lists the catalogue; typing narrows it. A failed search
+  // said nothing and looked like an empty catalogue (QA 17 Oct 2026).
+  const [browsing, setBrowsing] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
   useEffect(() => {
     const q = term.trim();
-    if (q.length < 2) {
+    if (q.length === 1 || (q.length === 0 && !browsing)) {
       setMatches([]);
       return;
     }
     let cancelled = false;
     const timer = setTimeout(() => {
       searchMedicines(q)
-        .then((r) => !cancelled && setMatches(r.items))
-        .catch(() => !cancelled && setMatches([]));
+        .then((r) => {
+          if (cancelled) return;
+          setMatches(r.items);
+          setSearchError(r.items.length ? null : t("inventory.noItemsMatch"));
+        })
+        .catch((reason) => {
+          if (cancelled) return;
+          setMatches([]);
+          setSearchError(reason instanceof ApiError ? reason.message : t("inventory.errItemSearch"));
+        });
     }, 250);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [term]);
+  }, [term, browsing, t]);
 
   const readyLines = useMemo(
     () => lines.filter((l) => l.item_id && Number(l.quantity) > 0),
@@ -173,6 +187,20 @@ export function PurchaseOrderWorkspace() {
                 </option>
               ))}
             </select>
+            {/* No supplier could be added anywhere (QA 10 Oct 2026). */}
+            <span className="mt-2 flex gap-2">
+              <input value={newSupplier} maxLength={200} onChange={(e) => setNewSupplier(e.target.value)}
+                placeholder={t("inventory.ui.newSupplierName")} aria-label={t("inventory.ui.newSupplierName")} className="flex-1 rounded border border-gray-300 p-2" />
+              <button type="button" disabled={newSupplier.trim().length < 2}
+                onClick={() => void api<Supplier>("/pharmacy/suppliers", {
+                  method: "POST", body: JSON.stringify({ name: newSupplier.trim() }), idempotencyKey: null,
+                }).then((created) => {
+                  setSuppliers((list) => list.some((s) => s.id === created.id) ? list : [...list, created]);
+                  setSupplierId(created.id);
+                  setNewSupplier("");
+                })}
+                className="rounded border border-gray-300 px-3 text-sm disabled:opacity-50">{t("inventory.ui.addSupplier")}</button>
+            </span>
           </label>
           <label className="text-sm">
             <span className="block text-gray-700">{t("inventory.po.expectedDelivery")}</span>
@@ -190,8 +218,10 @@ export function PurchaseOrderWorkspace() {
             className="w-full rounded border border-gray-300 p-2 text-sm sm:max-w-sm"
             placeholder={t("inventory.po.searchItemsPlaceholder")}
             value={term}
+            onFocus={() => setBrowsing(true)}
             onChange={(e) => setTerm(e.target.value)}
           />
+          {searchError ? <p className="mt-1 text-xs text-danger">{searchError}</p> : null}
           {matches.length > 0 ? (
             <ul className="mt-1 max-h-40 max-w-sm overflow-auto rounded border border-gray-200 text-sm">
               {matches.map((m) => (

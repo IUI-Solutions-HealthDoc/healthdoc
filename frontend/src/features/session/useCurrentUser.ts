@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { getMe, type CurrentUser } from "./api";
+import { translate } from "@/lib/i18n";
 
 /**
  * The caller's identity and facility, for display.
@@ -37,7 +38,7 @@ export function useCurrentUser(): {
       .catch((e: unknown) => {
         if (!cancelled) {
           setUser(null);
-          setError(e instanceof Error ? e.message : "Could not load your account");
+          setError(e instanceof Error ? e.message : translate("common.msg.couldNotLoadYourAccount"));
         }
       })
       .finally(() => {

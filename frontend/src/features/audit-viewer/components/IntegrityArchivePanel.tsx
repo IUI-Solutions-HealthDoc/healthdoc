@@ -5,7 +5,7 @@ import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 
 import { StatusChip } from "@/components/ui/StatusChip";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 import { meridian } from "@/styles/theme";
 import { VERIFICATION_STATUS_LABELS } from "../constants";
 import { formatDateTime, truncateHash } from "../lib/formatters";
@@ -57,17 +57,11 @@ export function IntegrityArchivePanel({ checks, archives, loading }: Props) {
                   <Typography sx={{ fontWeight: 700, fontSize: "0.875rem" }}>{c.partition_name}</Typography>
                   <StatusChip
                     status={c.chain_valid ? "verified" : "failed"}
-                    label={c.chain_valid ? "Chain valid" : "Chain broken"}
+                    label={c.chain_valid ? t("audit.ui.chainValid") : t("audit.ui.chainBroken")}
                   />
                 </Stack>
-                <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary }}>
-                  Checked {formatDateTime(c.checked_at)} · {c.rows_checked.toLocaleString("en-IN")} rows
-                </Typography>
-                <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary }}>
-                  Signatures valid {c.signatures_valid} / invalid {c.signatures_invalid}
-                  {c.first_mismatch_id ? ` · first mismatch ${c.first_mismatch_id}` : ""}
-                  {c.alerted ? " · alerted" : ""}
-                </Typography>
+                <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary }}>{t("audit.ui.checked")}{" "}{formatDateTime(c.checked_at)} · {c.rows_checked.toLocaleString("en-IN")}{" "}{t("audit.ui.rows")}</Typography>
+                <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary }}>{t("audit.ui.signaturesValidSignaturesValidInvalidSignatures", { signatures_valid: c.signatures_valid, signatures_invalid: c.signatures_invalid, value: c.first_mismatch_id ? translate("audit.msg.firstMismatchFirstMismatchId", undefined, { first_mismatch_id: c.first_mismatch_id }) : "", value2: c.alerted ? " · alerted" : "" })}</Typography>
               </Box>
             ))}
           </Stack>
@@ -83,11 +77,9 @@ export function IntegrityArchivePanel({ checks, archives, loading }: Props) {
           p: 2.5,
         }}
       >
-        <Typography sx={{ m: 0, mb: 1.5, fontSize: "1.0625rem", fontWeight: 700, color: meridian.textPrimary }}>
-          Archives
-        </Typography>
+        <Typography sx={{ m: 0, mb: 1.5, fontSize: "1.0625rem", fontWeight: 700, color: meridian.textPrimary }}>{t("audit.ui.archives")}</Typography>
         {archives.length === 0 ? (
-          <Typography sx={{ color: meridian.textSecondary, fontSize: "0.875rem" }}>No archives.</Typography>
+          <Typography sx={{ color: meridian.textSecondary, fontSize: "0.875rem" }}>{t("audit.ui.noArchives")}</Typography>
         ) : (
           <Stack spacing={1.5}>
             {archives.map((a) => (
@@ -107,14 +99,11 @@ export function IntegrityArchivePanel({ checks, archives, loading }: Props) {
                   />
                 </Stack>
                 <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary }}>
-                  {a.period_start} → {a.period_end} · {a.row_count.toLocaleString("en-IN")} rows
-                </Typography>
+                  {a.period_start} → {a.period_end} · {a.row_count.toLocaleString("en-IN")}{" "}{t("audit.ui.rows")}</Typography>
                 <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary, fontFamily: "ui-monospace, monospace" }}>
                   {a.object_storage_bucket}/{a.object_storage_key}
                 </Typography>
-                <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary }}>
-                  hash {truncateHash(a.archive_file_hash)} · archived {formatDateTime(a.archived_at)}
-                </Typography>
+                <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary }}>{t("audit.ui.hashArchiveFileHashArchivedArchived", { archive_file_hash: truncateHash(a.archive_file_hash), archived_at: formatDateTime(a.archived_at) })}</Typography>
               </Box>
             ))}
           </Stack>

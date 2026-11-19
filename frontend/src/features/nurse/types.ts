@@ -108,6 +108,11 @@ export type NursingTask = {
   completed_at: string | null;
   completed_by: string | null;
   completion_note: string | null;
+  order_number?: string | null;
+  patient_name?: string | null;
+  patient_uhid?: string | null;
+  patient_age_years?: number | null;
+  patient_sex?: string | null;
 };
 
 export type ClinicalIncident = {

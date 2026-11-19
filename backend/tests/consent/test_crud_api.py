@@ -200,6 +200,8 @@ class TestCreateConsentRecord:
                 created_by=user_id,
                 purpose_id=purpose_id,
                 granted_by_type="guardian",
+                guardian_name="Test Guardian",
+                guardian_relationship="parent",
                 channel="written",
                 expires_at=None,
                 scope=["lab_results", "prescriptions"],
@@ -710,3 +712,36 @@ class TestGetConsentRecordRouteLogsBeforeDenial:
         )
         assert str(row.patient_id) == str(patient_id)
         assert row.resource_type == "consent_records"
+
+
+async def test_a_minor_cannot_give_their_own_consent(engine, session_factory, facility_id, user_id, purpose_id):
+    # QA 16 Oct 2026: a 4-year-old was saved as "Granted by: patient".
+    child = uuid.uuid4()
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO patients (id, full_name, sex, identity_path, facility_id, created_by, age_years, uhid, "
+                "guardian_name, guardian_relationship) VALUES (:id, 'Retest Child', 'female', 'demographics_only', "
+                ":f, :u, 4, :uhid, 'Parent Name', 'mother')"
+            ),
+            {"id": child, "f": facility_id, "u": user_id, "uhid": f"UHID{child.hex[:8]}"},
+        )
+    async with session_factory() as db:
+        with pytest.raises(HTTPException) as exc:
+            await service.create_consent_record(
+                db, patient_id=child, facility_id=facility_id, created_by=user_id, purpose_id=purpose_id,
+                granted_by_type="patient", channel="written",
+            )
+        assert exc.value.detail["code"] == "minor_needs_guardian"
+        with pytest.raises(HTTPException) as exc:
+            await service.create_consent_record(
+                db, patient_id=child, facility_id=facility_id, created_by=user_id, purpose_id=purpose_id,
+                granted_by_type="guardian", channel="written",
+            )
+        assert exc.value.detail["code"] == "guardian_details_required"
+        record = await service.create_consent_record(
+            db, patient_id=child, facility_id=facility_id, created_by=user_id, purpose_id=purpose_id,
+            granted_by_type="guardian", guardian_name="Parent Name", guardian_relationship="mother", channel="written",
+        )
+        await db.rollback()
+    assert record.granted_by_type == "guardian"

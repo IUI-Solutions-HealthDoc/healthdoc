@@ -494,3 +494,34 @@ async def test_an_already_completed_token_is_not_touched_again(db, queue, opd_vi
 
     assert first is not None and first.status == "completed"
     assert second is None
+
+
+# --------------------------------------------------------------------------- #
+# QA 12 Oct 2026: "Token never shows In service; wait keeps counting".
+# Nothing moved a token to in_service; the first encounter of the visit now does.
+# --------------------------------------------------------------------------- #
+
+async def test_opening_the_consultation_puts_the_token_in_service(db, queue, opd_visit):
+    visit_id = (await opd_visit()).id
+    token = await service.create_token(db, queue.id, visit_id, "normal", queue.facility_id)
+    started = await service.start_service_for_visit(db, visit_id)
+    assert started.id == token.id and started.status == "in_service"
+    assert started.called_at is not None, "service start is the moment the wait ends"
+    completed = await service.complete_for_visit_if_active(db, visit_id)
+    assert completed.status == "completed" and completed.completed_at is not None
+
+
+async def test_starting_service_twice_changes_nothing_the_second_time(db, queue, opd_visit):
+    visit_id = (await opd_visit()).id
+    await service.create_token(db, queue.id, visit_id, "normal", queue.facility_id)
+    first = await service.start_service_for_visit(db, visit_id)
+    called_at = first.called_at
+    assert await service.start_service_for_visit(db, visit_id) is None
+    assert first.called_at == called_at
+
+
+def test_an_unknown_age_is_not_zero():
+    from datetime import date
+
+    assert service._patient_age(None, None, date(2026, 10, 14)) is None
+    assert service._patient_age(None, 0, date(2026, 10, 14)) == 0

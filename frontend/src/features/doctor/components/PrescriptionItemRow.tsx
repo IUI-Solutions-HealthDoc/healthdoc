@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/Badge";
 import { meridian } from "@/styles/theme";
 import { FREQUENCIES_WITHOUT_DURATION, FREQUENCY_OPTIONS, ROUTE_OPTIONS } from "../constants";
 import type { DraftPrescriptionItem, FrequencyCode, RouteCode } from "../types";
+import { useLocale } from "@/lib/i18n";
 
 export interface PrescriptionItemRowProps {
   item: DraftPrescriptionItem;
@@ -19,6 +20,7 @@ export interface PrescriptionItemRowProps {
 }
 
 export function PrescriptionItemRow({ item, onChange, onRemove }: PrescriptionItemRowProps) {
+  const { t } = useLocale();
   const noDuration = FREQUENCIES_WITHOUT_DURATION.includes(item.frequency as never);
 
   return (
@@ -37,17 +39,17 @@ export function PrescriptionItemRow({ item, onChange, onRemove }: PrescriptionIt
         {item.strength && (
           <Typography sx={{ fontSize: "0.75rem", color: meridian.textSecondary }}>{item.strength}</Typography>
         )}
-        {item.is_controlled_drug && <Badge variant="destructive">Controlled</Badge>}
+        {item.is_controlled_drug && <Badge variant="destructive">{t("doctor.ui.controlled")}</Badge>}
         <Box sx={{ flex: 1 }} />
-        <IconButton size="small" onClick={onRemove} aria-label="Remove medicine">
+        <IconButton size="small" onClick={onRemove} aria-label={t("doctor.ui.removeMedicine")}>
           ×
         </IconButton>
       </Stack>
 
       <Stack direction="row" spacing={1.5} sx={{ flexWrap: "wrap", gap: 1.5 }}>
         <TextField
-          label="Dosage"
-          placeholder="e.g. 1 tab"
+          label={t("common.ui.dosage")}
+          placeholder={t("doctor.ui.eG1Tab")}
           value={item.dosage}
           onChange={(e) => onChange({ dosage: e.target.value })}
           size="small"
@@ -55,7 +57,7 @@ export function PrescriptionItemRow({ item, onChange, onRemove }: PrescriptionIt
         />
         <TextField
           select
-          label="Frequency"
+          label={t("doctor.ui.frequency")}
           value={item.frequency}
           onChange={(e) => onChange({ frequency: e.target.value as FrequencyCode })}
           size="small"
@@ -68,7 +70,7 @@ export function PrescriptionItemRow({ item, onChange, onRemove }: PrescriptionIt
           ))}
         </TextField>
         <TextField
-          label="Duration"
+          label={t("doctor.ui.duration")}
           type="number"
           value={noDuration ? "" : item.duration_days ?? ""}
           onChange={(e) =>
@@ -76,12 +78,12 @@ export function PrescriptionItemRow({ item, onChange, onRemove }: PrescriptionIt
           }
           size="small"
           disabled={noDuration}
-          helperText={noDuration ? "As needed" : "days"}
+          helperText={noDuration ? t("doctor.ui.asNeeded") : "days"}
           sx={{ width: 120 }}
         />
         <TextField
           select
-          label="Route"
+          label={t("immunization.col.route")}
           value={item.route}
           onChange={(e) => onChange({ route: e.target.value as RouteCode })}
           size="small"
@@ -96,8 +98,8 @@ export function PrescriptionItemRow({ item, onChange, onRemove }: PrescriptionIt
       </Stack>
 
       <TextField
-        label="Instructions (optional)"
-        placeholder="e.g. after food"
+        label={t("doctor.ui.instructionsOptional")}
+        placeholder={t("doctor.ui.eGAfterFood")}
         value={item.instructions ?? ""}
         onChange={(e) => onChange({ instructions: e.target.value })}
         size="small"

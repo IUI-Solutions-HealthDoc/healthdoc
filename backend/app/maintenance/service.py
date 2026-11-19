@@ -21,6 +21,40 @@ class MaintenanceLogNotFound(Exception):
     pass
 
 
+class MaintenanceRefused(Exception):
+    def __init__(self, code: str, message: str):
+        self.code = code
+        self.message = message
+
+
+async def _registered_machine(db: AsyncSession, facility_id: uuid.UUID, machine: str) -> str:
+    """The register's name for a machine, or the typed text when none is registered.
+
+    Service records named machines in free text while the equipment register
+    held them separately, so "MR-01" had a service history and the doctor's
+    Equipment page said no machines were registered (QA 17 Oct 2026). Once a
+    facility registers equipment, a record must name one of its machines, by
+    asset tag or name in any case, and the tag is what is stored.
+    """
+    from app.equipment.models import Equipment
+
+    registered = (
+        await db.execute(select(Equipment).where(Equipment.facility_id == facility_id))
+    ).scalars().all()
+    if not registered:
+        return machine.strip().upper()
+    wanted = machine.strip().upper()
+    for item in registered:
+        if (item.asset_tag or "").upper() == wanted or item.name.strip().upper() == wanted:
+            if item.status == "retired":
+                raise MaintenanceRefused("machine_retired", f"{item.name} is retired. Service is not recorded on a retired machine.")
+            return (item.asset_tag or item.name).strip().upper()
+    raise MaintenanceRefused(
+        "machine_not_registered",
+        "This machine is not in the equipment register. Choose a registered machine, or ask an administrator to register it under Equipment.",
+    )
+
+
 async def create_maintenance_log(
     db: AsyncSession,
     *,
@@ -38,10 +72,18 @@ async def create_maintenance_log(
     ).scalar_one_or_none()
     if department is None:
         raise DepartmentNotFound
+    if not (payload.performed_by_vendor or "").strip():
+        # Who did the work is the point of the record (QA 17 Oct 2026).
+        raise MaintenanceRefused(
+            "performed_by_required", "Enter who performed the service: the vendor, or the in-house engineer's name.",
+        )
+    if payload.maintenance_type == "breakdown" and payload.downtime_minutes is None:
+        raise MaintenanceRefused("downtime_required", "Enter how long the machine was out of use for a breakdown.")
+    machine = await _registered_machine(db, facility_id, payload.machine_id)
 
     row = MachineMaintenanceLog(
         id=uuid.uuid4(),
-        machine_id=payload.machine_id,
+        machine_id=machine,
         department_id=department.id,
         maintenance_type=payload.maintenance_type,
         performed_at=payload.performed_at,
@@ -106,7 +148,10 @@ async def list_maintenance_logs(
 ) -> tuple[list[MachineMaintenanceLog], int]:
     statement = _scoped_logs(facility_id)
     if machine_id is not None:
-        statement = statement.where(MachineMaintenanceLog.machine_id == machine_id)
+        # Part of a name or tag, any case: typing "mr" found nothing because
+        # the filter wanted the exact stored value (QA 17 Oct 2026).
+        term = machine_id.strip().replace("%", "").replace("_", "")
+        statement = statement.where(MachineMaintenanceLog.machine_id.ilike(f"%{term}%"))
     if department_id is not None:
         statement = statement.where(
             MachineMaintenanceLog.department_id == department_id

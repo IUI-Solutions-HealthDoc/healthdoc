@@ -4,6 +4,7 @@
 // browser.
 //
 import type { SchemeOptionCode } from "./types";
+import { translate } from "@/lib/i18n";
 export const RECEIPT_PREFIX = "RCP";
 export const REFUND_PREFIX = "RFD";
 
@@ -17,18 +18,18 @@ export const SCHEME_OPTIONS: {
     code: "self_pay",
     label: "Self-pay / Cash",
     scheme_code: null,
-    description: "Patient pays net amount in full (stored as null; MIS shows self_pay)",
+    get description() { return translate("billing.msg.patientPaysNetAmountInFull"); },
   },
   {
     code: "PMJAY",
     label: "PM-JAY (Ayushman Bharat)",
     scheme_code: "PMJAY",
-    description: "Ayushman Bharat — scheme adjustment applied",
+    get description() { return translate("billing.msg.ayushmanBharatSchemeAdjustmentApplied"); },
   },
   {
     code: "OTHER",
-    label: "Other scheme",
+    get label() { return translate("billing.msg.otherScheme"); },
     scheme_code: "OTHER",
-    description: "Corporate / state / other coverage",
+    get description() { return translate("billing.msg.corporateStateOtherCoverage"); },
   },
 ];

@@ -37,6 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit.service import write_audit_log
 from app.auth.deps import AuthUser, CurrentDbUser, get_current_db_user, require_roles
 from app.common.accession import LAB, allocate_accession_number
+from app.common.patient_brief import patient_briefs
 from app.common.db import SessionLocal, get_db
 from app.common.idempotency import check_idempotency, hash_request_body, record_idempotent_response
 from app.orders.models import Order
@@ -442,7 +443,7 @@ async def list_lab_order_items(
     db: AsyncSession = Depends(get_db),
 ):
     query = (
-        select(LabOrderItem)
+        select(LabOrderItem, Order.patient_id)
         .join(Order, Order.id == LabOrderItem.order_id)
         .where(Order.facility_id == current_db_user.facility_id)
     )
@@ -455,9 +456,15 @@ async def list_lab_order_items(
         .offset((page - 1) * page_size)
         .limit(page_size)
     )
-    rows = result.scalars().all()
-
-    return LabOrderItemListOut(items=rows, page=page, page_size=page_size, total=total)
+    rows = result.all()
+    briefs = await patient_briefs(db, (pid for _, pid in rows), current_db_user.facility_id)
+    items = []
+    for item, pid in rows:
+        out = LabOrderItemOut.model_validate(item)
+        if pid in briefs:
+            out = out.model_copy(update=briefs[pid].model_dump())
+        items.append(out)
+    return LabOrderItemListOut(items=items, page=page, page_size=page_size, total=total)
 
 
 async def _write_audit_log(db: AsyncSession, *, table_name: str, row_id: uuid.UUID,

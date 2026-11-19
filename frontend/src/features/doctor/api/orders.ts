@@ -9,6 +9,7 @@ import type {
   OrderStatus,
   PlacedOrder,
 } from "../types";
+import { translate } from "@/lib/i18n";
 
 interface OrderResponse {
   id: string;
@@ -61,7 +62,7 @@ export async function listOrders(encounterId: string): Promise<PlacedOrder[]> {
       ordered_at: order.ordered_at,
       item_label:
         procedure?.procedure_name ??
-        `${order.order_type === "lab" ? "Lab" : order.order_type === "radiology" ? "Radiology" : "Clinical"} order`,
+        `${order.order_type === "lab" ? "Lab" : order.order_type === "radiology" ? translate("sidebar.radiology") : translate("area.clinical")} order`,
       detail_status: procedure ? "complete" : "header_only",
     };
   });
@@ -128,7 +129,7 @@ export async function placeOrder(
     draft.order_type !== "radiology" &&
     draft.order_type !== "procedure"
   ) {
-    throw new Error(`Ordering ${draft.order_type} is not supported in this workflow.`);
+    throw new Error(translate("doctor.msg.orderingOrderTypeIsNotSupported", undefined, { order_type: draft.order_type }));
   }
 
   let header = await createOrder(
@@ -142,10 +143,10 @@ export async function placeOrder(
   );
   const label =
     draft.order_type === "lab"
-      ? draft.test_name?.trim() || "Lab test"
+      ? draft.test_name?.trim() || translate("doctor.msg.labTest")
       : draft.order_type === "radiology"
-        ? draft.scan_type?.trim() || "Radiology study"
-        : draft.procedure_name?.trim() || "Procedure";
+        ? draft.scan_type?.trim() || translate("doctor.msg.radiologyStudy")
+        : draft.procedure_name?.trim() || translate("doctor.orderType.procedure");
 
   // Legacy replay snapshots predate fulfilment_mode. Read the actual order
   // before calling a department; absence must never mean "internal".
@@ -163,7 +164,7 @@ export async function placeOrder(
     return { ...base, detail_status: "header_only" };
   }
   if (header.fulfilment_mode !== "internal") {
-    return { ...base, detail_status: "failed", detail_error: "Fulfilment could not be confirmed. Refresh orders; do not reorder." };
+    return { ...base, detail_status: "failed", detail_error: translate("doctor.msg.fulfilmentCouldNotBeConfirmedRefresh") };
   }
 
   try {
@@ -205,7 +206,7 @@ export async function placeOrder(
       ...base,
       item_label: label,
       detail_status: "failed",
-      detail_error: error instanceof Error ? error.message : "Department item creation failed",
+      detail_error: error instanceof Error ? error.message : translate("doctor.msg.departmentItemCreationFailed"),
     };
   }
 }

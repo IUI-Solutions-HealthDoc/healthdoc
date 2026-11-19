@@ -2,6 +2,7 @@
 
 import { CheckCircle2, Printer, ShieldCheck, X } from "lucide-react";
 import type { ImmunizationCertificate } from "../types";
+import { useLocale } from "@/lib/i18n";
 
 interface ImmunizationCertificateModalProps {
   isOpen: boolean;
@@ -14,6 +15,7 @@ export function ImmunizationCertificateModal({
   onClose,
   certificate,
 }: ImmunizationCertificateModalProps) {
+  const { t } = useLocale();
   if (!isOpen || !certificate) return null;
 
   const handlePrint = () => {
@@ -26,16 +28,14 @@ export function ImmunizationCertificateModal({
         <div className="flex items-center justify-between pb-4 border-b border-border print:hidden">
           <div className="flex items-center gap-2">
             <ShieldCheck className="h-5 w-5 text-primary" />
-            <h3 className="text-lg font-bold text-card-foreground">Immunization Record</h3>
+            <h3 className="text-lg font-bold text-card-foreground">{t("immunization.ui.immunizationRecord")}</h3>
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={handlePrint}
               className="flex items-center gap-1.5 rounded-lg bg-secondary px-3 py-1.5 text-xs font-semibold text-secondary-foreground hover:bg-secondary/80 transition-colors"
             >
-              <Printer className="h-4 w-4" />
-              Print
-            </button>
+              <Printer className="h-4 w-4" />{t("common.ui.print")}</button>
             <button
               onClick={onClose}
               className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
@@ -50,58 +50,50 @@ export function ImmunizationCertificateModal({
           {/* Header */}
           <div className="text-center border-b border-border pb-4">
             <div className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary mb-2">
-              <CheckCircle2 className="h-3.5 w-3.5" />
-              Recorded Administrations
-            </div>
+              <CheckCircle2 className="h-3.5 w-3.5" />{t("immunization.ui.recordedAdministrations")}</div>
             <h2 className="text-xl font-bold tracking-tight text-foreground">{certificate.facility_name}</h2>
-            <p className="text-xs text-muted-foreground">Facility immunization record</p>
-            <p className="text-[11px] text-muted-foreground/80 mt-1 font-mono">
-              Certificate No: {certificate.certificate_id} • Issued: {new Date(certificate.generated_at).toLocaleString()}
-            </p>
+            <p className="text-xs text-muted-foreground">{t("immunization.ui.facilityImmunizationRecord")}</p>
+            <p className="text-[11px] text-muted-foreground/80 mt-1 font-mono">{t("immunization.ui.certificateNoCertificateIdIssuedValue", { certificate_id: certificate.certificate_id, value: new Date(certificate.generated_at).toLocaleString() })}</p>
           </div>
 
           {/* Beneficiary Details */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-4 rounded-lg bg-muted/40 text-xs">
             <div>
-              <span className="text-muted-foreground font-medium block">Patient Name</span>
+              <span className="text-muted-foreground font-medium block">{t("common.ui.patientName")}</span>
               <span className="font-semibold text-foreground">{certificate.patient_name}</span>
             </div>
             <div>
-              <span className="text-muted-foreground font-medium block">Patient record ID</span>
+              <span className="text-muted-foreground font-medium block">{t("immunization.ui.patientRecordId")}</span>
               <span className="font-mono font-semibold text-foreground">{certificate.patient_id}</span>
             </div>
             <div>
-              <span className="text-muted-foreground font-medium block">Date of Birth</span>
-              <span className="font-semibold text-foreground">{certificate.dob || "Not recorded"}</span>
+              <span className="text-muted-foreground font-medium block">{t("common.ui.dateOfBirth")}</span>
+              <span className="font-semibold text-foreground">{certificate.dob || t("receptionist.scanShare.notRecorded")}</span>
             </div>
             <div>
-              <span className="text-muted-foreground font-medium block">Gender</span>
-              <span className="font-semibold capitalize text-foreground">{certificate.gender || "Not recorded"}</span>
+              <span className="text-muted-foreground font-medium block">{t("admin.ui.gender")}</span>
+              <span className="font-semibold capitalize text-foreground">{certificate.gender || t("receptionist.scanShare.notRecorded")}</span>
             </div>
           </div>
 
           {/* Vaccination Table */}
           <div>
-            <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2">
-              Vaccination Administration History
-            </h4>
+            <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2">{t("immunization.ui.vaccinationAdministrationHistory")}</h4>
             <div className="overflow-hidden rounded-lg border border-border">
               <table className="w-full text-left text-xs">
                 <thead className="bg-muted/60 text-muted-foreground font-semibold">
                   <tr>
-                    <th className="p-2.5">Vaccine</th>
-                    <th className="p-2.5">Dose</th>
-                    <th className="p-2.5">Date</th>
-                    <th className="p-2.5">Batch / Lot</th>
-                    <th className="p-2.5">Manufacturer</th>
+                    <th className="p-2.5">{t("immunization.record.vaccine")}</th>
+                    <th className="p-2.5">{t("immunization.ui.dose")}</th>
+                    <th className="p-2.5">{t("common.date")}</th>
+                    <th className="p-2.5">{t("immunization.ui.batchLot")}</th>
+                    <th className="p-2.5">{t("immunization.record.manufacturer")}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
                   {certificate.records.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="p-4 text-center text-muted-foreground">
-                        No immunization records found for this patient.
-                      </td>
+                      <td colSpan={5} className="p-4 text-center text-muted-foreground">{t("immunization.ui.noImmunizationRecordsFoundForThis")}</td>
                     </tr>
                   ) : (
                     certificate.records.map((v, idx) => (
@@ -109,10 +101,10 @@ export function ImmunizationCertificateModal({
                         <td className="p-2.5 font-medium text-foreground">
                           <span className="text-muted-foreground text-[10px]">({v.vaccine_code})</span>
                         </td>
-                        <td className="p-2.5">Dose {v.dose_number}</td>
+                        <td className="p-2.5">{t("immunization.ui.doseDoseNumber", { dose_number: v.dose_number })}</td>
                         <td className="p-2.5 font-mono">{new Date(v.administered_at).toLocaleString()}</td>
                         <td className="p-2.5 font-mono">{v.batch_number}</td>
-                        <td className="p-2.5 text-muted-foreground">{v.manufacturer || "Not recorded"}</td>
+                        <td className="p-2.5 text-muted-foreground">{v.manufacturer || t("receptionist.scanShare.notRecorded")}</td>
                       </tr>
                     ))
                   )}
@@ -121,7 +113,7 @@ export function ImmunizationCertificateModal({
             </div>
           </div>
 
-          <p className="text-xs text-muted-foreground">Generated from facility records. This document is not digitally signed.</p>
+          <p className="text-xs text-muted-foreground">{t("immunization.ui.generatedFromFacilityRecordsThisDocument")}</p>
         </div>
       </div>
     </div>

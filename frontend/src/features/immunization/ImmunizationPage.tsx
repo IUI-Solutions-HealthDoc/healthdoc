@@ -1,5 +1,6 @@
 "use client";
 
+import { formatScheduleAge, humanizeCode } from "@/lib/format-age";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, BookOpen, RefreshCw, Search, Syringe } from "lucide-react";
 import { fetchVaccineCatalogue, fetchImmunizationCertificate } from "./api";
@@ -277,17 +278,15 @@ export function ImmunizationPage() {
                     <td className="p-3 font-mono font-medium text-primary">{v.code}</td>
                     <td className="p-3 text-muted-foreground">{v.target_disease}</td>
                     <td className="p-3 font-medium">
-                      {v.min_age_days === 0
-                        ? t("immunization.atBirth")
-                        : t("immunization.daysAge", { days: v.min_age_days })}
+                      {v.min_age_days === 0 ? t("immunization.atBirth") : formatScheduleAge(v.min_age_days)}
                     </td>
                     <td className="p-3">
-                      <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
+                      <span className="whitespace-nowrap rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
                         {t("immunization.doseLabel", { n: v.standard_doses })}
                       </span>
                     </td>
-                    <td className="p-3 text-muted-foreground">{v.route}</td>
-                    <td className="p-3 text-muted-foreground">{v.site || "—"}</td>
+                    <td className="p-3 text-muted-foreground">{humanizeCode(v.route)}</td>
+                    <td className="p-3 text-muted-foreground">{humanizeCode(v.site)}</td>
                   </tr>
                 ))}
               </tbody>

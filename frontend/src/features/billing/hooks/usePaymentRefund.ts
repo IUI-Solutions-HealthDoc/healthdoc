@@ -5,6 +5,7 @@ import { useCallback, useState } from "react";
 import { createRefund } from "../api";
 import { toast } from "@/components/ui/toast";
 import type { CreateRefundInput, Refund } from "../types";
+import { translate } from "@/lib/i18n";
 
 export function usePaymentRefund(
   paymentId: string | null,
@@ -23,11 +24,11 @@ export function usePaymentRefund(
         // { refund, payment, invoice }; the balance moves server-side, so the
         // caller re-reads rather than being handed a reconstructed invoice.
         const refund = await createRefund(paymentId, body);
-        toast.success("Payment reversed", refund.refund_number);
+        toast.success(translate("billing.msg.paymentReversed"), refund.refund_number);
         onSaved?.(refund);
         return refund;
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : "Reversal failed");
+        toast.error(e instanceof Error ? e.message : translate("billing.msg.reversalFailed"));
         throw e;
       } finally {
         setBusy(false);

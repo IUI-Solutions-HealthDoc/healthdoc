@@ -10,7 +10,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.equipment.models import Equipment, EquipmentStatusEvent
@@ -40,10 +40,12 @@ async def register(
     db: AsyncSession, *, facility_id: uuid.UUID, user_id: uuid.UUID, name: str, category: str,
     location: str | None, asset_tag: str | None, is_critical: bool,
 ) -> Equipment:
-    tag = asset_tag.strip() if asset_tag and asset_tag.strip() else None
+    # One physical tag, whatever case it is typed in: XR-01 was refused but
+    # xr-01 registered a second machine under it (QA 16 Oct 2026).
+    tag = asset_tag.strip().upper() if asset_tag and asset_tag.strip() else None
     if tag is not None:
         clash = await db.execute(
-            select(Equipment.id).where(Equipment.facility_id == facility_id, Equipment.asset_tag == tag)
+            select(Equipment.id).where(Equipment.facility_id == facility_id, func.upper(Equipment.asset_tag) == tag)
         )
         if clash.first() is not None:
             raise EquipmentError("asset_tag_in_use", f"Asset tag {tag} is already registered here")

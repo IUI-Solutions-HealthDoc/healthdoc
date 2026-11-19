@@ -6,6 +6,7 @@ import Typography from "@mui/material/Typography";
 
 import { meridian } from "@/styles/theme";
 import type { RadiologyReport } from "../types";
+import { useLocale } from "@/lib/i18n";
 
 const sectionLabelSx = {
   fontSize: "0.6875rem",
@@ -21,6 +22,7 @@ export interface RadiologyReportViewerProps {
 }
 
 export function RadiologyReportViewer({ report }: RadiologyReportViewerProps) {
+  const { t } = useLocale();
   return (
     <Stack spacing={2}>
       {report.status === "preliminary" && (
@@ -34,14 +36,12 @@ export function RadiologyReportViewer({ report }: RadiologyReportViewerProps) {
           }}
         >
           <Typography sx={{ fontSize: "0.8125rem", color: meridian.textPrimary }}>
-            <strong>Preliminary report.</strong> Not yet finalised by the reporting consultant — a
-            corrected version may follow.
-          </Typography>
+            <strong>{t("doctor.ui.preliminaryReport")}</strong>{" "}{t("doctor.ui.notYetFinalisedByTheReporting")}</Typography>
         </Box>
       )}
 
       <Box>
-        <Typography sx={sectionLabelSx}>Findings</Typography>
+        <Typography sx={sectionLabelSx}>{t("radiology.ui.findings")}</Typography>
         <Typography sx={{ fontSize: "0.875rem", lineHeight: 1.65, whiteSpace: "pre-wrap" }}>
           {report.findings}
         </Typography>
@@ -56,7 +56,7 @@ export function RadiologyReportViewer({ report }: RadiologyReportViewerProps) {
           backgroundColor: meridian.muted,
         }}
       >
-        <Typography sx={sectionLabelSx}>Impression</Typography>
+        <Typography sx={sectionLabelSx}>{t("radiology.ui.impression")}</Typography>
         <Typography sx={{ fontSize: "0.875rem", fontWeight: 600, lineHeight: 1.6 }}>
           {report.impression}
         </Typography>
@@ -64,7 +64,7 @@ export function RadiologyReportViewer({ report }: RadiologyReportViewerProps) {
 
       {report.pacs_study_uid && (
         <Box>
-          <Typography sx={sectionLabelSx}>PACS study</Typography>
+          <Typography sx={sectionLabelSx}>{t("doctor.ui.pacsStudy")}</Typography>
           <Typography
             sx={{
               fontSize: "0.75rem",

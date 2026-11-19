@@ -173,7 +173,7 @@ export function DocumentSharing({ patientId, verified }: { patientId: string; ve
     }
   }
   return (
-    <section className="surface-card space-y-4 p-5" aria-label="Share finalized documents">
+    <section className="surface-card space-y-4 p-5" aria-label={t("doctor.ui.shareFinalizedDocuments")}>
       <h2 className="text-xl font-semibold">{t("doctor.abdm.shareTitle")}</h2>
       <p className="text-sm text-muted-foreground">{t("doctor.abdm.shareIntro")}</p>
       <ReleaseDocument patientId={patientId} onReleased={() => setRefresh((value) => value + 1)} />

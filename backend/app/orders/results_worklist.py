@@ -93,10 +93,17 @@ JOIN patients p ON p.id = m.patient_id
 -- doctor_reviews is keyed by whichever item type the review is for, so the
 -- join has to match on the correct column per row. Scoped to the caller's
 -- facility as well: a review row is itself facility-stamped (0038).
-LEFT JOIN doctor_reviews dr
-       ON dr.facility_id = :facility_id
-      AND ((m.order_type = 'lab'       AND dr.lab_order_item_id = m.id)
-        OR (m.order_type = 'radiology' AND dr.radiology_order_item_id = m.id))
+-- The latest review only. A plain join listed an item once per review, so a
+-- re-reviewed CBC appeared twice (QA 16 Oct 2026, duplicate React key).
+LEFT JOIN LATERAL (
+    SELECT d.status
+      FROM doctor_reviews d
+     WHERE d.facility_id = :facility_id
+       AND ((m.order_type = 'lab'       AND d.lab_order_item_id = m.id)
+         OR (m.order_type = 'radiology' AND d.radiology_order_item_id = m.id))
+     ORDER BY d.created_at DESC
+     LIMIT 1
+) dr ON true
 ORDER BY
     CASE m.priority WHEN 'stat' THEN 0 WHEN 'urgent' THEN 1 ELSE 2 END,
     m.reported_at DESC NULLS LAST,

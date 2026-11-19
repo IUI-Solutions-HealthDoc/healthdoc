@@ -1,6 +1,9 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+
+import type { VitalRecord } from "@/components/VitalsTimeline/VitalsTimeline.types";
+import { getPatientVitals } from "@/features/nurse/api/nursing";
 
 import { toast } from "@/components/ui/toast";
 import { newIdempotencyKey } from "@/lib/api";
@@ -37,6 +40,42 @@ const EMPTY: VitalsForm = {
   pain_score: "",
 };
 
+/**
+ * The server's accepted ranges (nursing/schemas.py VitalsCreate), checked
+ * before sending so the field itself is marked: 4567 °C or a pulse of 456789
+ * reached the server and came back as an unhighlighted generic error
+ * (QA 17 Oct 2026).
+ */
+export const VITAL_RANGES: Record<keyof VitalsForm, [number, number]> = {
+  temp_c: [20, 45],
+  pulse_bpm: [0, 350],
+  resp_rate: [0, 120],
+  spo2_pct: [0, 100],
+  bp_systolic: [0, 350],
+  bp_diastolic: [0, 250],
+  pain_score: [0, 10],
+  height_cm: [0, 300],
+  weight_kg: [0, 700],
+  waist_cm: [0, 300],
+  hip_cm: [0, 300],
+};
+
+export function vitalErrors(form: VitalsForm): Partial<Record<keyof VitalsForm, string>> {
+  const errors: Partial<Record<keyof VitalsForm, string>> = {};
+  for (const key of Object.keys(VITAL_RANGES) as (keyof VitalsForm)[]) {
+    const raw = form[key].trim();
+    if (!raw) continue;
+    const value = Number(raw);
+    const [low, high] = VITAL_RANGES[key];
+    if (!Number.isFinite(value) || value < low || value > high) errors[key] = `${low}–${high}`;
+  }
+  const sys = Number(form.bp_systolic), dia = Number(form.bp_diastolic);
+  if (form.bp_systolic.trim() && form.bp_diastolic.trim() && !errors.bp_systolic && !errors.bp_diastolic && dia >= sys) {
+    errors.bp_diastolic = "< systolic";
+  }
+  return errors;
+}
+
 function num(v: string): number | undefined {
   if (v.trim() === "") return undefined;
   const n = Number(v);
@@ -48,6 +87,26 @@ export function useVitals(encounter: ActiveEncounter) {
   const [form, setForm] = useState<VitalsForm>(EMPTY);
   const [saving, setSaving] = useState(false);
   const [idempotencyKey, setIdempotencyKey] = useState(() => newIdempotencyKey());
+  // What has been recorded: the form clears after a save, so without this the
+  // saved values were shown nowhere (QA 12 Oct 2026).
+  const [history, setHistory] = useState<VitalRecord[] | null>(null);
+  const [historyFailed, setHistoryFailed] = useState(false);
+  const [tried, setTried] = useState(false);
+  const errors = useMemo(() => vitalErrors(form), [form]);
+
+  const loadHistory = useCallback(async () => {
+    try {
+      const rows = await getPatientVitals(encounter.patient_id);
+      setHistory([...rows].sort((a, b) => b.measured_at.localeCompare(a.measured_at)));
+      setHistoryFailed(false);
+    } catch {
+      setHistoryFailed(true);
+    }
+  }, [encounter.patient_id]);
+
+  useEffect(() => {
+    void loadHistory();
+  }, [loadHistory]);
 
   const setField = useCallback(
     (field: keyof VitalsForm, value: string) => setForm((f) => ({ ...f, [field]: value })),
@@ -61,6 +120,11 @@ export function useVitals(encounter: ActiveEncounter) {
   const record = useCallback(async () => {
     if (!anyEntered) {
       toast.error(t("doctor.toast.enterOneVital"));
+      return;
+    }
+    if (Object.keys(vitalErrors(form)).length) {
+      setTried(true);
+      toast.error(t("doctor.toast.vitalsOutOfRange"));
       return;
     }
     setSaving(true);
@@ -84,14 +148,17 @@ export function useVitals(encounter: ActiveEncounter) {
     try {
       await saveVitals(input, idempotencyKey);
       setForm(EMPTY);
+      setTried(false);
       setIdempotencyKey(newIdempotencyKey());
       toast.success(t("doctor.toast.vitalsRecorded"));
+      void loadHistory();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("doctor.toast.recordVitalsFailed"));
     } finally {
       setSaving(false);
     }
-  }, [anyEntered, encounter, form, idempotencyKey, t]);
+  }, [anyEntered, encounter, form, idempotencyKey, t, loadHistory]);
 
-  return { form, setField, bmi, whr, anyEntered, saving, record };
+  // Out-of-range fields are marked as soon as they are typed, not only after Record.
+  return { form, setField, bmi, whr, anyEntered, saving, record, history, historyFailed, errors, tried };
 }

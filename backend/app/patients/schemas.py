@@ -135,6 +135,24 @@ def _validate_full_name(value: str | None) -> str | None:
     return name
 
 
+def _validate_guardian_name(value: str | None) -> str | None:
+    """Same rule as the patient's own name (QA 10 Oct 2026: "12345 <script>"
+    was saved as a guardian name and printed on the patient card)."""
+    if value is None or not value.strip():
+        return None
+    try:
+        return _validate_full_name(value)
+    except ValueError as exc:
+        raise ValueError(str(exc).replace("full_name", "guardian_name")) from None
+
+
+ADULT_AGE_YEARS = 18
+
+
+def _age_on(dob: date, today: date) -> int:
+    return (today.year - dob.year) - ((today.month, today.day) < (dob.month, dob.day))
+
+
 class PatientCreate(BaseModel):
     full_name: str
     sex: Sex
@@ -156,6 +174,10 @@ class PatientCreate(BaseModel):
     _validate_mobile = field_validator("mobile")(_normalise_mobile)
     _validate_abha = field_validator("abha_number")(_normalise_abha)
     _validate_name = field_validator("full_name")(_validate_full_name)
+    _validate_guardian = field_validator("guardian_name")(_validate_guardian_name)
+    # The receptionist has seen the possible-duplicate warning and confirmed
+    # this is a different person with the same name, age and mobile.
+    confirm_not_duplicate: bool = False
 
     @model_validator(mode="after")
     def _dob_or_age_required(self) -> PatientCreate:
@@ -165,6 +187,16 @@ class PatientCreate(BaseModel):
             raise ValueError("dob cannot be in the future")
         if self.age_years is not None and (self.age_years < 0 or self.age_years > 130):
             raise ValueError("age_years must be between 0 and 130")
+        if self.guardian_relationship is not None and not self.guardian_relationship.strip():
+            self.guardian_relationship = None
+        if self.guardian_name and not self.guardian_relationship:
+            raise ValueError("guardian_relationship is required when guardian_name is given")
+        # A child cannot consent or be contacted on their own account, so the
+        # registration of a minor names the guardian (QA 12 Oct 2026: a
+        # 3-year-old was registered with no guardian and "gave" consent).
+        age = self.age_years if self.dob is None else _age_on(self.dob, latest_date_anywhere())
+        if age is not None and age < ADULT_AGE_YEARS and not self.guardian_name:
+            raise ValueError("guardian_name and guardian_relationship are required for a patient under 18")
         return self
 
 
@@ -211,6 +243,7 @@ class PatientUpdate(BaseModel):
     # corrections are where people paste.
     _validate_mobile = field_validator("mobile")(_normalise_mobile)
     _validate_name = field_validator("full_name")(_validate_full_name)
+    _validate_guardian = field_validator("guardian_name")(_validate_guardian_name)
 
     @model_validator(mode="before")
     @classmethod
@@ -290,6 +323,9 @@ class PatientSearchRequest(BaseModel):
     uhid: str | None = None
     aadhaar_number: str | None = None
     abha_number: str | None = None
+    # A patient who knows only their age (registered by age, or no papers):
+    # matched against stored age_years or a DOB in that year range, +-2 years.
+    age_years: int | None = Field(default=None, ge=0, le=130)
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1, le=100)
 
@@ -303,8 +339,10 @@ class PatientSearchRequest(BaseModel):
     def _at_least_one_criterion(self) -> PatientSearchRequest:
         if not any([self.full_name, self.mobile, self.uhid, self.aadhaar_number, self.abha_number]):
             raise ValueError("At least one search criterion is required")
-        if self.full_name and self.dob is None:
-            raise ValueError("dob is required when searching by full_name")
+        if self.full_name and self.dob is None and self.age_years is None:
+            raise ValueError("dob or age_years is required when searching by full_name")
+        if self.dob is not None and self.age_years is not None:
+            raise ValueError("Search by dob or by age_years, not both")
         return self
 
 
@@ -318,7 +356,10 @@ class PatientSearchResult(BaseModel):
     dob: date | None = None
     mobile_masked: str | None
     match_score: float
-    matched_on: str  # "aadhaar" | "abha" | "uhid" | "thid" | "merged_identifier" | "mobile" | "name_dob"
+    matched_on: str  # "aadhaar" | "abha" | "uhid" | "thid" | "merged_identifier" | "mobile" | "name_dob" | "name_age"
+    # Every criterion this patient matched, strongest first. matched_on is the
+    # first; a mobile hit whose name and DOB also match says so (QA 10 Oct).
+    matched_fields: list[str] = Field(default_factory=list)
     merged_from_uhid: str | None = None
 
 

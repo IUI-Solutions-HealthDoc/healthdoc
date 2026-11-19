@@ -80,11 +80,12 @@ TOKEN_ELIGIBLE_VISIT_STATUSES = OPEN_VISIT_STATUSES
 _NOT_FOUND = HTTPException(404, "Queue not found")
 
 
-def _patient_age(dob: date | None, age_years: int | None, today: date) -> int:
+def _patient_age(dob: date | None, age_years: int | None, today: date) -> int | None:
     if age_years is not None:
         return age_years
     if dob is None:
-        return 0
+        # Unknown, not 0: "0 yrs" is a newborn, and age drives dosing (QA 10 Oct 2026).
+        return None
     return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
 
 
@@ -771,8 +772,8 @@ async def call_next_token(
 async def _complete_token_and_advance(
     db: AsyncSession, token: QueueToken
 ) -> tuple[QueueToken, QueueToken | None, dict | None]:
-    if token.status != QueueTokenStatus.CALLED.value:
-        raise HTTPException(409, f"Token must be 'called' to complete it (currently '{token.status}')")
+    if token.status not in (QueueTokenStatus.CALLED.value, QueueTokenStatus.IN_SERVICE.value):
+        raise HTTPException(409, f"Token must be 'called' or 'in_service' to complete it (currently '{token.status}')")
 
     queue = (
         await db.execute(select(Queue).where(Queue.id == token.queue_id).with_for_update())
@@ -842,7 +843,7 @@ async def complete_by_visit_id(
             select(QueueToken)
             .where(
                 QueueToken.visit_id == visit_id,
-                QueueToken.status == QueueTokenStatus.CALLED.value,
+                QueueToken.status.in_((QueueTokenStatus.CALLED.value, QueueTokenStatus.IN_SERVICE.value)),
             )
             .with_for_update()
         )
@@ -876,7 +877,8 @@ async def complete_for_visit_if_active(
             .where(
                 QueueToken.visit_id == visit_id,
                 QueueToken.status.in_(
-                    (QueueTokenStatus.WAITING.value, QueueTokenStatus.CALLED.value)
+                    (QueueTokenStatus.WAITING.value, QueueTokenStatus.CALLED.value,
+                     QueueTokenStatus.RECALLED.value, QueueTokenStatus.IN_SERVICE.value)
                 ),
             )
             .with_for_update()
@@ -885,7 +887,7 @@ async def complete_for_visit_if_active(
     if token is None:
         return None
 
-    if token.status == QueueTokenStatus.WAITING.value:
+    if token.status in (QueueTokenStatus.WAITING.value, QueueTokenStatus.RECALLED.value):
         # Promote through CALLED rather than jumping straight to COMPLETED.
         # _complete_token_and_advance refuses waiting -> completed, and that
         # guard is right: a token that was never called has no business being
@@ -1771,3 +1773,34 @@ async def get_pending_approvals(
             })
 
     return list(approvals_by_id.values())
+
+
+async def start_service_for_visit(db: AsyncSession, visit_id: uuid.UUID) -> QueueToken | None:
+    """The doctor has opened this patient's consultation: the token is in service.
+
+    Nothing moved a token to in_service, so the queue went from Waiting
+    straight to Completed and the wait clock kept running while the patient
+    was in the room (QA 12 Oct 2026). The first encounter of the visit is the
+    evidence the patient is being seen. Returns None when the visit has no
+    live token (IPD, emergency, teleconsult).
+    """
+    token = (
+        await db.execute(
+            select(QueueToken)
+            .where(
+                QueueToken.visit_id == visit_id,
+                QueueToken.status.in_(
+                    (QueueTokenStatus.WAITING.value, QueueTokenStatus.CALLED.value,
+                     QueueTokenStatus.RECALLED.value)
+                ),
+            )
+            .with_for_update()
+        )
+    ).scalars().first()
+    if token is None:
+        return None
+    if token.called_at is None:
+        token.called_at = datetime.now(UTC)
+    token.status = QueueTokenStatus.IN_SERVICE.value
+    await db.flush()
+    return token

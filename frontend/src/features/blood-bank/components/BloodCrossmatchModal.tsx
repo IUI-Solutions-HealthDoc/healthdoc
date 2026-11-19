@@ -14,7 +14,7 @@ import { crossmatchBlood, issueBloodUnit } from "../api";
 import { formatBloodGroup, type BloodCrossmatch, type BloodUnit } from "../types";
 import { api } from "@/lib/api";
 import { useClinicalWrite } from "@/lib/useClinicalWrite";
-import { useLocale } from "@/lib/i18n";
+import { useLocale, translate } from "@/lib/i18n";
 
 interface BloodCrossmatchModalProps {
   isOpen: boolean;
@@ -129,23 +129,23 @@ export function BloodCrossmatchModal({
       }, async (payload, key) => {
         const result = await crossmatchBlood(payload, key);
         if (result.patient_id !== payload.patient_id || result.unit_id !== payload.unit_id)
-          throw new Error("Crossmatch did not match the selected patient and unit.");
+          throw new Error(translate("bloodBank.msg.crossmatchDidNotMatchTheSelected"));
         return result;
       });
       if (!mounted.current) return;
       if (xm.patient_id !== selectedPatient.id || xm.unit_id !== unit.id)
-        throw new Error("The saved crossmatch belongs to a different patient or unit.");
+        throw new Error(translate("bloodBank.msg.theSavedCrossmatchBelongsToA"));
       savedMatch.current = xm;
       setMatchSaved(true);
 
       if (compatibility === "compatible" && issueDirectly) {
         const issued = await issueWrite.run({
           crossmatch_id: xm.id,
-          notes: [issuedToWard.trim() && `Destination: ${issuedToWard.trim()}`, notes.trim()].filter(Boolean).join("\n") || null,
+          notes: [issuedToWard.trim() && translate("bloodBank.msg.destinationValue", undefined, { value: issuedToWard.trim() }), notes.trim()].filter(Boolean).join("\n") || null,
         }, async (payload, key) => {
           const result = await issueBloodUnit(payload, key);
           if (!result.issued_at || result.id !== xm.id)
-            throw new Error("Issue was not confirmed by the server.");
+            throw new Error(translate("bloodBank.msg.issueWasNotConfirmedByThe"));
           return result;
         });
         if (!mounted.current) return;
@@ -218,8 +218,7 @@ export function BloodCrossmatchModal({
                     {unit.bag_number || unit.unit_number || unit.id.slice(0, 8).toUpperCase()}
                   </span>
                   <span className="text-muted-foreground ml-2 capitalize">
-                    {(unit.component_type || t("bloodBank.notRecorded")).replace(/_/g, " ")} ({unit.volume_ml} mL)
-                  </span>
+                    {(unit.component_type || t("bloodBank.notRecorded")).replace(/_/g, " ")} ({unit.volume_ml}{" "}{t("bloodBank.ui.ml")}</span>
                 </div>
               </div>
               <span className="font-black px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-600 dark:text-rose-400">

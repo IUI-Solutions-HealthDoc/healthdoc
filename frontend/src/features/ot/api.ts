@@ -1,4 +1,4 @@
-import { api } from "@/lib/api";
+import { api, newIdempotencyKey } from "@/lib/api";
 import type {
   CompleteOtCaseInput,
   CreateOtScheduleInput,
@@ -21,6 +21,7 @@ export async function createOtSchedule(body: CreateOtScheduleInput): Promise<OtS
   return api<OtSchedule>("/ot/schedules", {
     method: "POST",
     body: JSON.stringify(body),
+    idempotencyKey: newIdempotencyKey(),
   });
 }
 

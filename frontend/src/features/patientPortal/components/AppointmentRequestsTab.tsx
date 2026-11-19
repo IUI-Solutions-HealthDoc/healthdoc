@@ -6,12 +6,14 @@
  * says why not). HealthDoc records shift names, not clinic hours, so the
  * portal does not offer clock-time slots it would have to invent.
  */
+import { formatDate } from "@/lib/dates";
 import { useCallback, useEffect, useState } from "react";
 
 import { ApiError, newIdempotencyKey } from "@/lib/api";
 import { useLocale } from "@/lib/i18n";
 
 import {
+  cancelPortalAppointment,
   listPortalAppointmentRequests,
   listPortalDepartments,
   requestPortalAppointment,
@@ -34,6 +36,14 @@ const STATUS_LABEL = {
   withdrawn: "patientPortal.appt.status.withdrawn",
 } as const;
 
+/** Today and the last day the server accepts (requests.MAX_DAYS_AHEAD = 60), on this device's calendar. */
+function bookableRange(now = new Date()): { min: string; max: string } {
+  const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const last = new Date(now);
+  last.setDate(last.getDate() + 60);
+  return { min: iso(now), max: iso(last) };
+}
+
 export function AppointmentRequestsTab() {
   const { localizeField, t } = useLocale();
   const [departments, setDepartments] = useState<PortalDepartment[] | null>(null);
@@ -44,6 +54,13 @@ export function AppointmentRequestsTab() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // Withdraw and cancel ask once more before acting: one click used to
+  // withdraw with no confirmation and no undo (QA 12 Oct 2026).
+  const [pending, setPending] = useState<{ id: string; action: "withdraw" | "cancel" } | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const range = bookableRange();
+  const dateOutOfRange = Boolean(form.preferred_date) &&
+    (form.preferred_date < range.min || form.preferred_date > range.max);
 
   const load = useCallback(async () => {
     try {
@@ -85,8 +102,28 @@ export function AppointmentRequestsTab() {
   async function withdraw(id: string) {
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
       await withdrawPortalAppointmentRequest(id);
+      setPending(null);
+      setNotice(t("patientPortal.appt.withdrawn"));
+      await load();
+    } catch (reason) {
+      setError(reason instanceof ApiError ? reason.message : t("patientPortal.appt.errSend"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function cancelAppointment(id: string) {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await cancelPortalAppointment(id, cancelReason.trim() || null);
+      setPending(null);
+      setCancelReason("");
+      setNotice(t("patientPortal.appt.cancelled"));
       await load();
     } catch (reason) {
       setError(reason instanceof ApiError ? reason.message : t("patientPortal.appt.errSend"));
@@ -117,8 +154,13 @@ export function AppointmentRequestsTab() {
         </label>
         <label className="text-sm">
           <span className="text-muted-foreground">{t("patientPortal.appt.date")}</span>
-          <input type="date" value={form.preferred_date} onChange={(e) => setForm((f) => ({ ...f, preferred_date: e.target.value }))}
-            className="mt-1 w-full rounded-md border border-border px-2 py-2" />
+          <input type="date" value={form.preferred_date} min={range.min} max={range.max}
+            onChange={(e) => setForm((f) => ({ ...f, preferred_date: e.target.value }))}
+            aria-invalid={dateOutOfRange}
+            className={`mt-1 w-full rounded-md border px-2 py-2 ${dateOutOfRange ? "border-danger" : "border-border"}`} />
+          {dateOutOfRange ? (
+            <span className="text-xs text-danger">{t("patientPortal.appt.dateRange")}</span>
+          ) : null}
         </label>
         <fieldset className="text-sm">
           <legend className="text-muted-foreground">{t("patientPortal.appt.session")}</legend>
@@ -143,7 +185,7 @@ export function AppointmentRequestsTab() {
         </label>
         {error ? <p className="text-sm text-danger md:col-span-2" role="alert">{error}</p> : null}
         {notice ? <p className="text-sm text-success md:col-span-2" role="status">{notice}</p> : null}
-        <button type="submit" disabled={busy || !form.department_id || !form.preferred_date}
+        <button type="submit" disabled={busy || !form.department_id || !form.preferred_date || dateOutOfRange}
           className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50 md:col-span-2">
           {t("patientPortal.appt.send")}
         </button>
@@ -159,14 +201,24 @@ export function AppointmentRequestsTab() {
               <li key={r.id} className="surface-card p-4 text-sm">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="font-medium">
-                    {r.department_name} · {r.preferred_date} · {t(r.session === "morning" ? "patientPortal.appt.morning" : "patientPortal.appt.afternoon")}
+                    {r.department_name} · {formatDate(r.preferred_date)} · {t(r.session === "morning" ? "patientPortal.appt.morning" : "patientPortal.appt.afternoon")}
                     {r.is_teleconsult ? ` · ${t("patientPortal.appt.teleconsultShort")}` : ""}
                   </span>
                   <span className={`rounded px-2 py-0.5 text-xs font-medium ${STATUS_STYLE[r.status]}`}>{t(STATUS_LABEL[r.status])}</span>
                 </div>
-                {r.status === "confirmed" && r.appointment_date ? (
+                {r.reason ? (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {t("patientPortal.appt.yourReason")} {r.reason}
+                  </p>
+                ) : null}
+                {r.status === "confirmed" && r.appointment_status === "cancelled" ? (
+                  <p className="mt-1 text-slate-600">
+                    {t("patientPortal.appt.appointmentCancelled")}
+                    {r.cancellation_reason ? ` — ${r.cancellation_reason}` : ""}
+                  </p>
+                ) : r.status === "confirmed" && r.appointment_date ? (
                   <p className="mt-1">
-                    {t("patientPortal.appt.bookedFor", { date: r.appointment_date, time: r.start_time ?? "" })}
+                    {t("patientPortal.appt.bookedFor", { date: formatDate(r.appointment_date), time: r.start_time ?? "" })}
                     {r.doctor_name ? ` · ${r.doctor_name}` : ""}
                   </p>
                 ) : null}
@@ -174,9 +226,33 @@ export function AppointmentRequestsTab() {
                   <p className="mt-1 text-xs text-amber-800">{t("patientPortal.appt.noVideo")}</p>
                 ) : null}
                 {r.status === "declined" && r.decline_reason ? <p className="mt-1 text-red-800">{r.decline_reason}</p> : null}
-                {r.status === "requested" ? (
-                  <button type="button" disabled={busy} onClick={() => void withdraw(r.id)} className="mt-2 text-xs underline disabled:opacity-50">
+                {pending?.id === r.id ? (
+                  <div className="mt-2 space-y-2 rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900" role="alert">
+                    <p>{t(pending.action === "withdraw" ? "patientPortal.appt.confirmWithdraw" : "patientPortal.appt.confirmCancel")}</p>
+                    {pending.action === "cancel" ? (
+                      <input value={cancelReason} maxLength={300} onChange={(e) => setCancelReason(e.target.value)}
+                        placeholder={t("patientPortal.appt.cancelReason")}
+                        aria-label={t("patientPortal.appt.cancelReason")}
+                        className="w-full rounded-md border border-border px-2 py-1" />
+                    ) : null}
+                    <div className="flex gap-3">
+                      <button type="button" disabled={busy}
+                        onClick={() => void (pending.action === "withdraw" ? withdraw(r.id) : cancelAppointment(r.id))}
+                        className="rounded-md border border-red-300 bg-white px-3 py-1 font-medium text-red-700 disabled:opacity-50">
+                        {t(pending.action === "withdraw" ? "patientPortal.appt.withdraw" : "patientPortal.appt.cancelAppointment")}
+                      </button>
+                      <button type="button" onClick={() => setPending(null)} className="underline">
+                        {t("patientPortal.appt.keep")}
+                      </button>
+                    </div>
+                  </div>
+                ) : r.status === "requested" ? (
+                  <button type="button" disabled={busy} onClick={() => setPending({ id: r.id, action: "withdraw" })} className="mt-2 text-xs underline disabled:opacity-50">
                     {t("patientPortal.appt.withdraw")}
+                  </button>
+                ) : r.status === "confirmed" && (r.appointment_status === "booked" || r.appointment_status === "confirmed") ? (
+                  <button type="button" disabled={busy} onClick={() => setPending({ id: r.id, action: "cancel" })} className="mt-2 text-xs underline disabled:opacity-50">
+                    {t("patientPortal.appt.cancelAppointment")}
                   </button>
                 ) : null}
               </li>

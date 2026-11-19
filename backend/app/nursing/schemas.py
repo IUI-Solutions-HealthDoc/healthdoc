@@ -5,7 +5,7 @@ encounters/router.py and allergies/router.py).
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID
 
@@ -224,6 +224,13 @@ class OrderTaskOut(BaseModel):
     completed_at: datetime | None
     completed_by: UUID | None
     completion_note: str | None
+    order_number: str | None = None
+    # Who the order is for. A nurse must confirm the patient before acting on
+    # an order; the queue showed "-" in the Patient column (QA 10 Oct 2026).
+    patient_name: str | None = None
+    patient_uhid: str | None = None
+    patient_age_years: int | None = None
+    patient_sex: str | None = None
 
 
 class OrderCompleteRequest(BaseModel):
@@ -235,6 +242,15 @@ class OrderCompleteRequest(BaseModel):
 
 
 # ============================================================ incidents (#236)
+
+# A ward PC's clock running a few minutes fast must not refuse "just now".
+_CLOCK_SKEW = timedelta(minutes=5)
+
+
+def _aware(value: datetime) -> datetime:
+    # A naive time from the browser is taken as UTC, as the column stores it.
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
 
 class IncidentReport(BaseModel):
     incident_type: str = Field(..., description=_one_of(ClinicalIncidentType))
@@ -268,6 +284,14 @@ class IncidentReport(BaseModel):
             raise ValueError(f"severity must be one of: {_one_of(ClinicalIncidentSeverity)}")
         if self.reported_at is not None and self.reported_at < self.occurred_at:
             raise ValueError("reported_at cannot precede occurred_at")
+        # An incident is reported after it happens. A future occurred_at used
+        # to reach the database, where reported_at (defaulting to now) broke
+        # 0046's reported_at >= occurred_at CHECK: HTTP 500 (QA 12 Oct 2026).
+        latest = datetime.now(UTC) + _CLOCK_SKEW
+        if _aware(self.occurred_at) > latest:
+            raise ValueError("The time the incident occurred cannot be in the future")
+        if self.reported_at is not None and _aware(self.reported_at) > latest:
+            raise ValueError("The report time cannot be in the future")
         return self
 
 

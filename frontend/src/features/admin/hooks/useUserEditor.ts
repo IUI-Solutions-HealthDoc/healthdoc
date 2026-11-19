@@ -6,6 +6,7 @@ import { toast } from "@/components/ui/toast";
 import { activateUser, deactivateUser, updateUser } from "../api";
 import type { User, UserUpdateInput } from "../types";
 import { type FieldErrors, validateUserProfile } from "../validation";
+import { translate } from "@/lib/i18n";
 
 export function useUserEditor(user: User | null, onSaved?: (next: User) => void) {
   const [draft, setDraft] = useState<User | null>(null);
@@ -41,7 +42,7 @@ export function useUserEditor(user: User | null, onSaved?: (next: User) => void)
     const validationErrors = validateUserProfile(draft);
     setErrors(validationErrors);
     if (Object.keys(validationErrors).length > 0) {
-      toast.error("Please correct the highlighted profile fields before saving.");
+      toast.error(translate("admin.msg.pleaseCorrectTheHighlightedProfileFields"));
       return;
     }
     setBusy(true);
@@ -60,9 +61,9 @@ export function useUserEditor(user: User | null, onSaved?: (next: User) => void)
       });
       setDraft(next);
       onSaved?.(next);
-      toast.success("User updated");
+      toast.success(translate("admin.msg.userUpdated"));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Update failed");
+      toast.error(e instanceof Error ? e.message : translate("admin.msg.updateFailed"));
     } finally {
       setBusy(false);
     }
@@ -77,16 +78,16 @@ export function useUserEditor(user: User | null, onSaved?: (next: User) => void)
         const next = { ...draft, is_active: false };
         setDraft(next);
         onSaved?.(next);
-        toast.success("User deactivated");
+        toast.success(translate("admin.msg.userDeactivated"));
       } else {
         await activateUser(draft.id);
         const next = { ...draft, is_active: true };
         setDraft(next);
         onSaved?.(next);
-        toast.success("User activated");
+        toast.success(translate("admin.msg.userActivated"));
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Status change failed");
+      toast.error(e instanceof Error ? e.message : translate("admin.msg.statusChangeFailed"));
     } finally {
       setBusy(false);
     }
