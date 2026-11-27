@@ -2363,7 +2363,7 @@ ordered_by UUID NOT NULL → users
 stopped_at timestamptz                             -- required when stopped (CHECK)
 stopped_by UUID → users
 stop_reason text
-UNIQUE (admission_id) WHERE status = 'active'; INDEX (facility_id, status), (ordered_by), (stopped_by)
+UNIQUE (admission_id) WHERE status = 'active'; INDEX (admission_id), (facility_id, status), (ordered_by), (stopped_by)
 ```
 Audited (resource type `diet_orders`). Doctors and nurses order and stop; a new order stops the old one. Discharge stops it.
 

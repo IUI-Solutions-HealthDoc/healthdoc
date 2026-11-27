@@ -77,6 +77,8 @@ class DietOrder(Base, UUIDPk, Timestamps):
             "uq_diet_orders_active_admission", "admission_id", unique=True,
             sqlite_where=text("status = 'active'"), postgresql_where=text("status = 'active'"),
         ),
+        # The partial unique index above cannot serve the FK: stopped orders are outside it.
+        Index("ix_diet_orders_admission_id", "admission_id"),
         Index("ix_diet_orders_facility_status", "facility_id", "status"),
         Index("ix_diet_orders_ordered_by", "ordered_by"),
         Index("ix_diet_orders_stopped_by", "stopped_by"),

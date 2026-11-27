@@ -78,6 +78,7 @@ def upgrade() -> None:
         "uq_diet_orders_active_admission", "diet_orders", ["admission_id"], unique=True,
         postgresql_where=sa.text("status = 'active'"),
     )
+    op.create_index("ix_diet_orders_admission_id", "diet_orders", ["admission_id"])
     op.create_index("ix_diet_orders_facility_status", "diet_orders", ["facility_id", "status"])
     op.create_index("ix_diet_orders_ordered_by", "diet_orders", ["ordered_by"])
     op.create_index("ix_diet_orders_stopped_by", "diet_orders", ["stopped_by"])
