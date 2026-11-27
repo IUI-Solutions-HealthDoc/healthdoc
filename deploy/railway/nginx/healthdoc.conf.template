@@ -1,0 +1,91 @@
+# Railway variant of infra/nginx/prod-conf.d/healthdoc.conf. Keep the two in
+# step: a header or location added there belongs here too.
+#
+# WHY VARIABLES IN proxy_pass
+# Railway's private DNS (*.railway.internal) answers with the address of the
+# current deployment, which changes on every redeploy. A literal upstream is
+# resolved once at nginx start and then points at a dead container; a variable
+# is re-resolved through `resolver` every `valid` seconds.
+resolver ${RAILWAY_DNS_RESOLVER} valid=10s ipv6=on;
+
+# WHY real_ip WITHOUT recursion
+# Every request reaches this container from Railway's edge, so $remote_addr is
+# the edge, and the per-client rate limits in nginx.conf would put every user
+# in one bucket. The edge appends the caller's address as the LAST entry of
+# X-Forwarded-For. Non-recursive real_ip takes exactly that entry; recursive
+# mode would walk left to whatever the caller chose to send.
+set_real_ip_from 0.0.0.0/0;
+set_real_ip_from ::/0;
+real_ip_header X-Forwarded-For;
+real_ip_recursive off;
+
+server {
+    # IPv4 only: this service takes public traffic from Railway's edge, and
+    # an IPv6 listen fails outright on hosts without IPv6.
+    listen ${PORT} default_server;
+    server_name _;
+
+    set $hd_backend  http://${BACKEND_HOST}:8000;
+    set $hd_frontend http://${FRONTEND_HOST}:3000;
+    set $hd_keycloak http://${KEYCLOAK_HOST}:8080;
+
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "camera=(self), geolocation=(), microphone=()" always;
+
+    # TLS ended at Railway's edge; the browser's request was https. Pass that
+    # on, not this hop's http, or Keycloak and the app build http:// links.
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header X-Forwarded-Port 443;
+
+    location /api/ {
+        limit_req zone=api burst=60 nodelay;
+        proxy_pass $hd_backend;
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
+    }
+
+    location /monitor { return 404; }
+    location /auth/realms/healthdoc-control/ { return 404; }
+
+    # WASA W1: the admin console and master realm are not served on the public
+    # address. Administer through `railway ssh` into the keycloak service
+    # (kcadm.sh), or give that service a temporary Railway domain and remove it.
+    location /auth/admin/ { return 404; }
+    location /auth/realms/master/ { return 404; }
+
+    location /auth/ {
+        limit_req zone=auth burst=20 nodelay;
+        proxy_pass $hd_keycloak;
+        proxy_buffer_size 64k;
+        proxy_buffers 8 64k;
+        add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        # Same policy as infra/nginx/conf.d (dev): the healthdoc login theme
+        # needs 'unsafe-eval' and Google Fonts, scoped to Keycloak's /auth/
+        # only. The older prod-conf.d header lacks both and unstyles the theme.
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data:; frame-ancestors 'self'" always;
+    }
+
+    location = /silent-check-sso.html {
+        proxy_pass $hd_frontend;
+        add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "no-referrer" always;
+        add_header Content-Security-Policy "default-src 'none'; script-src 'unsafe-inline'; frame-ancestors 'self'" always;
+    }
+
+    # Application documents carry their own per-request nonce CSP from
+    # frontend/src/proxy.ts; nginx deliberately sets none here.
+    location / {
+        proxy_pass $hd_frontend;
+    }
+}
