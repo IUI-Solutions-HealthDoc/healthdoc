@@ -248,6 +248,9 @@ class BedStatus(CheckedEnum):
     OCCUPIED = "occupied"
     RESERVED = "reserved"
     MAINTENANCE = "maintenance"
+    #: Vacated by a discharge or transfer and waiting for housekeeping (0104).
+    #: Not admittable; completing the bed turnover task returns it to vacant.
+    CLEANING = "cleaning"
 
 
 class NotificationStatus(CheckedEnum):

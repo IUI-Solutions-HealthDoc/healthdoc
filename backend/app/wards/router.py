@@ -1,6 +1,6 @@
 """wards module router — endpoints land here; see this module's GitHub issues."""
 import uuid
-
+from datetime import UTC, datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -44,6 +44,41 @@ _WARD_ROLES = ("doctor", "nurse", "admin")
 @router.get("/ping", dependencies=[Depends(require_roles("admin"))])
 async def ping() -> dict:
     return {"module": "wards", "status": "ok"}
+
+
+class LocationBedOut(BaseModel):
+    bed_id: uuid.UUID
+    bed_number: str
+    status: str
+
+
+class LocationOut(BaseModel):
+    ward_id: uuid.UUID
+    ward_name: str
+    beds: list[LocationBedOut]
+
+
+@router.get(
+    "/locations",
+    response_model=list[LocationOut],
+    dependencies=[Depends(require_roles(*_WARD_ROLES, "hod", "supervisor"))],
+)
+async def list_locations(current_db_user: CurrentDbUser, db: AsyncSession = Depends(get_db)) -> list[LocationOut]:
+    """Active wards and their beds with no occupant: what kitchen, laundry and
+    housekeeping screens pick from. HOD and the services supervisor need the
+    places, not the bed grid, which names the patient in each bed."""
+    rows = (await db.execute(
+        select(Ward.id, Ward.name, Bed.id, Bed.bed_number, Bed.status)
+        .outerjoin(Bed, Bed.ward_id == Ward.id)
+        .where(Ward.facility_id == current_db_user.facility_id, Ward.is_active.is_(True))
+        .order_by(Ward.name, Bed.bed_number)
+    )).all()
+    out: dict[uuid.UUID, LocationOut] = {}
+    for ward_id, ward_name, bed_id, bed_number, bed_status in rows:
+        location = out.setdefault(ward_id, LocationOut(ward_id=ward_id, ward_name=ward_name, beds=[]))
+        if bed_id is not None:
+            location.beds.append(LocationBedOut(bed_id=bed_id, bed_number=bed_number, status=bed_status))
+    return list(out.values())
 
 
 @router.get(
@@ -212,10 +247,21 @@ async def change_bed_status(
     if occupied is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, {"code": "bed_occupied",
                             "message": "A patient is admitted to this bed. Transfer or discharge them first."})
-    if bed.status not in ("vacant", "maintenance"):
+    if bed.status not in ("vacant", "maintenance", "cleaning"):
         raise HTTPException(status.HTTP_409_CONFLICT, {"code": "bed_not_changeable",
                             "message": f"A {bed.status} bed cannot be changed here"})
     before = bed.status
+    if before == "cleaning":
+        # An admin overriding housekeeping closes the turnover on the record,
+        # with the admin's reason, rather than leaving an orphaned task open.
+        from app.housekeeping.models import OPEN_STATUSES, HousekeepingTask
+
+        for task in (await db.execute(select(HousekeepingTask).where(
+            HousekeepingTask.bed_id == bed.id, HousekeepingTask.task_type == "bed_turnover",
+            HousekeepingTask.status.in_(OPEN_STATUSES),
+        ))).scalars():
+            task.status, task.cancel_reason = "cancelled", f"Bed set {payload.status} by admin: {payload.reason.strip()}"
+            task.completed_at, task.completed_by = datetime.now(UTC), current_db_user.id
     bed.status = payload.status
     await db.flush()
     await write_audit_log(

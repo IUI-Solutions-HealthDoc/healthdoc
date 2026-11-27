@@ -416,6 +416,10 @@ AUDITABLE_MODULE_PREFIXES: tuple[str, ...] = (
     "app.equipment",
     # Maternal records (0103).
     "app.mch",
+    # Diet, laundry and housekeeping (0104).
+    "app.dietary",
+    "app.laundry",
+    "app.housekeeping",
 )
 
 

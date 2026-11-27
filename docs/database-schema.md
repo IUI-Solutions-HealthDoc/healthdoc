@@ -222,6 +222,7 @@ do not merge out of order.**
 | 0101 | facility_publish_availability | ALTER facilities: add publish_availability | A facility opts in to the public bed and blood availability page (no login, counts from the 15-minute capture). Off by default. |
 | 0102 | appointment_requests | CREATE appointment_requests | Patient-portal appointment requests: department, day, morning or afternoon, in person or teleconsultation. Reception confirms (creating a normal appointment through the desk's checks) or declines with a reason the patient reads. No clock-time slots: HealthDoc records shift names, not clinic hours. |
 | 0103 | mch_records | CREATE mch_pregnancies, mch_anc_visits, mch_deliveries, mch_newborns | Maternal and child health, record only (owner decision 10 Oct 2026): no schedule, computed due date or inferred risk. High risk is a clinician's flag with a reason. Range checks catch mistyped values; they are not clinical thresholds. The control room counts these per facility. |
+| 0104 | dietary_laundry_housekeeping | CREATE diet_orders, meal_services, linen_batches, linen_batch_items, linen_batch_events, housekeeping_tasks; ALTER beds: status gains cleaning | Kitchen, laundry and housekeeping for admitted patients. One active diet order per admission; each meal recorded once as served, refused or not served (a nil-by-mouth patient cannot be recorded as served). Linen is counted out of a ward and back, with condemned and missing counts. Discharge and transfer put the vacated bed in `cleaning` with a bed turnover task; completing the turnover (linen changed, mattress and surfaces disinfected) returns it to vacant. |
 
 Because you're working in parallel: if the previous migration isn't merged yet, set
 `down_revision` to its number anyway and coordinate merge order in the team channel.
@@ -1162,7 +1163,7 @@ UNIQUE (facility_id, counter_type, counter_date)`; allocate with
 ### 0015 — wards, beds, admissions, discharges (B3)
 
 **wards** — `name text NOT NULL · name_hi text NULL · department_id UUID NULL → departments · facility_id UUID NOT NULL → facilities · is_active bool`
-**beds** — `ward_id UUID NOT NULL → wards · bed_number varchar(20) NOT NULL · status varchar(30) DEFAULT 'vacant' (BedStatus) · UNIQUE (ward_id, bed_number)`
+**beds** — `ward_id UUID NOT NULL → wards · bed_number varchar(20) NOT NULL · status varchar(30) DEFAULT 'vacant' (BedStatus; `cleaning` from 0104: vacated, awaiting housekeeping, not admittable) · UNIQUE (ward_id, bed_number)`
 
 **admissions** `[Blame]` — (Aditya: no ward/room/bed varchars — real FKs)
 ```
@@ -2349,6 +2350,95 @@ changed_by UUID NOT NULL → users
 changed_at timestamptz NOT NULL DEFAULT now()
 INDEX (equipment_id, changed_at); INDEX (facility_id); INDEX (changed_by)
 ```
+
+**diet_orders** (0104) — the diet in force for one admission
+```
+facility_id UUID NOT NULL → facilities · admission_id UUID NOT NULL → admissions
+diet_type varchar(50) NOT NULL                     -- normal|soft|liquid|clear_liquid|diabetic|renal|low_salt|low_fat|high_protein|semi_solid|tube_feed|npo|other
+instructions text                                  -- required when other (CHECK)
+food_allergies text                                -- as the clinician states them
+status varchar(50) NOT NULL DEFAULT 'active'       -- active|stopped
+starts_at timestamptz NOT NULL DEFAULT now()
+ordered_by UUID NOT NULL → users
+stopped_at timestamptz                             -- required when stopped (CHECK)
+stopped_by UUID → users
+stop_reason text
+UNIQUE (admission_id) WHERE status = 'active'; INDEX (facility_id, status), (ordered_by), (stopped_by)
+```
+Audited (resource type `diet_orders`). Doctors and nurses order and stop; a new order stops the old one. Discharge stops it.
+
+**meal_services** (0104) — one meal on one day for one admission
+```
+facility_id UUID NOT NULL → facilities · admission_id UUID NOT NULL → admissions
+diet_order_id UUID → diet_orders                   -- the order in force when it was recorded
+service_date date NOT NULL                         -- ward calendar day (Asia/Kolkata); not future, not before admission
+meal varchar(50) NOT NULL                          -- early_morning|breakfast|mid_morning|lunch|evening_snack|dinner|bedtime
+status varchar(50) NOT NULL                        -- served|refused|not_served
+notes text                                         -- required when not_served (CHECK)
+recorded_by UUID NOT NULL → users · recorded_at timestamptz NOT NULL DEFAULT now()
+UNIQUE (admission_id, service_date, meal); INDEX (facility_id, service_date), (diet_order_id), (recorded_by)
+```
+Audited. Recorded by nurse, admin, hod, supervisor. Served is refused while the active diet is npo.
+
+**linen_batches** (0104) — one collection of linen for the laundry
+```
+facility_id UUID NOT NULL → facilities
+ward_id UUID → wards · bed_id UUID → beds          -- the bed, when stripped by a housekeeping task
+source varchar(120)                                -- required when no ward (API): "OT 2"
+is_infected boolean NOT NULL DEFAULT false         -- washed apart; set at collection
+status varchar(50) NOT NULL DEFAULT 'collected'    -- collected|washing|ready|returned, forward one step at a time
+notes text
+collected_by UUID NOT NULL → users · collected_at timestamptz NOT NULL DEFAULT now()
+returned_at timestamptz
+INDEX (facility_id, status), (ward_id), (bed_id), (collected_by)
+```
+
+**linen_batch_items** (0104) — one item type in a batch, counted out and back
+```
+batch_id UUID NOT NULL → linen_batches · facility_id UUID NOT NULL → facilities
+item_type varchar(50) NOT NULL                     -- bed_sheet|draw_sheet|pillow_cover|blanket|patient_gown|towel|curtain|ot_linen|other
+quantity integer NOT NULL CHECK (1..1000)
+returned_quantity integer                          -- NULL until returned
+condemned_quantity integer NOT NULL DEFAULT 0      -- returned + condemned <= quantity (CHECK); the rest is missing
+UNIQUE (batch_id, item_type); INDEX (facility_id)
+```
+
+**linen_batch_events** (0104) — append-only history of every batch status change
+```
+batch_id UUID NOT NULL → linen_batches · facility_id UUID NOT NULL → facilities
+from_status varchar(50)                            -- NULL on collection
+to_status varchar(50) NOT NULL
+notes text
+changed_by UUID NOT NULL → users · changed_at timestamptz NOT NULL DEFAULT now()
+INDEX (batch_id, changed_at), (facility_id), (changed_by)
+```
+All three are audited. Laundry is nurse, admin, hod, supervisor.
+
+**housekeeping_tasks** (0104) — a room or bed cleaning job
+```
+facility_id UUID NOT NULL → facilities · ward_id UUID NOT NULL → wards · bed_id UUID → beds
+admission_id UUID → admissions                     -- the stay whose discharge or transfer raised it
+task_type varchar(50) NOT NULL                     -- bed_turnover|terminal_clean|routine_clean|spill|linen_change|other
+priority varchar(50) NOT NULL DEFAULT 'routine'    -- routine|urgent (turnovers are urgent)
+source varchar(50) NOT NULL DEFAULT 'manual'       -- discharge|transfer|manual
+status varchar(50) NOT NULL DEFAULT 'pending'      -- pending|in_progress|done|cancelled
+notes text
+requested_by UUID → users                          -- NULL when raised by discharge or transfer
+requested_at timestamptz NOT NULL DEFAULT now()
+assigned_to_name varchar(120)                      -- the cleaner, often without a login
+started_at timestamptz · started_by UUID → users
+completed_at timestamptz                           -- required when done (CHECK); also set on cancel
+completed_by UUID → users
+linen_changed boolean NOT NULL DEFAULT false
+mattress_disinfected boolean NOT NULL DEFAULT false
+surfaces_disinfected boolean NOT NULL DEFAULT false
+waste_removed boolean NOT NULL DEFAULT false
+linen_batch_id UUID → linen_batches                -- linen stripped here and sent to the laundry
+cancel_reason text                                 -- required when cancelled (CHECK)
+UNIQUE (bed_id) WHERE task_type = 'bed_turnover' AND status IN ('pending','in_progress')
+INDEX (facility_id, status) and one per foreign key
+```
+Audited. A turnover or terminal clean completes only with linen changed and mattress and surfaces disinfected; completing or cancelling a turnover returns a `cleaning` bed to vacant. An admin setting a cleaning bed's status cancels its open turnover with the admin's reason.
 
 **abdm_care_context_links** (0055) — an ABHA address's claim on those contexts
 ```

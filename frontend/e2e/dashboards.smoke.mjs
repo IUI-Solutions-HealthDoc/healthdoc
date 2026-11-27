@@ -100,6 +100,7 @@ const ROLE_DASHBOARDS = [
     dashboards: [
       { path: "/mch", expectCalls: false, expectedText: "Maternal and child health" },
       { path: "/equipment", expectCalls: true, requiredRequests: [{ method: "GET", path: "/api/v1/equipment" }] },
+      { path: "/kitchen", expectCalls: true, requiredRequests: [{ method: "GET", path: "/api/v1/dietary/board" }] },
       { path: "/doctor/dashboard", expectCalls: true },
       {
         path: "/doctor/consultation",
@@ -142,6 +143,9 @@ const ROLE_DASHBOARDS = [
     dashboards: [
       { path: "/mch", expectCalls: false, expectedText: "Maternal and child health" },
       { path: "/equipment", expectCalls: true, requiredRequests: [{ method: "GET", path: "/api/v1/equipment" }] },
+      { path: "/kitchen", expectCalls: true, requiredRequests: [{ method: "GET", path: "/api/v1/dietary/board" }] },
+      { path: "/laundry", expectCalls: true, requiredRequests: [{ method: "GET", path: "/api/v1/laundry/batches" }] },
+      { path: "/housekeeping", expectCalls: true, requiredRequests: [{ method: "GET", path: "/api/v1/housekeeping/tasks" }] },
       { path: "/nurse/ward-dashboard", expectCalls: true },
       { path: "/nurse/emar", expectCalls: true },
       { path: "/ipd", expectCalls: true },
@@ -223,6 +227,9 @@ const ROLE_DASHBOARDS = [
       },
       { path: "/reports", expectCalls: true },
       { path: "/ot", expectCalls: true },
+      { path: "/kitchen", expectCalls: true, requiredRequests: [{ method: "GET", path: "/api/v1/dietary/board" }] },
+      { path: "/laundry", expectCalls: true, requiredRequests: [{ method: "GET", path: "/api/v1/laundry/batches" }] },
+      { path: "/housekeeping", expectCalls: true, requiredRequests: [{ method: "GET", path: "/api/v1/housekeeping/tasks" }] },
       { path: "/programs", expectCalls: true },
     ],
   },
@@ -232,6 +239,9 @@ const ROLE_DASHBOARDS = [
     landingPath: "/hod",
     dashboards: [
       { path: "/equipment", expectCalls: true, requiredRequests: [{ method: "GET", path: "/api/v1/equipment" }] },
+      { path: "/kitchen", expectCalls: true, requiredRequests: [{ method: "GET", path: "/api/v1/dietary/board" }] },
+      { path: "/laundry", expectCalls: true, requiredRequests: [{ method: "GET", path: "/api/v1/laundry/batches" }] },
+      { path: "/housekeeping", expectCalls: true, requiredRequests: [{ method: "GET", path: "/api/v1/housekeeping/tasks" }] },
       // Dashboard summary reads plus the roster manager. Before this screen
       // existed the role had no landing page and these endpoints were unreachable.
       {
@@ -258,6 +268,9 @@ const ROLE_DASHBOARDS = [
     landingPath: "/admin",
     dashboards: [
       { path: "/equipment", expectCalls: true, requiredRequests: [{ method: "GET", path: "/api/v1/equipment" }] },
+      { path: "/kitchen", expectCalls: true, requiredRequests: [{ method: "GET", path: "/api/v1/dietary/board" }] },
+      { path: "/laundry", expectCalls: true, requiredRequests: [{ method: "GET", path: "/api/v1/laundry/batches" }] },
+      { path: "/housekeeping", expectCalls: true, requiredRequests: [{ method: "GET", path: "/api/v1/housekeeping/tasks" }] },
       { path: "/admin", expectCalls: false },
       { path: "/admin/users", expectCalls: true },
       { path: "/admin/departments", expectCalls: true },

@@ -51,6 +51,11 @@ FORBIDDEN = [
     # Deciding which documents an ABHA address may see is the doctor's screen.
     ("/abdm/hip/care-contexts", {"receptionist", "patient"}),
     ("/abdm/hip/patients", {"receptionist", "patient"}),
+    # Ward services (0104). The kitchen board names admitted patients and
+    # their diet; none of it is front-desk or portal information.
+    ("/dietary/board", {"receptionist", "patient", "billing", "pharmacist", "auditor"}),
+    ("/laundry/batches", {"receptionist", "patient", "billing", "auditor"}),
+    ("/housekeeping/tasks", {"receptionist", "patient", "billing", "auditor"}),
 ]
 
 
