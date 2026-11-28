@@ -25,8 +25,10 @@ avoids all of this with no application code changes.
 ## Services
 
 Create one Railway project with region **Southeast Asia (Singapore)** for
-every service. Connect the GitHub repo and set branch `staging` for the
-services built from it.
+every service. Connect the GitHub repo and set branch `main` for the
+services built from it. All deployments go out from `main`: work merges into
+`staging` for review and reaches Railway only once it is promoted to `main`.
+Nothing deploys from `staging`.
 
 | Service name (exact) | Source | Root directory | Config file path | Volume | Public domain |
 |---|---|---|---|---|---|
