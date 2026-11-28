@@ -82,8 +82,10 @@ when the audit store is unreachable.
 
 ### 1. Accounts and domain (owner)
 
-1. Create a Railway account and a project on the **Pro** plan. Hobby's limits
-   are too small for Keycloak, Java crypto, Mongo and two Postgres instances.
+1. Create a Railway account and a project. **Pro** (US$20/month) is the
+   right plan: Hobby caps each volume at 5 GB, which Postgres and MinIO
+   outgrow, and has no team members. Both plans count the fee as usage
+   credit, so at this stack's usage they bill about the same (see Cost).
 2. Choose the public hostname under `healthdoc.world`, which is already on
    Cloudflare. These files use `app.healthdoc.world` as the example. Set it as the shared
    variable `PUBLIC_HOST`.
@@ -228,9 +230,38 @@ Until step 7, the Mac is untouched: `docker start healthdoc-backend-1
 healthdoc-frontend-1 healthdoc-nginx-1` puts it back. After step 7, switch the `abdm` DNS record back
 to the tunnel, stop the Railway runners, and restart the Mac runners.
 
-## Rough cost
+## Cost
 
-On Railway Pro, this is about 5–6 GB of RAM in steady use (Keycloak is the
-largest), so roughly US$50–100 a month plus the US$20
-seat. This is an estimate. Check the project's usage page after the first
-week.
+Railway bills by the minute for what each service actually uses
+([pricing](https://docs.railway.com/pricing/plans)): RAM US$10 per GB-month,
+CPU US$20 per vCPU-month, volumes US$0.15 per GB-month, egress US$0.05 per
+GB. Builds are free. Pro's US$20 fee **is** US$20 of usage credit, so the
+bill is the larger of US$20 and the usage.
+
+Estimate for test and demo use (light traffic). These are expected steady
+memory figures, not measurements:
+
+| Service | RAM | RAM cost |
+|---|---|---|
+| keycloak (JVM) | ~0.8 GB | $8 |
+| backend | ~0.4 GB | $4 |
+| frontend (Next.js) | ~0.3 GB | $3 |
+| Postgres | ~0.3 GB | $3 |
+| MongoDB | ~0.3 GB | $3 |
+| minio | ~0.2 GB | $2 |
+| monitor-capture | ~0.2 GB | $2 |
+| abdm-runner ×2 | ~0.2 GB each | $4 |
+| KeycloakDB | ~0.15 GB | $1.5 |
+| Redis, edge | <0.1 GB | $1 |
+| **RAM total** | **~3.1 GB** | **~$31** |
+
+Add about $10 of CPU (roughly 0.5 vCPU used on average across all services
+when idle or lightly used), about $1.50 for ~10 GB of volumes, and under $1
+of egress. That is **about US$40–45 a month in total**, and the US$20 fee is
+part of it, not added on top. Heavier use (many testers, large uploads, load
+tests) pushes the CPU and egress lines up, to roughly US$60–80.
+
+To keep it down, don't deploy the two ABDM runners until they're needed (−$4),
+and set a usage limit under Workspace → Usage so a mistake cannot run up a
+bill. Check the usage page after the first week and replace these guesses with
+real figures.
