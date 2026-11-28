@@ -211,6 +211,10 @@ export default function IpdPage() {
                   <span className="font-medium text-slate-700">{t("ipd.legendMaintenance", { count: bedStatusCounts["maintenance"] ?? 0 })}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
+                  <span className="h-3 w-3 rounded-full bg-sky-500 ring-2 ring-sky-200" />
+                  <span className="font-medium text-slate-700">{t("ipd.legendCleaning", { count: bedStatusCounts["cleaning"] ?? 0 })}</span>
+                </div>
+                <div className="flex items-center gap-1.5">
                   <span className="h-3 w-3 rounded-full bg-purple-500 ring-2 ring-purple-200" />
                   <span className="font-medium text-slate-700">{t("ipd.legendReserved", { count: bedStatusCounts["reserved"] ?? 0 })}</span>
                 </div>

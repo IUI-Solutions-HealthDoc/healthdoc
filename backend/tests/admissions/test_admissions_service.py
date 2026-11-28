@@ -103,7 +103,8 @@ class TestTransferPatient:
 
         await db.refresh(bed)
         await db.refresh(to_bed)
-        assert bed.status == "vacant"
+        # The bed left behind waits for housekeeping (0104), it is not vacant yet.
+        assert bed.status == "cleaning"
         assert to_bed.status == "occupied"
 
         result = await db.execute(
@@ -177,7 +178,8 @@ class TestDischargePatient:
         assert admission.status == "discharged"
 
         await db.refresh(bed)
-        assert bed.status == "vacant"
+        # Discharge hands the bed to housekeeping (0104); it is vacant only once cleaned.
+        assert bed.status == "cleaning"
 
         notif_result = await db.execute(
             select(DischargeNotification).where(DischargeNotification.discharge_id == discharge.id)

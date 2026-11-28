@@ -152,7 +152,8 @@ export default function Page() {
                         )}
                       </td>
                       <td className="px-3 py-2">
-                        {occupied ? null : bed.status === "maintenance" ? (
+                        {/* A cleaning bed freed here closes its housekeeping turnover with this reason. */}
+                        {occupied ? null : bed.status === "maintenance" || bed.status === "cleaning" ? (
                           <button type="button" disabled={busy || reason.length < 3} onClick={() => void setStatus(bed, "vacant")}
                             className="text-xs underline disabled:opacity-50">{t("admin.ui.backInService")}</button>
                         ) : bed.status === "vacant" ? (
