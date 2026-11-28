@@ -1,10 +1,10 @@
-# HealthDoc on Railway (hosted staging)
+# HealthDoc on Railway
 
 This moves the stack that runs on the owner's Mac today onto Railway, so it
 stays up when the PC is off and testers, demos and the NHA sandbox reach a
 stable address.
 
-**Scope: staging and sandbox with test data only.** Railway has no India
+**Scope: testing, demos and the NHA sandbox, with test data only.** Railway has no India
 region (the nearest is Singapore), and real patient records under ABDM and the
 DPDP Act should stay on Indian infrastructure. Live hospitals go on an
 Indian-region server using the existing `infra/docker-compose.prod.yml`.
@@ -25,8 +25,13 @@ avoids all of this with no application code changes.
 ## Services
 
 Create one Railway project with region **Southeast Asia (Singapore)** for
-every service. Connect the GitHub repo and set branch `staging` for the
-services built from it.
+every service. Connect the GitHub repo and set branch **`main`** for the
+services built from it. **Railway deploys from `main` only**: work still
+merges into `staging` first, and a merge of the reviewed staging → main
+promotion is what releases it. Don't point any service at `staging`, and
+don't create a second Railway environment for it. Turn on **Wait for CI**
+in each repo service's settings, so a push to `main` deploys only after its
+checks pass.
 
 | Service name (exact) | Source | Root directory | Config file path | Volume | Public domain |
 |---|---|---|---|---|---|
@@ -79,8 +84,8 @@ when the audit store is unreachable.
 
 1. Create a Railway account and a project on the **Pro** plan. Hobby's limits
    are too small for Keycloak, Java crypto, Mongo and two Postgres instances.
-2. Choose the public hostname. These files assume `staging.healthdoc.world`,
-   because `healthdoc.world` is already on Cloudflare. Set it as the shared
+2. Choose the public hostname under `healthdoc.world`, which is already on
+   Cloudflare. These files use `app.healthdoc.world` as the example. Set it as the shared
    variable `PUBLIC_HOST`.
 
 ### 2. Create the services
@@ -186,9 +191,9 @@ privately, then delete both files.
 Deploy in this order: `minio` → `keycloak` (already up from step 5) → `backend` (runs migrations) →
 `monitor-capture` → `frontend` → `edge`. Then:
 
-- `https://staging.healthdoc.world/api/v1/health` → `{"status":"ok",…}`
+- `https://app.healthdoc.world/api/v1/health` → `{"status":"ok",…}`
 - `/api/v1/health/deep` reports Postgres OK
-- `https://staging.healthdoc.world/auth/admin/` → 404 (W1)
+- `https://app.healthdoc.world/auth/admin/` → 404 (W1)
 - sign in as one role, open a patient, download a stored file (MinIO link)
 
 ### 7. Move ABDM callbacks (needs owner approval at the time)
@@ -211,7 +216,7 @@ the same jobs. Both use the `--created-since` values from the work summary.
 it at the hosted address:
 
 ```bash
-cd frontend && HEALTHDOC_URL=https://staging.healthdoc.world npm run electron:dev
+cd frontend && HEALTHDOC_URL=https://app.healthdoc.world npm run electron:dev
 ```
 
 The backend already allows the `app://healthdoc` origin. Building a signed
