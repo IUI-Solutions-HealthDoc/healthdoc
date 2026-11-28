@@ -6,18 +6,19 @@ import { translate } from "@/lib/i18n";
  * `src/features`. No mapping layer: a mapper is where a field quietly stops
  * being copied.
  *
- * The imported version used "Occupied" | "Vacant" | "Reserved" | "Cleaning".
- * The backend's BedStatus enum has no "Cleaning" — it has `maintenance`, which
- * is a bed out of service, not one being turned around. A nurse reading
- * "Cleaning" on a broken bed plans to admit into it in ten minutes.
+ * `maintenance` is a bed out of service. `cleaning` (0104) is a different
+ * thing: a bed a discharge or transfer just vacated, waiting for housekeeping's
+ * turnover. It frees up when the turnover is recorded done. Keep the two apart:
+ * a nurse reading "being cleaned" on a broken bed plans to admit into it soon.
  */
-export type BedStatus = "vacant" | "occupied" | "reserved" | "maintenance";
+export type BedStatus = "vacant" | "occupied" | "reserved" | "maintenance" | "cleaning";
 
 export const BED_STATUS_LABELS: Record<BedStatus, string> = {
   get vacant() { return translate("common.msg.vacant"); },
   get occupied() { return translate("monitor.occupied"); },
   get reserved() { return translate("bloodBank.status.reserved"); },
   get maintenance() { return translate("admin.ui.outOfService"); },
+  get cleaning() { return translate("ipd.bedCleaning"); },
 };
 
 export interface BedOccupant {

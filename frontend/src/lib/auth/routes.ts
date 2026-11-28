@@ -41,8 +41,8 @@ const ROUTE_PREFIXES: Record<Role, readonly string[]> = {
   // job, not a side effect of registering a patient. The registration
   // invoice is still created server-side by create_visit.
   [ROLES.RECEPTIONIST]: ["/receptionist", "/consent"],
-  [ROLES.DOCTOR]: ["/doctor", "/consent", "/ipd", "/lab", "/radiology", "/ot", "/programs", "/immunization", "/blood-bank", "/forms", "/equipment", "/mch"],
-  [ROLES.NURSE]: ["/nurse", "/ipd", "/consent", "/ot", "/programs", "/immunization", "/forms", "/equipment", "/mch"],
+  [ROLES.DOCTOR]: ["/doctor", "/consent", "/ipd", "/lab", "/radiology", "/ot", "/programs", "/immunization", "/blood-bank", "/forms", "/equipment", "/mch", "/kitchen"],
+  [ROLES.NURSE]: ["/nurse", "/ipd", "/consent", "/ot", "/programs", "/immunization", "/forms", "/equipment", "/mch", "/kitchen", "/laundry", "/housekeeping"],
   [ROLES.LAB_TECH]: ["/lab", "/blood-bank", "/admin/maintenance", "/equipment"],
   [ROLES.RADIOLOGY_TECH]: ["/radiology", "/admin/maintenance", "/equipment"],
   [ROLES.PHARMACIST]: ["/pharmacy", "/inventory"],
@@ -50,17 +50,17 @@ const ROUTE_PREFIXES: Record<Role, readonly string[]> = {
   // The existing /emergency page registers a new THID and its POST endpoint
   // intentionally excludes supervisors. Their maker-checker promotion APIs
   // need a separate records-authority screen (#221) at /supervisor/merges.
-  [ROLES.SUPERVISOR]: ["/supervisor", "/reports", "/ot", "/programs"],
+  [ROLES.SUPERVISOR]: ["/supervisor", "/reports", "/ot", "/programs", "/kitchen", "/laundry", "/housekeeping"],
   //: The billing desk. /reports carries the finance MIS panel it needs.
   [ROLES.BILLING]: ["/billing", "/reports"],
   // The backend accepts admin on some HOD reads for operational support, but
   // that does not make a department-operating dashboard part of the admin UI.
-  [ROLES.ADMIN]: ["/admin", "/billing", "/reports", "/audit-viewer", "/ot", "/programs", "/immunization", "/blood-bank", "/forms", "/equipment"],
+  [ROLES.ADMIN]: ["/admin", "/billing", "/reports", "/audit-viewer", "/ot", "/programs", "/immunization", "/blood-bank", "/forms", "/equipment", "/kitchen", "/laundry", "/housekeeping"],
   // /inventory is NOT decoration here. Indent approval is gated
   // `require_roles("hod")` — HOD ONLY — and the approve/reject buttons live on
   // Inventory -> Indents. Without this prefix the one action only a department
   // head can perform was unreachable by every department head.
-  [ROLES.HOD]: ["/hod", "/queue-display", "/inventory", "/equipment"],
+  [ROLES.HOD]: ["/hod", "/queue-display", "/inventory", "/equipment", "/kitchen", "/laundry", "/housekeeping"],
   [ROLES.AUDITOR]: ["/audit-viewer", "/reports", "/admin/data-protection", "/admin/integration"],
   [ROLES.PATIENT]: ["/patient-portal"],
   [ROLES.SUPERADMIN]: ["/superadmin"],

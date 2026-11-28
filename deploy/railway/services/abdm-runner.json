@@ -1,0 +1,9 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {"builder": "DOCKERFILE", "dockerfilePath": "Dockerfile", "watchPatterns": ["/backend/**"]},
+  "deploy": {
+    "startCommand": "/bin/sh -c 'exec python -m scripts.run_abdm_test_session --facility-id \"$ABDM_RUNNER_FACILITY_ID\" --expected-service-id \"$ABDM_RUNNER_SERVICE_ID\" --created-since \"$ABDM_RUNNER_CREATED_SINCE\" --execute'",
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 3
+  }
+}

@@ -366,9 +366,13 @@ async def transfer_patient(
         reason=reason, moved_by=moved_by,
     ))
 
-    if old_bed is not None:
-        old_bed.status = "vacant"
     to_bed.status = "occupied"
+    if old_bed is not None:
+        # The bed the patient left is dirty: it goes to housekeeping, not back
+        # to the vacant pool, until someone records it clean.
+        from app.housekeeping.service import request_bed_turnover
+
+        await request_bed_turnover(db, bed=old_bed, admission_id=locked_adm.id, source="transfer")
     locked_adm.ward_id = to_ward_id
     locked_adm.bed_id = to_bed_id
     locked_adm.updated_by = moved_by
@@ -497,7 +501,15 @@ async def discharge_patient(
 
     bed = await db.get(Bed, admission.bed_id)
     if bed is not None:
-        bed.status = "vacant"
+        # Not 'vacant': a discharged patient's bed needs stripping and
+        # disinfecting before the next admission. Housekeeping frees it.
+        from app.housekeeping.service import request_bed_turnover
+
+        await request_bed_turnover(db, bed=bed, admission_id=admission.id, source="discharge")
+    # The kitchen stops cooking for a bed that is empty.
+    from app.dietary.service import stop_for_discharge
+
+    await stop_for_discharge(db, admission.id, created_by)
 
     for target in _DISCHARGE_NOTIFICATION_TARGETS:
         db.add(DischargeNotification(id=uuid.uuid4(), discharge_id=discharge.id, target_module=target))

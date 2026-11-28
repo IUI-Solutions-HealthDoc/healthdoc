@@ -20,10 +20,13 @@ import {
   Receipt,
   RotateCcw,
   Search,
+  Shirt,
   Shield,
+  Sparkles,
   Stethoscope,
   Syringe,
   UserRound,
+  UtensilsCrossed,
   Users,
   X,
   type LucideIcon,
@@ -84,6 +87,13 @@ const NAV_ITEMS: readonly NavItem[] = [
     href: "/equipment", labelKey: "sidebar.equipment", icon: Wrench, area: "clinical",
     roles: [ROLES.ADMIN, ROLES.HOD, ROLES.DOCTOR, ROLES.NURSE, ROLES.LAB_TECH, ROLES.RADIOLOGY_TECH],
   },
+  // Ward services (0104): food, linen and cleaning for admitted patients.
+  {
+    href: "/kitchen", labelKey: "sidebar.kitchen", icon: UtensilsCrossed, area: "clinical",
+    roles: [ROLES.DOCTOR, ROLES.NURSE, ROLES.ADMIN, ROLES.HOD, ROLES.SUPERVISOR],
+  },
+  { href: "/laundry", labelKey: "sidebar.laundry", icon: Shirt, area: "clinical", roles: [ROLES.NURSE, ROLES.ADMIN, ROLES.HOD, ROLES.SUPERVISOR] },
+  { href: "/housekeeping", labelKey: "sidebar.housekeeping", icon: Sparkles, area: "clinical", roles: [ROLES.NURSE, ROLES.ADMIN, ROLES.HOD, ROLES.SUPERVISOR] },
   // A state/district officer is not a platform administrator (QA 12 Oct 2026).
   { href: "/monitor", labelKey: "sidebar.controlRoom", icon: LayoutDashboard, area: "monitoring", roles: [ROLES.MONITOR] },
   { href: "/hod", labelKey: "sidebar.hodDashboard", icon: LayoutDashboard, area: "clinical", roles: [ROLES.HOD] },

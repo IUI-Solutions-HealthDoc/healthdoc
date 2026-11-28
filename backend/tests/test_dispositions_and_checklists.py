@@ -350,8 +350,8 @@ async def test_transfer_patient_with_concurrency_lock(db):
     assert transferred.ward_id == ward_id_2
     assert transferred.bed_id == bed_id_2
 
-    # Check old bed is now vacant and new bed is occupied
+    # The old bed waits for housekeeping (0104); the new bed is occupied
     old_bed = await db.get(Bed, bed_id_1)
     new_bed = await db.get(Bed, bed_id_2)
-    assert old_bed.status == "vacant"
+    assert old_bed.status == "cleaning"
     assert new_bed.status == "occupied"
