@@ -1,0 +1,5 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {"builder": "DOCKERFILE", "dockerfilePath": "deploy/railway/minio/Dockerfile", "watchPatterns": ["/deploy/railway/minio/**"]},
+  "deploy": {"healthcheckPath": "/minio/health/live", "restartPolicyType": "ON_FAILURE", "restartPolicyMaxRetries": 5}
+}
